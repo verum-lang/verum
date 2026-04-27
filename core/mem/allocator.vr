@@ -123,6 +123,14 @@ public type AllocError is
     /// is the would-be element / capacity count that triggered the
     /// overflow (not bytes, since the byte count itself overflowed).
     | CapacityOverflow { requested: Int }
+    /// The current target OS has no `os_mmap` / `os_munmap` lowering
+    /// in this build.  Surfaced as a typed error rather than the
+    /// previous `unreachable()` so a future cross-compile to an
+    /// unsupported target is a propagable failure, not a runtime
+    /// panic from inside the kernel-page allocator.  `op` is the
+    /// failing entry point ("mmap" or "munmap") for diagnostic
+    /// disambiguation.
+    | UnsupportedOs { op: Text }
     ;
 
 implement AllocError {
@@ -136,6 +144,7 @@ implement AllocError {
             PageExhausted => "page exhausted, need new page",
             InvalidPointer => "invalid pointer for deallocation",
             CapacityOverflow { requested } => f"capacity overflow: {requested} elements would overflow addressable size space",
+            UnsupportedOs { op } => f"{op} not supported on this target OS (no platform lowering)",
         }
     }
 }
@@ -1026,7 +1035,12 @@ fn os_mmap(size: Int) -> Result<&unsafe Byte, AllocError> {
         return Ok(result);
     }
 
-    unreachable()
+    // No @cfg block matched: this build targets an OS we don't have
+    // a kernel-page allocator for. Surface as a typed error so the
+    // caller can fall back to a different allocator strategy or
+    // refuse the operation explicitly — better than panicking from
+    // inside the allocator hot path.
+    Err(AllocError.UnsupportedOs { op: "mmap" })
 }
 
 /// Deallocate memory via munmap/VirtualFree
@@ -1055,7 +1069,9 @@ fn os_munmap(ptr: &unsafe Byte, size: Int) -> Result<(), AllocError> {
         return Ok(());
     }
 
-    unreachable()
+    // See [`os_mmap`] above — typed error rather than `unreachable()`
+    // for forward compatibility with new target OSes.
+    Err(AllocError.UnsupportedOs { op: "munmap" })
 }
 
 // =============================================================================
