@@ -595,30 +595,38 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
     let hex_chars = "0123456789abcdefghijklmnopqrstuvwxyz";
 
     let mut mag: UInt64 = if n < 0 {
-        // Two's-complement magnitude: exact for every Int.
+        // Two's-complement magnitude: exact for every Int (including
+        // Int.MIN whose magnitude `2^63` is unrepresentable as a
+        // positive Int but fits cleanly in UInt64).
         (((!n) as UInt64) + (1 as UInt64))
     } else {
         n as UInt64
     };
     let radix_u: UInt64 = radix as UInt64;
 
-    // Build digits in reverse into a fixed-size stack buffer.
-    // Maximum digit count for radix 2 over 64-bit unsigned is
-    // 64; sized to fit any radix ≥ 2.
-    let mut buf: [Byte; 64] = [0; 64];
-    let mut i: Int = 63;
+    // Collect digits low-to-high in a List<Char>, then iterate
+    // backwards into the result Text.  Earlier impl used a fixed
+    // `[Byte; 64]` buffer + `Text.from_utf8_unchecked` — that path
+    // doesn't survive the Tier-0 interpreter (no byte-array
+    // primitive at the @intrinsic surface), causing every
+    // `to_hex / to_octal / to_binary` call to silently produce
+    // empty output.  Discovered while validating task #38 (f-string
+    // `:x` spec wrapping); the wrap was correct, the underlying
+    // formatter was the load-bearing bug.
+    let mut digits = List<Char>.new();
     while mag > (0 as UInt64) {
         let digit = (mag % radix_u) as Int;
-        buf[i] = hex_chars.nth_char(digit).unwrap() as Byte;
+        digits.push(hex_chars.nth_char(digit).unwrap());
         mag = mag / radix_u;
-        i = i - 1;
     }
 
     let mut out = Text.new();
     if n < 0 { out.push('-'); }
-    let start = i + 1;
-    let digit_str = Text.from_utf8_unchecked(&buf[start..64]);
-    out.push_str(&digit_str);
+    let mut i: Int = (digits.len() as Int) - 1;
+    while i >= 0 {
+        out.push(digits[i]);
+        i = i - 1;
+    }
     out
 }
 

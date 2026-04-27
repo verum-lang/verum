@@ -8,17 +8,9 @@
 //   • #34 — width-aware atomic RMW codegen (5074f971)
 //   • #37 — StructFieldAddr opcode + atomic-handler ptr extraction
 //           (e5f60f3a + 56e990fe)
-//   • #38 — f-string `:x` format-spec wrapping (this commit's
-//           safe_interpolation.rs change)
-//
-// The expected output `load:c3` end-to-ends:
-//   1. AtomicU8.new(0xC3) constructs the heap object
-//   2. `&self.value as *const Byte as *const UInt8` lowers via
-//      StructFieldAddr to the real heap-field address
-//   3. atomic_load_u8 reads the live byte = 0xC3 = 195 decimal
-//   4. `as Int` converts UInt8 to Int (=195)
-//   5. f-string `{v:x}` wraps as `v.to_hex()` → "c3"
-//   6. concat with literal "load:" → "load:c3"
+//   • #38 — f-string `:x` format-spec wrapping (ca32027d) +
+//           format_radix_signed byte-array→List<Char> rewrite
+//           (this commit)
 
 mount core.sync.atomic.{AtomicU8, MemoryOrdering};
 
