@@ -236,9 +236,9 @@ impl ModuleError {
     /// supply-chain auditors, IDE plugins) match on these codes
     /// rather than parsing the human message.
     ///
-    /// Codes are stable across minor versions per the VVA §15.5
-    /// kernel-receipt invariant: when a code is renamed, an alias
-    /// is added so existing CI rules keep passing.
+    /// Codes are stable across minor versions per the kernel-receipt
+    /// invariant: when a code is renamed, an alias is added so
+    /// existing CI rules keep passing.
     pub fn code(&self) -> &'static str {
         match self {
             ModuleError::ModuleNotFound { .. }      => "E_MODULE_NOT_FOUND",
@@ -262,7 +262,7 @@ impl ModuleError {
     /// Documentation URL for this error code. CI consumers and IDE
     /// hover-tooltips use this to deep-link the user to the
     /// remediation page; the URL is stable across minor versions
-    /// per the same VVA §15.5 stability guarantee that `code()`
+    /// per the same stability guarantee that `code()`
     /// follows.
     pub fn docs_url(&self) -> String {
         format!("https://docs.verum-lang.org/errors/{}", self.code())
@@ -574,7 +574,7 @@ impl fmt::Display for ModuleError {
                     "\n  hint: pick exactly one of the file form (`<name>.vr`) \
                      or the directory form (`<name>/mod.vr`); having both makes \
                      declarations in the loser invisible at use sites and is \
-                     classified as `E_MODULE_PATH_COLLISION` per VVA §15.5",
+                     classified as `E_MODULE_PATH_COLLISION`",
                 )
             }
             ModuleError::InvalidPath { path, reason, .. } => {
