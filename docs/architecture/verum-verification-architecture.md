@@ -1247,7 +1247,28 @@ Hint selection respects priority and pattern match against the current goal.
 
 Timeout per backend: 5 s default, configurable via `@verify(strategy, timeout_ms = …)`. Cache hits are free.
 
-### 8.5 Certificate export (five formats, day-one)
+### 8.5 Certificate export (five formats, day-one) **[80% — V8 #238 (statement-only export shipping); V2 = full proof-term replay via SMT reconstruction]**
+
+**Implementation**: `crates/verum_cli/src/commands/export.rs` (~1370 LOC).
+
+**Status by target**:
+
+| Target | Format | Statement export | Lineage imports | Proof bodies |
+|--------|--------|------------------|-----------------|--------------|
+| Lean 4 | `--to lean` | ✓ | 5/8 frameworks mapped | `:= sorry` |
+| Coq | `--to coq` | ✓ | 4/8 frameworks mapped | `Admitted.` |
+| Agda | `--to agda` | ✓ | 4/8 frameworks mapped | `postulate` |
+| Dedukti | `--to dedukti` | ✓ | 0/8 frameworks mapped | comment-only |
+| Metamath | `--to metamath` | ✓ | 0/8 frameworks mapped | `$= ? $.` |
+| OWL 2 FS | `--to owl2-fs` | ✓ (separate path) | n/a | n/a |
+
+**Lineage-import table** (`LINEAGE_IMPORTS` in `export.rs`): curated map from Verum framework slug → target-ecosystem dependency stanza. Alphabetically sorted by slug for deterministic output. Eight entries today: `arnold_mather`, `baez_dolan`, `connes_reconstruction`, `diakrisis` (meta-classifier), `lurie_htt`, `owl2_fs`, `petz_classification`, `schreiber_dcct`, `univalence`. New in V8 #238: `diakrisis` + `owl2_fs` table-coverage entries; `schreiber_dcct.coq` (HoTT.Modalities.Modality) + `schreiber_dcct.agda` (Cubical.Modalities.Everything) populated for the cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯.
+
+**Coverage**: 16 unit tests in `crates/verum_cli/src/commands/export.rs::format_tests` — alphabetical-ordering invariant pinned, table-membership for diakrisis + owl2_fs, schreiber_dcct Coq+Agda mappings populated, defensive lookup-of-unknown returns None.
+
+**V2 scope**: full proof-term re-derivation through `verum_kernel` and serialisation of the resulting CoreTerm; per-backend SMT reconstruction (Z3 trace → Lean tactic / Coq Ltac / Agda reflection); `verum ci --export-roundtrip` wiring for end-to-end smoke coverage.
+
+
 
 ```bash
 verum export --to lean ./src/theorems.vr   -o ./out/theorems.lean
