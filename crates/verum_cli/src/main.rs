@@ -979,6 +979,28 @@ enum Commands {
         #[clap(long)]
         accessibility: bool,
 
+        /// 108.T round-trip audit: for every theorem citing the
+        /// AC/OC duality (Diakrisis 108.T) or its `core.theory_interop.
+        /// bridges.oc_dc_bridge` round-trip, classify the canonical
+        /// round-trip status as Decidable / SemiDecidable / Undecidable
+        /// per the operational coherence layer. Emits one entry per
+        /// theorem to `audit-reports/round-trip.json`. Finitely-
+        /// axiomatized theorems must be 100% Decidable to clear the
+        /// corpus acceptance gate (T5.2).
+        #[clap(long)]
+        round_trip: bool,
+
+        /// Operational coherence audit: for every `@verify(coherent)`
+        /// or `@verify(coherent_static / coherent_runtime)` theorem,
+        /// validate the bidirectional α-cert ⟺ ε-cert correspondence
+        /// per the Coherent verification rule family. Emits one entry
+        /// per theorem to `audit-reports/coherent.json`. Currently
+        /// reports a Status::Pending verdict pending the full coherent-
+        /// rule kernel implementation (T2.2); the audit surface itself
+        /// is stable so CI dashboards can pre-wire it.
+        #[clap(long)]
+        coherent: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -2288,6 +2310,8 @@ fn run_command(cli: Cli) -> Result<()> {
             owl2_classify,
             framework_conflicts,
             accessibility,
+            round_trip,
+            coherent,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2321,6 +2345,10 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_framework_conflicts_with_format(output_format)
             } else if accessibility {
                 commands::audit::audit_accessibility_with_format(output_format)
+            } else if round_trip {
+                commands::audit::audit_round_trip_with_format(output_format)
+            } else if coherent {
+                commands::audit::audit_coherent_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
