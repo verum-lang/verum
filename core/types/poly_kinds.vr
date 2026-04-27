@@ -63,7 +63,7 @@ public type KindBinding is { name: Text, kind: Kind };
 fn lookup_binding(bindings: List<KindBinding>, var_name: Text) -> Maybe<Kind> {
     let mut i: Int = 0;
     while i < bindings.len() as Int {
-        let b: KindBinding = (*bindings.get(i as Int).unwrap()).clone();
+        let b: KindBinding = (*bindings.get(i as Int).expect("poly_kinds: i < bindings.len() by while-condition")).clone();
         if b.name == var_name {
             return Some(b.kind);
         }
@@ -104,7 +104,7 @@ fn kind_compose(
     // Apply s2 to every range value of s1, then keep the binding.
     let mut i: Int = 0;
     while i < s1.len() as Int {
-        let b: KindBinding = (*s1.get(i as Int).unwrap()).clone();
+        let b: KindBinding = (*s1.get(i as Int).expect("poly_kinds: i < s1.len() by while-condition")).clone();
         out.push(KindBinding {
             name: b.name,
             kind: kind_apply(s2.clone(), b.kind),
@@ -115,7 +115,7 @@ fn kind_compose(
     // s1 wins on shared keys, matching the "apply s1 first" semantics).
     let mut j: Int = 0;
     while j < s2.len() as Int {
-        let b2: KindBinding = (*s2.get(j as Int).unwrap()).clone();
+        let b2: KindBinding = (*s2.get(j as Int).expect("poly_kinds: j < s2.len() by while-condition")).clone();
         match lookup_binding(out.clone(), b2.name.clone()) {
             Some(_) => {},
             None => { out.push(b2); },
@@ -270,7 +270,7 @@ public fn apply_args(k: Kind, args: List<Kind>) -> KindUnifyResult {
     let mut acc: List<KindBinding> = List.new();
     let mut i: Int = 0;
     while i < args.len() as Int {
-        let arg: Kind = (*args.get(i as Int).unwrap()).clone();
+        let arg: Kind = (*args.get(i as Int).expect("poly_kinds: i < args.len() by while-condition")).clone();
         match current {
             Kind.KArrow { domain, codomain } => {
                 match kind_unify(*domain, arg) {
