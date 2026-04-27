@@ -105,8 +105,27 @@ impl<'ctx> AnyValueEnum<'ctx> {
                 }
                 AnyValueEnum::InstructionValue(InstructionValue::new(value))
             },
-            LLVMTypeKind::LLVMMetadataTypeKind => panic!("Metadata values are not supported as AnyValue's."),
-            _ => panic!("The given type is not supported."),
+            // SSA-incompatible LLVM type kinds: these have no
+            // representation as an `AnyValue` because they are not
+            // first-class values you can bind to a name. Listing each
+            // one explicitly means a future LLVM upgrade that adds a
+            // new such kind will fail to compile here, surfacing the
+            // gap at build time instead of as a runtime panic.
+            LLVMTypeKind::LLVMMetadataTypeKind => {
+                panic!("Metadata values are not supported as AnyValue's.")
+            }
+            LLVMTypeKind::LLVMLabelTypeKind => {
+                panic!("Label (basic-block address) is not an AnyValue.")
+            }
+            LLVMTypeKind::LLVMTokenTypeKind => {
+                panic!("Token (operand bundle) is not an AnyValue.")
+            }
+            LLVMTypeKind::LLVMX86_AMXTypeKind => {
+                panic!("Intel AMX matrix type is not an AnyValue.")
+            }
+            LLVMTypeKind::LLVMTargetExtTypeKind => {
+                panic!("Target-extension type is not an AnyValue (verum_llvm has no target-ext bindings).")
+            }
         }
     }
 
