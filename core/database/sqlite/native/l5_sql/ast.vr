@@ -213,6 +213,29 @@ public type CreateTableStmt is {
     without_rowid: Bool,
 };
 
+public type CreateIndexStmt is {
+    if_not_exists: Bool,
+    unique: Bool,
+    index: TableRef,
+    table: TableRef,
+    columns: List<IndexedColumn>,
+    where_clause: Maybe<Expr>,
+};
+
+public type IndexedColumn is {
+    expr: Expr,            // EColumn(table, name) in simple cases
+    collation: Maybe<Text>,
+    direction: OrderDirection,
+};
+
+public type CreateViewStmt is {
+    if_not_exists: Bool,
+    temporary: Bool,
+    view: TableRef,
+    columns: List<Text>,   // explicit column list, empty → infer
+    query: Heap<SelectStmt>,
+};
+
 public type DropTargetKind is DtkTable | DtkIndex | DtkView | DtkTrigger;
 
 // -----------------------------------------------------------------------------

@@ -42,10 +42,14 @@ mount core.database.sqlite.native.l5_sql.lexer.{
     Token, SqlKeyword, Operator, Punct,
 };
 mount core.database.sqlite.native.l5_sql.ast.{
-    SqlStatement, Expr, TableRef,
+    SqlStatement, Expr, TableRef, SelectStmt,
     CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
+    CreateIndexStmt, IndexedColumn, CreateViewStmt,
+    OrderDirection,
     SqlOnConflict,
 };
+mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
+mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
 mount core.database.sqlite.native.l5_sql.parser.token_stream.{
     SqlTokenStream, ParseError, parse_error,
 };
@@ -70,22 +74,17 @@ public fn parse_create(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseErr
     }
 
     if ts.accept_keyword(KwIndex) {
-        // CREATE [UNIQUE] INDEX [IF NOT EXISTS] qname ON qname '(' col-list ')'
-        // For v1 we parse through and discard — the planner consumes
-        // the AST once it's available. Surface as parse error so
-        // callers notice the gap instead of silently succeeding with a
-        // broken AST node.
-        return Err(parse_error(
-            "CREATE INDEX parsed but not yet modelled in AST v1".clone(),
-            ts.position(),
-        ));
+        let stmt = match parse_create_index_rest(ts, unique) {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        return Ok(SCreateIndex(stmt));
     }
 
     if ts.accept_keyword(KwView) {
-        return Err(parse_error(
-            "CREATE VIEW not yet supported in L5.5 initial cut".clone(),
-            ts.position(),
-        ));
+        let stmt = match parse_create_view_rest(ts, temporary) {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        return Ok(SCreateView(stmt));
     }
 
     if ts.accept_keyword(KwTrigger) {
@@ -485,6 +484,96 @@ public fn parse_drop(ts: &mut SqlTokenStream) -> Result<SqlStatement, ParseError
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+fn parse_create_index_rest(
+    ts: &mut SqlTokenStream,
+    unique: Bool,
+) -> Result<CreateIndexStmt, ParseError> {
+    let if_not_exists = if ts.accept_keyword(KwIf) {
+        match ts.expect_keyword(KwNot) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        true
+    } else { false };
+
+    let index_name = match parse_qualified_name(ts) {
+        Ok(t)  => t, Err(e) => { return Err(e); }
+    };
+    match ts.expect_keyword(KwOn) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let table = match parse_qualified_name(ts) {
+        Ok(t)  => t, Err(e) => { return Err(e); }
+    };
+    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let mut cols: List<IndexedColumn> = List.new();
+    loop {
+        let name = match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        let collation: Maybe<Text> = if ts.accept_keyword(KwCollate) {
+            match ts.expect_ident() {
+                Ok(s)  => Some(s), Err(e) => { return Err(e); }
+            }
+        } else { None };
+        let direction = if ts.accept_keyword(KwDesc) { OdDesc }
+                        else { let _ = ts.accept_keyword(KwAsc); OdAsc };
+        cols.push(IndexedColumn {
+            expr: EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, name),
+            collation: collation,
+            direction: direction,
+        });
+        if !ts.accept_punct(PComma) { break; }
+    }
+    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    // Optional WHERE clause (partial indexes).
+    let where_clause: Maybe<Expr> = if ts.accept_keyword(KwWhere) {
+        match parse_expr(ts) {
+            Ok(e)  => Some(e), Err(err) => { return Err(err); }
+        }
+    } else { None };
+    Ok(CreateIndexStmt {
+        if_not_exists: if_not_exists,
+        unique: unique,
+        index: index_name,
+        table: table,
+        columns: cols,
+        where_clause: where_clause,
+    })
+}
+
+fn parse_create_view_rest(
+    ts: &mut SqlTokenStream,
+    temporary: Bool,
+) -> Result<CreateViewStmt, ParseError> {
+    let if_not_exists = if ts.accept_keyword(KwIf) {
+        match ts.expect_keyword(KwNot) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        true
+    } else { false };
+    let view_name = match parse_qualified_name(ts) {
+        Ok(t)  => t, Err(e) => { return Err(e); }
+    };
+    let mut cols: List<Text> = List.new();
+    if ts.accept_punct(PLParen) {
+        loop {
+            let c = match ts.expect_ident() {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            cols.push(c);
+            if !ts.accept_punct(PComma) { break; }
+        }
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    }
+    match ts.expect_keyword(KwAs) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let query = match parse_select(ts) {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    Ok(CreateViewStmt {
+        if_not_exists: if_not_exists,
+        temporary: temporary,
+        view: view_name,
+        columns: cols,
+        query: Heap(query),
+    })
+}
 
 fn parse_qualified_name(ts: &mut SqlTokenStream) -> Result<TableRef, ParseError> {
     let first = match ts.expect_ident() {

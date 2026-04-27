@@ -118,7 +118,10 @@ public type PlanNode is
     | PnCreateTable(stmt: CreateTableStmt)
     | PnDrop(kind: DropPlanKind, if_exists: Bool, target: TableRef)
     | PnTransaction(tx: TxAction)
-    | PnPragma(name: Text, value: Maybe<Expr>);
+    | PnPragma(name: Text, value: Maybe<Expr>)
+    // DDL side-effects we don't need to codegen beyond a Halt — the
+    // facade layer applies schema-cache mutations pre-compile.
+    | PnNoop;
 
 public type DropPlanKind is DpkTable | DpkIndex | DpkView | DpkTrigger;
 
@@ -140,6 +143,8 @@ public fn plan_statement(stmt: &Statement) -> Result<PlanNode, PlanError> {
         SUpdate(upd)        => plan_update(upd),
         SDelete(del)        => plan_delete(del),
         SCreateTable(ct)    => Ok(PnCreateTable(clone_create_table(ct))),
+        SCreateIndex(_)     => Ok(PnNoop),
+        SCreateView(_)      => Ok(PnNoop),
         SDropTable(f, t)    => Ok(PnDrop(DpkTable, f, clone_table_ref(t))),
         SDropIndex(f, t)    => Ok(PnDrop(DpkIndex, f, clone_table_ref(t))),
         SDropView(f, t)     => Ok(PnDrop(DpkView, f, clone_table_ref(t))),
