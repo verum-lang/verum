@@ -42,4 +42,6 @@ public module query;
 public module protocol;
 public module capability;
 public module retry;
+public module retry_run;
 public module pool;
+public module pool_impl;

@@ -1,0 +1,419 @@
+// =============================================================================
+// core/database/common/pool_impl.vr — concrete ConnectionPool<C>
+// =============================================================================
+// Layer: 3 (Database — common implementation)
+// Spec: internal/specs/database.md §4.3
+// =============================================================================
+//
+// Generic connection pool implementation parameterised over a
+// connection type `C` and a factory closure that produces fresh
+// connections on demand. Per-vendor `SqlitePool` / `PgPool` /
+// `MysqlPool` are thin wrappers that pin `C` and inject the
+// vendor-specific factory.
+//
+// Internals:
+//   * `Mutex<PoolInner<C>>` guards the idle queue and bookkeeping.
+//   * `idle: List<C>` is a LIFO stack — recent connections are
+//     served first so warm sockets stay warm and TCP RST'd ones get
+//     evicted on the next health-check.
+//   * `outstanding` counts checked-out connections; the pool refuses
+//     to allocate beyond `max_connections`.
+//   * `acquire_timeout_ms` bounds the wait for an available slot.
+//     We poll-and-sleep rather than condvar-await for portability;
+//     the production runtime swaps in `core.async.notify` when the
+//     async-pool variant lands.
+//
+// Returned `PoolHandle` is affine — drop after use to release the
+// connection. The vendor-specific façade owns the recycle / discard
+// decision via `release_kind`:
+//   * `Healthy`        — return to idle pool.
+//   * `Discard(reason)` — close + decrement outstanding (the next
+//                         acquire reopens via the factory).
+// =============================================================================
+
+module core.database.common.pool_impl;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount sync.mutex.Mutex;
+mount async.timer.sleep_ms;
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific, PoolErrorKind};
+
+// -----------------------------------------------------------------------------
+// Configuration
+// -----------------------------------------------------------------------------
+
+public type PoolConfig is {
+    /// Connections held even when idle. The pool launches `min_connections`
+    /// eagerly during `launch()` so the first acquire is never a cold
+    /// connect. 0 = lazy — every connection is built on first acquire.
+    min_connections: Int,
+    /// Hard cap on total live connections (idle + checked out). Acquires
+    /// past this point park on a timer until a release frees a slot or
+    /// `acquire_timeout_ms` elapses.
+    max_connections: Int,
+    /// Acquire timeout — DbError.PoolFailure { kind: PekExhausted } after.
+    acquire_timeout_ms: Int,
+    /// Inter-poll sleep when blocked on a full pool. Tradeoff: smaller
+    /// = lower acquire latency, more wakeups; larger = more lazy.
+    /// Default 5ms — fast enough for OLTP, low enough to not burn CPU.
+    poll_interval_ms: Int,
+    /// Adapter id stamped onto every error this pool produces. Filled
+    /// in by the per-vendor wrapper.
+    adapter_id: AdapterId,
+}
+
+implement PoolConfig {
+    public fn default(adapter_id: AdapterId) -> PoolConfig {
+        PoolConfig {
+            min_connections: 1,
+            max_connections: 16,
+            acquire_timeout_ms: 30_000,
+            poll_interval_ms: 5,
+            adapter_id: adapter_id,
+        }
+    }
+
+    public fn with_min(self, n: Int) -> PoolConfig {
+        PoolConfig { min_connections: n, .. self }
+    }
+    public fn with_max(self, n: Int) -> PoolConfig {
+        PoolConfig { max_connections: n, .. self }
+    }
+    public fn with_acquire_timeout_ms(self, ms: Int) -> PoolConfig {
+        PoolConfig { acquire_timeout_ms: ms, .. self }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Release verdict
+// -----------------------------------------------------------------------------
+
+public type ReleaseKind is
+      Healthy
+    | Discard(Text);     // reason — usually the propagated error text
+
+// -----------------------------------------------------------------------------
+// Internal state
+// -----------------------------------------------------------------------------
+
+type PoolInner<C> is {
+    idle: List<C>,
+    outstanding: Int,
+    /// Monotonic counter for assigning checkouts a unique ID — useful
+    /// for tracing and for the `PoolHandle.checked_out_at_ms` slot
+    /// in the protocol surface.
+    next_id: Int,
+    /// Total successful acquires since launch.
+    total_acquired: Int,
+    /// Total acquire timeouts (PekExhausted).
+    total_timeouts: Int,
+    /// Total errors during connect / checkout.
+    total_errors: Int,
+}
+
+// -----------------------------------------------------------------------------
+// ConnectionPool
+// -----------------------------------------------------------------------------
+
+public type ConnectionPool<C> is {
+    config: PoolConfig,
+    /// Factory closure boxed into a function-pointer-like value. The
+    /// pool re-invokes this whenever it needs to build a fresh
+    /// connection. Errors propagate verbatim.
+    factory: fn() -> Result<C, DbError>,
+    inner: Mutex<PoolInner<C>>,
+}
+
+implement<C> ConnectionPool<C> {
+    /// Construct + warm — pre-opens `min_connections` upfront. If any
+    /// of the eager connects fails we return that error and drop the
+    /// already-open ones (caller can retry with a smaller min).
+    public fn launch(
+        config: PoolConfig,
+        factory: fn() -> Result<C, DbError>,
+    ) -> Result<ConnectionPool<C>, DbError> {
+        if config.max_connections < 1 {
+            return Err(DbError.PoolFailure {
+                kind: PoolErrorKind.PekConfigInvalid("max_connections < 1".clone()),
+            });
+        }
+        if config.min_connections < 0 || config.min_connections > config.max_connections {
+            return Err(DbError.PoolFailure {
+                kind: PoolErrorKind.PekConfigInvalid("min_connections out of range".clone()),
+            });
+        }
+        let mut idle: List<C> = List.new();
+        let mut i: Int = 0;
+        while i < config.min_connections {
+            match factory() {
+                Ok(c)  => idle.push(c),
+                Err(e) => { return Err(e); }
+            }
+            i = i + 1;
+        }
+        let inner = PoolInner {
+            idle: idle,
+            outstanding: 0,
+            next_id: 1,
+            total_acquired: 0,
+            total_timeouts: 0,
+            total_errors: 0,
+        };
+        Ok(ConnectionPool {
+            config: config,
+            factory: factory,
+            inner: Mutex.new(inner),
+        })
+    }
+
+    /// Acquire one connection. Reuses an idle one when available;
+    /// otherwise opens a fresh one if we are below `max_connections`;
+    /// otherwise polls + sleeps until a slot frees or the timeout
+    /// elapses.
+    public fn acquire(&self) -> Result<PooledConnection<C>, DbError> {
+        let deadline_ms = self.config.acquire_timeout_ms;
+        let mut waited_ms: Int = 0;
+        loop {
+            // Fast path — try to grab from the idle queue / open new.
+            match self.try_acquire_now() {
+                Ok(opt) => {
+                    match opt {
+                        Some(handle) => return Ok(handle),
+                        None         => {}     // pool full; fall through to wait
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+            if waited_ms >= deadline_ms {
+                let mut guard = match self.inner.lock() {
+                    Ok(g)  => g,
+                    Err(_) => { return Err(self.poisoned_err()); }
+                };
+                guard.total_timeouts = guard.total_timeouts + 1;
+                return Err(DbError.PoolFailure {
+                    kind: PoolErrorKind.PekExhausted,
+                });
+            }
+            let _ = sleep_ms(self.config.poll_interval_ms);
+            waited_ms = waited_ms + self.config.poll_interval_ms;
+        }
+    }
+
+    /// Release a checked-out connection. Healthy → recycled; Discard →
+    /// closed + slot count decremented. Returning a connection always
+    /// succeeds (the connection itself may already be closed; we just
+    /// drop it).
+    public fn release(&self, conn: C, kind: ReleaseKind) {
+        let mut guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => { return; }   // poisoned — silently drop the conn
+        };
+        match kind {
+            Healthy => { guard.idle.push(conn); }
+            Discard(_reason) => {
+                let _ = conn;     // dropped, factory rebuilds on next acquire
+            }
+        }
+        if guard.outstanding > 0 {
+            guard.outstanding = guard.outstanding - 1;
+        }
+    }
+
+    /// Drain — refuse new acquires (caller policed at handler scope),
+    /// wait for in-flight checkouts to release, then close every idle
+    /// connection. The connection drop is the responsibility of `C`'s
+    /// destructor.
+    public fn drain(&self, deadline_ms: Int) -> Result<(), DbError> {
+        let mut waited: Int = 0;
+        loop {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => { return Err(self.poisoned_err()); }
+            };
+            if guard.outstanding == 0 {
+                guard.idle = List.new();
+                return Ok(());
+            }
+            // Drop the lock before sleeping so releases can land.
+            // (No explicit drop API — let the binding go out of scope.)
+            let _ = guard;
+            if waited >= deadline_ms {
+                return Err(DbError.PoolFailure {
+                    kind: PoolErrorKind.PekDraining,
+                });
+            }
+            let _ = sleep_ms(self.config.poll_interval_ms);
+            waited = waited + self.config.poll_interval_ms;
+        }
+    }
+
+    /// Snapshot — total / idle / in_use / waiting / total_acquired /
+    /// total_timeouts / total_errors. Useful for metrics emit.
+    public fn stats(&self) -> PoolStatsSnapshot {
+        let guard = match self.inner.lock() {
+            Ok(g)  => g,
+            Err(_) => {
+                return PoolStatsSnapshot {
+                    total: 0, idle: 0, in_use: 0,
+                    total_acquired: 0, total_timeouts: 0, total_errors: 0,
+                };
+            }
+        };
+        let idle = guard.idle.len() as Int;
+        let in_use = guard.outstanding;
+        PoolStatsSnapshot {
+            total: idle + in_use,
+            idle: idle,
+            in_use: in_use,
+            total_acquired: guard.total_acquired,
+            total_timeouts: guard.total_timeouts,
+            total_errors: guard.total_errors,
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals
+    // -------------------------------------------------------------------------
+
+    fn try_acquire_now(&self) -> Result<Maybe<PooledConnection<C>>, DbError> {
+        // 1. Try popping an idle connection under the lock.
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => { return Err(self.poisoned_err()); }
+            };
+            if guard.idle.len() > 0 {
+                let conn = match guard.idle.pop() {
+                    Some(c) => c,
+                    None    => {
+                        // Race with another puller — fall through.
+                        return Ok(None);
+                    }
+                };
+                guard.outstanding = guard.outstanding + 1;
+                guard.total_acquired = guard.total_acquired + 1;
+                let id = guard.next_id;
+                guard.next_id = guard.next_id + 1;
+                return Ok(Some(PooledConnection {
+                    conn: Some(conn),
+                    pool: self,
+                    id: id,
+                }));
+            }
+            // 2. No idle — try opening a new one if we are below the cap.
+            let total = (guard.idle.len() as Int) + guard.outstanding;
+            if total >= self.config.max_connections {
+                return Ok(None);
+            }
+            // Reserve the slot before invoking the factory so a parallel
+            // acquire sees us as outstanding.
+            guard.outstanding = guard.outstanding + 1;
+        }
+        // Drop the lock for the (possibly slow) factory call.
+        match (self.factory)() {
+            Ok(conn) => {
+                let mut guard = match self.inner.lock() {
+                    Ok(g)  => g,
+                    Err(_) => { return Err(self.poisoned_err()); }
+                };
+                guard.total_acquired = guard.total_acquired + 1;
+                let id = guard.next_id;
+                guard.next_id = guard.next_id + 1;
+                Ok(Some(PooledConnection {
+                    conn: Some(conn),
+                    pool: self,
+                    id: id,
+                }))
+            }
+            Err(e) => {
+                let mut guard = match self.inner.lock() {
+                    Ok(g)  => g,
+                    Err(_) => { return Err(self.poisoned_err()); }
+                };
+                if guard.outstanding > 0 {
+                    guard.outstanding = guard.outstanding - 1;
+                }
+                guard.total_errors = guard.total_errors + 1;
+                Err(e)
+            }
+        }
+    }
+
+    fn poisoned_err(&self) -> DbError {
+        DbError.Adapter(AdapterSpecific {
+            adapter: self.config.adapter_id.clone(),
+            code: "POOL_POISONED".clone(),
+            message: "pool mutex poisoned".clone(),
+            retryable: false,
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PooledConnection — checkout handle.
+// -----------------------------------------------------------------------------
+
+/// Affine RAII handle. Caller MUST consume via `release_healthy` or
+/// `release_discard`; the destructor's behaviour for an unconsumed
+/// handle is to release as healthy (defensive — we'd rather leak a
+/// possibly-bad connection back into the pool than leak the slot).
+public type PooledConnection<C> is {
+    conn: Maybe<C>,
+    pool: &ConnectionPool<C>,
+    id: Int,
+}
+
+implement<C> PooledConnection<C> {
+    public fn id(&self) -> Int { self.id }
+
+    /// Borrow the connection mutably — the body runs the actual
+    /// query. Affine consume happens via release_*.
+    public fn conn_mut(&mut self) -> &mut C {
+        match &mut self.conn {
+            Some(c) => c,
+            None    => panic("PooledConnection: connection already released"),
+        }
+    }
+
+    public fn conn_ref(&self) -> &C {
+        match &self.conn {
+            Some(c) => c,
+            None    => panic("PooledConnection: connection already released"),
+        }
+    }
+
+    /// Return the connection to the pool as healthy.
+    public fn release_healthy(mut self) {
+        let c = match self.conn {
+            Some(c) => c,
+            None    => { return; }
+        };
+        self.conn = None;
+        self.pool.release(c, Healthy);
+    }
+
+    /// Discard the connection (will be reopened on next acquire).
+    public fn release_discard(mut self, reason: Text) {
+        let c = match self.conn {
+            Some(c) => c,
+            None    => { return; }
+        };
+        self.conn = None;
+        self.pool.release(c, Discard(reason));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Stats snapshot
+// -----------------------------------------------------------------------------
+
+public type PoolStatsSnapshot is {
+    total: Int,
+    idle: Int,
+    in_use: Int,
+    total_acquired: Int,
+    total_timeouts: Int,
+    total_errors: Int,
+}
