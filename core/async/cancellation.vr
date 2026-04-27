@@ -204,7 +204,7 @@ implement CancellationFlag {
     }
 
     public fn reason(&self) -> Maybe<CancelReason> {
-        let guard = self.reason.lock().unwrap();
+        let guard = self.reason.lock().unwrap_or_else(|p| p.into_inner());
         match &*guard {
             Some(r) => Some(r.clone()),
             None => None,
@@ -226,7 +226,7 @@ implement CancellationFlag {
 
         // Record reason.
         {
-            let mut rg = self.reason.lock().unwrap();
+            let mut rg = self.reason.lock().unwrap_or_else(|p| p.into_inner());
             *rg = Some(r);
         }
 
@@ -241,7 +241,7 @@ implement CancellationFlag {
         // hit `[lenient] SKIP … undefined function`.  The
         // `replace<T>` form has no bound and registers cleanly.
         let waiters_drained = {
-            let mut wg = self.waiters.lock().unwrap();
+            let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
             let list = replace(&mut *wg, List.new());
             list
         };
@@ -251,7 +251,7 @@ implement CancellationFlag {
 
         // Drain callbacks.
         let callbacks_drained = {
-            let mut cg = self.callbacks.lock().unwrap();
+            let mut cg = self.callbacks.lock().unwrap_or_else(|p| p.into_inner());
             let list = replace(&mut *cg, List.new());
             list
         };
@@ -261,7 +261,7 @@ implement CancellationFlag {
 
         // Propagate to children (weak → strong upgrade; skip dead).
         let children_snapshot = {
-            let cg = self.children.lock().unwrap();
+            let cg = self.children.lock().unwrap_or_else(|p| p.into_inner());
             cg.iter().map(|w| w.clone()).collect<List<_>>()
         };
         for weak in children_snapshot {
@@ -285,7 +285,7 @@ implement CancellationFlag {
             return 0;
         }
         let id = self.next_id.fetch_add(1, MemoryOrdering.Relaxed);
-        let mut wg = self.waiters.lock().unwrap();
+        let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
         // Re-check under lock: avoid lost-wake race with concurrent cancel.
         if self.is_cancelled() {
             drop(wg);
@@ -298,7 +298,7 @@ implement CancellationFlag {
 
     fn deregister_waiter(&self, id: RegistrationId) {
         if id == 0 { return; }
-        let mut wg = self.waiters.lock().unwrap();
+        let mut wg = self.waiters.lock().unwrap_or_else(|p| p.into_inner());
         wg.retain(|w| w.id != id);
     }
 
@@ -308,7 +308,7 @@ implement CancellationFlag {
             return 0;
         }
         let id = self.next_id.fetch_add(1, MemoryOrdering.Relaxed);
-        let mut cg = self.callbacks.lock().unwrap();
+        let mut cg = self.callbacks.lock().unwrap_or_else(|p| p.into_inner());
         if self.is_cancelled() {
             drop(cg);
             cb();
@@ -320,7 +320,7 @@ implement CancellationFlag {
 
     fn deregister_callback(&self, id: RegistrationId) {
         if id == 0 { return; }
-        let mut cg = self.callbacks.lock().unwrap();
+        let mut cg = self.callbacks.lock().unwrap_or_else(|p| p.into_inner());
         cg.retain(|c| c.id != id);
     }
 
@@ -332,7 +332,7 @@ implement CancellationFlag {
             }
             return;
         }
-        let mut cg = self.children.lock().unwrap();
+        let mut cg = self.children.lock().unwrap_or_else(|p| p.into_inner());
         // Re-check under lock.
         if self.is_cancelled() {
             drop(cg);
