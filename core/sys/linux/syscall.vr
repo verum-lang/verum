@@ -700,6 +700,43 @@ public fn ftruncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
     }
 }
 
+// POSIX access(2) mode bits — same numeric values across Linux, BSD, Darwin.
+public const F_OK: Int = 0;
+public const X_OK: Int = 1;
+public const W_OK: Int = 2;
+public const R_OK: Int = 4;
+
+/// Probe path accessibility relative to AT_FDCWD via faccessat(2).
+///
+/// `mode` is a bitwise-OR of `F_OK | R_OK | W_OK | X_OK`. Returns
+/// `Ok(true)` on success, `Ok(false)` on EACCES/ENOENT/ENOTDIR/EROFS,
+/// `Err(...)` for everything else (EIO, EFAULT, ENAMETOOLONG, ELOOP).
+public fn faccessat(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
+    let mut path_buf = [0_u8; 4096];
+    let len = path.len().min(4095);
+    path_buf[..len].copy_from_slice(&path[..len]);
+    path_buf[len] = 0;
+
+    // faccessat(AT_FDCWD, path, mode, 0) — flags=0 means follow symlinks
+    // and use real (not effective) UID/GID, matching access(2). Portable
+    // across x86_64 and aarch64 (no legacy access syscall on aarch64).
+    let result = unsafe {
+        syscall_raw(SYS_FACCESSAT, AT_FDCWD, path_buf.as_ptr() as Int, mode, 0, 0, 0)
+    };
+
+    if result == 0 {
+        return Ok(true);
+    }
+    let code = -result as Int;
+    // ENOENT=2, EACCES=13, ENOTDIR=20, EROFS=30 — all mean "no" for an
+    // access probe. Anything else is a real error worth surfacing.
+    if code == 2 || code == 13 || code == 20 || code == 30 {
+        Ok(false)
+    } else {
+        Err(OSError.from_code(code))
+    }
+}
+
 /// Duplicate a file descriptor.
 public fn dup(oldfd: FileDesc) -> Result<FileDesc, OSError> {
     let result = unsafe {
