@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/mysql/auth/mod.vr — MySQL authentication
+// =============================================================================
+// Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
+// =============================================================================
+
+module core.database.mysql.auth;
+
+public module caching_sha2;
+
+public mount .caching_sha2.{
+    scramble_caching_sha2,
+    CachingSha2State,
+    CsFastAuthOk, CsFullAuthRequired, CsFailed,
+};

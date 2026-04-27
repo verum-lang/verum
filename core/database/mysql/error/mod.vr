@@ -1,0 +1,88 @@
+// =============================================================================
+// core/database/mysql/error/mod.vr — translate MySQL ErrPacket → DbError
+// =============================================================================
+// Spec: internal/specs/database.md §5.6, dev.mysql.com/doc/refman/8.0/en/server-error-reference.html
+// =============================================================================
+
+module core.database.mysql.error;
+
+mount core.*;
+mount base.{Text, Maybe, None, Some};
+mount core.database.common.error.{
+    DbError, AdapterId, AdapterSpecific, SqlState,
+    ConnectionErrorKind, AuthErrorKind, TimeoutPhase,
+};
+mount core.database.mysql.wire.backend.ErrPacket;
+
+const MYSQL_ER_LOCK_DEADLOCK:    Int = 1213;
+const MYSQL_ER_LOCK_WAIT_TIMEOUT: Int = 1205;
+const MYSQL_ER_ACCESS_DENIED:    Int = 1045;
+const MYSQL_ER_BAD_DB:           Int = 1049;
+const MYSQL_ER_DUP_ENTRY:        Int = 1062;
+const MYSQL_ER_NO_SUCH_TABLE:    Int = 1146;
+const MYSQL_ER_PARSE_ERROR:      Int = 1064;
+
+/// Fold an `ErrPacket` (post-decode) into the unified Spindle DbError.
+///
+///   * 1213 / 1205           → Adapter(retryable=true)  — retry combinator picks them up
+///   * 1045                  → AuthFailed(role-not-permitted with ER_ACCESS_DENIED message)
+///   * 1062 (dup entry)      → QueryFailed with SQLSTATE 23000 — is_constraint_violation = true
+///   * everything else       → QueryFailed with the decoded SQLSTATE if the server provided one
+public fn dberr_from_mysql(err: ErrPacket) -> DbError {
+    if err.code == MYSQL_ER_LOCK_DEADLOCK || err.code == MYSQL_ER_LOCK_WAIT_TIMEOUT {
+        return DbError.Adapter(AdapterSpecific {
+            adapter: AdMysql,
+            code: itoa(err.code),
+            message: err.message,
+            retryable: true,
+        });
+    }
+    if err.code == MYSQL_ER_ACCESS_DENIED {
+        return DbError.AuthFailed {
+            kind: AuthErrorKind.AekRoleNotPermitted(err.message),
+        };
+    }
+    let state_text = if err.sql_state.len() == 5 {
+        err.sql_state.clone()
+    } else {
+        infer_state_from_code(err.code)
+    };
+    let state = match SqlState.parse(&state_text) {
+        Some(s) => s,
+        None    => SqlState.parse(&"XX000".clone()).unwrap(),
+    };
+    DbError.QueryFailed {
+        sql_state: state,
+        message: err.message,
+        position: None,
+    }
+}
+
+fn infer_state_from_code(code: Int) -> Text {
+    if code == MYSQL_ER_DUP_ENTRY      { return "23000".clone(); }
+    if code == MYSQL_ER_NO_SUCH_TABLE  { return "42S02".clone(); }
+    if code == MYSQL_ER_BAD_DB         { return "42000".clone(); }
+    if code == MYSQL_ER_PARSE_ERROR    { return "42000".clone(); }
+    "HY000".clone()
+}
+
+fn itoa(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let neg = n < 0;
+    let mut abs = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > 0 {
+        digits.push(((abs % 10) + 0x30) as Byte);
+        abs = abs / 10;
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i = (digits.len() as Int) - 1;
+    while i >= 0 {
+        out.push(digits[i]);
+        i = i - 1;
+    }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
+
+mount collections.List;

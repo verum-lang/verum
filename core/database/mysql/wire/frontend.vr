@@ -1,0 +1,130 @@
+// =============================================================================
+// core/database/mysql/wire/frontend.vr — frontend message builders
+// =============================================================================
+// Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
+//
+// Builds the post-header payload — caller wraps each in a packet via
+// `frame.frame_packet(seq, payload.as_slice())`.
+// =============================================================================
+
+module core.database.mysql.wire.frontend;
+
+mount core.*;
+mount base.{Text};
+mount collections.List;
+mount core.database.mysql.wire.frame.{
+    put_u8, put_u16_le, put_u32_le, put_bytes, put_cstr, put_lenenc_string,
+};
+mount core.database.mysql.wire.types.{
+    SPINDLE_CLIENT_FLAGS, COM_QUERY, COM_PING, COM_QUIT, COM_INIT_DB,
+    COM_RESET_CONNECTION, plugin_caching_sha2_password,
+};
+
+// -----------------------------------------------------------------------------
+// HandshakeResponse41 (client → server, after Initial Handshake)
+// -----------------------------------------------------------------------------
+//
+// Layout (CLIENT_PROTOCOL_41 + CLIENT_PLUGIN_AUTH_LENENC negotiated):
+//   * 4-byte LE client capability flags
+//   * 4-byte LE max-packet (24-bit advisory)
+//   * 1-byte character set
+//   * 23 zero filler bytes
+//   * NUL-terminated user name
+//   * length-encoded auth response
+//   * NUL-terminated initial database (only if CLIENT_CONNECT_WITH_DB)
+//   * NUL-terminated auth-plugin name (only if CLIENT_PLUGIN_AUTH)
+//   * length-encoded connection-attribute key-value pairs
+//     (only if CLIENT_CONNECT_ATTRS — Spindle does NOT negotiate this
+//     in v0.1, so we omit the trailing block).
+
+public fn handshake_response(
+    user: &Text,
+    auth_response: &[Byte],
+    database: &Text,
+    plugin_name: &Text,
+    character_set: Int,
+    max_packet: Int,
+) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u32_le(&mut out, SPINDLE_CLIENT_FLAGS);
+    put_u32_le(&mut out, max_packet);
+    put_u8(&mut out, character_set);
+    let mut i = 0;
+    while i < 23 { out.push(0 as Byte); i = i + 1; }
+    put_cstr(&mut out, user);
+    put_lenenc_string(&mut out, auth_response);
+    put_cstr(&mut out, database);
+    put_cstr(&mut out, plugin_name);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// COM_QUERY — single SQL string, text-mode result-set.
+// -----------------------------------------------------------------------------
+
+public fn com_query(sql: &Text) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_QUERY as Int);
+    let bytes = sql.as_bytes();
+    put_bytes(&mut out, bytes);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// COM_PING — round-trip keepalive.
+// -----------------------------------------------------------------------------
+
+public fn com_ping() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_PING as Int);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// COM_QUIT — orderly close.
+// -----------------------------------------------------------------------------
+
+public fn com_quit() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_QUIT as Int);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// COM_INIT_DB — change the default schema.
+// -----------------------------------------------------------------------------
+
+public fn com_init_db(db: &Text) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_INIT_DB as Int);
+    put_bytes(&mut out, db.as_bytes());
+    out
+}
+
+// -----------------------------------------------------------------------------
+// COM_RESET_CONNECTION — drop session state without re-auth.
+// -----------------------------------------------------------------------------
+
+public fn com_reset_connection() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_RESET_CONNECTION as Int);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// AuthSwitchResponse — caller-built auth payload after AuthSwitchRequest.
+// -----------------------------------------------------------------------------
+
+public fn auth_switch_response(payload: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_bytes(&mut out, payload);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Default plugin name helper.
+// -----------------------------------------------------------------------------
+
+public fn default_plugin_name() -> Text {
+    plugin_caching_sha2_password()
+}

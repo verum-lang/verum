@@ -1,0 +1,106 @@
+// =============================================================================
+// core/database/mysql/auth/caching_sha2.vr — caching_sha2_password client
+// =============================================================================
+// Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
+//
+// Algorithm (fast-path):
+//
+//   A = SHA-256(password)
+//   B = SHA-256(SHA-256(SHA-256(password)))
+//   C = SHA-256(B || nonce_20_bytes)
+//   response = A XOR C
+//
+// The server answers with a single byte:
+//   * 0x03  → fast auth done; OK packet follows
+//   * 0x04  → full auth required; over TLS the password is sent in
+//             cleartext (terminated by NUL); without TLS the client
+//             must perform RSA exchange first. Spindle v0.1 only
+//             implements the fast path; full-auth returns
+//             CsFullAuthRequired so the connection layer surfaces a
+//             typed error rather than a silent pause.
+// =============================================================================
+
+module core.database.mysql.auth.caching_sha2;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount collections.List;
+mount core.security.hash.sha256.Sha256;
+
+// -----------------------------------------------------------------------------
+// Fast-path scramble.
+// -----------------------------------------------------------------------------
+
+/// Compute the 32-byte fast-auth response. `password` is the
+/// utf-8-encoded user password (the empty string is allowed); `nonce`
+/// is the 20-byte challenge from the server's Initial Handshake
+/// `auth_plugin_data`.
+///
+/// Returns a 32-byte response. An empty password yields an empty
+/// response (0 bytes) — matching the official client behaviour, and
+/// the caller's length-encoded wrapper handles the zero-length case.
+public fn scramble_caching_sha2(password: &[Byte], nonce: &[Byte]) -> List<Byte> {
+    if password.len() == 0 {
+        return List.new();
+    }
+
+    // A = SHA-256(password)
+    let mut h_a = Sha256.new();
+    h_a.update(password);
+    let a_arr = h_a.finalize();
+
+    // B = SHA-256(SHA-256(SHA-256(password)))  — but the docs actually
+    // say `B = SHA-256(A)` then `C = SHA-256(B || nonce)`. The triple
+    // hash is for `mysql_native_password`. We follow the reference
+    // implementation: B = SHA-256(SHA-256(password)), C = SHA-256(B || nonce).
+    let a_list = arr32_to_list(&a_arr);
+    let mut h_b = Sha256.new();
+    h_b.update(a_list.as_slice());
+    let b_arr = h_b.finalize();
+
+    let b_list = arr32_to_list(&b_arr);
+    let mut h_c = Sha256.new();
+    h_c.update(b_list.as_slice());
+    h_c.update(nonce);
+    let c_arr = h_c.finalize();
+
+    // response = A XOR C
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 32 {
+        out.push(((a_arr[i] as Int) ^ (c_arr[i] as Int)) as Byte);
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Server-reply discriminator.
+// -----------------------------------------------------------------------------
+
+public type CachingSha2State is
+      CsFastAuthOk          // 0x03 — server accepted; OK follows
+    | CsFullAuthRequired    // 0x04 — full auth path needed (RSA / TLS)
+    | CsFailed;             // any other byte / payload shape
+
+public fn classify_auth_more(payload: &[Byte]) -> CachingSha2State {
+    if payload.len() == 0 { return CsFailed; }
+    let b = payload[0];
+    if b == (0x03 as Byte) { return CsFastAuthOk; }
+    if b == (0x04 as Byte) { return CsFullAuthRequired; }
+    CsFailed
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn arr32_to_list(arr: &[Byte; 32]) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 32 {
+        out.push(arr[i]);
+        i = i + 1;
+    }
+    out
+}
