@@ -130,7 +130,6 @@ pub enum ContextValue {
 #[derive(Clone)]
 pub struct Backtrace {
     frames: List<StackFrame>,
-    #[allow(dead_code)]
     captured_at: Instant,
     mode: BacktraceMode,
 }
@@ -722,15 +721,28 @@ impl Backtrace {
     pub fn frames(&self) -> &List<StackFrame> {
         &self.frames
     }
+
+    /// Capture timestamp — useful when the backtrace is logged or
+    /// rendered after the panic site (e.g. asynchronous error reporting),
+    /// so observers can correlate it with other timestamped events.
+    pub fn captured_at(&self) -> Instant {
+        self.captured_at
+    }
+
+    /// Capture mode (Disabled / Basic / Full).
+    pub fn mode(&self) -> BacktraceMode {
+        self.mode
+    }
 }
 
 impl fmt::Debug for Backtrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Backtrace {{ frames: {} frames, mode: {:?} }}",
+            "Backtrace {{ frames: {} frames, mode: {:?}, captured_at: {:?} }}",
             self.frames.len(),
-            self.mode
+            self.mode,
+            self.captured_at
         )
     }
 }

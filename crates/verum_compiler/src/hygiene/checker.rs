@@ -132,9 +132,6 @@ struct CheckerScope {
 /// An entry in the binding table
 #[derive(Debug, Clone)]
 struct BindingEntry {
-    /// The binding info
-    #[allow(dead_code)]
-    info: BindingInfo,
     /// The scope where it was introduced
     scope_id: ScopeId,
     /// The scopes at the point of introduction
@@ -802,7 +799,6 @@ impl HygieneChecker {
         };
 
         let entry = BindingEntry {
-            info: info.clone(),
             scope_id,
             scopes: scopes.clone(),
         };
