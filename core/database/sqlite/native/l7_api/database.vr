@@ -39,7 +39,7 @@ mount core.database.sqlite.native.l5_sql.{
 mount core.database.sqlite.native.l6_session.{
     Connection, ConnectionMode, ConnectionError, TxMode,
     PreparedStatement, StmtError, IndexMeta,
-    open_memory, prepare, prepare_with_schema,
+    open_memory, open_file, prepare, prepare_with_schema,
     mode_can_write, mode_can_ddl,
     table_meta_from_create,
     seed_cursors_from_connection, writeback_cursors_to_connection,
@@ -125,6 +125,30 @@ public fn open_admin() -> Result<Database, DbError> {
         Ok(c)  => Ok(Database { conn: c }),
         Err(e) => Err(db_error_from_conn(e)),
     }
+}
+
+/// Open a file-backed database with the given capability mode.
+/// Routes through L6 `open_file` → L1 `pager_open_file` → L0 PosixVfs.
+/// The path is interpreted by the platform's filesystem; the caller
+/// is responsible for any URI parsing (the `file:` URI handler is a
+/// separate `core.database.sqlite.native.uri` task).
+public fn open_path(path: &Text, mode: ConnectionMode) -> Result<Database, DbError> {
+    match open_file(path, mode) {
+        Ok(c)  => Ok(Database { conn: c }),
+        Err(e) => Err(db_error_from_conn(e)),
+    }
+}
+
+public fn open_path_readonly(path: &Text) -> Result<Database, DbError> {
+    open_path(path, CmRead)
+}
+
+public fn open_path_readwrite(path: &Text) -> Result<Database, DbError> {
+    open_path(path, CmWrite)
+}
+
+public fn open_path_admin(path: &Text) -> Result<Database, DbError> {
+    open_path(path, CmAdmin)
 }
 
 implement Database {

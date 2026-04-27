@@ -25,6 +25,12 @@ mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l0_vfs.memdb_vfs.{
     MemDbFile, open_memory_rwc, memdb_read, memdb_write, memdb_size,
 };
+mount core.database.sqlite.native.l0_vfs.posix_vfs.{
+    PosixVfs, PosixFile,
+};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    OpenFlags, flags_default, flags_rwc, flags_ro, VfsError,
+};
 
 // =============================================================================
 // Constants
@@ -92,8 +98,17 @@ public type PagerErrorKind is
 /// byte offset and delegates to the VFS. A tiny `page_cache` saves the
 /// last N read frames to cut round-trip allocation; it is NOT the
 /// production CBGR cache described in sqlite-native.md §8.2.
+/// Backend abstraction — every loom Pager runs on either a MemDbFile
+/// (for `:memory:` databases) or a real PosixFile (for file-backed
+/// databases). We carry the backend as an enum variant rather than a
+/// `dyn SqliteFile` so the dispatch is monomorphic and the code is
+/// readable; adding a third backend (Win32 / S3) means a new variant.
+public type PagerBackend is
+      BeMemory(MemDbFile)
+    | BeFile(PosixFile);
+
 public type Pager is {
-    file: MemDbFile,
+    backend: PagerBackend,
     page_size: Int,
     page_cache: Map<Int, PageFrame>,
     closed: Bool,
@@ -132,11 +147,49 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
     };
 
     Ok(Pager {
-        file: file,
+        backend: BeMemory(file),
         page_size: page_size,
         page_cache: Map.new(),
         closed: false,
     })
+}
+
+/// Open a file-backed pager. The path must already exist (or `flags`
+/// must include `create`); the caller's open-mode (read-only vs read-
+/// write) is reflected in the OpenFlags.
+public fn pager_open_file(path: &Text, page_size: Int, flags: OpenFlags) -> Result<Pager, PagerError> {
+    if !is_valid_page_size(page_size) {
+        return Err(PagerError {
+            kind: InvalidPageSize,
+            message: "page size must be a power of two in [512, 65536]",
+        });
+    }
+    let vfs = PosixVfs.new();
+    let file = match vfs.open(path, flags) {
+        Ok(f)  => f,
+        Err(e) => {
+            return Err(PagerError {
+                kind: IoError,
+                message: f"PosixVfs.open failed: {e.message}",
+            });
+        }
+    };
+    Ok(Pager {
+        backend: BeFile(file),
+        page_size: page_size,
+        page_cache: Map.new(),
+        closed: false,
+    })
+}
+
+/// Convenience — opens read/write/create with the default page size.
+public fn pager_open_file_rwc(path: &Text) -> Result<Pager, PagerError> {
+    pager_open_file(path, PAGE_SIZE_DEFAULT, flags_rwc())
+}
+
+/// Convenience — opens read-only.
+public fn pager_open_file_ro(path: &Text) -> Result<Pager, PagerError> {
+    pager_open_file(path, PAGE_SIZE_DEFAULT, flags_ro())
 }
 
 /// Cleanly close a pager and release its backing file. After `close`,
@@ -169,13 +222,24 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
         buf.push(0 as Byte);
         i = i + 1;
     }
-    match memdb_read(&p.file, &mut buf, offset) {
-        Ok(_) => {}
-        Err(_) => {
-            // Reading past EOF is a valid "fresh page" case for the
-            // first touch of a new page — return a zero-filled frame
-            // rather than bubbling an error up.
-            return Ok(PageFrame { page_no: page_no, data: buf, dirty: false });
+    match &p.backend {
+        BeMemory(f) => {
+            match memdb_read(f, &mut buf, offset) {
+                Ok(_) => {}
+                Err(_) => {
+                    // Reading past EOF — return a zero-filled frame
+                    // (fresh page on first touch).
+                    return Ok(PageFrame { page_no: page_no, data: buf, dirty: false });
+                }
+            }
+        }
+        BeFile(f) => {
+            match f.read(&mut buf, offset) {
+                Ok(_) => {}
+                Err(_) => {
+                    return Ok(PageFrame { page_no: page_no, data: buf, dirty: false });
+                }
+            }
         }
     }
 
@@ -199,9 +263,19 @@ public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError
     }
 
     let offset = (frame.page_no - 1) * p.page_size;
-    match memdb_write(&mut p.file, &frame.data, offset) {
-        Ok(_) => Ok(()),
-        Err(_) => Err(PagerError { kind: IoError, message: "memdb_write failed" }),
+    match &mut p.backend {
+        BeMemory(f) => {
+            match memdb_write(f, frame.data.as_slice(), offset) {
+                Ok(_) => Ok(()),
+                Err(_) => Err(PagerError { kind: IoError, message: "memdb_write failed" }),
+            }
+        }
+        BeFile(f) => {
+            match f.write(frame.data.as_slice(), offset) {
+                Ok(_)  => Ok(()),
+                Err(_) => Err(PagerError { kind: IoError, message: "PosixFile.write failed" }),
+            }
+        }
     }
 }
 

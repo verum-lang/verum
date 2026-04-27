@@ -34,7 +34,9 @@ mount core.*;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.OpenFlags;
-mount core.database.sqlite.native.l1_pager.{Pager, pager_open_memory};
+mount core.database.sqlite.native.l1_pager.{
+    Pager, pager_open_memory, pager_open_file_rwc, pager_open_file_ro,
+};
 mount core.database.sqlite.native.l4_vdbe.Register;
 mount core.database.sqlite.native.l6_session.schema_cache.{
     SchemaCache, schema_cache_new,
@@ -143,6 +145,30 @@ public fn open_readwrite_memory() -> Result<Connection, ConnectionError> {
 
 public fn open_admin_memory() -> Result<Connection, ConnectionError> {
     open_memory(CmAdmin)
+}
+
+/// Open a file-backed connection. The capability mode determines
+/// whether the underlying pager opens read-only or read/write/create.
+public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, ConnectionError> {
+    let pager = match mode {
+        CmRead => match pager_open_file_ro(path) {
+            Ok(p)  => p,
+            Err(_) => { return Err(IoError("pager_open_file_ro failed".clone())); }
+        },
+        CmWrite | CmAdmin => match pager_open_file_rwc(path) {
+            Ok(p)  => p,
+            Err(_) => { return Err(IoError("pager_open_file_rwc failed".clone())); }
+        },
+    };
+    Ok(Connection {
+        mode: mode,
+        pager: pager,
+        schema: schema_cache_new(),
+        tx: tx_state_autocommit(),
+        path: path.clone(),
+        next_root_page: 2,
+        table_store: Map.new(),
+    })
 }
 
 implement Connection {

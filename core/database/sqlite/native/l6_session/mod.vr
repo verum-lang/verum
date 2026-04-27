@@ -22,6 +22,7 @@ public mount .connection.{
     ConnectionMode, TxMode, TxState, Connection, ConnectionError,
     tx_state_autocommit,
     open_memory, open_readonly_memory, open_readwrite_memory, open_admin_memory,
+    open_file,
     mode_can_write, mode_can_ddl, mode_name,
 };
 
