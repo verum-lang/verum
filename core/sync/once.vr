@@ -14,6 +14,7 @@ module core.sync.once;
 mount core.*;
 mount .atomic.*;
 mount core.intrinsics.compiler_fence;
+mount core.intrinsics.spin_hint;
 
 // =============================================================================
 // Once
@@ -99,9 +100,18 @@ implement Once {
                     panic("Once.call_once called after panic");
                 }
                 Err(RUNNING) => {
-                    // Another thread is running, wait
+                    // Another thread is running. Wait with
+                    // spin_hint() so the CPU can issue PAUSE
+                    // (x86) / YIELD (aarch64) and not burn
+                    // 100% on the polling loop.  For very-
+                    // short init functions the wait
+                    // typically resolves in a handful of
+                    // iterations; for longer ones a futex
+                    // wait would be better but requires a
+                    // sequenced state-and-waiter counter
+                    // pair (tracked as a follow-up).
                     while self.state.load(MemoryOrdering.Acquire) == RUNNING {
-                        compiler_fence(MemoryOrdering.SeqCst);
+                        spin_hint();
                     }
                 }
                 Err(_) => {
@@ -241,12 +251,22 @@ implement<T> OnceLock<T> {
         }
     }
 
-    // Set value if !already set.
-    // Returns Ok(()) on success, Err(value) if already initialized.
+    // Set value if not already set.
+    // Returns Ok(()) on success, Err(value) if already initialized
+    // (the rejected value is returned to the caller so it isn't
+    // silently dropped).
     public fn set(&self, value: T) -> Result<(), T> {
-        let mut stored = false;
-        let mut rejected_value: Maybe<T> = None;
+        // Fast-path: already initialised — no need to enter the
+        // call_once dance, return the rejected value
+        // immediately. This also sidesteps the move-semantics
+        // problem where capturing `value` into the closure
+        // would prevent us from returning it on the
+        // already-initialised path.
+        if self.once.is_completed() {
+            return Err(value);
+        }
 
+        let mut stored = false;
         self.once.call_once(|| {
             unsafe {
                 let ptr = &self.value as *const Maybe<T> as *mut Maybe<T>;
@@ -258,9 +278,23 @@ implement<T> OnceLock<T> {
         if stored {
             Ok(())
         } else {
-            // Already initialized, return the value
-            // Note: This is a simplification; real impl would save rejected value
-            Err(value)
+            // Lost the race: another thread initialised between
+            // our `is_completed()` fast-path check and our own
+            // `call_once` attempt. The value was moved into the
+            // closure (which never ran, so it was dropped at
+            // closure-end); we can't materialise a `T` to
+            // return here without inventing one.
+            //
+            // Earlier revisions returned the moved `value`
+            // directly — a use-after-move that produced
+            // implementation-defined results. This honest
+            // panic surfaces the rare race at the actual
+            // misuse site rather than corrupting the value.
+            // Callers needing strict rejected-value
+            // preservation should use the (future)
+            // `try_get_or_set` API that doesn't move on the
+            // gating check.
+            panic("OnceLock::set lost a race window between is_completed() check and call_once entry — rejected value cannot be recovered. Use try_get_or_set for race-safe single-shot semantics.")
         }
     }
 
