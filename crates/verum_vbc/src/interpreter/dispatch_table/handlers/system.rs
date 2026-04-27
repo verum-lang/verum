@@ -114,8 +114,20 @@ pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> Inte
                     atomic.load(ord) as i64
                 }
                 8 => {
+                    // 8-byte loads land on a NaN-boxed Value (the
+                    // Tier-0 storage layout of every Verum struct
+                    // field is uniform 8-byte slots tagged via
+                    // value.rs Value).  Mask off the tag bits and
+                    // sign-extend at bit 47 to reconstruct the i64
+                    // payload — this is what the user-level
+                    // `AtomicInt.load` etc. expect.  See task #39
+                    // for the architectural background; the
+                    // alternative (raw u64 storage marker via a
+                    // future @raw_layout attribute) is the
+                    // long-term path.
                     let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                    atomic.load(ord) as i64
+                    let raw = atomic.load(ord);
+                    nan_box_payload_to_i64(raw)
                 }
                 _ => {
                     return Err(InterpreterError::InvalidOperand {
@@ -128,6 +140,35 @@ pub(in super::super) fn handle_atomic_load(state: &mut InterpreterState) -> Inte
 
     state.set_reg(dst, Value::from_i64(value));
     Ok(DispatchResult::Continue)
+}
+
+/// Extract the inline-int payload from a NaN-boxed Value bit-
+/// pattern.  Mirrors `Value::as_i64` for the inline-integer case.
+/// Used by 8-byte atomic load/CAS to reconstruct the user-visible
+/// integer from the raw u64 storage of a Verum struct field.
+#[inline]
+fn nan_box_payload_to_i64(raw: u64) -> i64 {
+    // PAYLOAD_MASK = bits 0..47 (48 bits).  Sign-extend at bit 47
+    // so values -2^47..-1 round-trip correctly.
+    let payload = (raw & 0x0000_FFFF_FFFF_FFFF) as i64;
+    if payload & (1 << 47) != 0 {
+        // Sign-extend: clear bit 47 then OR in the high 16 bits as 1s.
+        payload | !0x0000_FFFF_FFFF_FFFFi64
+    } else {
+        payload
+    }
+}
+
+/// Re-encode an i64 as a NaN-boxed Value bit-pattern with the
+/// integer tag.  Inverse of `nan_box_payload_to_i64`.
+/// Mirrors `Value::from_i64` for the inline-integer case.
+#[inline]
+fn i64_to_nan_box_payload(v: i64) -> u64 {
+    // NAN_BITS = 0x7FF8_0000_0000_0000, TAG_INTEGER << TAG_SHIFT = 0x0001_0000_0000_0000
+    // Combined NaN+TAG header = 0x7FF9_0000_0000_0000.
+    const NAN_INT_HEADER: u64 = 0x7FF9_0000_0000_0000;
+    const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+    NAN_INT_HEADER | ((v as u64) & PAYLOAD_MASK)
 }
 
 /// AtomicStore (0xE4)
@@ -179,8 +220,11 @@ pub(in super::super) fn handle_atomic_store(state: &mut InterpreterState) -> Int
                 atomic.store(val as u32, ord);
             }
             8 => {
+                // Re-encode as NaN-boxed Value bit-pattern (task #39
+                // — the storage IS a Value u64 slot, the high 16
+                // bits are the type-tag header).
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                atomic.store(val as u64, ord);
+                atomic.store(i64_to_nan_box_payload(val), ord);
             }
             _ => {
                 return Err(InterpreterError::InvalidOperand {
@@ -256,10 +300,17 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
                 }
             }
             8 => {
+                // Wrap expected/desired as NaN-boxed Value bit-
+                // patterns so the atomic CAS compares the WHOLE 8
+                // bytes including tag header (task #39).  Then
+                // unwrap the returned old_u64 back to an i64
+                // payload for the user.
                 let atomic = &*(ptr as *const std::sync::atomic::AtomicU64);
-                match atomic.compare_exchange(expected as u64, desired as u64, success_ord, failure_ord) {
-                    Ok(old) => (old as i64, true),
-                    Err(old) => (old as i64, false),
+                let expected_boxed = i64_to_nan_box_payload(expected);
+                let desired_boxed = i64_to_nan_box_payload(desired);
+                match atomic.compare_exchange(expected_boxed, desired_boxed, success_ord, failure_ord) {
+                    Ok(old) => (nan_box_payload_to_i64(old), true),
+                    Err(old) => (nan_box_payload_to_i64(old), false),
                 }
             }
             _ => {
@@ -270,8 +321,28 @@ pub(in super::super) fn handle_atomic_cas(state: &mut InterpreterState) -> Inter
         }
     };
 
-    state.set_reg(dst, Value::from_i64(old_value));
-    state.set_reg(Reg(dst.0 + 1), Value::from_bool(success));
+    // Pack (old_value, success) as a 2-slot Tuple heap object so
+    // the destructuring `let (actual, did_swap) = atomic_cas_*` in
+    // user code can Unpack it correctly.  The previous convention
+    // wrote dst (i64) and dst+1 (Bool) directly, but the codegen
+    // for intrinsic call sites doesn't allocate a paired register
+    // pair — it allocates ONE dst — so the dst+1 write was
+    // unreachable and `did_swap` arrived as nil.  Discovered while
+    // validating task #39's NaN-box CAS fix: the underlying CAS
+    // succeeded but the result tuple destructure read garbage.
+    let data_size = 2 * std::mem::size_of::<Value>();
+    let obj = state.heap.alloc_with_init(
+        TypeId::TUPLE,
+        data_size,
+        |_| {},
+    )?;
+    let data_ptr = obj.data_ptr();
+    unsafe {
+        let slot_ptr = data_ptr as *mut Value;
+        std::ptr::write(slot_ptr, Value::from_i64(old_value));
+        std::ptr::write(slot_ptr.add(1), Value::from_bool(success));
+    }
+    state.set_reg(dst, Value::from_ptr(obj.as_ptr()));
     Ok(DispatchResult::Continue)
 }
 
