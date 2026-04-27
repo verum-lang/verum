@@ -37,9 +37,19 @@ implement<T: Ord> BinaryHeap<T> {
         BinaryHeap { data: List.new() }
     }
 
-    // Create with pre-allocated capacity.
+    // Create with pre-allocated capacity.  Panics on OOM — use
+    // `try_with_capacity` for recoverable allocation.
     public fn with_capacity(capacity: Int) -> BinaryHeap<T> {
         BinaryHeap { data: List.with_capacity(capacity) }
+    }
+
+    // Fallible counterpart to `with_capacity`.  Returns
+    // `Err(AllocError::OutOfMemory)` instead of panicking when the
+    // underlying allocator cannot satisfy the request.  No partial
+    // state is left behind on Err.
+    public fn try_with_capacity(capacity: Int) -> Result<BinaryHeap<T>, AllocError> {
+        let data = List.try_with_capacity(capacity)?;
+        Ok(BinaryHeap { data })
     }
 
     // Create heap from list (heapify in O(n)).
@@ -47,6 +57,16 @@ implement<T: Ord> BinaryHeap<T> {
         let mut heap = BinaryHeap { data: list };
         heap.heapify();
         heap
+    }
+
+    // Fallible counterpart to `from_list`.  Currently always succeeds
+    // because heapify is in-place — exposed for API symmetry so call
+    // sites can write `BinaryHeap.try_from_list(list)?` without a
+    // panic-on-OOM hop.
+    public fn try_from_list(list: List<T>) -> Result<BinaryHeap<T>, AllocError> {
+        let mut heap = BinaryHeap { data: list };
+        heap.heapify();
+        Ok(heap)
     }
 
     // Number of elements.
@@ -85,7 +105,7 @@ implement<T: Ord> BinaryHeap<T> {
         if self.data.is_empty() {
             None
         } else {
-            Some(PeekMut { heap: self, sift: true })
+            Some(PeekMut { heap: self })
         }
     }
 
@@ -94,10 +114,20 @@ implement<T: Ord> BinaryHeap<T> {
         self.data.first_mut()
     }
 
-    // Push element onto heap.
+    // Push element onto heap.  Panics on OOM — use `try_push`
+    // when the operation must be recoverable.
     public fn push(&mut self, value: T) {
         self.data.push(value);
         self.sift_up(self.data.len() - 1);
+    }
+
+    // Fallible counterpart to `push`.  Returns
+    // `Err(AllocError::OutOfMemory)` on growth failure; the heap
+    // is left untouched in that case so the invariant is preserved.
+    public fn try_push(&mut self, value: T) -> Result<Unit, AllocError> {
+        self.data.try_push(value)?;
+        self.sift_up(self.data.len() - 1);
+        Ok(())
     }
 
     // Pop && return maximum element.
@@ -122,7 +152,9 @@ implement<T: Ord> BinaryHeap<T> {
 
     // Push && pop in single operation (more efficient than push then pop).
     public fn push_pop(&mut self, value: T) -> T {
-        if self.data.is_empty() || value >= self.data.get(0).unwrap() {
+        // Direct indexing is bounds-checked by the is_empty guard; the
+        // top element is data[0] when non-empty.
+        if self.data.is_empty() || value >= self.data[0] {
             return value;
         }
 
@@ -160,9 +192,17 @@ implement<T: Ord> BinaryHeap<T> {
         self.data.clear();
     }
 
-    // Reserve capacity for additional elements.
+    // Reserve capacity for additional elements.  Panics on OOM —
+    // use `try_reserve` for recoverable allocation.
     public fn reserve(&mut self, additional: Int) {
         self.data.reserve(additional);
+    }
+
+    // Fallible counterpart to `reserve`.  Returns
+    // `Err(AllocError::OutOfMemory)` if the underlying allocator
+    // cannot satisfy the growth.
+    public fn try_reserve(&mut self, additional: Int) -> Result<Unit, AllocError> {
+        self.data.try_reserve(additional)
     }
 
     // Shrink capacity to fit current length.
@@ -292,10 +332,12 @@ implement<T: Ord> BinaryHeap<T> {
     public fn remove_value(&mut self, value: &T) -> Bool
     where T: Eq
     {
-        // Find the index of the value
+        // Find the index of the value via direct indexing (the loop
+        // bound is the live `len`, so each access is in-range by
+        // construction).
         let mut idx: Maybe<Int> = None;
         for i in range(0, self.data.len()) {
-            if self.data.get(i).unwrap() == *value {
+            if self.data[i] == *value {
                 idx = Some(i);
                 break;
             }
@@ -409,8 +451,7 @@ implement<T: Ord> BinaryHeap<T> {
     where T: Clone
     {
         let mut result = BinaryHeap.new();
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             if f(item) {
                 result.push(item.clone());
             }
@@ -421,8 +462,7 @@ implement<T: Ord> BinaryHeap<T> {
     /// Return a new BinaryHeap with each element transformed by the function.
     public fn map<U: Ord, F: fn(&T) -> U>(&self, f: F) -> BinaryHeap<U> {
         let mut result: BinaryHeap<U> = BinaryHeap.new();
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             result.push(f(item));
         }
         result
@@ -432,8 +472,7 @@ implement<T: Ord> BinaryHeap<T> {
     /// Note: iteration order is NOT sorted — it traverses the internal array.
     public fn fold<U>(&self, init: U, f: fn(U, &T) -> U) -> U {
         let mut acc = init;
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             acc = f(acc, item);
         }
         acc
@@ -442,8 +481,7 @@ implement<T: Ord> BinaryHeap<T> {
     /// Apply a function to each element for its side effects.
     /// Note: iteration order is NOT sorted.
     public fn for_each<F: fn(&T)>(&self, f: F) {
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             f(item);
         }
     }
@@ -451,8 +489,7 @@ implement<T: Ord> BinaryHeap<T> {
     /// Count elements matching a predicate.
     public fn count_where<F: fn(&T) -> Bool>(&self, f: F) -> Int {
         let mut count = 0;
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             if f(item) {
                 count = count + 1;
             }
@@ -463,8 +500,7 @@ implement<T: Ord> BinaryHeap<T> {
     /// Filter and transform in one pass. Keeps elements for which the function returns Some.
     public fn filter_map<U: Ord, F: fn(&T) -> Maybe<U>>(&self, f: F) -> BinaryHeap<U> {
         let mut result: BinaryHeap<U> = BinaryHeap.new();
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             match f(item) {
                 Some(v) => result.push(v),
                 None => {}
@@ -475,8 +511,7 @@ implement<T: Ord> BinaryHeap<T> {
 
     /// Check if any element satisfies the predicate.
     public fn any<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             if f(item) {
                 return true;
             }
@@ -486,8 +521,7 @@ implement<T: Ord> BinaryHeap<T> {
 
     /// Check if all elements satisfy the predicate.
     public fn all<F: fn(&T) -> Bool>(&self, f: F) -> Bool {
-        for i in range(0, self.data.len()) {
-            let item = self.data.get(i).unwrap();
+        for item in self.data.iter() {
             if !f(item) {
                 return false;
             }
@@ -515,11 +549,15 @@ implement<T: Ord> BinaryHeap<T> {
     }
 
     // Move element at idx up to restore heap property.
+    //
+    // The `current > 0` precondition guarantees that `parent` is a
+    // non-negative index < current < len, so direct indexing is in
+    // bounds without an unwrap.
     fn sift_up(&mut self, idx: Int) {
         let mut current = idx;
         while current > 0 {
             let parent = (current - 1) / 2;
-            if self.data.get(current).unwrap() > self.data.get(parent).unwrap() {
+            if self.data[current] > self.data[parent] {
                 self.data.swap(current, parent);
                 current = parent;
             } else {
@@ -529,6 +567,9 @@ implement<T: Ord> BinaryHeap<T> {
     }
 
     // Move element at idx down to restore heap property.
+    //
+    // Each access is guarded by `< len`, so direct indexing is in
+    // bounds without an unwrap.
     fn sift_down(&mut self, idx: Int) {
         let len = self.data.len();
         let mut current = idx;
@@ -538,10 +579,10 @@ implement<T: Ord> BinaryHeap<T> {
             let right = 2 * current + 2;
             let mut largest = current;
 
-            if left < len && self.data.get(left).unwrap() > self.data.get(largest).unwrap() {
+            if left < len && self.data[left] > self.data[largest] {
                 largest = left;
             }
-            if right < len && self.data.get(right).unwrap() > self.data.get(largest).unwrap() {
+            if right < len && self.data[right] > self.data[largest] {
                 largest = right;
             }
 
@@ -562,29 +603,54 @@ implement<T: Ord> BinaryHeap<T> {
 /// Guard that provides mutable access to the top element of a BinaryHeap.
 /// When consumed via `replace()` or `pop()`, the heap invariant is automatically
 /// restored.
+///
+/// Construction is gated by `BinaryHeap.peek_mut`, which only returns a guard
+/// when the heap is non-empty.  That precondition is the load-bearing
+/// invariant: every method on `PeekMut` may assume `self.heap.data.len() > 0`.
 public type PeekMut<T: Ord> is {
     heap: &mut BinaryHeap<T>,
-    sift: Bool,
 };
 
 implement<T: Ord> PeekMut<T> {
     /// Get a reference to the top element.
+    ///
+    /// `BinaryHeap.peek_mut` only constructs a guard when the heap is
+    /// non-empty, so direct indexing of `data[0]` is in bounds.
     public fn value(&self) -> &T {
-        self.heap.data.first().unwrap()
+        &self.heap.data[0]
     }
 
-    /// Replace the top element with a new value.
-    /// Returns the old top element. Restores heap invariant.
+    /// Replace the top element with a new value.  Returns the old top
+    /// element and restores the heap invariant in O(log n).
+    ///
+    /// The previous implementation used `swap_remove(0) + insert(0, ...)`,
+    /// which is O(n) because `insert` shifts the entire backing array.
+    /// The current implementation overwrites the root in place using
+    /// the same `ptr_read`/`ptr_write` pattern that `BinaryHeap.push_pop`
+    /// uses, then sifts down once.
     public fn replace(self, new_value: T) -> T {
-        let old = self.heap.data.swap_remove(0);
-        self.heap.data.insert(0, new_value);
+        let old = unsafe {
+            let ptr = self.heap.data.as_mut_slice().as_mut_ptr();
+            let old = ptr_read(ptr);
+            ptr_write(ptr, new_value);
+            old
+        };
         self.heap.sift_down(0);
         old
     }
 
     /// Pop the top element. Equivalent to `heap.pop()` but through the guard.
+    ///
+    /// The guard's existence is the non-empty invariant, so the
+    /// fallible `pop` always returns `Some` here; we strip the layer
+    /// without an `unwrap`.
     public fn pop(self) -> T {
-        self.heap.pop().unwrap()
+        match self.heap.pop() {
+            Some(v) => v,
+            // Unreachable by construction: PeekMut is only created when
+            // the heap is non-empty and pop() drains exactly one element.
+            None => panic("PeekMut.pop on heap that became empty"),
+        }
     }
 }
 
@@ -592,7 +658,7 @@ implement<T: Ord> Deref for PeekMut<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        self.heap.data.first().unwrap()
+        &self.heap.data[0]
     }
 }
 
@@ -823,6 +889,20 @@ implement<T: Ord> Extend<T> for BinaryHeap<T> {
         for v in iter {
             self.push(v);
         }
+    }
+}
+
+implement<T: Ord> BinaryHeap<T> {
+    /// Fallible counterpart to `extend`.  Stops at the first allocation
+    /// failure and returns `Err(AllocError::OutOfMemory)`; elements
+    /// pushed before the failure stay in the heap (consistent with
+    /// `List.try_push` semantics — partial success is observable but
+    /// the heap invariant is preserved).
+    public fn try_extend<I: Iterator<Item = T>>(&mut self, iter: I) -> Result<Unit, AllocError> {
+        for v in iter {
+            self.try_push(v)?;
+        }
+        Ok(())
     }
 }
 
