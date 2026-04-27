@@ -201,6 +201,28 @@ impl TrampolineRegistry {
         arg_types: Vec<CTypeRuntime>,
         function_id: u32,
     ) -> Result<TrampolineId, FfiPlatformError> {
+        // Reject struct-by-value parameters / return type *up front* so
+        // an unsupported signature surfaces at trampoline-creation time
+        // (i.e. when the callback is registered, before any C code can
+        // dispatch through it) rather than panicking deep inside
+        // `marshal_c_to_value` / `marshal_value_to_c` / `size_of_ctype` /
+        // `ctype_to_ffi_type` mid-call. The four downstream call sites
+        // still preserve the panic as a defence-in-depth guard, but the
+        // strict-mode contract is: by the time we reach those, every
+        // CTypeRuntime in this signature is StructValue-free.
+        if matches!(return_type, CTypeRuntime::StructValue(_)) {
+            return Err(FfiPlatformError::StructValueInCallback {
+                position: "return type".to_string(),
+            });
+        }
+        for (idx, arg) in arg_types.iter().enumerate() {
+            if matches!(arg, CTypeRuntime::StructValue(_)) {
+                return Err(FfiPlatformError::StructValueInCallback {
+                    position: format!("argument {}", idx + 1),
+                });
+            }
+        }
+
         let id = TrampolineId(NEXT_TRAMPOLINE_ID.fetch_add(1, Ordering::SeqCst));
 
         // Create the context - Pin<Box<>> ensures stable address for libffi userdata pointer
@@ -656,6 +678,66 @@ mod tests {
 
         // Clean up
         TrampolineRegistry::clear_handler();
+    }
+
+    #[test]
+    fn rejects_struct_value_in_callback_argument() {
+        // Pass-by-value structs in C callbacks need a concrete layout that
+        // the libffi closure path doesn't have at trampoline-creation time.
+        // The strict-mode contract is: reject at registration, not panic
+        // mid-call.
+        let mut registry = TrampolineRegistry::new();
+        let result = registry.create_callback(
+            CTypeRuntime::I32,
+            vec![CTypeRuntime::I32, CTypeRuntime::StructValue(7), CTypeRuntime::I32],
+            42,
+        );
+        match result {
+            Err(FfiPlatformError::StructValueInCallback { position }) => {
+                assert!(
+                    position.contains("argument 2"),
+                    "expected diagnostic to point at argument 2, got `{}`",
+                    position
+                );
+            }
+            other => panic!("expected StructValueInCallback, got {:?}", other),
+        }
+        assert_eq!(registry.len(), 0, "no callback should have been registered");
+    }
+
+    #[test]
+    fn rejects_struct_value_in_callback_return_type() {
+        let mut registry = TrampolineRegistry::new();
+        let result = registry.create_callback(
+            CTypeRuntime::StructValue(3),
+            vec![CTypeRuntime::I32],
+            42,
+        );
+        match result {
+            Err(FfiPlatformError::StructValueInCallback { position }) => {
+                assert_eq!(
+                    position, "return type",
+                    "expected diagnostic to name the return type"
+                );
+            }
+            other => panic!("expected StructValueInCallback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn struct_ptr_in_callback_remains_supported() {
+        // The negative tests above must not regress the canonical
+        // pass-by-pointer path — that's the recommended workaround.
+        let mut registry = TrampolineRegistry::new();
+        let id = registry
+            .create_callback(
+                CTypeRuntime::Void,
+                vec![CTypeRuntime::StructPtr(11), CTypeRuntime::I32],
+                7,
+            )
+            .expect("StructPtr is the canonical struct-callback ABI");
+        assert_eq!(registry.len(), 1);
+        let _ = id;
     }
 
     #[test]

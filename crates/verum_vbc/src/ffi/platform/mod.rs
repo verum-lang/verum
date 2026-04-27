@@ -101,6 +101,20 @@ pub enum FfiPlatformError {
         name: String,
         reason: String,
     },
+    /// FFI callback signature contains a struct-by-value (`CTypeRuntime::
+    /// StructValue`) parameter or return type. Struct-by-value in
+    /// callbacks is not supported — the libffi closure path needs a
+    /// concrete struct layout that we don't have at trampoline-creation
+    /// time. Use `StructPtr(...)` (pass-by-pointer) instead, which is
+    /// the canonical C-callback ABI for non-trivial aggregates.
+    ///
+    /// `position` is `"return"` for the return type or
+    /// `"argument {index}"` (1-based) for a parameter, so the caller
+    /// can produce an actionable diagnostic without re-walking the
+    /// signature.
+    StructValueInCallback {
+        position: String,
+    },
 }
 
 impl fmt::Display for FfiPlatformError {
@@ -120,6 +134,16 @@ impl fmt::Display for FfiPlatformError {
             }
             FfiPlatformError::InvalidLibraryName { name, reason } => {
                 write!(f, "invalid library name '{}': {}", name, reason)
+            }
+            FfiPlatformError::StructValueInCallback { position } => {
+                write!(
+                    f,
+                    "FFI callback {} is a struct-by-value (`StructValue`); \
+                     pass the struct by pointer (`StructPtr`) instead — \
+                     struct-by-value in C callbacks needs a concrete \
+                     layout that the trampoline path does not produce",
+                    position
+                )
             }
         }
     }
