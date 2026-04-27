@@ -26,11 +26,34 @@ mount core.base.result.{Result, Ok, Err};
 // SECTION 1: Termination
 // =============================================================================
 
-/// Trap (abort execution immediately)
+/// Trap (abort execution immediately).
+///
+/// Unconditionally aborts the process via the LLVM `llvm.trap`
+/// intrinsic. Safe to call (no UB — abort is a defined termination
+/// path); the `Never` return type prevents any code-after-trap
+/// from being live.
 public fn trap() -> Never { @intrinsic("trap") }
 
-/// Unreachable (undefined behavior if reached, optimization hint)
-public fn unreachable() -> Never { @intrinsic("unreachable") }
+/// Unreachable — UB-hint optimisation primitive.
+///
+/// Lowers to LLVM's `unreachable` instruction, which the optimiser
+/// treats as "this code path is impossible." If control flow ever
+/// DOES reach this point, behaviour is undefined (in practice the
+/// optimiser will have removed the surrounding code and the program
+/// will execute whatever bytes happen to follow — typically a crash,
+/// possibly silent corruption).
+///
+/// Marked `unsafe` because reaching this primitive is undefined
+/// behaviour — the same contract as `unreachable_unchecked` below
+/// (which used to be the only `unsafe` variant; the bare
+/// `unreachable` was inconsistently marked safe even though both
+/// share the identical UB semantics). Safe-to-call panicking
+/// "this can't happen" diagnostics live at
+/// `core.base.panic::unreachable(msg)` — that one is the right
+/// surface for almost all callers; this raw intrinsic is for
+/// codegen-internal paths where the compiler has already proven
+/// the unreachability.
+public unsafe fn unreachable() -> Never { @intrinsic("unreachable") }
 
 // =============================================================================
 // SECTION 2: Debug
@@ -46,8 +69,20 @@ public fn nop() { @intrinsic("nop") }
 // SECTION 3: Branch Hints
 // =============================================================================
 
-/// Assume condition is true (optimization hint, UB if false)
-public fn assume(condition: Bool) { @intrinsic("assume", condition) }
+/// Assume `condition` is true — UB-hint optimisation primitive.
+///
+/// Lowers to LLVM's `llvm.assume`, telling the optimiser it may
+/// rely on `condition` being true at this program point. If
+/// `condition` is actually `false`, behaviour is undefined.
+///
+/// Marked `unsafe` to match the UB-if-false contract: the
+/// previous safe declaration let arbitrary callers pass
+/// arbitrary boolean expressions and silently corrupt
+/// optimiser state if any happened to be false. Safe code
+/// that wants to communicate "I expect this to be true" with
+/// no UB risk should use [`likely`] / [`unlikely`] (branch
+/// hints; never UB) instead.
+public unsafe fn assume(condition: Bool) { @intrinsic("assume", condition) }
 
 /// Likely branch hint
 public fn likely(condition: Bool) -> Bool { @intrinsic("expect", condition, true) }
