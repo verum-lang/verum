@@ -1,0 +1,176 @@
+// =============================================================================
+// core/database/sqlite/error.vr — translate loom DbError → common.DbError
+// =============================================================================
+// Layer: 3 (Database — sqlite façade)
+// Spec: internal/specs/database.md §5.6, §6.2
+// =============================================================================
+//
+// Loom (`core.database.sqlite.native.l7_api.database.DbError`) carries
+// SQLite-shaped tags (DbBusy, DbLocked, DbConstraint, ...). The Spindle
+// surface speaks `core.database.common.error.DbError`. This module is
+// the boundary translator — every public-API failure crosses through
+// `dberr_from_loom` exactly once so the rest of the façade only deals
+// in the unified shape.
+//
+// Mapping is defined in database.md §6.2 (loom DbBusy → DbError
+// Adapter(retryable=true) for retry-combinator; loom DbConstraint →
+// QueryFailed with SQLSTATE 23000 so `is_constraint_violation()` fires
+// portably).
+// =============================================================================
+
+module core.database.sqlite.error;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount core.database.common.error.{
+    DbError,
+    AdapterId, AdapterSpecific, SqlState,
+    ConnectionErrorKind, AuthErrorKind, TimeoutPhase,
+    EncodeFault,
+};
+// Loom's own SQLite-specific DbError lives in a sibling namespace and
+// shares the bare name `DbError` with our common surface. We import
+// loom's variants directly so pattern arms can name them, but we
+// don't bring loom's `DbError` type into scope (the function signature
+// references it via the fully-qualified path).
+mount core.database.sqlite.native.l7_api.{
+    DbOk, DbGeneric, DbBusy, DbLocked, DbOutOfMemory, DbReadonly,
+    DbInterrupted, DbIoError, DbCorrupt, DbFull, DbCannotOpen,
+    DbConstraint, DbDataTypeMismatch, DbMisuse, DbAuthDenied,
+    DbBindRange, DbNotADatabase, DbCompileError, DbConnectionError,
+    DbStmtError, DbUnsupported,
+};
+
+// -----------------------------------------------------------------------------
+// SQLSTATE constants for the specific tags loom can raise. SQLite's
+// own SQLSTATE table (sqlite3.h) maps to these.
+// -----------------------------------------------------------------------------
+
+const SQLSTATE_BUSY:        Text = "55006";    // object_in_use
+const SQLSTATE_LOCKED:      Text = "55006";
+const SQLSTATE_READONLY:    Text = "25006";    // read_only_sql_transaction
+const SQLSTATE_CORRUPT:     Text = "XX001";    // data_corrupted
+const SQLSTATE_FULL:        Text = "53100";    // disk_full
+const SQLSTATE_CONSTRAINT:  Text = "23000";    // integrity_constraint_violation
+const SQLSTATE_DATATYPE:    Text = "22023";    // invalid_parameter_value
+const SQLSTATE_MISUSE:      Text = "0Z002";    // diagnostics_exception
+const SQLSTATE_AUTH:        Text = "28000";    // invalid_authorization
+const SQLSTATE_BIND:        Text = "07002";    // dynamic_sql_error
+const SQLSTATE_NOT_DB:      Text = "XX002";
+const SQLSTATE_GENERIC:     Text = "XX000";
+const SQLSTATE_INTERRUPTED: Text = "57014";    // query_canceled
+
+fn make_sqlstate(s: &Text) -> SqlState {
+    match SqlState.parse(s) {
+        Some(state) => state,
+        // Constants above are all 5-char ASCII so this branch is
+        // unreachable in practice; we still avoid panicking and fall
+        // back to XX000 (generic).
+        None => match SqlState.parse(&SQLSTATE_GENERIC) {
+            Some(s2) => s2,
+            // Truly unreachable — XX000 is a known-valid 5-char ASCII.
+            None => SqlState.parse(&"XX000".clone())
+                .expect("make_sqlstate: \"XX000\" is a known-valid 5-char SQLSTATE — parse must succeed (defensive double-fallback)"),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// loom → common
+// -----------------------------------------------------------------------------
+
+/// Translate one loom-side DbError into a Spindle-surface DbError.
+///
+/// Retryable tags (DbBusy, DbLocked, DbInterrupted) become
+/// `Adapter(AdapterSpecific{ retryable: true })` so `run_with_retry`
+/// picks them up while preserving the original tag for debugging.
+public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbError {
+    match e {
+        DbOk => {
+            // loom returns DbOk only at the API boundary as a "no error"
+            // pad. We never wrap an Ok in an Err — but if we somehow are
+            // given one, surface as a misuse adapter error.
+            DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,    // placeholder — overwritten below
+                code: "OK".clone(),
+                message: "loom DbOk reached the error path".clone(),
+                retryable: false,
+            })
+        }
+        DbGeneric(msg) => adapter_err(SQLSTATE_GENERIC.clone(), msg, false),
+        DbBusy         => adapter_err("BUSY".clone(),     "database is busy".clone(),       true),
+        DbLocked       => adapter_err("LOCKED".clone(),   "database is locked".clone(),     true),
+        DbOutOfMemory  => adapter_err("NOMEM".clone(),    "out of memory".clone(),          false),
+        DbReadonly     => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_READONLY),
+            message: "attempt to write a read-only database".clone(),
+            position: None,
+        },
+        DbInterrupted  => DbError.Cancelled,
+        DbIoError(msg) => DbError.ConnectionFailed {
+            source: ConnectionErrorKind.CekServerTerminated,
+            adapter: AdSqlite,
+        },
+        DbCorrupt(msg) => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_CORRUPT),
+            message: msg,
+            position: None,
+        },
+        DbFull         => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_FULL),
+            message: "database or disk is full".clone(),
+            position: None,
+        },
+        DbCannotOpen(msg) => DbError.ConnectionFailed {
+            source: ConnectionErrorKind.CekConnectRefused,
+            adapter: AdSqlite,
+        },
+        DbConstraint(msg) => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_CONSTRAINT),
+            message: msg,
+            position: None,
+        },
+        DbDataTypeMismatch => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_DATATYPE),
+            message: "datatype mismatch".clone(),
+            position: None,
+        },
+        DbMisuse(msg) => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_MISUSE),
+            message: msg,
+            position: None,
+        },
+        DbAuthDenied => DbError.AuthFailed {
+            kind: AuthErrorKind.AekRoleNotPermitted("operation".clone()),
+        },
+        DbBindRange(idx) => DbError.EncodeFailed {
+            fault: error_module_fault(idx),
+        },
+        DbNotADatabase => DbError.QueryFailed {
+            sql_state: make_sqlstate(&SQLSTATE_NOT_DB),
+            message: "file is not a database".clone(),
+            position: None,
+        },
+        DbCompileError(c)    => adapter_err("COMPILE".clone(),  f"{c}", false),
+        DbConnectionError(c) => adapter_err("CONN".clone(),     f"{c}", false),
+        DbStmtError(c)       => adapter_err("STMT".clone(),     f"{c}", false),
+        DbUnsupported(msg)   => adapter_err("UNSUPPORTED".clone(), msg, false),
+    }
+}
+
+fn adapter_err(code: Text, msg: Text, retryable: Bool) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdSqlite,
+        code: code,
+        message: msg,
+        retryable: retryable,
+    })
+}
+
+fn error_module_fault(param_index: Int) -> EncodeFault {
+    EncodeFault {
+        param_index: param_index,
+        type_name: "<unknown>".clone(),
+        reason: "bind parameter index out of range".clone(),
+    }
+}

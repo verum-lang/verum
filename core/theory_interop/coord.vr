@@ -353,7 +353,8 @@ public fn theorem_coord(coords: List<MsfsCoord>) -> MsfsTheoremCoord {
     let mut all_intensional: Bool = true;
     let mut i: Int = 0;
     while i < coords.len() as Int {
-        let c: &MsfsCoord = coords.get(i as Int).unwrap();
+        let c: &MsfsCoord = coords.get(i as Int)
+            .expect("MsfsCoord aggregate: i < coords.len() by while-condition");
         // Append framework name (caller may dedup downstream; we keep
         // insertion order so reports are reproducible).
         names.push(c.framework.clone());
@@ -382,7 +383,10 @@ public fn theorem_coord_as_text(t: MsfsTheoremCoord) -> Text {
         if i > 0 {
             fw_block = fw_block.concat(", ");
         }
-        fw_block = fw_block.concat(t.frameworks.get(i as Int).unwrap().clone());
+        fw_block = fw_block.concat(
+            t.frameworks.get(i as Int)
+                .expect("frameworks block: i < t.frameworks.len() by while-condition")
+                .clone());
         i = i + 1;
     }
     fw_block = fw_block.concat("}");

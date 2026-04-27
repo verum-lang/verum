@@ -292,7 +292,9 @@ implement<T> Future for JoinSet<T> {
     // Poll until any task completes.
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, JoinError>> {
         for i in range(0, self.handles.len()) {
-            if let Poll.Ready(res) = self.handles.get_mut(i).unwrap().poll(cx) {
+            if let Poll.Ready(res) = self.handles.get_mut(i)
+                .expect("JoinSet poll: i in range(0, handles.len()) — get_mut is_some")
+                .poll(cx) {
                 self.handles.remove(i);
                 return Poll.Ready(res);
             }
