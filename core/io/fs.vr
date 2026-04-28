@@ -43,7 +43,7 @@ module core.io.fs;
 mount core.*;
 mount collections.*;
 mount io.path.{Path, PathBuf};
-mount io.protocols.{StreamError, StreamError as IoError, IoErrorKind, IoResult};
+mount io.protocols.{StreamError, StreamError as IoError, IoErrorKind, IoResult, io_error_kind_from_os_code};
 mount core.base.env.{var as env_var};
 mount io.file.{File, read_to_string as file_read_to_string, read as file_read, write as file_write};
 
@@ -484,7 +484,7 @@ implement Iterator for ReadDir {
                     }
                     Err(e) => {
                         self.finished = true;
-                        return Some(Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }));
+                        return Some(Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }));
                     }
                 }
             }
@@ -619,7 +619,7 @@ public fn metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, true);
             Ok(Metadata { raw: raw })
         }
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -634,7 +634,7 @@ public fn symlink_metadata(path: &Path) -> IoResult<Metadata> {
             let raw = FsMetadataRaw.from_stat(&stat_buf, false);
             Ok(Metadata { raw: raw })
         }
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -691,7 +691,7 @@ public fn create_dir(path: &Path) -> IoResult<()> {
 
     match sys_mkdir(path_bytes, mode) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -737,7 +737,7 @@ public fn remove_dir(path: &Path) -> IoResult<()> {
 
     match sys_rmdir(path_bytes) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -798,7 +798,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
                 finished: false,
             })
         }
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -816,7 +816,7 @@ public fn read_dir(path: &Path) -> IoResult<ReadDir> {
     let dir_handle = unsafe { sys.darwin.libsystem.opendir(path_buf.as_ptr() as &Byte) };
     if dir_handle.is_null() {
         let err = sys.darwin.libsystem.errno();
-        return Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {err}") });
+        return Err(StreamError { kind: io_error_kind_from_os_code(err), message: Some(f"OS error {err}") });
     }
 
     Ok(ReadDir {
@@ -842,7 +842,7 @@ public fn remove_file(path: &Path) -> IoResult<()> {
 
     match sys_unlink(path_bytes) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -860,7 +860,7 @@ public fn rename(from: &Path, to: &Path) -> IoResult<()> {
 
     match sys_rename(from_bytes, to_bytes) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -918,7 +918,7 @@ public fn hard_link(src: &Path, dst: &Path) -> IoResult<()> {
 
     match sys_link(src_bytes, dst_bytes) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -937,7 +937,7 @@ public fn symlink(src: &Path, dst: &Path) -> IoResult<()> {
 
     match sys_symlink(src_bytes, dst_bytes) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -958,7 +958,7 @@ public fn read_link(path: &Path) -> IoResult<PathBuf> {
             let target = Text.from_utf8_lossy(&buf[..n]);
             Ok(PathBuf.from(&target))
         }
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1049,7 +1049,7 @@ public fn set_permissions(path: &Path, perm: Permissions) -> IoResult<()> {
 
     match sys_chmod(path_bytes, perm.mode) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1117,7 +1117,7 @@ public fn current_dir() -> IoResult<PathBuf> {
             let path = Text.from_utf8_lossy(&buf[..len]);
             Ok(PathBuf.from(&path))
         }
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 
@@ -1128,7 +1128,7 @@ public fn set_current_dir(path: &Path) -> IoResult<()> {
 
     match sys_chdir(path_bytes) {
         Ok(()) => Ok(()),
-        Err(e) => Err(StreamError { kind: IoErrorKind.Other, message: Some(f"OS error {e.code}") }),
+        Err(e) => Err(StreamError { kind: io_error_kind_from_os_code(e.code), message: Some(f"OS error {e.code}") }),
     }
 }
 

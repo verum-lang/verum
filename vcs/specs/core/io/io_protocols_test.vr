@@ -8,7 +8,7 @@
 // @description: Tests Clone for IoErrorKind and Display for path Component
 // =============================================================================
 
-mount core.io.protocols.{StreamError, IoErrorKind};
+mount core.io.protocols.{StreamError, IoErrorKind, io_error_kind_from_os_code};
 mount core.io.path.{Component};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.text.format.{Formatter, FormatError, format_display, format_debug};
@@ -132,6 +132,87 @@ fn test_io_error_kind_type_exists() {
 @test
 fn test_component_type_exists() {
     let _: Maybe<Component> = None;
+}
+
+// =============================================================================
+// Section 4: Typed errno mapping (#102) — `io_error_kind_from_os_code`
+// =============================================================================
+//
+// Pins the POSIX-stable errno → IoErrorKind mappings that core/io/fs.vr
+// uses to surface specific error kinds instead of collapsing every
+// syscall failure into IoErrorKind.Other.  ENOENT/EACCES/EEXIST/EPIPE/
+// EINTR/EINVAL/ENOMEM are POSIX-stable across all three supported
+// platforms (Linux/macOS/Windows ucrt) so those can be tested
+// platform-independently.  Network / time errno codes diverge between
+// Linux and macOS — those tests live behind @cfg-gated companion files
+// when added.
+
+@test
+fn test_errno_2_maps_to_not_found() {
+    // ENOENT = 2 — POSIX-stable.
+    assert(io_error_kind_from_os_code(2) == IoErrorKind.NotFound);
+}
+
+@test
+fn test_errno_13_maps_to_permission_denied() {
+    // EACCES = 13 — POSIX-stable.
+    assert(io_error_kind_from_os_code(13) == IoErrorKind.PermissionDenied);
+}
+
+@test
+fn test_errno_17_maps_to_already_exists() {
+    // EEXIST = 17 — POSIX-stable.
+    assert(io_error_kind_from_os_code(17) == IoErrorKind.AlreadyExists);
+}
+
+@test
+fn test_errno_32_maps_to_broken_pipe() {
+    // EPIPE = 32 — POSIX-stable.
+    assert(io_error_kind_from_os_code(32) == IoErrorKind.BrokenPipe);
+}
+
+@test
+fn test_errno_4_maps_to_interrupted() {
+    // EINTR = 4 — POSIX-stable.
+    assert(io_error_kind_from_os_code(4) == IoErrorKind.Interrupted);
+}
+
+@test
+fn test_errno_22_maps_to_invalid_input() {
+    // EINVAL = 22 — POSIX-stable.
+    assert(io_error_kind_from_os_code(22) == IoErrorKind.InvalidInput);
+}
+
+@test
+fn test_errno_12_maps_to_out_of_memory() {
+    // ENOMEM = 12 — POSIX-stable.
+    assert(io_error_kind_from_os_code(12) == IoErrorKind.OutOfMemory);
+}
+
+@test
+fn test_unknown_errno_falls_through_to_other() {
+    // Any errno outside the per-platform table collapses to
+    // Other — defensive catch-all so unrecognised codes still
+    // surface with the original message instead of crashing
+    // the dispatch.
+    assert(io_error_kind_from_os_code(9999) == IoErrorKind.Other);
+}
+
+@test
+fn test_zero_errno_collapses_to_other() {
+    // 0 is not a valid errno (success); if it surfaces here
+    // something upstream is mishandling success vs failure —
+    // collapse to Other rather than misclassify.
+    assert(io_error_kind_from_os_code(0) == IoErrorKind.Other);
+}
+
+@test
+fn test_negative_errno_collapses_to_other() {
+    // Some platforms use negative codes (return -EINVAL) in
+    // raw syscall returns; the high-level wrappers should
+    // negate before passing here, but defensively the
+    // mapping must not crash.
+    assert(io_error_kind_from_os_code(-22) == IoErrorKind.Other);
 }
 
 fn main() {
