@@ -17634,6 +17634,21 @@ impl VbcCodegen {
                 use crate::instruction::TensorSubOpcode;
                 self.emit_intrinsic_tensor_extended(TensorSubOpcode::RegexSplit, args, dest);
             }
+            // Single-match / capture variants land in the ext-extended
+            // (`TensorExtSubOpcode`) space because the bulk variants
+            // already filled the regex-dedicated 0xE0–0xE3 slot.
+            InlineSequenceId::RegexFind => {
+                use crate::instruction::TensorExtSubOpcode;
+                self.emit_intrinsic_tensor_ext_extended(TensorExtSubOpcode::RegexFind, args, dest);
+            }
+            InlineSequenceId::RegexReplace => {
+                use crate::instruction::TensorExtSubOpcode;
+                self.emit_intrinsic_tensor_ext_extended(TensorExtSubOpcode::RegexReplace, args, dest);
+            }
+            InlineSequenceId::RegexCaptures => {
+                use crate::instruction::TensorExtSubOpcode;
+                self.emit_intrinsic_tensor_ext_extended(TensorExtSubOpcode::RegexCaptures, args, dest);
+            }
 
             // =================================================================
             // Type Introspection Operations

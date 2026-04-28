@@ -3008,6 +3008,53 @@ pub fn dispatch_regex_split(pattern: &str, text: &str) -> Option<Vec<String>> {
     Some(parts)
 }
 
+/// Find the FIRST match of a regex pattern in text.
+///
+/// Returns `Some(matched_substring)` on a successful match, or
+/// `None` when either the pattern fails to compile (mirrors the
+/// bulk variants' error-collapse semantics) or no match is found.
+pub fn dispatch_regex_find(pattern: &str, text: &str) -> Option<String> {
+    use regex::Regex;
+
+    let re = Regex::new(pattern).ok()?;
+    re.find(text).map(|m| m.as_str().to_string())
+}
+
+/// Replace the FIRST match of a regex pattern in text.
+///
+/// Returns `Some(text)` on successful pattern compile (whether or
+/// not a match was found — `regex::replace` returns the input
+/// unchanged when no match exists). `None` only when the pattern
+/// itself fails to compile.
+pub fn dispatch_regex_replace(pattern: &str, text: &str, replacement: &str) -> Option<String> {
+    use regex::Regex;
+
+    let re = Regex::new(pattern).ok()?;
+    Some(re.replace(text, replacement).into_owned())
+}
+
+/// Run a capturing regex against `text` and return ordered group
+/// captures of the FIRST match.
+///
+/// Layout: `result[0]` is always the entire match; `result[i]` for
+/// `i >= 1` is the i-th `(group)` capture. Non-participating
+/// groups become empty strings — callers preferring `Maybe<Text>`
+/// per group can re-check at the Verum side.
+///
+/// Returns `None` when the pattern fails to compile or no match
+/// exists.
+pub fn dispatch_regex_captures(pattern: &str, text: &str) -> Option<Vec<String>> {
+    use regex::Regex;
+
+    let re = Regex::new(pattern).ok()?;
+    let caps = re.captures(text)?;
+    let groups: Vec<String> = caps
+        .iter()
+        .map(|m| m.map(|m| m.as_str().to_string()).unwrap_or_default())
+        .collect();
+    Some(groups)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

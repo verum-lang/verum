@@ -2857,6 +2857,36 @@ pub enum TensorExtSubOpcode {
     ///
     /// Format: `dst:reg, shape:reg, dtype:u8`
     MemAllocTensor = 0x09,
+
+    // ========================================================================
+    // Regex Single-Match / Capture Operations (0x0A-0x0C)
+    // The four bulk regex ops (find_all, replace_all, is_match, split) live
+    // in `TensorSubOpcode` 0xE0-0xE3; that range filled before the single-
+    // match counterparts landed, so these three placed in the ext-extended
+    // space (TensorExtended 0xFC + sub_op 0xFF + ext_sub_op).
+    // ========================================================================
+
+    /// Find the FIRST regex match in text.
+    ///
+    /// Format: `dst:reg, pattern:reg, text:reg`
+    /// Returns `Maybe<Text>` — the first match, or None.
+    RegexFind = 0x0A,
+
+    /// Replace the FIRST regex match in text.
+    ///
+    /// Format: `dst:reg, pattern:reg, text:reg, replacement:reg`
+    /// Returns the text with at most one match replaced.
+    RegexReplace = 0x0B,
+
+    /// Run a capturing regex and return ordered group captures of
+    /// the first match.
+    ///
+    /// Format: `dst:reg, pattern:reg, text:reg`
+    /// Returns `Maybe<List<Text>>` — the capture-group list (group
+    /// 0 = whole match), or None if no match. Non-participating
+    /// groups are emitted as empty strings; callers needing
+    /// `Maybe<Text>` per group can re-check via the regex API.
+    RegexCaptures = 0x0C,
 }
 
 impl TensorExtSubOpcode {
@@ -2873,6 +2903,9 @@ impl TensorExtSubOpcode {
             0x07 => Some(Self::GlobalAllocator),
             0x08 => Some(Self::MemNewId),
             0x09 => Some(Self::MemAllocTensor),
+            0x0A => Some(Self::RegexFind),
+            0x0B => Some(Self::RegexReplace),
+            0x0C => Some(Self::RegexCaptures),
             _ => None,
         }
     }
@@ -2895,6 +2928,9 @@ impl TensorExtSubOpcode {
             Self::GlobalAllocator => "GLOBAL_ALLOCATOR",
             Self::MemNewId => "MEM_NEW_ID",
             Self::MemAllocTensor => "MEM_ALLOC_TENSOR",
+            Self::RegexFind => "REGEX_FIND",
+            Self::RegexReplace => "REGEX_REPLACE",
+            Self::RegexCaptures => "REGEX_CAPTURES",
         }
     }
 }

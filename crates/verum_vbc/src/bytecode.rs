@@ -4038,6 +4038,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                             let dtype = decode_u8(data, offset)?;
                             Ok(Instruction::MemAllocTensor { dst, shape, dtype })
                         }
+                        // Regex sub-opcodes — bytecode shape parked until
+                        // the regex extended-tensor pass lands. Match
+                        // exhaustively so `cargo build` doesn't fail; the
+                        // arms reject as InvalidOpcode at decode time
+                        // since no codegen path emits them yet.
+                        Some(TensorExtSubOpcode::RegexFind)
+                        | Some(TensorExtSubOpcode::RegexReplace)
+                        | Some(TensorExtSubOpcode::RegexCaptures) => {
+                            Err(VbcError::InvalidOpcode(sub_opcode_byte))
+                        }
                         None => Err(VbcError::InvalidOpcode(sub_opcode_byte)),
                     }
                 }

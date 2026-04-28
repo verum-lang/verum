@@ -49,7 +49,9 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
         dispatch_bucket_gradients, dispatch_get_grad, dispatch_set_grad, dispatch_module_backward,
         dispatch_mesh_select, dispatch_actor_new_id, dispatch_rdma_create_ref, dispatch_rdma_fetch,
         dispatch_rdma_write, dispatch_rdma_check_valid, dispatch_regex_find_all, dispatch_regex_replace_all,
-        dispatch_regex_is_match, dispatch_regex_split, ProcessGroupHandle, ActorMeshHandle,
+        dispatch_regex_is_match, dispatch_regex_split,
+        dispatch_regex_find, dispatch_regex_replace, dispatch_regex_captures,
+        ProcessGroupHandle, ActorMeshHandle,
         RdmaRefHandle, ParameterHandle, ReduceOp,
         dispatch_cholesky, dispatch_einsum, dispatch_diag, dispatch_triu, dispatch_tril,
     };
@@ -3854,6 +3856,55 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     } else {
                         state.set_reg(dst, Value::nil());
                     }
+                    Ok(DispatchResult::Continue)
+                }
+
+                Some(TensorExtSubOpcode::RegexFind) => {
+                    let dst = read_reg(state)?;
+                    let pattern_reg = read_reg(state)?;
+                    let text_reg = read_reg(state)?;
+                    let pattern_val = state.get_reg(pattern_reg);
+                    let text_val = state.get_reg(text_reg);
+                    let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
+                    let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
+                    let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
+                    let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+                    let _maybe_match = dispatch_regex_find(pattern, text);
+                    state.set_reg(dst, Value::nil());
+                    Ok(DispatchResult::Continue)
+                }
+
+                Some(TensorExtSubOpcode::RegexReplace) => {
+                    let dst = read_reg(state)?;
+                    let pattern_reg = read_reg(state)?;
+                    let text_reg = read_reg(state)?;
+                    let replacement_reg = read_reg(state)?;
+                    let pattern_val = state.get_reg(pattern_reg);
+                    let text_val = state.get_reg(text_reg);
+                    let replacement_val = state.get_reg(replacement_reg);
+                    let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
+                    let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
+                    let replacement_id = if replacement_val.is_int() { replacement_val.as_i64() as u32 } else { 0 };
+                    let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
+                    let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+                    let replacement = state.module.get_string(crate::types::StringId(replacement_id)).unwrap_or("");
+                    let _maybe_text = dispatch_regex_replace(pattern, text, replacement);
+                    state.set_reg(dst, Value::nil());
+                    Ok(DispatchResult::Continue)
+                }
+
+                Some(TensorExtSubOpcode::RegexCaptures) => {
+                    let dst = read_reg(state)?;
+                    let pattern_reg = read_reg(state)?;
+                    let text_reg = read_reg(state)?;
+                    let pattern_val = state.get_reg(pattern_reg);
+                    let text_val = state.get_reg(text_reg);
+                    let pattern_id = if pattern_val.is_int() { pattern_val.as_i64() as u32 } else { 0 };
+                    let text_id = if text_val.is_int() { text_val.as_i64() as u32 } else { 0 };
+                    let pattern = state.module.get_string(crate::types::StringId(pattern_id)).unwrap_or("");
+                    let text = state.module.get_string(crate::types::StringId(text_id)).unwrap_or("");
+                    let _maybe_caps = dispatch_regex_captures(pattern, text);
+                    state.set_reg(dst, Value::nil());
                     Ok(DispatchResult::Continue)
                 }
 
