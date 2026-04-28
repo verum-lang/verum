@@ -352,11 +352,15 @@ implement Path {
     public fn file_stem(&self) -> Maybe<Text> {
         let name = self.file_name()?;
 
-        // Find the last dot (but not if it's the first character)
-        let mut last_dot = -1;
-        for (i, c) in name.chars().enumerate() {
-            if c == '.' && i > 0 {
-                last_dot = i as Int;
+        // Find the last dot (but not if it's the first character).
+        // BYTE offset via char_indices — same byte-vs-char hazard
+        // as `parent()` / `file_name()` would otherwise hit on
+        // names containing non-ASCII characters before the
+        // extension dot (`фото.jpg`, `データ.csv`, etc.).
+        let mut last_dot: Int = -1;
+        for (b, c) in name.char_indices() {
+            if c == '.' && b > 0 {
+                last_dot = b as Int;
             }
         }
 
@@ -378,11 +382,15 @@ implement Path {
     public fn extension(&self) -> Maybe<Text> {
         let name = self.file_name()?;
 
-        // Find the last dot (but not if it's the first character)
-        let mut last_dot = -1;
-        for (i, c) in name.chars().enumerate() {
-            if c == '.' && i > 0 {
-                last_dot = i as Int;
+        // BYTE offset via char_indices — `name.slice(last_dot + 1,
+        // ...)` is byte-indexed; `last_dot + 1` is correct in byte
+        // terms only when `last_dot` is itself a byte offset. The
+        // dot character is ASCII (1 byte) so the `+ 1` past it is
+        // safe regardless of preceding multi-byte characters.
+        let mut last_dot: Int = -1;
+        for (b, c) in name.char_indices() {
+            if c == '.' && b > 0 {
+                last_dot = b as Int;
             }
         }
 
