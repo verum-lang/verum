@@ -34,6 +34,23 @@ pub(in super::super) fn handle_extended(
             // older interpreters.
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::ProcessExit) => {
+            // Format: `[0x1F][0x10][reg:u16]`. Read the register holding
+            // the exit code, flush stdio (Rust's stdout is line-buffered
+            // by default — an immediate `process::exit` could otherwise
+            // drop the tail of a partial line that `print(...)` emitted
+            // just before this call), and terminate the process.
+            //
+            // First-class divergent instruction: dispatch never returns,
+            // so the dispatch loop's `Ok(DispatchResult::Continue)` arm
+            // is structurally unreachable.
+            let code_reg = super::bytecode_io::read_reg(state)?;
+            let code = state.get_reg(code_reg).as_integer_compatible() as i32;
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().flush();
+            std::process::exit(code);
+        }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",
             opcode: Some(Opcode::Extended),

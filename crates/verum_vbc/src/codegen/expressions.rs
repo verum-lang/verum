@@ -3522,6 +3522,44 @@ impl VbcCodegen {
                 Ok(Some(None))
             }
 
+            // First-class process termination. The Verum stdlib's
+            // `core.base.env::exit_impl` calls this name on every
+            // platform; the codegen lowers it to `Opcode::Extended`
+            // sub-op `ProcessExit` (0x10), giving uniform termination
+            // semantics across Tier 0 (interpreter) and Tier 1 (AOT).
+            //
+            // Wire format: `[0x1F][0x10][reg]` where `reg` carries the
+            // i64 exit code (truncated to i32 at the OS boundary).
+            "__verum_process_exit" => {
+                if args.len() != 1 {
+                    return Err(CodegenError::new(
+                        CodegenErrorKind::WrongArgumentCount {
+                            expected: 1,
+                            found: args.len(),
+                            function: "__verum_process_exit".to_string(),
+                        },
+                    ));
+                }
+                let code_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| {
+                        CodegenError::internal("__verum_process_exit arg has no value")
+                    })?;
+                let mut operands: Vec<u8> = Vec::with_capacity(2);
+                if code_reg.0 < 128 {
+                    operands.push(code_reg.0 as u8);
+                } else {
+                    operands.push(0x80 | ((code_reg.0 >> 8) as u8));
+                    operands.push(code_reg.0 as u8);
+                }
+                self.ctx.emit(Instruction::Extended {
+                    sub_op: 0x10, // ExtendedSubOpcode::ProcessExit
+                    operands,
+                });
+                self.ctx.free_temp(code_reg);
+                Ok(Some(None))
+            }
+
             "panic" => {
                 let message_id = if !args.is_empty() {
                     // Extract the string from the argument if it's a literal
