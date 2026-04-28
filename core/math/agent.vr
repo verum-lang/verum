@@ -1876,6 +1876,28 @@ implement Error for AgentParseError {
     }
 }
 
+implement Display for AgentParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if let Maybe.Some(pos) = self.position {
+            f.write_str(f"{self.message} at position {pos}".as_str())
+        } else {
+            f.write_str(self.message.as_str())
+        }
+    }
+}
+
+implement Debug for AgentParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"AgentParseError {{ message: {self.message}, position: {self.position:?} }}".as_str())
+    }
+}
+
+implement Eq for AgentParseError {
+    fn eq(&self, other: &AgentParseError) -> Bool {
+        self.message == other.message && self.position == other.position
+    }
+}
+
 // =============================================================================
 // Substantive agent theorems (SMT-discharged)
 // =============================================================================

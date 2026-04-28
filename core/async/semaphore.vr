@@ -201,6 +201,30 @@ public type SemaphoreFuture is {
 public type SemaphoreError is
       Closed;
 
+implement Display for SemaphoreError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed => f.write_str("semaphore closed"),
+        }
+    }
+}
+
+implement Debug for SemaphoreError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for SemaphoreError {
+    fn eq(&self, other: &SemaphoreError) -> Bool {
+        match (self, other) {
+            (Closed, Closed) => true,
+        }
+    }
+}
+
 // The Future impl: on first poll, try to grab a permit; if not
 // available, register the waker once and return Pending. Subsequent
 // polls re-check permits but skip waker registration — the existing

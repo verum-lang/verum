@@ -116,6 +116,35 @@ implement Clone for CancelReason {
     }
 }
 
+implement Display for CancelReason {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for CancelReason {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Cancelled            => f.write_str("Cancelled"),
+            Timeout { deadline } => f.write_str(f"Timeout {{ deadline: {deadline:?} }}".as_str()),
+            ParentCancelled      => f.write_str("ParentCancelled"),
+            Aborted(msg)         => f.write_str(f"Aborted({msg})".as_str()),
+        }
+    }
+}
+
+implement Eq for CancelReason {
+    fn eq(&self, other: &CancelReason) -> Bool {
+        match (self, other) {
+            (Cancelled,                Cancelled)                => true,
+            (Timeout { deadline: a },  Timeout { deadline: b })  => a == b,
+            (ParentCancelled,          ParentCancelled)          => true,
+            (Aborted(a),               Aborted(b))               => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // CancellationError — returned by `throw_if_cancelled`
 // -----------------------------------------------------------------------------
@@ -137,6 +166,24 @@ implement CancellationError {
 implement Clone for CancellationError {
     fn clone(&self) -> CancellationError {
         CancellationError { reason: self.reason.clone() }
+    }
+}
+
+implement Display for CancellationError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.reason.message().as_str())
+    }
+}
+
+implement Debug for CancellationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"CancellationError {{ reason: {self.reason:?} }}".as_str())
+    }
+}
+
+implement Eq for CancellationError {
+    fn eq(&self, other: &CancellationError) -> Bool {
+        self.reason == other.reason
     }
 }
 

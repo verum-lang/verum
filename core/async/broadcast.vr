@@ -68,6 +68,34 @@ public type BroadcastRecvError is
     /// Receiver fell behind by N messages; advanced to oldest available.
     | Lagged(Int);
 
+implement Display for BroadcastRecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed     => f.write_str("broadcast channel closed"),
+            Lagged(n)  => f.write_str(f"broadcast receiver lagged by {n} messages".as_str()),
+        }
+    }
+}
+
+implement Debug for BroadcastRecvError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed     => f.write_str("Closed"),
+            Lagged(n)  => f.write_str(f"Lagged({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for BroadcastRecvError {
+    fn eq(&self, other: &BroadcastRecvError) -> Bool {
+        match (self, other) {
+            (Closed,    Closed)    => true,
+            (Lagged(a), Lagged(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Result of a non-blocking receive attempt.
 public type TryRecvResult<T> is
     | Value(T)
