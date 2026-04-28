@@ -171,20 +171,17 @@ public fn verify_inclusion_proof(
 // =============================================================================
 
 public fn leaf_hash(leaf: &[Byte]) -> [Byte; 32] {
-    let mut buf: List<Byte> = [];
+    let mut buf: List<Byte> = List.with_capacity(1 + leaf.len());
     buf.push(0x00_u8);
-    let mut i: Int = 0;
-    while i < leaf.len() { buf.push(leaf[i]); i = i + 1; }
+    buf.extend_from_slice(leaf);
     Sha256.digest(buf.as_slice())
 }
 
 public fn node_hash(left: &[Byte; 32], right: &[Byte; 32]) -> [Byte; 32] {
-    let mut buf: List<Byte> = [];
+    let mut buf: List<Byte> = List.with_capacity(1 + 32 + 32);
     buf.push(0x01_u8);
-    let mut i: Int = 0;
-    while i < 32 { buf.push(left[i]);  i = i + 1; }
-    let mut j: Int = 0;
-    while j < 32 { buf.push(right[j]); j = j + 1; }
+    buf.extend_from_slice(&left[..]);
+    buf.extend_from_slice(&right[..]);
     Sha256.digest(buf.as_slice())
 }
 

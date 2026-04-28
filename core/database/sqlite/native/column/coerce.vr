@@ -67,24 +67,21 @@ public fn to_blob(v: &ColumnValue) -> List<Byte> {
     match v {
         CvNull       => List.new(),
         CvBlob(b)    => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(b.len());
+            out.extend_from_slice(b.as_slice());
             out
         }
         CvText(t)    => {
-            let mut out: List<Byte> = List.new();
             let bs = t.as_bytes();
-            let mut i: Int = 0;
-            while i < bs.len() { out.push(bs[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(bs.len());
+            out.extend_from_slice(bs);
             out
         }
         _ => {
-            let mut out: List<Byte> = List.new();
             let t = to_text(v);
             let bs = t.as_bytes();
-            let mut i: Int = 0;
-            while i < bs.len() { out.push(bs[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(bs.len());
+            out.extend_from_slice(bs);
             out
         }
     }
@@ -196,7 +193,7 @@ fn render_real(f: Float64) -> Text {
 }
 
 fn blob_to_text(b: &List<Byte>) -> Text {
-    let mut t = Text.new();
+    let mut t = Text.with_capacity(b.len());
     let mut i: Int = 0;
     while i < b.len() { t.push_byte(b[i]); i = i + 1; }
     t

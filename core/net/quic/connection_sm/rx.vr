@@ -139,9 +139,8 @@ public fn parse_long_packet(
             let (tl, p1) = quic_decode(wire, scid_end).map_err(|_| RxError.VarintFailure)?;
             let token_end = p1 + (tl as Int);
             if token_end > wire.len() { return Err(RxError.Truncated); }
-            let mut t: List<Byte> = [];
-            let mut i: Int = p1;
-            while i < token_end { t.push(wire[i]); i = i + 1; }
+            let mut t: List<Byte> = List.with_capacity(token_end - p1);
+            t.extend_from_slice(&wire[p1..token_end]);
             (t, token_end)
         },
         LongPacketType.Retry => {
@@ -166,10 +165,9 @@ public fn parse_long_packet(
     )?;
 
     // Assemble the AAD = header with HP-cleared first byte + cleared PN bytes.
-    let mut aad: List<Byte> = [];
+    let mut aad: List<Byte> = List.with_capacity(pn_offset + 4);
     aad.push(first_byte_clear);
-    let mut i: Int = 1;
-    while i < pn_offset { aad.push(wire[i]); i = i + 1; }
+    aad.extend_from_slice(&wire[1..pn_offset]);
     // PN bytes, unmasked
     let mut pn_buf: List<Byte> = [];
     let mut p: Int = 0;
@@ -226,10 +224,9 @@ public fn parse_short_packet(
         wire, pn_offset, packet_end, &keys.hp_key, largest_acked_received, /* is_long */ false,
     )?;
 
-    let mut aad: List<Byte> = [];
+    let mut aad: List<Byte> = List.with_capacity(pn_offset + 4);
     aad.push(first_byte_clear);
-    let mut i: Int = 1;
-    while i < pn_offset { aad.push(wire[i]); i = i + 1; }
+    aad.extend_from_slice(&wire[1..pn_offset]);
     let mut pn_buf: List<Byte> = [];
     let mut p: Int = 0;
     while p < (pn_len as Int) {
@@ -378,8 +375,7 @@ fn parse_version_negotiation(wire: &[Byte]) -> Result<InboundPacket, RxError> {
 // =============================================================================
 
 fn slice_of(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = start;
-    while i < end { out.push(buf[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    out.extend_from_slice(&buf[start..end]);
     out
 }
