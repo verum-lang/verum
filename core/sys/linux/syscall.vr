@@ -560,11 +560,10 @@ public type Stat is {
 /// Internally uses openat(AT_FDCWD, ...) which is portable across all
 /// Linux architectures. (aarch64 has no legacy `open` syscall.)
 public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
-    // Ensure null-terminated path
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    // Ensure null-terminated path (copy_path_nul sidesteps
+    // RUNTIME-3-DEEPER (#104) slice-on-array recursion).
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     let result = unsafe {
         syscall_raw(SYS_OPENAT, AT_FDCWD, path_buf.as_ptr() as Int, flags, mode, 0, 0)
@@ -575,6 +574,22 @@ public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError
     } else {
         Ok(FileDesc.from_raw(result))
     }
+}
+
+/// Copy a UTF-8 path into a 4096-byte stack buffer and
+/// NUL-terminate.  Manual byte loop sidesteps the
+/// RUNTIME-3-DEEPER (#104) slice-on-array recursion in
+/// the Tier-0 interpreter.  Mirrors the matching helper
+/// in `core/sys/darwin/libsystem.vr`.
+fn copy_path_nul(path_buf: &mut [Byte; 4096], path: &[Byte]) -> Int {
+    let len = path.len().min(4095);
+    let mut i: Int = 0;
+    while i < len {
+        path_buf[i] = path[i];
+        i = i + 1;
+    }
+    path_buf[len] = 0 as Byte;
+    len
 }
 
 /// Raw-pointer entry that bypasses the `&[Byte]` parameter coercion
@@ -596,11 +611,10 @@ public fn open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSErr
 
 /// Open a file relative to a directory file descriptor.
 public fn openat(dirfd: FileDesc, path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
-    // Ensure null-terminated path
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    // Ensure null-terminated path (copy_path_nul sidesteps
+    // RUNTIME-3-DEEPER (#104) slice-on-array recursion).
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     let result = unsafe {
         syscall_raw(SYS_OPENAT, dirfd.as_raw(), path_buf.as_ptr() as Int, flags, mode, 0, 0)
@@ -653,11 +667,10 @@ public fn fstat(fd: FileDesc, stat: &mut Stat) -> Result<(), OSError> {
 ///
 /// Uses the portable newfstatat(AT_FDCWD, ...) syscall.
 public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
-    // Ensure null-terminated path
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    // Ensure null-terminated path (copy_path_nul sidesteps
+    // RUNTIME-3-DEEPER (#104) slice-on-array recursion).
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     let result = unsafe {
         syscall_raw(
@@ -681,11 +694,10 @@ public fn stat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
 ///
 /// Uses newfstatat(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW) which is portable.
 public fn lstat(path: &[Byte], stat_buf: &mut Stat) -> Result<(), OSError> {
-    // Ensure null-terminated path
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    // Ensure null-terminated path (copy_path_nul sidesteps
+    // RUNTIME-3-DEEPER (#104) slice-on-array recursion).
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     let result = unsafe {
         syscall_raw(
@@ -756,10 +768,8 @@ public const R_OK: Int = 4;
 /// `Ok(true)` on success, `Ok(false)` on EACCES/ENOENT/ENOTDIR/EROFS,
 /// `Err(...)` for everything else (EIO, EFAULT, ENAMETOOLONG, ELOOP).
 public fn faccessat(path: &[Byte], mode: Int) -> Result<Bool, OSError> {
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     // faccessat(AT_FDCWD, path, mode, 0) — flags=0 means follow symlinks
     // and use real (not effective) UID/GID, matching access(2). Portable
@@ -800,11 +810,10 @@ public fn dup(oldfd: FileDesc) -> Result<FileDesc, OSError> {
 
 /// Create a directory.
 public fn mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
-    // Ensure null-terminated path
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    // Ensure null-terminated path (copy_path_nul sidesteps
+    // RUNTIME-3-DEEPER (#104) slice-on-array recursion).
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     // Portable: mkdirat(AT_FDCWD, path, mode) works on x86_64 and aarch64.
     let result = unsafe {
@@ -820,10 +829,8 @@ public fn mkdir(path: &[Byte], mode: Int) -> Result<(), OSError> {
 
 /// Remove a directory.
 public fn rmdir(path: &[Byte]) -> Result<(), OSError> {
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     // Portable: unlinkat(AT_FDCWD, path, AT_REMOVEDIR).
     let result = unsafe {
@@ -839,10 +846,8 @@ public fn rmdir(path: &[Byte]) -> Result<(), OSError> {
 
 /// Remove a file.
 public fn unlink(path: &[Byte]) -> Result<(), OSError> {
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     // Portable: unlinkat(AT_FDCWD, path, 0).
     let result = unsafe {
@@ -871,15 +876,11 @@ public fn unlink_raw(path: &Byte) -> Result<(), OSError> {
 
 /// Rename a file or directory.
 public fn rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
-    let mut old_buf = [0_u8; 4096];
-    let old_len = oldpath.len().min(4095);
-    old_buf[..old_len].copy_from_slice(&oldpath[..old_len]);
-    old_buf[old_len] = 0;
+    let mut old_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _old_len = copy_path_nul(&mut old_buf, oldpath);
 
-    let mut new_buf = [0_u8; 4096];
-    let new_len = newpath.len().min(4095);
-    new_buf[..new_len].copy_from_slice(&newpath[..new_len]);
-    new_buf[new_len] = 0;
+    let mut new_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _new_len = copy_path_nul(&mut new_buf, newpath);
 
     // Portable: renameat(AT_FDCWD, old, AT_FDCWD, new).
     let result = unsafe {
@@ -913,10 +914,8 @@ public fn getcwd(buf: &mut [Byte]) -> Result<Int, OSError> {
 
 /// Change current working directory.
 public fn chdir(path: &[Byte]) -> Result<(), OSError> {
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     let result = unsafe {
         syscall_raw(SYS_CHDIR, path_buf.as_ptr() as Int, 0, 0, 0, 0, 0)
@@ -945,15 +944,11 @@ public fn getdents64(fd: FileDesc, buf: &mut [Byte]) -> Result<Int, OSError> {
 
 /// Create a symbolic link.
 public fn symlink(target: &[Byte], linkpath: &[Byte]) -> Result<(), OSError> {
-    let mut target_buf = [0_u8; 4096];
-    let target_len = target.len().min(4095);
-    target_buf[..target_len].copy_from_slice(&target[..target_len]);
-    target_buf[target_len] = 0;
+    let mut target_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _target_len = copy_path_nul(&mut target_buf, target);
 
-    let mut link_buf = [0_u8; 4096];
-    let link_len = linkpath.len().min(4095);
-    link_buf[..link_len].copy_from_slice(&linkpath[..link_len]);
-    link_buf[link_len] = 0;
+    let mut link_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _link_len = copy_path_nul(&mut link_buf, linkpath);
 
     // Portable: symlinkat(target, AT_FDCWD, linkpath).
     let result = unsafe {
@@ -975,10 +970,8 @@ public fn symlink(target: &[Byte], linkpath: &[Byte]) -> Result<(), OSError> {
 
 /// Read the target of a symbolic link.
 public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     // Portable: readlinkat(AT_FDCWD, path, buf, bufsize).
     let result = unsafe {
@@ -1004,15 +997,11 @@ public fn readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError> {
 /// Uses the portable linkat(AT_FDCWD, ...) underneath — works on both
 /// x86_64 and aarch64 (aarch64 has no legacy `link` syscall).
 public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
-    let mut old_buf = [0_u8; 4096];
-    let old_len = oldpath.len().min(4095);
-    old_buf[..old_len].copy_from_slice(&oldpath[..old_len]);
-    old_buf[old_len] = 0;
+    let mut old_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _old_len = copy_path_nul(&mut old_buf, oldpath);
 
-    let mut new_buf = [0_u8; 4096];
-    let new_len = newpath.len().min(4095);
-    new_buf[..new_len].copy_from_slice(&newpath[..new_len]);
-    new_buf[new_len] = 0;
+    let mut new_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _new_len = copy_path_nul(&mut new_buf, newpath);
 
     // Portable: linkat(AT_FDCWD, old, AT_FDCWD, new, 0).
     let result = unsafe {
@@ -1033,10 +1022,8 @@ public fn link(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
 
 /// Change file permissions.
 public fn chmod(path: &[Byte], mode: Int) -> Result<(), OSError> {
-    let mut path_buf = [0_u8; 4096];
-    let len = path.len().min(4095);
-    path_buf[..len].copy_from_slice(&path[..len]);
-    path_buf[len] = 0;
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
 
     // Portable: fchmodat(AT_FDCWD, path, mode, 0).
     let result = unsafe {

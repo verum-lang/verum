@@ -1611,15 +1611,11 @@ public fn safe_readlink(path: &[Byte], buf: &mut [Byte]) -> Result<Int, OSError>
 
 /// Create a hard link
 public fn safe_link(src: &[Byte], dst: &[Byte]) -> Result<(), OSError> {
-    let mut src_buf = [0_u8; 4096];
-    let src_len = src.len().min(4095);
-    src_buf[..src_len].copy_from_slice(&src[..src_len]);
-    src_buf[src_len] = 0;
+    let mut src_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _ = copy_path_nul(&mut src_buf, src);
 
-    let mut dst_buf = [0_u8; 4096];
-    let dst_len = dst.len().min(4095);
-    dst_buf[..dst_len].copy_from_slice(&dst[..dst_len]);
-    dst_buf[dst_len] = 0;
+    let mut dst_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _ = copy_path_nul(&mut dst_buf, dst);
 
     let result = unsafe { link(src_buf.as_ptr() as &Byte, dst_buf.as_ptr() as &Byte) };
     if result < 0 {
@@ -1682,10 +1678,17 @@ public fn safe_chdir(path: &[Byte]) -> Result<(), OSError> {
 ///
 /// Returns None if the variable is not set.
 public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
-    let mut name_buf = [0_u8; 256];
+    // Manual byte-copy loop sidesteps the RUNTIME-3-DEEPER
+    // slice-on-array recursion in the Tier-0 interpreter
+    // (see #104; same workaround as `copy_path_nul`).
+    let mut name_buf: [Byte; 256] = [0 as Byte; 256];
     let len = name.len().min(255);
-    name_buf[..len].copy_from_slice(&name[..len]);
-    name_buf[len] = 0;
+    let mut i: Int = 0;
+    while i < len {
+        name_buf[i] = name[i];
+        i = i + 1;
+    }
+    name_buf[len] = 0 as Byte;
 
     let result = unsafe { getenv(name_buf.as_ptr() as &Byte) };
     if result.is_null() {
@@ -1707,15 +1710,18 @@ public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
 ///
 /// If overwrite is true, replaces existing value. If false, does nothing if variable exists.
 public fn safe_setenv(name: &[Byte], value: &[Byte], overwrite: Bool) -> Result<(), OSError> {
-    let mut name_buf = [0_u8; 256];
+    // Manual byte-copy loops sidestep RUNTIME-3-DEEPER (#104).
+    let mut name_buf: [Byte; 256] = [0 as Byte; 256];
     let name_len = name.len().min(255);
-    name_buf[..name_len].copy_from_slice(&name[..name_len]);
-    name_buf[name_len] = 0;
+    let mut i: Int = 0;
+    while i < name_len {
+        name_buf[i] = name[i];
+        i = i + 1;
+    }
+    name_buf[name_len] = 0 as Byte;
 
-    let mut value_buf = [0_u8; 4096];
-    let value_len = value.len().min(4095);
-    value_buf[..value_len].copy_from_slice(&value[..value_len]);
-    value_buf[value_len] = 0;
+    let mut value_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let _ = copy_path_nul(&mut value_buf, value);
 
     let result = unsafe {
         setenv(
@@ -1734,10 +1740,15 @@ public fn safe_setenv(name: &[Byte], value: &[Byte], overwrite: Bool) -> Result<
 
 /// Remove environment variable
 public fn safe_unsetenv(name: &[Byte]) -> Result<(), OSError> {
-    let mut name_buf = [0_u8; 256];
+    // Manual byte-copy loop sidesteps RUNTIME-3-DEEPER (#104).
+    let mut name_buf: [Byte; 256] = [0 as Byte; 256];
     let len = name.len().min(255);
-    name_buf[..len].copy_from_slice(&name[..len]);
-    name_buf[len] = 0;
+    let mut i: Int = 0;
+    while i < len {
+        name_buf[i] = name[i];
+        i = i + 1;
+    }
+    name_buf[len] = 0 as Byte;
 
     let result = unsafe { unsetenv(name_buf.as_ptr() as &Byte) };
     if result < 0 {
