@@ -75,7 +75,10 @@ public type StreamWrite is {
 // =============================================================================
 
 type PeerUniKind is
-      UnknownUni                      // haven't yet parsed the type prefix
+      UnknownUni { buf: List<Byte> }   // accumulating prefix bytes — stream type
+                                       // prefix is a variable-length integer (1-8 B),
+                                       // so partial reads on a TCP fragment boundary
+                                       // are legal and must be buffered.
     | ControlStream { buf: List<Byte> }
     | QpackEncoderStream
     | QpackDecoderStream
@@ -307,34 +310,42 @@ implement H3Connection {
     public fn on_uni_stream(&mut self, stream_id: UInt64, bytes: &[Byte]) -> Result<(), H3Error> {
         let st = self.find_or_create_uni(stream_id);
         match &mut st.kind {
-            PeerUniKind.UnknownUni => {
-                // Not yet parsed the prefix — buffer + try.
-                let mut tmp: List<Byte> = List.with_capacity(bytes.len());
-                tmp.extend_from_slice(bytes);
-                match decode_stream_type(tmp.as_slice()) {
+            PeerUniKind.UnknownUni { buf: pending } => {
+                // Stream type prefix is a QUIC varint (1-8 B); a TCP /
+                // TLS-record split can deliver it across multiple
+                // on_uni_stream calls.  Append, then attempt to parse.
+                pending.extend_from_slice(bytes);
+                match decode_stream_type(pending.as_slice()) {
                     Ok((uk, pos)) => {
+                        let mut remaining: List<Byte> = List.with_capacity(pending.len() - pos);
+                        remaining.extend_from_slice(&pending.as_slice()[pos..]);
                         match uk {
                             UniStreamType.ControlStream => {
-                                let mut remaining: List<Byte> = List.with_capacity(tmp.len() - pos);
-                                remaining.extend_from_slice(&tmp.as_slice()[pos..]);
                                 st.kind = PeerUniKind.ControlStream { buf: remaining };
                                 // Try to parse any already-buffered frames.
                                 self.drain_control_stream(stream_id)?;
                             },
                             UniStreamType.QpackEncoderStream => {
                                 st.kind = PeerUniKind.QpackEncoderStream;
+                                // Encoder-stream payload follows the prefix; v1.1
+                                // dynamic-table work consumes `remaining`.
+                                let _ = remaining;
                             },
                             UniStreamType.QpackDecoderStream => {
                                 st.kind = PeerUniKind.QpackDecoderStream;
+                                let _ = remaining;
                             },
                             _ => { st.kind = PeerUniKind.DroppedUni; },
                         }
                     },
                     Err(_) => {
-                        // Need more bytes; stay UnknownUni. Real impl
-                        // would buffer here — v0.1 requires prefix in
-                        // first call which all production clients
-                        // satisfy.
+                        // Prefix incomplete — keep accumulating.  Cap the
+                        // buffer at 16 bytes (max QUIC varint is 8 B; 2x
+                        // gives slack for malformed peers without unbounded
+                        // memory growth) and drop the stream past that.
+                        if pending.len() > 16 {
+                            st.kind = PeerUniKind.DroppedUni;
+                        }
                     },
                 }
             },
@@ -366,7 +377,7 @@ implement H3Connection {
             i = i + 1;
         }
         self.peer_unistreams.push(PeerUniState {
-            stream_id: sid, kind: PeerUniKind.UnknownUni,
+            stream_id: sid, kind: PeerUniKind.UnknownUni { buf: List.new() },
         });
         let last = self.peer_unistreams.len() - 1;
         &mut self.peer_unistreams[last]
