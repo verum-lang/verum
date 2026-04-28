@@ -53,7 +53,7 @@ mount core.collections.List;
 mount core.encoding.der.{DerReader, DerError, DerErrorKind, Time, TagClass};
 mount core.encoding.der as der;
 mount core.security.x509.algorithm.{
-    SignatureAlg, parse_signature_alg,
+    SignatureAlg, RsaPssParams, RsaPssHash, parse_signature_alg,
 };
 mount core.security.x509.name.{DistinguishedName, parse_name};
 mount core.security.x509.spki.{Spki, parse_spki};
@@ -240,13 +240,26 @@ fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
 // Algorithm equality (RFC 5280 §4.1.1.2 outer vs inner)
 // =============================================================================
 
+fn rsa_pss_hash_eq(a: &RsaPssHash, b: &RsaPssHash) -> Bool {
+    match (a, b) {
+        (RsaPssHash.Sha256Hash, RsaPssHash.Sha256Hash) => true,
+        (RsaPssHash.Sha384Hash, RsaPssHash.Sha384Hash) => true,
+        (RsaPssHash.Sha512Hash, RsaPssHash.Sha512Hash) => true,
+        _ => false,
+    }
+}
+
+fn rsa_pss_params_eq(a: &RsaPssParams, b: &RsaPssParams) -> Bool {
+    rsa_pss_hash_eq(&a.hash, &b.hash) && a.salt_length == b.salt_length
+}
+
 fn signature_alg_matches(a: &SignatureAlg, b: &SignatureAlg) -> Bool {
     match (a, b) {
         (SignatureAlg.Sha256WithRsa,   SignatureAlg.Sha256WithRsa)   => true,
         (SignatureAlg.Sha384WithRsa,   SignatureAlg.Sha384WithRsa)   => true,
         (SignatureAlg.Sha512WithRsa,   SignatureAlg.Sha512WithRsa)   => true,
         (SignatureAlg.Sha1WithRsa,     SignatureAlg.Sha1WithRsa)     => true,
-        (SignatureAlg.RsaPss(_),       SignatureAlg.RsaPss(_))       => true,   // params must also match; deferred
+        (SignatureAlg.RsaPss(pa),      SignatureAlg.RsaPss(pb))      => rsa_pss_params_eq(pa, pb),
         (SignatureAlg.EcdsaWithSha256, SignatureAlg.EcdsaWithSha256) => true,
         (SignatureAlg.EcdsaWithSha384, SignatureAlg.EcdsaWithSha384) => true,
         (SignatureAlg.EcdsaWithSha512, SignatureAlg.EcdsaWithSha512) => true,

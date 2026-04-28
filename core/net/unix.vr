@@ -711,9 +711,55 @@ implement UnixStream {
 
     @cfg(target_os = "macos")
     public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
-        // macOS: LOCAL_PEERCRED returns struct xucred, shape differs.
-        // Minimal-scope helper left to a follow-up.
-        Err(UnixError.IoError("peer_cred: macOS impl deferred".into()))
+        // <sys/ucred.h>:
+        //   struct xucred {
+        //       u_int   cr_version;            // 4 B  @ 0
+        //       uid_t   cr_uid;                // 4 B  @ 4
+        //       short   cr_ngroups;            // 2 B  @ 8 (+2 B pad before gid_t[])
+        //       gid_t   cr_groups[NGROUPS=16]; // 64 B @ 12
+        //   };  // total 76 B
+        // pid is NOT in xucred — fetched separately via LOCAL_PEEREPID.
+        const SOL_LOCAL: Int32 = 0;
+        const LOCAL_PEERCRED: Int32 = 0x001;
+        const LOCAL_PEEREPID:  Int32 = 0x003;
+        let mut buf = [0_u8; 76];
+        let mut len: UInt32 = 76;
+        @intrinsic("libc.getsockopt")
+        fn getsockopt(fd: Int32, level: Int32, optname: Int32, val: &mut Byte, len: &mut UInt32) -> Int32;
+        let rc = getsockopt(self.fd, SOL_LOCAL, LOCAL_PEERCRED,
+                            &mut buf[0], &mut len);
+        if rc != 0 {
+            return Err(UnixError.IoError("LOCAL_PEERCRED failed".into()));
+        }
+        // We accept any xucred version; fields at offset 4 (uid) and 12
+        // (gid_t cr_groups[0] = effective gid) have been stable since
+        // 10.4.  Reject obviously-malformed short replies.
+        if len < 16 {
+            return Err(UnixError.IoError("LOCAL_PEERCRED short reply".into()));
+        }
+        let uid = ((buf[4]  as UInt32)
+                 | ((buf[5]  as UInt32) << 8)
+                 | ((buf[6]  as UInt32) << 16)
+                 | ((buf[7]  as UInt32) << 24));
+        let gid = ((buf[12] as UInt32)
+                 | ((buf[13] as UInt32) << 8)
+                 | ((buf[14] as UInt32) << 16)
+                 | ((buf[15] as UInt32) << 24));
+
+        // pid via LOCAL_PEEREPID (effective pid; -1 sentinel if unavailable).
+        let mut pid_buf = [0_u8; 4];
+        let mut pid_len: UInt32 = 4;
+        let pid_rc = getsockopt(self.fd, SOL_LOCAL, LOCAL_PEEREPID,
+                                &mut pid_buf[0], &mut pid_len);
+        let pid: Int32 = if pid_rc == 0 && pid_len == 4 {
+            ((pid_buf[0] as Int32)
+             | ((pid_buf[1] as Int32) << 8)
+             | ((pid_buf[2] as Int32) << 16)
+             | ((pid_buf[3] as Int32) << 24))
+        } else {
+            -1 as Int32
+        };
+        Ok(PeerCred { pid: pid, uid: uid, gid: gid })
     }
 
     @cfg(target_os = "windows")
