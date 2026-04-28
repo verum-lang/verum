@@ -4496,6 +4496,7 @@ impl IntrinsicLowering {
             TensorExtSubOpcode::RegexReplace => "verum.regex.replace",
             TensorExtSubOpcode::RegexCaptures => "verum.regex.captures",
             TensorExtSubOpcode::PermissionCheckWire => "verum.permission.check_wire",
+            TensorExtSubOpcode::PermissionAssert => "verum.permission.assert",
         };
 
         self.emit(MlirOp {
