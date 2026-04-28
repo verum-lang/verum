@@ -46,6 +46,7 @@ public mount .connection.{
     connect,
     cancel_running_query_at,
 };
+public mount .wire.backend.{NotificationResponse};
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
 public mount .stmt_cache.{StmtCache, CacheEntry};

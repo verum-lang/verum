@@ -44,7 +44,8 @@ mount core.database.postgres.wire.backend.{
     BackendMessage,
     BmAuth, BmParameterStatus, BmBackendKeyData, BmReadyForQuery,
     BmRowDescription, BmDataRow, BmCommandComplete, BmEmptyQueryResponse,
-    BmError, BmNotice, BmParseComplete, BmBindComplete, BmCloseComplete,
+    BmError, BmNotice, BmNotification, BmParseComplete, BmBindComplete, BmCloseComplete,
+    NotificationResponse,
     BmNoData, BmPortalSuspend, BmUnknown,
     AuthRequest, AuthOk, AuthCleartextPassword, AuthMd5Password,
     AuthSasl, AuthSaslContinue, AuthSaslFinal,
@@ -87,6 +88,11 @@ public type PgConnection is {
     /// Per-column wire formats from the most recent RowDescription —
     /// used by parse_data_row to interpret each value's bytes.
     last_formats: List<Int>,
+    /// FIFO buffer of LISTEN/NOTIFY async events received between
+    /// query rounds.  `read_message` appends here whenever it sees
+    /// a `BmNotification(...)` frame; user code drains via
+    /// `take_notifications()`.  Spec database.md §6.1.7.
+    notifications: List<NotificationResponse>,
 };
 
 // -----------------------------------------------------------------------------
@@ -128,6 +134,7 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
         backend_key: None,
         tx_status: TxIdle,
         last_formats: List.new(),
+        notifications: List.new(),
     };
 
     // Send Startup.
@@ -277,6 +284,96 @@ implement PgConnection {
     /// driver.  Returns `None` if the connection never reached Ready
     /// (server didn't emit BackendKeyData yet).
     public fn backend_key_view(&self) -> Maybe<(Int, Int)> { self.backend_key }
+
+    // -------------------------------------------------------------------------
+    // LISTEN / NOTIFY — async event surface (spec §6.1.7)
+    // -------------------------------------------------------------------------
+    //
+    // Postgres NotificationResponse messages may arrive at any time
+    // the server is allowed to push.  `read_message` demuxes them
+    // into `conn.notifications`; the methods below are the public
+    // drain / subscribe interface.
+
+    /// Subscribe to `channel`.  Issues `LISTEN <channel>`; subsequent
+    /// `NOTIFY` calls (from this or any other connection) deliver
+    /// `NotificationResponse` frames that accumulate in this
+    /// connection's notification buffer.
+    public fn listen(&mut self, channel: &Text) -> Result<(), DbError> {
+        let mut sql: Text = "LISTEN ".clone();
+        sql.push_str(channel);
+        match self.execute(&sql) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Unsubscribe from `channel` (or `*` to drop all subscriptions).
+    public fn unlisten(&mut self, channel: &Text) -> Result<(), DbError> {
+        let mut sql: Text = "UNLISTEN ".clone();
+        sql.push_str(channel);
+        match self.execute(&sql) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Send a notification on `channel` with optional `payload`.  An
+    /// empty payload omits the second argument.  Listeners on this
+    /// channel — including this connection itself — receive a
+    /// `NotificationResponse` after the surrounding tx commits
+    /// (NOTIFY is transactional in Postgres).
+    public fn notify(&mut self, channel: &Text, payload: &Text) -> Result<(), DbError> {
+        let mut sql: Text = "NOTIFY ".clone();
+        sql.push_str(channel);
+        if payload.len() > 0 {
+            sql.push_str(&", ".clone());
+            // Quote the payload — Postgres NOTIFY payloads are SQL
+            // string literals.  Use single-quote-doubling for any
+            // embedded apostrophe.
+            sql.push_str(&"'".clone());
+            sql.push_str(&escape_single_quote(payload));
+            sql.push_str(&"'".clone());
+        }
+        match self.execute(&sql) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Drain and return all pending notifications.  After this call
+    /// the buffer is empty until the next backend frame.  Most callers
+    /// pair this with `wait_for_notification` for blocking subscribe
+    /// loops, or with the connection's own `simple_query` /
+    /// `execute` for opportunistic poll.
+    public fn take_notifications(&mut self) -> List<NotificationResponse> {
+        let out = self.notifications.clone();
+        self.notifications = List.new();
+        out
+    }
+
+    /// Whether the buffer currently holds any notifications.  O(1).
+    public fn has_notifications(&self) -> Bool {
+        self.notifications.len() > 0
+    }
+
+    /// Block until at least one notification is available, then
+    /// return all pending.  Sends a no-op `SELECT 1` round-trip if
+    /// the buffer is empty — Postgres flushes pending NOTIFICATION
+    /// frames into the next response, so the round-trip is sufficient
+    /// to surface them.  For a true server-push wait the caller would
+    /// need to poll the underlying socket; v1 keeps this simple.
+    public fn wait_for_notification(&mut self) -> Result<List<NotificationResponse>, DbError> {
+        if self.has_notifications() {
+            return Ok(self.take_notifications());
+        }
+        // No-op probe — flushes any pending async frames into the
+        // response stream.  Discard the (empty) result; notifications
+        // arrived alongside it and are now in the buffer.
+        match self.execute(&"SELECT 1".clone()) {
+            Ok(_)  => Ok(self.take_notifications()),
+            Err(e) => Err(e),
+        }
+    }
 
     /// Issue a CancelRequest against this connection's backend.  Per
     /// Postgres protocol §6.1.7 the cancel must travel on a SEPARATE
@@ -511,7 +608,20 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
             Ok(Some(outcome)) => {
                 let consumed = outcome.bytes_consumed;
                 drop_front(&mut conn.recv, consumed);
-                return decode_one(outcome.frame, &conn.last_formats);
+                let msg = decode_one(outcome.frame, &conn.last_formats)?;
+                // Async LISTEN/NOTIFY frames may arrive at any time
+                // the connection is in a "server may push" state
+                // (between query rounds, during long blocking ops).
+                // Demux them into the notifications buffer here so
+                // every higher-level call site can ignore the
+                // distinction; callers drain via `take_notifications`.
+                match msg {
+                    BmNotification(n) => {
+                        conn.notifications.push(n);
+                        continue;
+                    }
+                    _ => { return Ok(msg); }
+                }
             }
             Ok(None) => {
                 // Need more bytes.
@@ -621,6 +731,28 @@ fn collect_formats(rd: &RowDescription) -> List<Int> {
     let mut i = 0;
     while i < rd.columns.len() as Int {
         out.push(rd.columns[i].format);
+        i = i + 1;
+    }
+    out
+}
+
+/// Escape single quotes in a payload literal — `'` becomes `''` per
+/// SQL string syntax.  Used by `notify` to embed payloads inline.
+/// The caller must NOT pass anything that could already contain
+/// shell-injection characters; this is a pure SQL-string escape, not
+/// a general-purpose sanitizer.
+fn escape_single_quote(s: &Text) -> Text {
+    let raw = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < raw.len() {
+        let b = raw[i];
+        if b == 0x27_u8 as Byte {
+            out.push_byte(0x27_u8 as Byte);
+            out.push_byte(0x27_u8 as Byte);
+        } else {
+            out.push_byte(b);
+        }
         i = i + 1;
     }
     out
