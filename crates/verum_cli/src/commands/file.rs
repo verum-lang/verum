@@ -352,37 +352,52 @@ pub fn run_with_tier_and_flags(
             // `PermissionRouter` lives in the interpreter only;
             // wiring it into the LLVM lowering of `PermissionAssert`
             // is a follow-on step.
-            if is_script_shaped(&input) {
-                use crate::script::context::{ScriptContext, ScriptContextOptions};
-                use crate::script::permission_flags::PermissionFlags;
-                let ctx = ScriptContext::from_path(
-                    &input,
-                    &ScriptContextOptions {
-                        flags: PermissionFlags::default(),
-                        compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-                        extra_cache_flags: Vec::new(),
-                    },
-                )
-                .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
-                if let Some(fm) = ctx.frontmatter.as_ref() {
-                    check_frontmatter_version(fm)?;
-                    if !fm.dependencies.is_empty() {
-                        ui::warn(
-                            "script frontmatter declares dependencies — \
-                             registry resolution lands separately; for \
-                             now they are ignored",
-                        );
+            // Script-shaped AOT path: validate frontmatter, then
+            // try the persistent native-binary cache. On hit, exec
+            // the cached binary directly — sub-millisecond cold
+            // start. On miss, run the LLVM pipeline below and
+            // store the result.
+            let aot_cache_key: Option<crate::script::cache::CacheKey> =
+                if is_script_shaped(&input) {
+                    use crate::script::context::{ScriptContext, ScriptContextOptions};
+                    let ctx = ScriptContext::from_path(
+                        &input,
+                        &ScriptContextOptions {
+                            flags: permission_flags.clone(),
+                            compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+                            extra_cache_flags: aot_cache_flag_inputs(),
+                        },
+                    )
+                    .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
+                    if let Some(fm) = ctx.frontmatter.as_ref() {
+                        check_frontmatter_version(fm)?;
+                        if !fm.dependencies.is_empty() {
+                            ui::warn(
+                                "script frontmatter declares dependencies — \
+                                 registry resolution lands separately; for \
+                                 now they are ignored",
+                            );
+                        }
+                        if !fm.permissions.is_empty() {
+                            ui::warn(
+                                "script frontmatter declares permissions — \
+                                 AOT permission enforcement lands separately; \
+                                 use `verum run` (interpreter) for sandboxed \
+                                 execution today",
+                            );
+                        }
                     }
-                    if !fm.permissions.is_empty() {
-                        ui::warn(
-                            "script frontmatter declares permissions — \
-                             AOT permission enforcement lands separately; \
-                             use `verum run` (interpreter) for sandboxed \
-                             execution today",
+                    if let Some(cached) = lookup_aot_binary(ctx.cache_key) {
+                        ui::status(
+                            "Running",
+                            &format!("`{}` (cached AOT)", cached.display()),
                         );
+                        return exec_native_binary(&cached, &args);
                     }
-                }
-            }
+                    Some(ctx.cache_key)
+                } else {
+                    None
+                };
 
             let options = CompilerOptions {
                 input: input.clone(),
@@ -398,6 +413,16 @@ pub fn run_with_tier_and_flags(
                 Ok(executable) => {
                     if timings {
                         print_phase_timings(&session);
+                    }
+
+                    // Persist the freshly-compiled AOT binary in the
+                    // script cache so subsequent runs of the same
+                    // source skip the LLVM pipeline entirely.
+                    // Best-effort — write failures don't fail the run.
+                    if let Some(key) = aot_cache_key {
+                        if let Err(e) = store_aot_binary(key, &executable) {
+                            ui::warn(&format!("AOT cache store failed: {e}"));
+                        }
                     }
 
                     ui::status("Running", &format!("`{}`", executable.display()));
@@ -1069,6 +1094,103 @@ fn build_script_permission_policy(
     };
 
     Some(ScriptPermissionPolicy(Box::new(policy)))
+}
+
+/// Cache-key contributors specific to the AOT script-binary cache.
+/// Identical (source, compiler, flags) tuples should produce
+/// byte-identical AOT binaries on the same target — but a
+/// different target triple, opt level, or LTO mode produces a
+/// different binary, so each must contribute to the key.
+fn aot_cache_flag_inputs() -> Vec<String> {
+    vec![
+        format!("aot=1"),
+        format!("target={}", std::env::consts::ARCH),
+        format!("os={}", std::env::consts::OS),
+    ]
+}
+
+/// Resolve the AOT script-binary cache root: `~/.verum/script-aot-cache/`.
+/// Returns `None` on any I/O glitch — the AOT cache is best-effort.
+fn aot_cache_root() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+    Some(home.join(".verum").join("script-aot-cache"))
+}
+
+/// Look up a previously-compiled AOT binary for the given cache key.
+/// Returns `Some(path)` on hit (binary exists at the canonical
+/// location), `None` on miss or any I/O failure.
+fn lookup_aot_binary(
+    key: crate::script::cache::CacheKey,
+) -> Option<std::path::PathBuf> {
+    let root = aot_cache_root()?;
+    let entry = root.join(key.to_hex());
+    let bin_name = if cfg!(windows) { "binary.exe" } else { "binary" };
+    let bin = entry.join(bin_name);
+    if bin.is_file() {
+        Some(bin)
+    } else {
+        None
+    }
+}
+
+/// Persist a freshly-compiled AOT binary into the cache. Atomic at
+/// the rename boundary (write to temp filename, fsync, rename) so a
+/// crash mid-write doesn't leave a corrupt entry visible to the
+/// next lookup. Best-effort — caller must not fail the run on
+/// `Err`.
+fn store_aot_binary(
+    key: crate::script::cache::CacheKey,
+    src_binary: &std::path::Path,
+) -> std::io::Result<()> {
+    let root = aot_cache_root()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "$HOME unset"))?;
+    let entry = root.join(key.to_hex());
+    std::fs::create_dir_all(&entry)?;
+    let bin_name = if cfg!(windows) { "binary.exe" } else { "binary" };
+    let final_path = entry.join(bin_name);
+    let tmp_path = entry.join(format!(
+        "{}.tmp-{}",
+        bin_name,
+        std::process::id()
+    ));
+    std::fs::copy(src_binary, &tmp_path)?;
+    // Preserve the executable bit on Unix so the cached binary can
+    // be exec'd directly without a chmod step on every lookup.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&tmp_path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&tmp_path, perms)?;
+    }
+    std::fs::rename(&tmp_path, &final_path)?;
+    Ok(())
+}
+
+/// Exec a cached AOT binary with the script's args, propagating its
+/// exit code. Mirrors the live-compile path's exec semantics so the
+/// observed behaviour is identical between cache-hit and cache-miss
+/// runs.
+fn exec_native_binary(
+    binary: &std::path::Path,
+    args: &List<Text>,
+) -> Result<(), CliError> {
+    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let status = std::process::Command::new(binary)
+        .args(&args_str)
+        .status()
+        .map_err(|e| {
+            CliError::RuntimeError(format!(
+                "Failed to run cached AOT binary {}: {}",
+                binary.display(),
+                e
+            ))
+        })?;
+    if !status.success() {
+        let exit_code = status.code().unwrap_or(-1);
+        std::process::exit(exit_code);
+    }
+    Ok(())
 }
 
 /// Stable cache-key contributors derived from CompilerOptions.
