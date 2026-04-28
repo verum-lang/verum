@@ -10,13 +10,18 @@ mount base.{Bool, Text, Int64};
 // Emit base-10 integer as Text (small positive numbers only; negatives and
 // big values are represented with a minus sign and digits).
 fn int_to_text(n: Int) -> Text {
+    // Int.MIN-safe via UInt64 magnitude.
     if n == 0 { return "0".clone(); }
-    let mut v: Int = if n < 0 { -n } else { n };
+    let mut v: UInt64 = if n < 0 {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
     let mut digits = "".clone();
-    while v > 0 {
-        let d = (v % 10) as u8;
+    while v > 0_u64 {
+        let d = (v % 10_u64) as u8;
         digits.push_byte((d + 0x30 as u8) as u8);
-        v = v / 10;
+        v = v / 10_u64;
     }
     // Reverse digits.
     let bs = digits.as_bytes();
