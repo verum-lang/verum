@@ -350,6 +350,42 @@ impl BuildAssetsInfo {
         Ok(result)
     }
 
+    /// Load a TOML file from the project root and parse it into a
+    /// `ConstValue::Map` keyed on top-level table names (#20 / P7).
+    ///
+    /// Sandbox + caching are inherited from `load_text`. The TOML
+    /// document is required to be a top-level table (not a bare
+    /// value or array) — every other shape returns
+    /// `MetaError::Other`. Numeric / boolean / string / sub-table /
+    /// array values become the obvious `ConstValue` variants;
+    /// datetimes become `Text` (RFC 3339 form preserved by the
+    /// `toml` crate's Display) so callers can re-parse them as
+    /// needed without forcing a `chrono` dependency on the meta
+    /// surface.
+    ///
+    /// The result is the foundation for `@codegen("spec.toml")`:
+    /// users register a meta fn that consumes the spec and emits
+    /// generated code; this builtin gives them the spec data
+    /// without forcing them to reimplement TOML parsing in user
+    /// meta code.
+    pub fn load_toml(&mut self, path: &str) -> Result<MetaValue, MetaError> {
+        let text = self.load_text(path)?;
+        let parsed: toml::Value = toml::from_str(text.as_str()).map_err(|e| {
+            MetaError::Other(Text::from(format!(
+                "@load_toml({}): TOML parse error: {}",
+                path, e
+            )))
+        })?;
+        match parsed {
+            toml::Value::Table(_) => Ok(toml_to_meta(parsed)),
+            _ => Err(MetaError::Other(Text::from(format!(
+                "@load_toml({}): root must be a table, got {}",
+                path,
+                toml_kind_name(&parsed)
+            )))),
+        }
+    }
+
     /// Resolve a single-level glob pattern against the project
     /// root and return the matched (relative-path, bytes) pairs.
     ///
@@ -446,6 +482,47 @@ impl BuildAssetsInfo {
 /// Supports `*` (any chars within one component) and `?` (one
 /// char). Backtracks on `*` so e.g. `*.tar.gz` matches
 /// `archive.tar.gz`. Rejects path separators implicitly because
+/// Convert a `toml::Value` into a `MetaValue` (= `meta::ConstValue`).
+/// Datetimes collapse to RFC 3339 text — every other variant has a
+/// direct MetaValue analogue. Used by `BuildAssetsInfo::load_toml`
+/// to lower a parsed TOML document into the meta-builtin surface.
+pub(crate) fn toml_to_meta(v: toml::Value) -> MetaValue {
+    use verum_common::OrderedMap;
+    match v {
+        toml::Value::String(s) => MetaValue::Text(Text::from(s)),
+        toml::Value::Integer(i) => MetaValue::Int(i as i128),
+        toml::Value::Float(f) => MetaValue::Float(f),
+        toml::Value::Boolean(b) => MetaValue::Bool(b),
+        toml::Value::Datetime(dt) => MetaValue::Text(Text::from(dt.to_string())),
+        toml::Value::Array(arr) => {
+            let items: List<MetaValue> = arr.into_iter().map(toml_to_meta).collect();
+            MetaValue::Array(items)
+        }
+        toml::Value::Table(table) => {
+            let mut map: OrderedMap<Text, MetaValue> = OrderedMap::new();
+            for (k, val) in table.into_iter() {
+                map.insert(Text::from(k), toml_to_meta(val));
+            }
+            MetaValue::Map(map)
+        }
+    }
+}
+
+/// Diagnostic-shaped name for a `toml::Value` variant. Used in
+/// error messages from `load_toml` when the root document isn't a
+/// table.
+pub(crate) fn toml_kind_name(v: &toml::Value) -> &'static str {
+    match v {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "float",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Datetime(_) => "datetime",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+    }
+}
+
 /// `load_glob` already split the pattern at the last `/` and
 /// only feeds basenames in.
 pub(crate) fn fnmatch_basename(pattern: &str, name: &str) -> bool {
