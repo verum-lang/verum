@@ -186,17 +186,26 @@ cost against AOT-compiled equivalent.
 
 **Status:** PENDING — needs synthetic-module generator.
 
-### 5.2 Deeply nested @cfg conditional — PARTIAL DEFENSE 2026-04-28
+### 5.2 Deeply nested @cfg conditional — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — 12-cfg-attribute stress at representative
-scale; full 1024+-cfg fuzz pending.
+**Status:** DEFENSE CONFIRMED — 78-distinct-cfg-attribute stress
+demonstrates walker linearity.  A naive walker that materialised DNF
+on the 16 nested `all(any(...), not(...))` combinators would here
+produce ~2^16 clauses; the actual walker terminates in ≈10s.
 
 **Guardrail:** `vcs/specs/L4-performance/red-team-3-perf/cfg_nesting_bounded.vr`
-exercises 12 distinct @cfg predicates including `any` / `all` / `not`
-combinators and 6-arm `any(target_os = ...)` to prove the walker stays
-bounded. The walker is conservative on the `unix`/`linux`/`macos`/
-`windows` predicate family per round-1 §4.1 audit, and per-cfg
-processing remains linear (K predicates → K registrations, not 2^K).
+exercises 78 distinct @cfg predicates:
+  - 12 original predicates including `any` / `all` / `not` combinators
+    and 6-arm `any(target_os = ...)`.
+  - 50 independent feature flags (`verum_cfg_bulk_01..50`) — pins linear
+    scaling on flag count.
+  - 16 nested `all(any(...), not(...))` combinations — pins predicate-tree
+    expansion bound (no DNF explosion).
+
+The walker is conservative on the `unix`/`linux`/`macos`/`windows`
+predicate family per round-1 §4.1 audit, and per-cfg processing remains
+linear (K predicates → K registrations, not 2^K) regardless of how
+deeply they nest.
 
 ---
 
