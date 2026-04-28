@@ -469,7 +469,12 @@ implement EngineIoError {
             125 | 89 => Cancelled,                             // ECANCELED (125 Linux, 89 Darwin)
             62 => TimedOut,                                    // ETIME (io_uring specific timeout)
             107 | 57 => NotConnected,                            // ENOTCONN (107 Linux, 57 Darwin)
-            _ => Other("Unknown error"),
+            // Preserve the actual errno value in the
+            // diagnostic message — pre-fix `Other("Unknown
+            // error")` discarded the integer, leaving callers
+            // and operators no way to identify the underlying
+            // syscall failure beyond "something went wrong".
+            _ => Other(f"Unknown errno: {err}"),
         }
     }
 
@@ -505,7 +510,11 @@ implement EngineIoError {
             121 => TimedOut,                // ERROR_SEM_TIMEOUT
             1460 => TimedOut,               // ERROR_TIMEOUT
             50 => NotSupported,             // ERROR_NOT_SUPPORTED
-            _ => Other("Windows error"),
+            // Preserve the Win32 error code so operators can
+            // look it up in the System Error Codes
+            // documentation.  Pre-fix `Other("Windows error")`
+            // discarded the number entirely.
+            _ => Other(f"Win32 error: {err}"),
         }
     }
 
