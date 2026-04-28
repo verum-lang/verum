@@ -1,0 +1,133 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, decoder-canonicality, protobuf, varint, forgery
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173 — decoder
+// canonicality recipe class).
+//
+// Protobuf varint encodes a UInt64 in up to 10 bytes (7 data bits
+// per byte, MSB = continuation flag). Bytes 0..8 contribute 63
+// bits total; the 10th byte (index 9) carries the final bit at
+// position 63 — its low data bit is meaningful, but data bits 1..6
+// (mask 0x7E) cannot be represented in UInt64.
+//
+// Pre-fix bug: `read_varint` did `v |= ((b & 0x7F) << shift)` for
+// shift=63, silently truncating bits 1..6 of byte[9]. Multiple
+// distinct 10-byte sequences decoded to the SAME UInt64 — a
+// classic round-trip-equality forgery surface. Closed in commit
+// 17b1bb44 with `(b & 0x7F) > 1` rejection at byte index 9.
+//
+// This test pins the rejection: every 10-byte varint with byte[9]
+// data-bits ≠ 0 or 1 MUST surface VarintOverflow.
+
+mount core.protobuf.wire.{read_varint};
+mount core.protobuf.error.{ProtobufError};
+
+// Canonical 10-byte form encoding UInt64.MAX:
+// 9 bytes of 0xFF (each 7-bit group) then byte[9] = 0x01 (the top bit).
+fn varint_uint64_max_canonical_works() {
+    let buf: List<Byte> = [
+        0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+        0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+        0xFF_u8, 0x01_u8,
+    ];
+    let res = read_varint(buf.as_slice(), 0);
+    match res {
+        Ok((v, pos)) => {
+            assert(v == 18_446_744_073_709_551_615_u64,
+                   "canonical UInt64.MAX must round-trip");
+            assert(pos == 10, "must consume all 10 bytes");
+        }
+        Err(e) => panic(f"canonical UInt64.MAX must decode: {e}"),
+    }
+}
+
+// Hostile: byte[9] = 0x02 — bit 1 of the 10th byte is set, which
+// would shift to bit 64 (off the end of UInt64). Pre-fix silently
+// truncated; post-fix MUST reject as VarintOverflow.
+fn varint_byte9_bit1_rejected() {
+    let buf: List<Byte> = [
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x02_u8,
+    ];
+    let res = read_varint(buf.as_slice(), 0);
+    match res {
+        Ok(_) => panic("byte[9] data-bit 1 set MUST be rejected"),
+        Err(ProtobufError.VarintOverflow) => {},
+        Err(e) => panic(f"expected VarintOverflow, got {e}"),
+    }
+}
+
+// Hostile: byte[9] = 0x40 — bit 6 of the 10th byte set, the
+// upper-most non-trivial truncation case. Same VarintOverflow.
+fn varint_byte9_bit6_rejected() {
+    let buf: List<Byte> = [
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x40_u8,
+    ];
+    let res = read_varint(buf.as_slice(), 0);
+    match res {
+        Ok(_) => panic("byte[9] data-bit 6 set MUST be rejected"),
+        Err(ProtobufError.VarintOverflow) => {},
+        Err(e) => panic(f"expected VarintOverflow, got {e}"),
+    }
+}
+
+// Hostile: byte[9] = 0x7E — bits 1..6 all set, the maximum
+// truncation case. The pre-fix bug would have silently dropped
+// all 6 high bits.
+fn varint_byte9_max_data_bits_rejected() {
+    let buf: List<Byte> = [
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x7E_u8,
+    ];
+    let res = read_varint(buf.as_slice(), 0);
+    match res {
+        Ok(_) => panic("byte[9] high data bits set MUST be rejected"),
+        Err(ProtobufError.VarintOverflow) => {},
+        Err(e) => panic(f"expected VarintOverflow, got {e}"),
+    }
+}
+
+// Sanity: byte[9] = 0x00 (zero — encodes UInt64 with bit 63 clear).
+fn varint_byte9_zero_works() {
+    let buf: List<Byte> = [
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x80_u8, 0x80_u8, 0x80_u8,
+        0x80_u8, 0x00_u8,
+    ];
+    let res = read_varint(buf.as_slice(), 0);
+    match res {
+        Ok((v, _)) => assert(v == 0_u64,
+                              "all-continue + zero = 0 (canonical)"),
+        Err(e) => panic(f"all-zero varint must decode: {e}"),
+    }
+}
+
+// Sanity: small varints round-trip.
+fn varint_small_works() {
+    // Single-byte varint: just the low 7 bits.
+    let buf: List<Byte> = [0x2A_u8];   // = 42
+    let res = read_varint(buf.as_slice(), 0);
+    match res {
+        Ok((v, pos)) => {
+            assert(v == 42_u64, "single-byte 0x2A = 42");
+            assert(pos == 1, "consumed 1 byte");
+        }
+        Err(e) => panic(f"small varint must decode: {e}"),
+    }
+}
+
+fn main() {
+    varint_uint64_max_canonical_works();
+    varint_byte9_bit1_rejected();
+    varint_byte9_bit6_rejected();
+    varint_byte9_max_data_bits_rejected();
+    varint_byte9_zero_works();
+    varint_small_works();
+}

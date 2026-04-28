@@ -14,6 +14,8 @@ that the defense must reject.
 | `http_range_overflow.vr` | RFC 7233 byte-offset 3-layer overflow defense | CVE-2011-3192-class |
 | `constant_time_compare.vr` | `constant_time_eq` / `_compare` behavioural contract (no early exit, length-mismatch handled at boundary) | timing-attack class |
 | `csprng_id_entropy.vr` | UUID v4 / v7 + ULID entropy + timestamp non-zero | dishonest-stub class (lenient-codegen swallowed missing-fn calls) |
+| `protobuf_varint_canonicality.vr` | 10th-byte data-bits-1..6 rejection | varint round-trip-equality forgery |
+| `int_min_unary_negation.vr` | bit-flip pattern handles `Int.MIN` correctly | `(-n) as UInt64` overflow-back-to-Int.MIN |
 
 ## Adding new vectors
 
