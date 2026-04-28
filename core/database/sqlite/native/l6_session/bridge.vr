@@ -20,6 +20,12 @@ mount core.database.sqlite.native.l4_vdbe.{
     Register, CursorTable, CursorSlotKind, CursorKind,
     VdbeProgram,
 };
+mount core.database.sqlite.native.l4_vdbe.interpreter.{
+    RowMutation, RowMutationKind, RmkInsert, RmkUpdate, RmkDelete,
+};
+mount core.database.sqlite.native.ext.hooks.{
+    ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
+};
 mount core.database.sqlite.native.l6_session.connection.Connection;
 mount core.database.sqlite.native.l6_session.statement.PreparedStatement;
 
@@ -78,5 +84,73 @@ public fn writeback_cursors_to_connection(
             None => {}
         }
         i = i + 1;
+    }
+    // Fire update_hook (if registered) for every Insert / Delete /
+    // UpdateRow that happened during this program run.  Resolution
+    // walk: cursor_id → CursorDecl.root_page → SchemaCache.lookup_
+    // table_by_root → TableMeta { schema, name }.  Mutations whose
+    // cursor's root_page isn't in the schema cache (transient temp
+    // tables, ephemeral cursors) are silently skipped.
+    fire_update_hooks(stmt, conn);
+}
+
+/// Drive the connection's update_hook over the VDBE mutation log.
+/// Separated from writeback so callers that want write-through-
+/// without-hook semantics (e.g. internal schema bootstrap) can
+/// invoke the row apply step alone.
+pub fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut Connection) {
+    // Bail out of the hot path before grabbing the hook reference.
+    if !conn.registry_view().has_update_hook() {
+        return;
+    }
+    let mutations = stmt.state_ref().mutations_ref();
+    if mutations.len() == 0 { return; }
+
+    // We need both the schema (for root→table resolution) and the
+    // mutable hook.  Borrow them in turn — schema lookups don't
+    // require &mut so we resolve into a small (op, table_meta, rowid)
+    // staging list first, then iterate calling the hook.
+    let main_db: Text = "main".clone();
+    let mut staged: List<(ExtUpdateOp, Text, Text, Int64)> = List.new();
+    let mut i: Int = 0;
+    while i < mutations.len() {
+        let m = &mutations[i];
+        let decl_opt = stmt.program_ref().get_cursor_decl(m.cursor_id);
+        match decl_opt {
+            Some(decl) => {
+                match conn.schema().lookup_table_by_root(decl.root_page) {
+                    Some(meta) => {
+                        let op = match m.kind {
+                            RmkInsert => UoInsert,
+                            RmkUpdate => UoUpdate,
+                            RmkDelete => UoDelete,
+                        };
+                        let schema_name = if meta.schema.len() > 0 {
+                            meta.schema.clone()
+                        } else {
+                            main_db.clone()
+                        };
+                        staged.push((op, schema_name, meta.name.clone(), m.rowid));
+                    }
+                    None => {}   // ephemeral cursor — skip
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+
+    // Now invoke the hook with &mut access.
+    match &mut conn.registry_mut().update_hook {
+        None => {}
+        Some(h) => {
+            let hook_ref = &mut **h;
+            let mut k: Int = 0;
+            while k < staged.len() {
+                let entry = &staged[k];
+                hook_ref.on_update(entry.0, &entry.1, &entry.2, entry.3);
+                k = k + 1;
+            }
+        }
     }
 }

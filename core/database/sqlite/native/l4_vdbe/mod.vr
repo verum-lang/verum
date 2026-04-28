@@ -51,6 +51,7 @@ public mount .program.{
 
 public mount .interpreter.{
     StepResult, VdbeState,
+    RowMutation, RowMutationKind, RmkInsert, RmkUpdate, RmkDelete,
     vdbe_state_new, step, run_until_row,
 };
 
