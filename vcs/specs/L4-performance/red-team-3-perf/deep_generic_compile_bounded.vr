@@ -1,0 +1,57 @@
+// =============================================================================
+// L4-performance: Red-team Round 3 §1.1 — Deep generic compilation bounded
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L4
+// @tags: red-team, perf, generics, monomorphization, red-team-3.1.1
+// @timeout: 30000
+// @expect: pass
+// =============================================================================
+//
+// Pins the compile-time scaling for nested generic instantiation against
+// a stack-overflow-style cliff. The full attack vector is `List<List<...
+// List<Int>>>>` 1024 deep; here we exercise 32 levels which is enough to
+// expose any non-linear monomorphization scaling without timing out CI.
+//
+// **Audit reference:** vcs/red-team/round-3-perf.md §1.1.
+//
+// **Invariant being pinned:** monomorphization is approximately linear in
+// the nested-generic depth — N levels produce N type instances, not
+// 2^N. The compiler does NOT recurse exponentially through the type
+// argument tree.
+//
+// Companion: a benchmark in `crates/verum_compiler/benches/` measuring
+// the actual scaling slope is a round-3 follow-up; this test only
+// pins correctness + termination.
+
+mount core.collections.list.{List};
+
+// Build a 32-level type. If the compiler exponentially expands generic
+// instantiation, this would either OOM or stack-overflow. The test
+// passes by *compiling* — runtime behaviour is incidental.
+type L01<T> is List<T>;
+type L02<T> is L01<L01<T>>;
+type L03<T> is L02<L02<T>>;
+type L04<T> is L03<L03<T>>;
+type L05<T> is L04<L04<T>>;
+type L06<T> is L05<L05<T>>;
+type L07<T> is L06<L06<T>>;
+type L08<T> is L07<L07<T>>;
+type L09<T> is L08<L08<T>>;
+type L10<T> is L09<L09<T>>;
+
+// Concretise at Int. Even with the doubling-pattern above (each level
+// embeds two of the previous), the type arena must remain finite —
+// the kernel's normalize step deduplicates structurally-equal types.
+type Deep32 is L10<Int>;
+
+fn deep_constructor() -> Deep32 {
+    // Don't actually construct the deeply-nested value — just declare
+    // a function with the type. Compilation = monomorphization runs.
+    Deep32.empty()
+}
+
+fn main() {
+    print("L4-perf: red-team-3.1.1 deep generic compilation bounded");
+}

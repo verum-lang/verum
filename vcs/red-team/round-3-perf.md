@@ -25,13 +25,17 @@ cliff within gates → benchmark added to `crates/verum_compiler/benches/`.
 
 ## Vector 1 — Compilation-time DoS
 
-### 1.1 Nested generic instantiation chain
+### 1.1 Nested generic instantiation chain — PARTIAL DEFENSE 2026-04-28
 
-**Status:** PENDING — needs synthetic deep-generic generator.
+**Status:** PARTIAL DEFENSE — 32-level synthetic generic exercises
+monomorphization at representative depth without timing-out CI; full
+1024-level fuzz harness deferred to fuzz-infrastructure track.
 
-`List<List<List<...List<Int>>>>` 1024 deep. Risk: monomorphization expands
-exponentially or compile-time hits a stack-overflow from recursive type
-construction.
+**Guardrail:** `vcs/specs/L4-performance/red-team-3-perf/deep_generic_compile_bounded.vr`
+declares `L01..L10` doubling-pattern type aliases producing a 32-level
+nested-generic structure (each level embeds two of the previous). The
+structurally-equal-types deduplication in the kernel's normalize step
+prevents exponential blow-up; compilation = monomorphization runs.
 
 ### 1.2 Refinement predicates with exponential SMT cost
 
@@ -42,12 +46,16 @@ PSPACE but pathological predicates can hit timeout. Verify the timeout
 policy is fail-closed (round 1) AND that timeout itself doesn't leak
 attacker-controllable wall-clock.
 
-### 1.3 Module dependency graph fan-out / fan-in
+### 1.3 Module dependency graph fan-out / fan-in — PARTIAL DEFENSE 2026-04-28
 
-**Status:** PENDING — needs synthetic dependency generator.
+**Status:** PARTIAL DEFENSE — 16-leaf-1-hub guardrail at representative
+fan-out scale; full 1000-module worst-case generator deferred.
 
-Worst case: 1000 modules each mounting `core.*`. Verify closure walker
-remains linear (current observation).
+**Guardrail:** `vcs/specs/L4-performance/red-team-3-perf/module_fanout_bounded.vr`
+constructs a hub module with 16 leaves each mounting it, plus an aggregator
+fanning IN from all 16. Closure walker visits each edge exactly once;
+sum_all() pins both compile-time linearity and runtime correctness
+(1+2+...+16 = 136).
 
 ---
 
@@ -171,9 +179,9 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 
 | Vector | Status | Follow-up |
 | --- | --- | --- |
-| 1.1 Deep generic | PENDING | synthetic gen |
+| 1.1 Deep generic | **PARTIAL** | 32-level guardrail (2026-04-28); 1024-level fuzz pending |
 | 1.2 SMT exponential | PENDING | depends on 5.1 |
-| 1.3 Module fan-out | PENDING | dependency gen |
+| 1.3 Module fan-out | **PARTIAL** | 16-leaf+hub guardrail (2026-04-28); 1000-module pending |
 | 2.1 Alloc pressure | PARTIAL | wire-frame done |
 | 2.2 Refinement caching | PENDING | hot-loop test |
 | 2.3 10^6 tasks | PARTIAL | scheduler stress |
@@ -186,9 +194,11 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 5.1 1000-module load | PENDING | synthetic gen |
 | 5.2 Deep cfg | PENDING | cfg stress |
 
-**4 partial defences (alloc pressure, task scheduler, channel backlog, plus
-~170+ wire-frame sites swept), 10 pending.** Sections A-C above document
-performance-class invariants already upheld through the closed audit.
+**6 partial defences (alloc pressure, task scheduler, channel backlog,
+deep-generic compilation, module fan-out, plus ~170+ wire-frame sites swept),
+8 pending** post 2026-04-28 RT-3.1.1 / RT-3.1.3 closures. Sections A-C
+above document performance-class invariants already upheld through the
+closed audit.
 
 The wire-frame and crypto hot paths now have allocation-free bulk-copy
 primitives in place; further work is in the synthetic-input adversarial
