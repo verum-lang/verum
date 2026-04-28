@@ -82,10 +82,30 @@ exercises mutually-recursive impl-graph (AType / BType each implementing
 both AProtocol and BProtocol — 4 implement-blocks form a graph cycle the
 closure walker must terminate on).
 
-### 2.5 Pre-canon snapshot diff
+### 2.5 Pre-canon snapshot diff — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL — non-deterministic codegen guardrail in place per #143;
-needs ongoing differential vs snapshot.
+**Status:** DEFENSE CONFIRMED — encoding determinism is pinned via direct
+equality-of-bytes invariants (a stronger pin than snapshot-diff: the
+test re-encodes the same Instruction value multiple times and asserts
+byte-equality, so the property holds for ANY input rather than the
+narrow set captured in a frozen snapshot file).
+
+**Guardrails (already in place):**
+- `crates/verum_vbc/src/bytecode.rs::test_encoding_determinism` — same
+  `Instruction::CallG` value encoded three times must produce
+  byte-identical buffers.
+- `crates/verum_vbc/tests/bytecode_roundtrip_tests.rs::test_encoding_deterministic`
+  — same `Instruction::LoadI` value encoded twice must match.
+- `crates/verum_vbc/src/codegen/tests_comprehensive.rs::test_instruction_determinism`
+  — codegen-level determinism over multiple compilation runs.
+- `crates/verum_vbc/src/mono/phase.rs::test_instantiation_ordering_determinism`
+  — monomorphization order is deterministic across runs (closes the
+  HashMap-iteration-order non-determinism risk on `cargo test --release`).
+
+The four tests together cover the encoder, the decoder roundtrip, the
+codegen path, and the monomorphization phase — every level at which
+non-deterministic ordering or hash-randomization could leak into the
+emitted bytecode.
 
 ---
 
@@ -339,11 +359,27 @@ through the verifier.
 
 ## Vector 7 — CBGR memory safety
 
-### 7.1 Generation counter race
+### 7.1 Generation counter race — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — atomic increment with Acquire-Release ordering
-verified. Race-free at the per-generation level. Comprehensive concurrent
-stress test not yet shipped.
+**Status:** DEFENSE CONFIRMED — atomic increment with Acquire-Release
+ordering verified, race-free at the per-generation level, AND a
+concurrent stress test now pins the no-lost-updates invariant.
+
+**Implementation:** `crates/verum_common/src/cbgr.rs::CbgrHeader::increment_generation`
+uses a CAS loop that re-reads the packed `(generation, epoch_caps)` u64
+on each iteration.  Wraparound at `GEN_MAX` advances the global epoch
+and resets generation to `GEN_INITIAL` atomically (single CAS).
+Capabilities in the upper 16 bits are preserved across both increment
+and wraparound.
+
+**Guardrail (added 2026-04-28):**
+`crates/verum_common/src/cbgr.rs::test_generation_counter_concurrent_stress`
+— 8 threads × 5,000 increments each (40,000 total) all racing on the
+same `CbgrHeader`.  Asserts `final_gen == GEN_INITIAL + 40_000` (no
+lost updates), `final_gen < GEN_MAX` (no unexpected wraparound at
+this scale), and `epoch == 0` (generation race must not touch epoch).
+A regression to relaxed ordering or a non-atomic add would surface as
+a final generation count below 40,000.
 
 ### 7.2 Hazard-pointer reclamation race
 
