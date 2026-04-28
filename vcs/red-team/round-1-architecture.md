@@ -205,14 +205,26 @@ verification failure, never as a silent accept.
 
 ## Vector 6 — Capability leakage through generic monomorphization
 
-### 6.1 Generic with `using [Logger]` monomorphized to context lacking Logger
+### 6.1 Generic with `using [Logger]` monomorphized to context lacking Logger — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs context-monomorphization audit.
+**Status:** DEFENSE CONFIRMED — `crates/verum_compiler/src/phases/context_validation.rs`
+(1961 LOC) emits `UndeclaredContext` (E700) whenever a function body
+uses a context not present in its `using [...]` clause.
+Monomorphization preserves the using-clause constraint — the
+contexts list is part of the function's TYPE, and `f<T> using [Logger]`
+can only be instantiated at a call-site that itself supplies Logger
+(via its own `using [Logger]` or via `provide Logger` scope).
 
-Verum's context system (`verum_context`) is documented as runtime DI with
-~5-30 ns overhead. The static guarantee is that the type system rejects
-calls into a monomorphized context that doesn't satisfy `using [...]`. Verify
-through dedicated test.
+**Foundation:** the architectural rule `crates/verum_types/src/CLAUDE.md`
+requires the compiler to discover all type properties from source
+declarations (zero hardcoded stdlib knowledge). Context tracking lives
+in `Function::contexts: SmallVec<[ContextRef; 2]>` (verum_types::ty)
+and propagates through every monomorphization step.
+
+**Guardrail:** `vcs/specs/L2-standard/contexts/red_team_capability_monomorph.vr`
+exercises the canonical adversarial case — a generic
+`write_log<T>() using [Logger]` invoked from a caller without Logger
+in its using-clause; expected error E700 (UndeclaredContext).
 
 ### 6.2 Erased-vs-reified type consistency — DEFENSE CONFIRMED 2026-04-28
 
@@ -374,13 +386,14 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 4.3 Mount alias shadow | **DEFENSE CONFIRMED** | guardrail (2026-04-28) |
 | 5.1 Z3 timeout policy | **DEFENSE CONFIRMED** | 9-site audit + 3 guardrails (2026-04-28) |
 | 5.2 Always-timeout | **DEFENSE CONFIRMED** | guardrails pin fail-closed (2026-04-28) |
-| 6.1 Capability monomorph | PENDING | monomorph audit |
+| 6.1 Capability monomorph | **DEFENSE CONFIRMED** | context_validation.rs + L2 guardrail (2026-04-28) |
 | 6.2 Erased/reified | **DEFENSE CONFIRMED** | QTT framework + 4 RT-1.6.2 tests (2026-04-28) |
 | 7.1 Tier-0 vs Tier-1 | PENDING | #196 |
 | 7.2 Hash determinism | **DEFENSE CONFIRMED** | full audit + 7 L0 guardrails (2026-04-28) |
 
-**11 vectors confirmed defended (full or partial), 7 pending** (post 2026-04-28
-RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 + RT-1.6.2 closures). Round 1 success condition: every PENDING entry has either a
+**12 vectors confirmed defended (full or partial), 6 pending** (post 2026-04-28
+RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 + RT-1.6.2 + RT-1.6.1 closures).
+Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.

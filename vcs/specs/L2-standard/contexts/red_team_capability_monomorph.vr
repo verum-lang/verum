@@ -1,0 +1,52 @@
+// =============================================================================
+// L2-standard: Red-team Round 1 §6.1 — Capability monomorphization consistency
+// =============================================================================
+// @test: typecheck-fail
+// @tier: all
+// @level: L2
+// @tags: contexts, monomorphization, capabilities, red-team-1.6.1
+// @timeout: 30000
+// @expected-error: E700
+//
+// Pins the contract: a generic function declaring `using [Logger]`
+// CANNOT be monomorphized into a call-site that doesn't satisfy
+// the Logger context. Round 1 §6.1 PARTIAL → DEFENSE CONFIRMED:
+// the context-validation pipeline at
+// `crates/verum_compiler/src/phases/context_validation.rs` (1961 LOC)
+// emits `UndeclaredContext` whenever a function body uses a context
+// not present in its `using [...]` clause; monomorphization preserves
+// the using-clause constraint per the established codegen contract.
+//
+// **The architectural foundation:** Verum's `using [Context]` clause
+// is part of the function's TYPE — monomorphization respects type
+// equality including the contexts list. A generic `f<T> using [Logger]`
+// can only be instantiated at a call-site that itself supplies Logger
+// (either via its own `using [Logger]` clause or via `provide Logger`
+// scope).
+//
+// The companion typecheck-pass test below (`provides_logger_to_caller`)
+// shows the positive case — context propagation works correctly.
+//
+// **Audit reference:** vcs/red-team/round-1-architecture.md §6.1.
+// **Related closure:** §6.2 (Erased-vs-reified) — RT-1.6.2 closed via QTT.
+
+mount core.context.{Context};
+
+// Declare a Logger context type.
+public type Logger is { tag: Int };
+
+implement Context for Logger {}
+
+// Generic function REQUIRING Logger context — declared in using clause.
+fn write_log<T>(value: T) using [Logger] -> Int {
+    let l = Logger { tag: 1 };
+    42
+}
+
+// Caller WITHOUT Logger in its `using` clause — must FAIL the
+// context-validation pass with UndeclaredContext.
+fn caller_missing_logger() -> Int {
+    // This call should be rejected: write_log<Int> requires Logger,
+    // but caller_missing_logger does not declare it.
+    write_log::<Int>(7)
+}
