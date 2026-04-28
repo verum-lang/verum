@@ -1826,7 +1826,52 @@ implement Text {
     }
 
     /// Case-insensitive equality comparison.
+    ///
+    /// Fast path: if both inputs are length-equal and contain only
+    /// ASCII bytes, fold-and-compare in place — zero allocation,
+    /// O(min(|a|, |b|)) work. The previous implementation allocated
+    /// two fresh lowercase Texts via `to_lowercase()` on every call,
+    /// O(|a| + |b|) heap traffic per comparison; on the SQL / HTTP
+    /// header / DNS-name hot paths where eq_ignore_case is called
+    /// once per row / header / lookup, that allocator pressure is
+    /// the cost the workload can least afford.
+    ///
+    /// Slow path: any non-ASCII byte forces fall-through to full
+    /// Unicode lowercase comparison — case folding can change byte
+    /// length there (e.g. Turkish dotted-İ → i + combining dot)
+    /// so byte-equal lengths aren't a sufficient pre-check.
     public fn eq_ignore_case(&self, other: &Text) -> Bool {
+        let a = self.as_bytes();
+        let b = other.as_bytes();
+        if a.len() == b.len() {
+            let mut i: Int = 0;
+            let mut both_ascii: Bool = true;
+            while i < a.len() {
+                let ai = a[i];
+                let bi = b[i];
+                if (ai as Int) >= 128 || (bi as Int) >= 128 {
+                    both_ascii = false;
+                    break;
+                }
+                // Inline ASCII fold: 'A'..'Z' → +0x20.
+                let af = if ai >= (0x41 as Byte) && ai <= (0x5A as Byte) {
+                    ai + (0x20 as Byte)
+                } else {
+                    ai
+                };
+                let bf = if bi >= (0x41 as Byte) && bi <= (0x5A as Byte) {
+                    bi + (0x20 as Byte)
+                } else {
+                    bi
+                };
+                if af != bf { return false; }
+                i = i + 1;
+            }
+            if both_ascii { return true; }
+        }
+        // Slow path: Unicode case folding can change byte length, so
+        // length mismatches aren't an early-exit and we need the
+        // owning lowercased forms to compare.
         self.to_lowercase() == other.to_lowercase()
     }
 
