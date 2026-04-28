@@ -2818,21 +2818,29 @@ fn emit_unary(
     }
     match op {
         UNot => {
-            // NOT x → IfNot x → Integer(1, dst); else Integer(0, dst)
-            let set_true  = st.program.emit(Integer(1, dst));
-            let jump_over = st.program.emit(Goto(0));
-            let _else_idx = st.program.instruction_count();
+            // SQL `NOT x`: 0 → 1; anything-else → 0.  Lower via IfNot:
+            //
+            //   IfNot(src, SET_TRUE)    # if src is 0, jump to set_true
+            //   Integer(0, dst)         # else dst = 0
+            //   Goto(AFTER)
+            //   SET_TRUE:
+            //     Integer(1, dst)
+            //   AFTER:
+            //
+            // Pre-fix the body emitted Integer(1, dst) + Goto(0) +
+            // Integer(0, dst) with NO IfNot guard — Goto(0) restarted
+            // execution at the program start, dst was unconditionally
+            // 1.  `WHERE NOT x` produced wrong results across the
+            // board.  Same dishonest-API class as the HAVING UNot fix
+            // in 098b426b but in the main expression-codegen path.
+            let if_not_jmp = st.program.emit(IfNot(src, 0));
             let _ = st.program.emit(Integer(0, dst));
-            let after = st.program.instruction_count();
-            // Patch: the first If-style opcode needs to jump to
-            // else_idx; we rewrite set_true into an If(src, after)
-            // followed by set_false at the else arm. For v1 we keep
-            // the simpler sequence above and accept the slight
-            // redundancy in generated code — the peephole optimizer
-            // collapses the Goto once dead-code elim lands.
-            let _ = set_true;
-            let _ = jump_over;
-            let _ = after;
+            let goto_after = st.program.emit(Goto(0));
+            let set_true_target = st.program.instruction_count();
+            let _ = st.program.emit(Integer(1, dst));
+            let after_target = st.program.instruction_count();
+            st.program.replace(if_not_jmp, IfNot(src, set_true_target));
+            st.program.replace(goto_after, Goto(after_target));
             Ok(())
         }
         UNeg => {
