@@ -1,0 +1,50 @@
+// docs/by-example/22-ffi/main.vr
+// FFI: extern blocks, C-ABI calling conventions, safety wrappers.
+
+mount core.io.println;
+
+// `extern { ... }` declares C-ABI symbols the linker resolves at
+// build time. Each fn signature is the contract — Verum trusts the
+// caller to maintain it.
+extern {
+    /// libc strlen — `size_t strlen(const char *s)`.
+    /// SAFETY: `s` must be a NUL-terminated valid pointer.
+    fn strlen(s: &Byte) -> Int;
+}
+
+// Public Verum-side wrapper. `unsafe` because we can't prove the
+// caller's `&Byte` actually NUL-terminates without walking the bytes
+// ourselves.
+unsafe fn libc_strlen(s: &Byte) -> Int {
+    strlen(s)
+}
+
+// Safe wrapper — accepts a Verum Text, copies into a NUL-terminated
+// buffer, calls strlen, then returns. Allocates and copies; for
+// performance-critical code use the unsafe path with a
+// caller-maintained NUL invariant.
+fn ascii_byte_count(s: &Text) -> Int {
+    let bytes = s.as_bytes();
+    let mut buf: List<Byte> = List.with_capacity(bytes.len() + 1);
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        buf.push(bytes[i]);
+        i = i + 1;
+    }
+    buf.push(0);   // NUL terminator
+    unsafe { libc_strlen(&buf[0]) }
+}
+
+fn main() {
+    let s = "hello, world";
+    let len = ascii_byte_count(&s.to_text());
+    println(f"strlen('{s}') = {len}");
+
+    // Notes:
+    // - Verum strings are NOT NUL-terminated. The `Text` type is a
+    //   {ptr, len, cap} triple; passing `s.as_bytes().as_ptr()`
+    //   directly to strlen would walk into adjacent memory.
+    // - For a real FFI binding to a C library, prefer to write the
+    //   safe wrapper once and document its SAFETY invariant. Avoid
+    //   spreading `unsafe` blocks throughout user code.
+}

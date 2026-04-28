@@ -1,0 +1,49 @@
+// docs/by-example/21-macros/main.vr
+// Macros: @-prefixed compile-time constructs, hygenic, type-aware.
+
+mount core.io.println;
+
+// `@derive` synthesises protocol implementations at compile time —
+// the most common macro you'll meet.
+@derive(Eq, Hash, Debug)
+type Point is { x: Int, y: Int };
+
+// `@const` evaluates a value at compile time. The right-hand side
+// must be a pure expression over compile-time-known operands.
+@const
+const TABLE_SIZE: Int = 16 * 16;
+
+// `@cfg` gates code on a compile-time predicate (target_os, feature
+// flags, debug_assertions).
+@cfg(target_os = "linux")
+fn platform_message() -> Text { "running on linux".to_text() }
+
+@cfg(target_os = "macos")
+fn platform_message() -> Text { "running on macos".to_text() }
+
+@cfg(not(any(target_os = "linux", target_os = "macos")))
+fn platform_message() -> Text { "running on other".to_text() }
+
+// User-defined macros use `@!` for the declaration (procedural
+// macros register themselves in the meta registry; this example
+// just consumes them).
+fn main() {
+    let a = Point { x: 1, y: 2 };
+    let b = Point { x: 1, y: 2 };
+
+    // `@derive(Eq)` synthesised the == operator.
+    println(f"a == b: {a == b}");
+
+    // `@derive(Debug)` synthesised the {:?} format.
+    println(f"a = {a:?}");
+
+    // `@const` constant — no runtime evaluation.
+    println(f"table size: {TABLE_SIZE}");
+
+    // `@cfg` selected one platform_message at compile time; the
+    // other definitions don't even reach codegen.
+    println(platform_message());
+
+    // `@assert` gives compile-time errors when violated.
+    @assert(TABLE_SIZE == 256);
+}
