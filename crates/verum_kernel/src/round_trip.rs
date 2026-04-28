@@ -72,7 +72,7 @@ use verum_common::{Heap, Text};
 
 use crate::CoreTerm;
 use crate::KernelError;
-use crate::diakrisis_bridge::{BridgeAudit, BridgeId, admit_confluence_of_modal_rewrite};
+use crate::diakrisis_bridge::{BridgeAudit, admit_confluence_of_modal_rewrite};
 use crate::support::definitional_eq;
 
 /// `K-Round-Trip` admission rule (V0/V1).

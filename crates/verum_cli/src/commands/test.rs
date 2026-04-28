@@ -1323,7 +1323,6 @@ fn parse_test_cases(
     attrs: &[verum_ast::Attribute],
 ) -> Vec<Vec<crate::commands::property::TreeValue>> {
     use crate::commands::property::TreeValue;
-    use verum_ast::ExprKind;
     let mut cases = Vec::new();
     for a in attrs {
         if a.name.as_str() != "test_case" {

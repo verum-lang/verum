@@ -19,7 +19,7 @@
 //! 4. Emit a `.vr` file from the graph, preserving entity ordering.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::commands::owl2::{Owl2Entity, Owl2EntityKind, Owl2Graph};
 use crate::error::{CliError, Result};

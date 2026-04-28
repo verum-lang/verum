@@ -50,7 +50,6 @@
 //! applies LTO optimization, produces final executable binary.
 
 use anyhow::{bail, Context, Result};
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;

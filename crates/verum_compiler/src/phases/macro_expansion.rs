@@ -48,7 +48,7 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 use crate::derives::{DeriveError, DeriveRegistry};
 use crate::literal_registry::{LiteralRegistry, ParsedLiteral};
-use crate::meta::{ConstValue, MetaContext, MetaError, MetaRegistry};
+use crate::meta::{ConstValue, MetaContext, MetaRegistry};
 use crate::meta::linter::MetaLinter;
 
 /// Phase 3: Macro Expansion

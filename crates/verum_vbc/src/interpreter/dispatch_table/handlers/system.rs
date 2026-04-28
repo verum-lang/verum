@@ -6,7 +6,6 @@
 //! GradBegin (0xEB), GradEnd (0xEC), GradCheckpoint (0xED),
 //! GradAccumulate (0xEE), GradStop (0xEF)
 
-use crate::instruction::Reg;
 use crate::types::TypeId;
 use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};

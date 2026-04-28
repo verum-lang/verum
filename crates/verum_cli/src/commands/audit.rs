@@ -4227,7 +4227,6 @@ fn expr_is_trivially_true(e: &verum_ast::Expr) -> bool {
 /// Extract the framework lineage (first arg of `@framework(<lineage>, ...)`)
 /// from an axiom's attribute list. Returns "<unknown>" if not annotated.
 fn extract_framework_lineage(attrs: &verum_common::List<verum_ast::attr::Attribute>) -> Text {
-    use verum_ast::attr::FromAttribute;
     for attr in attrs.iter() {
         if !attr.is_named("framework") {
             continue;
