@@ -185,6 +185,24 @@ pub enum KernelError {
         context: Text,
     },
 
+    /// `K-Round-Trip` — OC/DC translation round-trip equality
+    /// rejected. The supplied articulation pair `(lhs, rhs)` does not
+    /// satisfy `canonicalise(inverse(translate(α))) ≡ canonicalise(α)`
+    /// at any of the V0/V1 admit-set entries (structural equality,
+    /// `AlphaOf(EpsilonOf(_))`/`EpsilonOf(AlphaOf(_))` adjunction
+    /// shapes, or β-/ι-/δ-equivalence).
+    ///
+    /// V2 (preprint-blocked on Diakrisis Theorem 16.10 algorithmic
+    /// content) will extend the admit-set with the full canonicalize
+    /// algorithm; until then non-identity round-trips need an
+    /// explicit framework axiom citation to be admitted.
+    #[error("kernel: K-Round-Trip equality failed: {context}")]
+    RoundTripFailed {
+        /// Human-readable context describing the AC/OC duality
+        /// callsite (e.g. `"Theorem 10.4 ε ⊣ α biadjunction"`).
+        context: Text,
+    },
+
     /// Modal-depth (V0) — `K-Refine-omega` modal-depth bound exceeded. A
     /// refinement type's predicate has ordinal modal-depth `md^ω`
     /// strictly greater than the base type's depth + 1, violating

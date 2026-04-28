@@ -123,6 +123,14 @@ pub use eps_mu::check_eps_mu_coherence;
 pub mod universe_ascent;
 pub use universe_ascent::{UniverseTier, check_universe_ascent};
 
+/// `K-Round-Trip` kernel rule (V0/V1) — OC/DC translation round-trip
+/// admission for the AC/OC duality (MSFS Theorem 10.4 / Diakrisis
+/// 108.T / 16.10). Hosts `check_round_trip` covering identity
+/// (structural), K-Adj-Unit/Counit shapes, and β-/ι-/δ-equivalence
+/// cases. V2 universal canonicalize (preprint-blocked) extends.
+pub mod round_trip;
+pub use round_trip::check_round_trip;
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
