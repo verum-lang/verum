@@ -148,9 +148,26 @@ impl EntryDetectionPhase {
         let main_fn = match main_fn.or(script_entry) {
             Some(func) => func,
             None => {
+                // Verum execution-mode contract:
+                //   1. Library/binary mode: a `fn main()` (or `async fn main()`)
+                //      defines the entry.
+                //   2. Script mode: the file MUST start with a `#!` shebang
+                //      line; the parser then folds top-level statements into
+                //      `__verum_script_main` and tags the module with
+                //      `@![__verum_kind("script")]`.
+                //
+                // If neither path produced an entry, surface BOTH options so
+                // the user can pick the one that fits — without a shebang the
+                // file is treated as library code and needs `fn main()`; with
+                // a shebang top-level statements (`print("hi");`) work
+                // directly and no `fn main()` is required.
                 let diag = DiagnosticBuilder::new(Severity::Error)
-                    .message(Text::from("No main function found"))
-                    .help(Text::from("Add 'fn main() { ... }' or 'async fn main() { ... }'"))
+                    .message(Text::from("No entry point found"))
+                    .help(Text::from(
+                        "Add 'fn main() { ... }' (library/binary mode), \
+                         or start the file with a `#!/usr/bin/env verum` \
+                         shebang line and use top-level statements (script mode).",
+                    ))
                     .build();
                 return Err(vec![diag].into());
             }
