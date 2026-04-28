@@ -369,16 +369,29 @@ public fn cbpv_normalise(t: CbpvTerm, gas: Int) -> (CbpvTerm, Int) {
 /// `name` was renamed to `index` (a de Bruijn-like depth marker).
 type AlphaEntry is { name: Text, index: Int };
 
-/// Look up the de-Bruijn index for `name` in the current
-/// renaming context. Returns -1 if the variable is free.
+/// Look up the de-Bruijn level for `name` in the current renaming
+/// context. Returns -1 if the variable is free.
+///
+/// SOUNDNESS: walks the context from MOST-RECENT (back of list) to
+/// OLDEST (front). Binders are pushed onto the back at descent;
+/// shadowing means an inner-scope `x` rebinds the name and the
+/// inner binding is the one a free occurrence resolves to. Earlier
+/// versions iterated front-to-back and returned the OUTERMOST
+/// binder — a soundness bug for α-equivalence under shadowing:
+/// `λx. λx. x` vs `λa. λb. b` would compare as inequal because the
+/// inner `x` resolved to level 0 (outer x) while the inner `b`
+/// resolved to level 1 (inner b), failing the per-side level
+/// match in `cbpv_alpha_eq_ctx`. Both are K-combinator-shaped
+/// after one β; they MUST be α-equivalent.
 fn alpha_lookup(ctx: List<AlphaEntry>, name: Text) -> Int {
-    let mut i: Int = 0;
-    while i < ctx.len() as Int {
-        let e: AlphaEntry = (*ctx.get(i as Int).unwrap()).clone();
+    let n = ctx.len() as Int;
+    let mut i: Int = n - 1;
+    while i >= 0 {
+        let e: AlphaEntry = (*ctx.get(i).unwrap()).clone();
         if e.name == name {
             return e.index;
         }
-        i = i + 1;
+        i = i - 1;
     }
     -1
 }
