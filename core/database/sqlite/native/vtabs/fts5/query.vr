@@ -51,6 +51,34 @@ public type Fts5VtabParseError is
       PeUnexpectedEnd
     | PeUnexpectedToken(Text);
 
+implement Display for Fts5VtabParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PeUnexpectedEnd       => f.write_str("FTS5 query parser: unexpected end of input"),
+            PeUnexpectedToken(t)  => f.write_str(f"FTS5 query parser: unexpected token {t}".as_str()),
+        }
+    }
+}
+
+implement Debug for Fts5VtabParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PeUnexpectedEnd       => f.write_str("PeUnexpectedEnd"),
+            PeUnexpectedToken(t)  => f.write_str(f"PeUnexpectedToken({t})".as_str()),
+        }
+    }
+}
+
+implement Eq for Fts5VtabParseError {
+    fn eq(&self, other: &Fts5VtabParseError) -> Bool {
+        match (self, other) {
+            (PeUnexpectedEnd,      PeUnexpectedEnd)      => true,
+            (PeUnexpectedToken(a), PeUnexpectedToken(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 public type Fts5VtabParseState is {
     tokens: List<Text>,
     pos: Int,

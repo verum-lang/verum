@@ -68,6 +68,46 @@ public type CipherError is
     | CeMalformedPage
     | CeUnsupported(Text);
 
+// Display + Debug + Eq for CipherError.  WrongKey + AuthFailure
+// surface no detail — page-level encrypted databases use AEAD
+// authentication (commonly AES-GCM); leaking which check failed
+// (key vs MAC vs nonce) creates the same oracle-attack surface
+// AEAD APIs (NIST SP 800-38D, RFC 7539) explicitly avoid.
+
+implement Display for CipherError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeWrongKey       => f.write_str("sqlite page decryption failed"),
+            CeAuthFailure    => f.write_str("sqlite page decryption failed"),
+            CeMalformedPage  => f.write_str("sqlite encrypted page malformed"),
+            CeUnsupported(m) => f.write_str(f"sqlite cipher unsupported: {m}".as_str()),
+        }
+    }
+}
+
+implement Debug for CipherError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeWrongKey       => f.write_str("CeWrongKey"),
+            CeAuthFailure    => f.write_str("CeAuthFailure"),
+            CeMalformedPage  => f.write_str("CeMalformedPage"),
+            CeUnsupported(m) => f.write_str(f"CeUnsupported({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for CipherError {
+    fn eq(&self, other: &CipherError) -> Bool {
+        match (self, other) {
+            (CeWrongKey,       CeWrongKey)       => true,
+            (CeAuthFailure,    CeAuthFailure)    => true,
+            (CeMalformedPage,  CeMalformedPage)  => true,
+            (CeUnsupported(a), CeUnsupported(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // PageCipher protocol
 // -----------------------------------------------------------------------------

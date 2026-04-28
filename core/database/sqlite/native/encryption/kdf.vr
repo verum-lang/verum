@@ -32,6 +32,37 @@ public type KdfError is
     | KeUnsupported(Text)
     | KeWeakKey;
 
+implement Display for KdfError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            KeBadParams(m)   => f.write_str(f"sqlite KDF bad params: {m}".as_str()),
+            KeUnsupported(m) => f.write_str(f"sqlite KDF unsupported: {m}".as_str()),
+            KeWeakKey        => f.write_str("sqlite KDF rejected weak key"),
+        }
+    }
+}
+
+implement Debug for KdfError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            KeBadParams(m)   => f.write_str(f"KeBadParams({m})".as_str()),
+            KeUnsupported(m) => f.write_str(f"KeUnsupported({m})".as_str()),
+            KeWeakKey        => f.write_str("KeWeakKey"),
+        }
+    }
+}
+
+implement Eq for KdfError {
+    fn eq(&self, other: &KdfError) -> Bool {
+        match (self, other) {
+            (KeBadParams(a),   KeBadParams(b))   => a == b,
+            (KeUnsupported(a), KeUnsupported(b)) => a == b,
+            (KeWeakKey,        KeWeakKey)        => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // KdfParams
 // -----------------------------------------------------------------------------

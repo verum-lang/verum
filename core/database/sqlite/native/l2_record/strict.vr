@@ -26,9 +26,79 @@ mount core.database.sqlite.native.l2_record.record.SerialType;
 
 public type StrictType is Any | Integer | Real | Text | Blob;
 
+fn strict_type_name(t: &StrictType) -> Text {
+    match t {
+        Any     => "ANY".clone(),
+        Integer => "INTEGER".clone(),
+        Real    => "REAL".clone(),
+        Text    => "TEXT".clone(),
+        Blob    => "BLOB".clone(),
+    }
+}
+
+fn strict_type_tag(t: &StrictType) -> Int {
+    match t {
+        Any     => 0,
+        Integer => 1,
+        Real    => 2,
+        Text    => 3,
+        Blob    => 4,
+    }
+}
+
+implement Display for StrictType {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(strict_type_name(self).as_str())
+    }
+}
+
+implement Debug for StrictType {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(strict_type_name(self).as_str())
+    }
+}
+
+implement Eq for StrictType {
+    fn eq(&self, other: &StrictType) -> Bool {
+        strict_type_tag(self) == strict_type_tag(other)
+    }
+}
+
 public type StrictConstraintError is
       DatatypeMismatch(column: Text, expected: StrictType)
     | UnknownType(declared: Text);
+
+implement Display for StrictConstraintError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DatatypeMismatch(column, expected) =>
+                f.write_str(f"sqlite STRICT column {column}: expected {strict_type_name(expected)}".as_str()),
+            UnknownType(declared) =>
+                f.write_str(f"sqlite STRICT unknown declared type: {declared}".as_str()),
+        }
+    }
+}
+
+implement Debug for StrictConstraintError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DatatypeMismatch(column, expected) =>
+                f.write_str(f"DatatypeMismatch({column}, {expected:?})".as_str()),
+            UnknownType(declared) =>
+                f.write_str(f"UnknownType({declared})".as_str()),
+        }
+    }
+}
+
+implement Eq for StrictConstraintError {
+    fn eq(&self, other: &StrictConstraintError) -> Bool {
+        match (self, other) {
+            (DatatypeMismatch(ca, ea), DatatypeMismatch(cb, eb)) => ca == cb && ea == eb,
+            (UnknownType(a),           UnknownType(b))           => a == b,
+            _ => false,
+        }
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Parse a column's declared type into a StrictType

@@ -61,6 +61,36 @@ public type CodegenError is
 
 fn unsupported(what: Text) -> CodegenError { Unsupported(what) }
 
+implement Display for CodegenError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Unsupported(what) =>
+                f.write_str(f"sqlite codegen unsupported: {what}".as_str()),
+            InvalidPlan(msg) =>
+                f.write_str(f"sqlite codegen invalid plan: {msg}".as_str()),
+        }
+    }
+}
+
+implement Debug for CodegenError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Unsupported(what) => f.write_str(f"Unsupported({what})".as_str()),
+            InvalidPlan(msg)  => f.write_str(f"InvalidPlan({msg})".as_str()),
+        }
+    }
+}
+
+implement Eq for CodegenError {
+    fn eq(&self, other: &CodegenError) -> Bool {
+        match (self, other) {
+            (Unsupported(a), Unsupported(b)) => a == b,
+            (InvalidPlan(a), InvalidPlan(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Register allocator
 // -----------------------------------------------------------------------------

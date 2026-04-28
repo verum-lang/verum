@@ -34,6 +34,39 @@ public type PoolError is
     | PoolClosed
     | InvalidLease;
 
+implement Display for PoolError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Timeout      => "sqlite pool acquire timeout",
+            PoolClosed   => "sqlite pool closed",
+            InvalidLease => "sqlite pool lease invalid",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for PoolError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Timeout      => "Timeout",
+            PoolClosed   => "PoolClosed",
+            InvalidLease => "InvalidLease",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for PoolError {
+    fn eq(&self, other: &PoolError) -> Bool {
+        match (self, other) {
+            (Timeout,      Timeout)      => true,
+            (PoolClosed,   PoolClosed)   => true,
+            (InvalidLease, InvalidLease) => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Connection slot — opaque ID + sequence number for ABA protection
 // -----------------------------------------------------------------------------

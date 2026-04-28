@@ -56,6 +56,24 @@ public type PlanError is {
 
 public fn plan_error(msg: Text) -> PlanError { PlanError { message: msg } }
 
+implement Display for PlanError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"sqlite plan error: {self.message}".as_str())
+    }
+}
+
+implement Debug for PlanError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"PlanError {{ message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for PlanError {
+    fn eq(&self, other: &PlanError) -> Bool {
+        self.message == other.message
+    }
+}
+
 // -----------------------------------------------------------------------------
 // PlanColumn — resolved output column
 // -----------------------------------------------------------------------------

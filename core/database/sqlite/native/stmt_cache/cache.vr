@@ -31,6 +31,36 @@ public type CacheError is
       CeNoSpace
     | CeAlreadyPinned;
 
+implement Display for CacheError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            CeNoSpace       => "sqlite stmt cache full",
+            CeAlreadyPinned => "sqlite stmt cache entry already pinned",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for CacheError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            CeNoSpace       => "CeNoSpace",
+            CeAlreadyPinned => "CeAlreadyPinned",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for CacheError {
+    fn eq(&self, other: &CacheError) -> Bool {
+        match (self, other) {
+            (CeNoSpace,       CeNoSpace)       => true,
+            (CeAlreadyPinned, CeAlreadyPinned) => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Statistics
 // -----------------------------------------------------------------------------
