@@ -74,6 +74,41 @@ public type Base58Error is
     | TruncatedChecksum
     | InputTooLong { len: Int, limit: Int };
 
+implement Display for Base58Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidCharacter(b)        => f.write_str(f"base58: invalid character 0x{b:x}".as_str()),
+            ChecksumMismatch           => f.write_str("base58: checksum mismatch"),
+            TruncatedChecksum          => f.write_str("base58: truncated checksum"),
+            InputTooLong { len, limit }=> f.write_str(f"base58: input {len} bytes exceeds limit {limit}".as_str()),
+        }
+    }
+}
+
+implement Debug for Base58Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidCharacter(b)        => f.write_str(f"InvalidCharacter(0x{b:x})".as_str()),
+            ChecksumMismatch           => f.write_str("ChecksumMismatch"),
+            TruncatedChecksum          => f.write_str("TruncatedChecksum"),
+            InputTooLong { len, limit }=> f.write_str(f"InputTooLong {{ len: {len}, limit: {limit} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for Base58Error {
+    fn eq(&self, other: &Base58Error) -> Bool {
+        match (self, other) {
+            (InvalidCharacter(a), InvalidCharacter(b)) => a == b,
+            (ChecksumMismatch,    ChecksumMismatch)    => true,
+            (TruncatedChecksum,   TruncatedChecksum)   => true,
+            (InputTooLong { len: la, limit: lia },
+             InputTooLong { len: lb, limit: lib })     => la == lb && lia == lib,
+            _ => false,
+        }
+    }
+}
+
 /// Hard cap on `decode` input length. Base58 decode is O(N²) — every
 /// character requires an inner loop scaling with the accumulated big-
 /// integer width. 64 KiB input is well above any realistic identifier

@@ -36,6 +36,37 @@ public type Base32Error is
     | InvalidLength(Int)
     | TrailingBits;
 
+implement Display for Base32Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidCharacter(b) => f.write_str(f"base32: invalid character 0x{b:x}".as_str()),
+            InvalidLength(n)    => f.write_str(f"base32: invalid length {n}".as_str()),
+            TrailingBits        => f.write_str("base32: non-zero trailing bits"),
+        }
+    }
+}
+
+implement Debug for Base32Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidCharacter(b) => f.write_str(f"InvalidCharacter(0x{b:x})".as_str()),
+            InvalidLength(n)    => f.write_str(f"InvalidLength({n})".as_str()),
+            TrailingBits        => f.write_str("TrailingBits"),
+        }
+    }
+}
+
+implement Eq for Base32Error {
+    fn eq(&self, other: &Base32Error) -> Bool {
+        match (self, other) {
+            (InvalidCharacter(a), InvalidCharacter(b)) => a == b,
+            (InvalidLength(a),    InvalidLength(b))    => a == b,
+            (TrailingBits,        TrailingBits)        => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Alphabet — V8 (#252) — RFC 4648 §6 (Standard) and §7 (Extended Hex).
 // =============================================================================

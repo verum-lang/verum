@@ -66,6 +66,37 @@ public type Rfc3339Error is
     | InvalidField(Text)
     | OutOfRange(Text);
 
+implement Display for Rfc3339Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)    => f.write_str(f"RFC 3339: malformed ({reason})".as_str()),
+            InvalidField(field)  => f.write_str(f"RFC 3339: invalid field ({field})".as_str()),
+            OutOfRange(field)    => f.write_str(f"RFC 3339: value out of range ({field})".as_str()),
+        }
+    }
+}
+
+implement Debug for Rfc3339Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)    => f.write_str(f"Malformed({reason})".as_str()),
+            InvalidField(field)  => f.write_str(f"InvalidField({field})".as_str()),
+            OutOfRange(field)    => f.write_str(f"OutOfRange({field})".as_str()),
+        }
+    }
+}
+
+implement Eq for Rfc3339Error {
+    fn eq(&self, other: &Rfc3339Error) -> Bool {
+        match (self, other) {
+            (Malformed(a),    Malformed(b))    => a == b,
+            (InvalidField(a), InvalidField(b)) => a == b,
+            (OutOfRange(a),   OutOfRange(b))   => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parse
 // =============================================================================
