@@ -53,7 +53,15 @@ public type LinkEntry is {
 };
 
 public type LinkHeaderError is
-      Malformed(Text);
+      Malformed(Text)
+    | TooManyEntries { declared: Int, limit: Int };
+
+/// Hard cap on the number of `<uri>; param=...` entries in a single
+/// `Link:` header. CVE-2011-3192-class fan-out — a peer sending
+/// thousands of comma-separated entries forces per-entry URI +
+/// param parsing. Real-world headers carry 2-5 entries (next, prev,
+/// canonical, preload, etc.); 256 is a generous bound.
+public const MAX_LINK_ENTRIES: Int = 256;
 
 // =============================================================================
 // Parse
@@ -66,6 +74,14 @@ public fn parse(value: &Text) -> Result<List<LinkEntry>, LinkHeaderError> {
     while i < b.len() {
         i = skip_ws(b, i);
         if i >= b.len() { break; }
+        // CVE-2011-3192-class hostile-input fan-out — bail when a
+        // peer ships thousands of entries before per-entry URI+param
+        // parsing escalates the cost.
+        if out.len() >= MAX_LINK_ENTRIES {
+            return Err(LinkHeaderError.TooManyEntries {
+                declared: out.len() + 1, limit: MAX_LINK_ENTRIES,
+            });
+        }
         let (entry, next_i) = parse_entry(b, i)?;
         out.push(entry);
         i = next_i;
