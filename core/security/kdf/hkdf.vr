@@ -63,6 +63,44 @@ public type HkdfError is
     | OutputTooLong { requested: Int, limit: Int }
     | InvalidPrk { len: Int };
 
+// Display + Debug + Eq for HkdfError — standard stdlib
+// protocol impls.  Pre-fix had no impls.
+
+implement Display for HkdfError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            HkdfError.OutputTooLong { requested, limit } =>
+                f.write_str(f"HKDF output length {requested} exceeds RFC 5869 limit {limit}".as_str()),
+            HkdfError.InvalidPrk { len } =>
+                f.write_str(f"HKDF pseudo-random key has invalid length: {len}".as_str()),
+        }
+    }
+}
+
+implement Debug for HkdfError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            HkdfError.OutputTooLong { requested, limit } =>
+                f.write_str(f"OutputTooLong {{ requested: {requested}, limit: {limit} }}".as_str()),
+            HkdfError.InvalidPrk { len } =>
+                f.write_str(f"InvalidPrk {{ len: {len} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for HkdfError {
+    fn eq(&self, other: &HkdfError) -> Bool {
+        match (self, other) {
+            (
+                HkdfError.OutputTooLong { requested: ra, limit: la },
+                HkdfError.OutputTooLong { requested: rb, limit: lb },
+            ) => ra == rb && la == lb,
+            (HkdfError.InvalidPrk { len: a }, HkdfError.InvalidPrk { len: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // SHA-256 variant
 // =============================================================================
