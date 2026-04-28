@@ -95,7 +95,10 @@ implement AsyncSemaphore {
     /// releases on drop. Errors with `SemaphoreError.Closed` if
     /// `close()` was called before a permit was granted.
     public async fn acquire(&self) -> Result<SemaphorePermit, SemaphoreError> {
-        let fut = SemaphoreFuture { sem: self.inner.clone() };
+        let fut = SemaphoreFuture {
+            sem: self.inner.clone(),
+            waker_registered: false,
+        };
         fut.await
     }
 
@@ -184,13 +187,25 @@ implement Drop for SemaphorePermit {
 
 public type SemaphoreFuture is {
     sem: Shared<Mutex<SemaphoreInner>>,
+    /// Register-once flag — same convention as
+    /// core/async/channel.vr's senders/receivers. Without this, every
+    /// poll of the same future pushed a fresh waker clone onto
+    /// `inner.waiters`; spurious wakes / multi-pass executors /
+    /// select! polling were accumulating duplicate stale entries that
+    /// later add_permits / Drop iterations would pop and consume,
+    /// "wasting" wake budget without actually waking new acquirers
+    /// and growing the deque unboundedly across the future's lifetime.
+    waker_registered: Bool,
 };
 
 public type SemaphoreError is
       Closed;
 
 // The Future impl: on first poll, try to grab a permit; if not
-// available, register the waker and return Pending.
+// available, register the waker once and return Pending. Subsequent
+// polls re-check permits but skip waker registration — the existing
+// entry remains valid because cx.waker() for a given future returns
+// a wake-equivalent value across polls.
 implement Future for SemaphoreFuture {
     type Output = Result<SemaphorePermit, SemaphoreError>;
 
@@ -203,7 +218,10 @@ implement Future for SemaphoreFuture {
             inner.permits = inner.permits - 1;
             return Poll.Ready(Ok(SemaphorePermit { sem: self.sem.clone() }));
         }
-        inner.waiters.push_back(cx.waker().clone());
+        if !self.waker_registered {
+            inner.waiters.push_back(cx.waker().clone());
+            self.waker_registered = true;
+        }
         Poll.Pending
     }
 }
