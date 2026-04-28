@@ -1082,22 +1082,25 @@ mod tests {
     }
 
     #[test]
-    fn test_entry_main_takes_precedence_over_script_main() {
-        // If a script-mode module ALSO declares an explicit `main`,
-        // the explicit one wins — that lets users gradually migrate
-        // a script to a regular main without a parser flip.
+    fn test_entry_script_main_is_entry_in_script_module_even_when_main_exists() {
+        // Script-mode contract (lines 103-117): in a script-tagged module,
+        // `__verum_script_main` IS the entry. A `fn main` in that same
+        // module is a regular function (callable, not the program entry).
+        // The two roles never overlap — by design — so users can declare
+        // `fn main` as a helper inside a script without it accidentally
+        // hijacking the entry.
         let phase = EntryDetectionPhase::new();
         let module = make_module(
             vec![
-                build_fn("__verum_script_main", false),
-                build_fn("main", true), // async — distinguishes from script_main
+                build_fn("__verum_script_main", false), // sync
+                build_fn("main", true),                 // async helper, NOT the entry
             ],
             true,
         );
         let modules = vec![module];
         let cfg = phase.detect_entry_point(&modules).expect("entry found");
-        // explicit `main` is async → MainConfig::Async
-        assert!(matches!(cfg, MainConfig::Async));
+        // `__verum_script_main` is sync → MainConfig::Sync
+        assert!(matches!(cfg, MainConfig::Sync));
     }
 
     #[test]
