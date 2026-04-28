@@ -91,6 +91,56 @@ public type GcmError is
     /// forgery).
     | InputTooLarge { limit_bytes: Int };
 
+// Display + Debug + Eq for GcmError.  TagMismatch
+// formatting deliberately avoids leaking which field
+// (key/nonce/AAD/ciphertext) failed verification — per
+// NIST SP 800-38D §6, side-channel-leaking the failure
+// detail is forbidden under cryptographic AEAD semantics.
+
+implement Display for GcmError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            GcmError.TagMismatch =>
+                f.write_str("AES-GCM tag verification failed"),
+            GcmError.InvalidInput { reason } => {
+                f.write_str("AES-GCM invalid input: ")?;
+                f.write_str(reason.as_str())
+            },
+            GcmError.InputTooLarge { limit_bytes } =>
+                f.write_str(f"AES-GCM input exceeds NIST SP 800-38D limit ({limit_bytes} bytes)".as_str()),
+        }
+    }
+}
+
+implement Debug for GcmError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            GcmError.TagMismatch => f.write_str("TagMismatch"),
+            GcmError.InvalidInput { reason } => {
+                f.write_str("InvalidInput { reason: ")?;
+                f.write_str(reason.as_str())?;
+                f.write_str(" }")
+            },
+            GcmError.InputTooLarge { limit_bytes } =>
+                f.write_str(f"InputTooLarge {{ limit_bytes: {limit_bytes} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for GcmError {
+    fn eq(&self, other: &GcmError) -> Bool {
+        match (self, other) {
+            (GcmError.TagMismatch, GcmError.TagMismatch) => true,
+            (GcmError.InvalidInput { reason: a }, GcmError.InvalidInput { reason: b }) => a == b,
+            (
+                GcmError.InputTooLarge { limit_bytes: a },
+                GcmError.InputTooLarge { limit_bytes: b },
+            ) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // NIST SP 800-38D §5.2.1.1 absolute upper bound on plaintext size for
 // a single (key, IV) pair under AES-GCM:
 //

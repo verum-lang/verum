@@ -37,6 +37,45 @@ public type Pbkdf2Error is
     | BadIterations
     | BadOutputLength;
 
+// Display + Debug + Eq for Pbkdf2Error — standard
+// stdlib protocol impls.  Pre-fix had no impls; callers
+// wanting to log/format/compare these errors had to roll
+// their own match block.
+
+implement Display for Pbkdf2Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Pbkdf2Error.OutputTooLong   =>
+                f.write_str("PBKDF2 output length exceeds platform limit"),
+            Pbkdf2Error.BadIterations   =>
+                f.write_str("PBKDF2 iteration count outside permitted range"),
+            Pbkdf2Error.BadOutputLength =>
+                f.write_str("PBKDF2 output length must be > 0"),
+        }
+    }
+}
+
+implement Debug for Pbkdf2Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Pbkdf2Error.OutputTooLong   => f.write_str("OutputTooLong"),
+            Pbkdf2Error.BadIterations   => f.write_str("BadIterations"),
+            Pbkdf2Error.BadOutputLength => f.write_str("BadOutputLength"),
+        }
+    }
+}
+
+implement Eq for Pbkdf2Error {
+    fn eq(&self, other: &Pbkdf2Error) -> Bool {
+        match (self, other) {
+            (Pbkdf2Error.OutputTooLong,   Pbkdf2Error.OutputTooLong)   => true,
+            (Pbkdf2Error.BadIterations,   Pbkdf2Error.BadIterations)   => true,
+            (Pbkdf2Error.BadOutputLength, Pbkdf2Error.BadOutputLength) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Max output length per RFC 8018 §5.2: (2^32 - 1) × hLen bytes.
 /// For HMAC-SHA256 (hLen = 32) this is ~137 GiB — we cap at
 /// 1 MiB in this API to keep List<Byte> allocation sane.
