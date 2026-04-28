@@ -889,11 +889,21 @@ fn test_compile_stdlib_io_engine() {
 }
 
 /// Tests compilation of core/io/fs.vr
+///
+/// `fs.vr` mounts cross-module symbols from `io.protocols` (most
+/// notably `io_error_kind_from_os_code`, the per-platform errno-to-
+/// `IoErrorKind` mapping populated via @cfg).  The mount-aware test
+/// helper parses each mounted module and pre-registers its
+/// declarations before compiling the main file — `compile_stdlib_file`
+/// would surface "undefined function: io_error_kind_from_os_code (in
+/// function metadata)" because mount resolution is not active.
 #[test]
 fn test_compile_stdlib_io_fs() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/io/fs.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile io/fs.vr");
+        compile_stdlib_file_with_mounts(path, core_root)
+            .expect("Failed to compile io/fs.vr");
     }
 }
 
