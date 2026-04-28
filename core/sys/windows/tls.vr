@@ -67,6 +67,53 @@ public type WindowsTlsError is
     | TlsIndexExhausted
     ;
 
+implement Display for WindowsTlsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotInitialized                       => f.write_str("Windows TLS: not initialized"),
+            AlreadyInitialized                   => f.write_str("Windows TLS: already initialized"),
+            AllocationFailed { code, size }      => f.write_str(f"Windows TLS: allocation of {size} bytes failed (code {code})".as_str()),
+            InvalidSlot { slot }                 => f.write_str(f"Windows TLS: invalid slot {slot}".as_str()),
+            StackOverflow { slot }               => f.write_str(f"Windows TLS: stack overflow on slot {slot}".as_str()),
+            StackUnderflow { slot }              => f.write_str(f"Windows TLS: stack underflow on slot {slot}".as_str()),
+            InvalidTcb                           => f.write_str("Windows TLS: invalid thread-control block"),
+            TlsIndexExhausted                    => f.write_str("Windows TLS: TLS index exhausted"),
+        }
+    }
+}
+
+implement Debug for WindowsTlsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotInitialized                       => f.write_str("NotInitialized"),
+            AlreadyInitialized                   => f.write_str("AlreadyInitialized"),
+            AllocationFailed { code, size }      => f.write_str(f"AllocationFailed {{ code: {code}, size: {size} }}".as_str()),
+            InvalidSlot { slot }                 => f.write_str(f"InvalidSlot {{ slot: {slot} }}".as_str()),
+            StackOverflow { slot }               => f.write_str(f"StackOverflow {{ slot: {slot} }}".as_str()),
+            StackUnderflow { slot }              => f.write_str(f"StackUnderflow {{ slot: {slot} }}".as_str()),
+            InvalidTcb                           => f.write_str("InvalidTcb"),
+            TlsIndexExhausted                    => f.write_str("TlsIndexExhausted"),
+        }
+    }
+}
+
+implement Eq for WindowsTlsError {
+    fn eq(&self, other: &WindowsTlsError) -> Bool {
+        match (self, other) {
+            (NotInitialized,                     NotInitialized)                     => true,
+            (AlreadyInitialized,                 AlreadyInitialized)                 => true,
+            (AllocationFailed { code: ca, size: sa },
+             AllocationFailed { code: cb, size: sb })                                => ca == cb && sa == sb,
+            (InvalidSlot { slot: a },            InvalidSlot { slot: b })            => a == b,
+            (StackOverflow { slot: a },          StackOverflow { slot: b })          => a == b,
+            (StackUnderflow { slot: a },         StackUnderflow { slot: b })         => a == b,
+            (InvalidTcb,                         InvalidTcb)                         => true,
+            (TlsIndexExhausted,                  TlsIndexExhausted)                  => true,
+            _ => false,
+        }
+    }
+}
+
 implement WindowsTlsError {
     public fn message(&self) -> Text {
         match self {

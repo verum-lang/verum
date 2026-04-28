@@ -73,6 +73,52 @@ public type SysTlsError is
     | PthreadError { code: Int }
     ;
 
+implement Display for SysTlsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotInitialized              => f.write_str("Darwin TLS: not initialized"),
+            AlreadyInitialized          => f.write_str("Darwin TLS: already initialized"),
+            AllocationFailed { code }   => f.write_str(f"Darwin TLS: allocation failed (code {code})".as_str()),
+            InvalidSlot { slot }        => f.write_str(f"Darwin TLS: invalid slot {slot}".as_str()),
+            StackOverflow { slot }      => f.write_str(f"Darwin TLS: stack overflow on slot {slot}".as_str()),
+            StackUnderflow { slot }     => f.write_str(f"Darwin TLS: stack underflow on slot {slot}".as_str()),
+            InvalidTcb                  => f.write_str("Darwin TLS: invalid thread-control block"),
+            PthreadError { code }       => f.write_str(f"Darwin TLS: pthread error (code {code})".as_str()),
+        }
+    }
+}
+
+implement Debug for SysTlsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotInitialized              => f.write_str("NotInitialized"),
+            AlreadyInitialized          => f.write_str("AlreadyInitialized"),
+            AllocationFailed { code }   => f.write_str(f"AllocationFailed {{ code: {code} }}".as_str()),
+            InvalidSlot { slot }        => f.write_str(f"InvalidSlot {{ slot: {slot} }}".as_str()),
+            StackOverflow { slot }      => f.write_str(f"StackOverflow {{ slot: {slot} }}".as_str()),
+            StackUnderflow { slot }     => f.write_str(f"StackUnderflow {{ slot: {slot} }}".as_str()),
+            InvalidTcb                  => f.write_str("InvalidTcb"),
+            PthreadError { code }       => f.write_str(f"PthreadError {{ code: {code} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for SysTlsError {
+    fn eq(&self, other: &SysTlsError) -> Bool {
+        match (self, other) {
+            (NotInitialized,             NotInitialized)             => true,
+            (AlreadyInitialized,         AlreadyInitialized)         => true,
+            (AllocationFailed { code: a }, AllocationFailed { code: b }) => a == b,
+            (InvalidSlot { slot: a },    InvalidSlot { slot: b })    => a == b,
+            (StackOverflow { slot: a },  StackOverflow { slot: b })  => a == b,
+            (StackUnderflow { slot: a }, StackUnderflow { slot: b }) => a == b,
+            (InvalidTcb,                 InvalidTcb)                 => true,
+            (PthreadError { code: a },   PthreadError { code: b })   => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Alias for convenience
 public type DarwinTlsError is SysTlsError;
 

@@ -113,6 +113,53 @@ implement DarwinIoDriverError {
     }
 }
 
+implement Display for DarwinIoDriverError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for DarwinIoDriverError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WouldBlock                       => f.write_str("WouldBlock"),
+            Interrupted                      => f.write_str("Interrupted"),
+            NotFound { path }                => f.write_str(f"NotFound {{ path: {path} }}".as_str()),
+            AlreadyExists                    => f.write_str("AlreadyExists"),
+            InvalidInput { reason }          => f.write_str(f"InvalidInput {{ reason: {reason} }}".as_str()),
+            PermissionDenied                 => f.write_str("PermissionDenied"),
+            ConnectionRefused                => f.write_str("ConnectionRefused"),
+            ConnectionReset                  => f.write_str("ConnectionReset"),
+            BrokenPipe                       => f.write_str("BrokenPipe"),
+            TimedOut                         => f.write_str("TimedOut"),
+            QueueFull                        => f.write_str("QueueFull"),
+            Closed                           => f.write_str("Closed"),
+            Other { code, message }          => f.write_str(f"Other {{ code: {code}, message: {message} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for DarwinIoDriverError {
+    fn eq(&self, other: &DarwinIoDriverError) -> Bool {
+        match (self, other) {
+            (WouldBlock,                     WouldBlock)                     => true,
+            (Interrupted,                    Interrupted)                    => true,
+            (NotFound { path: a },           NotFound { path: b })           => a == b,
+            (AlreadyExists,                  AlreadyExists)                  => true,
+            (InvalidInput { reason: a },     InvalidInput { reason: b })     => a == b,
+            (PermissionDenied,               PermissionDenied)               => true,
+            (ConnectionRefused,              ConnectionRefused)              => true,
+            (ConnectionReset,                ConnectionReset)                => true,
+            (BrokenPipe,                     BrokenPipe)                     => true,
+            (TimedOut,                       TimedOut)                       => true,
+            (QueueFull,                      QueueFull)                      => true,
+            (Closed,                         Closed)                         => true,
+            (Other { code: ca, message: ma }, Other { code: cb, message: mb }) => ca == cb && ma == mb,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Operation Types
 // =============================================================================
