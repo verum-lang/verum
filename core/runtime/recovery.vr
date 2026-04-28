@@ -819,13 +819,49 @@ implement InlineRetryPolicy {
 // Helper Functions
 // =============================================================================
 
-/// Check if error is transient (retriable)
+/// Check if error is transient (retriable).
+///
+/// Pre-fix recognised only 4 substrings — `timeout`,
+/// `connection reset`, `temporarily unavailable`, `try
+/// again` — and missed the canonical Display forms
+/// produced by the stdlib's typed error surfaces.  In
+/// particular `IoErrorKind.TimedOut` formats as
+/// `"operation timed out"` (no `"timeout"` substring) and
+/// `IoErrorKind.WouldBlock` / `Interrupted` formatted as
+/// `"operation would block"` / `"operation interrupted"`
+/// — both transient by definition but missed by the
+/// pre-fix predicate.
+///
+/// Now recognises:
+///   * `timed out` / `timeout`              — TimedOut, ETIMEDOUT
+///   * `connection reset` / `aborted`       — ECONNRESET / ECONNABORTED
+///   * `connection refused`                 — ECONNREFUSED (transient
+///                                            in the listening-socket
+///                                            still-binding case)
+///   * `would block`                        — EAGAIN / EWOULDBLOCK / EINPROGRESS
+///   * `temporarily unavailable`            — libc Display for EAGAIN
+///   * `interrupted`                        — EINTR / Interrupted
+///   * `try again`                          — DnsError.TryAgain
+///   * `tryagain`                           — DnsError.TryAgain Debug
+///
+/// Permanent failures (NotFound, PermissionDenied,
+/// InvalidInput, AddrInUse, etc.) are NOT matched —
+/// retrying them is wasted work.
 fn is_transient_error(error_msg: &Text) -> Bool {
-    // Transient errors: timeouts, connection reset, temporary failures
-    error_msg.contains("timeout") ||
-    error_msg.contains("connection reset") ||
-    error_msg.contains("temporarily unavailable") ||
-    error_msg.contains("try again")
+    // Lowercase once for case-insensitive matching.  The
+    // typed Display strings are lowercase but user-supplied
+    // and OS-supplied messages may not be.
+    let m = error_msg.to_lowercase();
+    m.contains("timed out") ||
+    m.contains("timeout") ||
+    m.contains("connection reset") ||
+    m.contains("connection aborted") ||
+    m.contains("connection refused") ||
+    m.contains("would block") ||
+    m.contains("temporarily unavailable") ||
+    m.contains("interrupted") ||
+    m.contains("try again") ||
+    m.contains("tryagain")
 }
 
 /// Simple PRNG for jitter (xorshift64)
