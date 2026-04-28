@@ -1,0 +1,148 @@
+module core.database.sqlite.native.l7_api.hooks;
+
+// =============================================================================
+// l7_api/hooks.vr — register Connection-level observation hooks
+// =============================================================================
+// Layer: 7 — public API.
+// Spec: sqlite-native.md §13.6 (hooks); database.md §15.x (audit context);
+//       SQLite C API: sqlite3_commit_hook / sqlite3_rollback_hook /
+//                     sqlite3_update_hook.
+//
+// Hooks are connection-bound observation / decision points.  Each
+// surface is a separate protocol in `ext.hooks`; this module exposes
+// thin sugar functions on `Database` that forward into the
+// connection's `FnRegistry` (accessible via `Database.registry_mut`).
+//
+// Eight hook surfaces exist (all in `ext.hooks`):
+//
+//     CommitHook        veto an in-progress COMMIT
+//     RollbackHook      observe ROLLBACKs
+//     UpdateHook        observe DML (INSERT / UPDATE / DELETE)
+//     PreUpdateHook     observe DML with old + new row images
+//     AuthorizerHook    pre-statement compile gate
+//     BusyHandler       SQLITE_BUSY retry policy
+//     ProgressHandler   per-N-instruction heartbeat
+//     TraceHook         observability surface
+//
+// Last subscriber wins (matches SQLite semantics).  Calling `set_*`
+// twice replaces; `clear_*` removes.
+//
+// Hooks fire from these sites:
+//
+//   * commit_hook   — Connection.commit_tx, BEFORE the actual COMMIT.
+//                     Veto (`CdAbort(msg)`) turns the commit into a
+//                     forced rollback returning the message.
+//
+//   * rollback_hook — Connection.rollback_tx, AFTER state transition.
+//                     Observation only — no veto.
+//
+//   * update_hook   — fired by the L4 VDBE Insert / Update / Delete
+//                     opcodes (separate task — wiring lands when the
+//                     opcode handlers learn about the Connection's
+//                     registry).
+//
+//   * authorizer    — fired by the L5 SQL compiler before each DML /
+//                     DDL action (separate task — auth-on-compile
+//                     wiring lands with the prepare pipeline).
+//
+//   * busy_handler  — fired by L1 pager when SQLITE_BUSY is returned.
+//
+//   * progress      — fired by L4 VDBE every N instructions.
+//
+//   * trace         — fired by L7 prepare / step / finalize.
+// =============================================================================
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
+    AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
+};
+mount core.database.sqlite.native.l7_api.database.{Database};
+
+// -----------------------------------------------------------------------------
+// CommitHook — veto in-progress COMMITs
+// -----------------------------------------------------------------------------
+
+/// Register a commit-hook on `db`.  Replaces any previously-set hook.
+/// Equivalent to SQLite's `sqlite3_commit_hook(db, callback, arg)`.
+public fn set_commit_hook(db: &mut Database, h: Heap<dyn CommitHook>) {
+    db.registry_mut().set_commit_hook(h);
+}
+
+/// Remove the commit-hook.  COMMIT proceeds without observation.
+public fn clear_commit_hook(db: &mut Database) {
+    db.registry_mut().clear_commit_hook();
+}
+
+public fn has_commit_hook(db: &Database) -> Bool {
+    db.registry_view().has_commit_hook()
+}
+
+// -----------------------------------------------------------------------------
+// RollbackHook
+// -----------------------------------------------------------------------------
+
+public fn set_rollback_hook(db: &mut Database, h: Heap<dyn RollbackHook>) {
+    db.registry_mut().set_rollback_hook(h);
+}
+
+public fn has_rollback_hook(db: &Database) -> Bool {
+    db.registry_view().has_rollback_hook()
+}
+
+// -----------------------------------------------------------------------------
+// UpdateHook
+// -----------------------------------------------------------------------------
+
+public fn set_update_hook(db: &mut Database, h: Heap<dyn UpdateHook>) {
+    db.registry_mut().set_update_hook(h);
+}
+
+public fn has_update_hook(db: &Database) -> Bool {
+    db.registry_view().has_update_hook()
+}
+
+// -----------------------------------------------------------------------------
+// PreUpdateHook
+// -----------------------------------------------------------------------------
+
+public fn set_pre_update_hook(db: &mut Database, h: Heap<dyn PreUpdateHook>) {
+    db.registry_mut().set_pre_update_hook(h);
+}
+
+// -----------------------------------------------------------------------------
+// AuthorizerHook
+// -----------------------------------------------------------------------------
+
+public fn set_authorizer(db: &mut Database, h: Heap<dyn AuthorizerHook>) {
+    db.registry_mut().set_authorizer(h);
+}
+
+public fn has_authorizer(db: &Database) -> Bool {
+    db.registry_view().has_authorizer()
+}
+
+// -----------------------------------------------------------------------------
+// BusyHandler
+// -----------------------------------------------------------------------------
+
+public fn set_busy_handler(db: &mut Database, h: Heap<dyn BusyHandler>) {
+    db.registry_mut().set_busy_handler(h);
+}
+
+// -----------------------------------------------------------------------------
+// ProgressHandler
+// -----------------------------------------------------------------------------
+
+public fn set_progress_handler(db: &mut Database, h: Heap<dyn ProgressHandler>) {
+    db.registry_mut().set_progress_handler(h);
+}
+
+// -----------------------------------------------------------------------------
+// TraceHook
+// -----------------------------------------------------------------------------
+
+public fn set_trace_hook(db: &mut Database, h: Heap<dyn TraceHook>) {
+    db.registry_mut().set_trace_hook(h);
+}

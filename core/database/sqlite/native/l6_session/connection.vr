@@ -41,6 +41,12 @@ mount core.database.sqlite.native.l4_vdbe.Register;
 mount core.database.sqlite.native.l6_session.schema_cache.{
     SchemaCache, schema_cache_new,
 };
+mount core.database.sqlite.native.ext.registry.{
+    FnRegistry, registry_new,
+};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitDecision, CdAllow, CdAbort,
+};
 
 // -----------------------------------------------------------------------------
 // Mode
@@ -115,6 +121,12 @@ public type Connection is {
     // actually see the inserted rows — real pager-backed row
     // persistence plugs in here once the actor IPC lands.
     table_store: Map<Int, List<List<Register>>>,
+    /// Per-connection function & hook registry — holds scalar /
+    /// aggregate / window function entries plus the eight observation
+    /// hook slots (commit / rollback / update / pre_update /
+    /// authorizer / busy / progress / trace).  Last subscriber wins.
+    /// See `core.database.sqlite.native.ext.registry`.
+    registry: FnRegistry,
 };
 
 /// Open an in-memory connection with the given mode. All three modes
@@ -132,6 +144,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
         path: ":memory:".clone(),
         next_root_page: 2,
         table_store: Map.new(),
+        registry: registry_new(),
     })
 }
 
@@ -168,6 +181,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, Con
         path: path.clone(),
         next_root_page: 2,
         table_store: Map.new(),
+        registry: registry_new(),
     })
 }
 
@@ -203,15 +217,54 @@ implement Connection {
 
     public fn commit_tx(&mut self) -> Result<(), ConnectionError> {
         if !self.tx.active { return Err(TxNotActive); }
-        self.tx = tx_state_autocommit();
-        Ok(())
+        // Fire commit-hook BEFORE finalising tx.  Hook may veto
+        // (CdAbort) — in that case we treat it as a constraint
+        // violation and force a rollback instead.  Matches the SQLite
+        // C API semantics for sqlite3_commit_hook.
+        let veto: Maybe<Text> = match &mut self.registry.commit_hook {
+            None => None,
+            Some(h) => {
+                let hook_ref = &mut **h;
+                match hook_ref.on_commit() {
+                    CdAllow      => None,
+                    CdAbort(msg) => Some(msg),
+                }
+            }
+        };
+        match veto {
+            None => {
+                self.tx = tx_state_autocommit();
+                Ok(())
+            }
+            Some(msg) => {
+                // Commit aborted by hook → rollback the tx and emit
+                // the hook's rejection reason via IoError until a
+                // dedicated "constraint by hook" error variant lands.
+                self.tx = tx_state_autocommit();
+                Err(IoError(msg))
+            }
+        }
     }
 
     public fn rollback_tx(&mut self) -> Result<(), ConnectionError> {
         if !self.tx.active { return Err(TxNotActive); }
         self.tx = tx_state_autocommit();
+        // Notify rollback-hook AFTER state transitions so observers
+        // see the post-rollback world.  Notification only — no veto.
+        match &mut self.registry.rollback_hook {
+            None => {}
+            Some(h) => {
+                let hook_ref = &mut **h;
+                hook_ref.on_rollback();
+            }
+        }
         Ok(())
     }
+
+    /// Borrow the hook + function registry.  Used by the L7 façade to
+    /// expose `Database.set_*_hook` / `register_scalar` etc.
+    public fn registry_view(&self) -> &FnRegistry { &self.registry }
+    public fn registry_mut(&mut self) -> &mut FnRegistry { &mut self.registry }
 
     /// Savepoint push — increments depth without replacing `tx.mode`.
     /// Caller is responsible for issuing the SAVEPOINT VDBE opcode.
