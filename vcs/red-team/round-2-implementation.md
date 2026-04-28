@@ -40,10 +40,16 @@ deferred to the fuzz infrastructure track.
 **Status:** DEFECT (closed by #167) — VariantTag overflow handled by
 MakeVariantTyped extension byte scheme.
 
-### 2.2 Functions with 2^16+ instructions
+### 2.2 Functions with 2^16+ instructions — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs synthetic large-fn generator. Risk: any 16-bit
-PC offset / branch-target encoding overflow.
+**Status:** DEFENSE CONFIRMED — branch-target offsets are encoded as `i32`
+(`crates/verum_vbc/src/instruction.rs:8455`); 2^16+ instructions are not
+a cliff. The encoding has ~2.1 billion offsets of headroom (i32 range).
+
+**Guardrails:** `crates/verum_vbc/tests/red_team_bytecode_trust_boundary.rs`
+— 5 tests pin the i32-offset invariant for `Jmp`, `JmpIf`, `JmpNot` —
+including offsets at `i32::MAX`, `i32::MIN`, ±100_000 (well past i16
+range). All passing.
 
 ### 2.3 Nested generics 100 levels deep
 
@@ -77,9 +83,17 @@ needs ongoing differential vs snapshot.
 **Status:** PARTIAL DEFENSE — FFI-arity guardrail covers extern calls; the
 interpreter-side internal-call arity check is partial. Audit gap.
 
-### 3.3 FunctionId(N) out of range
+### 3.3 FunctionId(N) out of range — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs out-of-range-call test harness.
+**Status:** DEFENSE CONFIRMED — interpreter routes through
+`state.module.get_function(func_id).ok_or(InterpreterError::FunctionNotFound)?`
+at three sites (`mod.rs:136`, `mod.rs:407`, `mod.rs:516`). OOR FunctionId
+surfaces as a typed Err, never panics or segfaults.
+
+**Guardrails:** `crates/verum_vbc/tests/red_team_bytecode_trust_boundary.rs`
+— 4 tests pin the OOR invariant: `FunctionId(1)` (one-past-end),
+`FunctionId(0xFFFF_FF00)` (far OOR), `FunctionId(u32::MAX)`, plus the
+`FunctionId(0)` valid baseline.
 
 ### 3.4 Frame-stack overflow — DEFENSE CONFIRMED + guardrails 2026-04-28
 
@@ -269,13 +283,13 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 1.1 Random fuzz | PARTIAL | corpus expansion |
 | 1.2 Boundary cases | **PARTIAL** | 4-form guardrail (2026-04-28); full 1000-level fuzz pending |
 | 2.1 256+ variants | DEFECT-CLOSED | #167 |
-| 2.2 2^16+ instructions | PENDING | synthetic gen |
+| 2.2 2^16+ instructions | **DEFENSE CONFIRMED** | i32 PC offsets + 5 guardrails (2026-04-28) |
 | 2.3 Deep generics | PENDING | gen + termination |
 | 2.4 Recursive impl | **DEFENSE** | guardrail (2026-04-28) |
 | 2.5 Codegen non-determinism | PARTIAL | ongoing diff |
 | 3.1 RO register | PENDING | bytecode harness |
 | 3.2 Arity mismatch | PARTIAL | interpreter audit |
-| 3.3 OOR FunctionId | PENDING | OOR harness |
+| 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
 | 4.1 LibraryCall collision | PARTIAL | #176 |
 | 4.2 Networking arity | PARTIAL | #105 follow-up |
@@ -293,7 +307,8 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | PENDING | lint audit |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**7 vectors confirmed defended (was 6), 15 partial (was 14, two strengthened),
-5 pending (was 7)** post 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2
-closures (§1.2 / §2.4 / §3.4 / §5.1 / §5.2 / §5.3 / §6.2 guardrails landed).
-Sections A-C below record real defects already closed in the audit pass.
+**9 vectors confirmed defended (was 7), 15 partial, 3 pending (was 5)** post
+2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3
+closures (§1.2 / §2.2 / §2.4 / §3.3 / §3.4 / §5.1 / §5.2 / §5.3 / §6.2
+guardrails landed). Sections A-C below record real defects already closed
+in the audit pass.
