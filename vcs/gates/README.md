@@ -9,7 +9,7 @@ JSON for the dashboard. `make production-readiness` (defined in
 | ID | Gate | Runner | Status |
 |---|---|---|---|
 | 1 | Tier-equivalence (#196) | `make diff-red-team` | partial — extend to full corpus |
-| 2 | Memory-safety | `make test-l0` (L0-critical) | partial — needs 0-ignored / 0-known-failures invariant |
+| 2 | **Memory-safety** | `vcs/gates/memory_safety.sh` | **shipped** — zero skip/ignore/known-failure markers; currently GREEN |
 | 3 | Soak (24h) | not shipped | needs CI infrastructure |
 | 4 | Performance (±5%) | `cargo bench` baselines | not shipped |
 | 5 | **Documentation** | `vcs/gates/documentation.sh` | **shipped** — every `public fn/type/axiom/theorem` has `///` doc; currently GREEN |
