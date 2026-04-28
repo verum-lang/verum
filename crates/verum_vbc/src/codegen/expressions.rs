@@ -17650,6 +17650,18 @@ impl VbcCodegen {
                 self.emit_intrinsic_tensor_ext_extended(TensorExtSubOpcode::RegexCaptures, args, dest);
             }
 
+            // #12 / P3.2 — wire-level bridge to PermissionRouter.
+            // Routes (scope_tag, target_id) through the runtime
+            // and writes a 0/1 decision tag into dest.
+            InlineSequenceId::PermissionCheckWire => {
+                use crate::instruction::TensorExtSubOpcode;
+                self.emit_intrinsic_tensor_ext_extended(
+                    TensorExtSubOpcode::PermissionCheckWire,
+                    args,
+                    dest,
+                );
+            }
+
             // =================================================================
             // Type Introspection Operations
             // =================================================================

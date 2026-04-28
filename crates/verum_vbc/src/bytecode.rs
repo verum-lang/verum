@@ -799,6 +799,19 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*dtype);
         }
 
+        // #12 / P3.2 — Permission router wire-level bridge.
+        // Encoded as TensorExtended.PermissionCheckWire so the
+        // existing TensorExt sub-opcode dispatcher routes the
+        // decode; the actual call lands in the dispatch handler
+        // (interpreter/dispatch_table/handlers/tensor_extended.rs).
+        Instruction::PermissionCheckWire { dst, scope_tag, target_id } => {
+            output.push(Opcode::TensorExtended.to_byte());
+            output.push(TensorExtSubOpcode::PermissionCheckWire.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*scope_tag, output);
+            encode_reg(*target_id, output);
+        }
+
         // ====================================================================
         // GPU - Fast Path (single-byte opcodes for common operations)
         // ====================================================================
@@ -4047,6 +4060,21 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         | Some(TensorExtSubOpcode::RegexReplace)
                         | Some(TensorExtSubOpcode::RegexCaptures) => {
                             Err(VbcError::InvalidOpcode(sub_opcode_byte))
+                        }
+                        // #12 / P3.2 — permission_check_wire encoding:
+                        // [dst:reg, scope_tag:reg, target_id:reg].
+                        // Decoded into the dispatch handler in
+                        // tensor_extended.rs, which routes through
+                        // InterpreterState::check_permission.
+                        Some(TensorExtSubOpcode::PermissionCheckWire) => {
+                            let dst = decode_reg(data, offset)?;
+                            let scope_tag = decode_reg(data, offset)?;
+                            let target_id = decode_reg(data, offset)?;
+                            Ok(Instruction::PermissionCheckWire {
+                                dst,
+                                scope_tag,
+                                target_id,
+                            })
                         }
                         None => Err(VbcError::InvalidOpcode(sub_opcode_byte)),
                     }

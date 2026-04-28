@@ -2887,6 +2887,24 @@ pub enum TensorExtSubOpcode {
     /// groups are emitted as empty strings; callers needing
     /// `Maybe<Text>` per group can re-check via the regex API.
     RegexCaptures = 0x0C,
+
+    /// Wire-level permission check (#12 / P3.2).
+    ///
+    /// Format: `dst:reg, scope_tag:reg, target_id:reg`
+    /// Routes a (scope_tag: u32, target_id: u64) pair through the
+    /// runtime `PermissionRouter` and writes the decision tag
+    /// into `dst` (0 = Allow, 1 = Deny). The Rust-side router
+    /// holds the warm-path cache so repeats hit ≤2ns regardless
+    /// of caller. NOT itself permission-gated — gating the
+    /// gating intrinsic would create an infinite recursion in
+    /// the dispatch path.
+    ///
+    /// Byte chosen at 0x1C — outside both `TensorSubOpcode`
+    /// (0x00, 0x0D-0x1B, 0x20-…) and the regex window
+    /// (0x0A-0x0C) so the decoder's TensorSubOpcode probe
+    /// returns `None` and falls through to the extended
+    /// dispatch path.
+    PermissionCheckWire = 0x1C,
 }
 
 impl TensorExtSubOpcode {
@@ -2906,6 +2924,7 @@ impl TensorExtSubOpcode {
             0x0A => Some(Self::RegexFind),
             0x0B => Some(Self::RegexReplace),
             0x0C => Some(Self::RegexCaptures),
+            0x1C => Some(Self::PermissionCheckWire),
             _ => None,
         }
     }
@@ -2931,6 +2950,7 @@ impl TensorExtSubOpcode {
             Self::RegexFind => "REGEX_FIND",
             Self::RegexReplace => "REGEX_REPLACE",
             Self::RegexCaptures => "REGEX_CAPTURES",
+            Self::PermissionCheckWire => "PERMISSION_CHECK_WIRE",
         }
     }
 }
@@ -9615,6 +9635,25 @@ pub enum Instruction {
         shape: Reg,
         /// Data type.
         dtype: u8,
+    },
+
+    /// Wire-level bridge to the runtime `PermissionRouter`
+    /// (#12 / P3.2). Reads `scope_tag: u32` and `target_id: u64`
+    /// from the named registers, routes through
+    /// `InterpreterState::check_permission`, and writes the
+    /// decision tag (`0` = Allow, `1` = Deny) into `dst`.
+    ///
+    /// NOT itself permission-gated — gating the gating
+    /// intrinsic would create an infinite recursion in the
+    /// dispatch path. The Rust-side router holds the warm-path
+    /// cache so repeated invocations hit ≤2ns.
+    PermissionCheckWire {
+        /// Destination register receiving the decision tag.
+        dst: Reg,
+        /// Register holding the scope wire tag (u32).
+        scope_tag: Reg,
+        /// Register holding the target id (u64).
+        target_id: Reg,
     },
 
     // ========================================================================

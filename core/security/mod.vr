@@ -94,6 +94,12 @@ public module token;
 public module labels;
 public module regions;
 
+// Runtime capability gating surface bridging the
+// `PermissionRouter` on `InterpreterState`. Every gated
+// intrinsic short-circuits through `check_permission` before
+// the gated operation runs (#12 / P3.2).
+public module permission;
+
 // Re-exports of most-used surface.
 //
 // NOTE: module `hash.sha256` and a free function `sha256` would collide

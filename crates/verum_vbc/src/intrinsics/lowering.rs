@@ -3148,6 +3148,34 @@ impl IntrinsicLowering {
             }
 
             // =====================================================================
+            // Permission Gating (#12 / P3.2)
+            // =====================================================================
+            //
+            // The wire-level bridge to the runtime PermissionRouter.
+            // AOT lowers this to a thin extern call into
+            // `__verum_permission_check_wire(scope_tag: u32,
+            // target_id: u64) -> u32` (0 = Allow, 1 = Deny).
+            // The Rust-side helper holds the warm-path cache, so
+            // even AOT-compiled code hits the same ≤2ns budget on
+            // repeats.
+            InlineSequenceId::PermissionCheckWire => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![
+                        MlirAttr {
+                            name: "callee".to_string(),
+                            value: MlirAttrValue::String(
+                                "__verum_permission_check_wire".to_string(),
+                            ),
+                        },
+                    ],
+                    result_types: vec![MlirType::I32],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+
+            // =====================================================================
             // Type Introspection Operations
             // =====================================================================
 
@@ -4467,6 +4495,7 @@ impl IntrinsicLowering {
             TensorExtSubOpcode::RegexFind => "verum.regex.find",
             TensorExtSubOpcode::RegexReplace => "verum.regex.replace",
             TensorExtSubOpcode::RegexCaptures => "verum.regex.captures",
+            TensorExtSubOpcode::PermissionCheckWire => "verum.permission.check_wire",
         };
 
         self.emit(MlirOp {
