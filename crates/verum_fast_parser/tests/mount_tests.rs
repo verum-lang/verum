@@ -311,3 +311,129 @@ fn test_multiple_mounts() {
         }
     }
 }
+
+// ============================================================================
+// #5 / P1.5 — File-relative mount (mount ./foo.vr)
+// ============================================================================
+
+#[test]
+fn test_file_mount_dot_slash() {
+    let source = "mount ./helper.vr;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::File { path, .. } => {
+            assert_eq!(path.as_str(), "./helper.vr");
+        }
+        other => panic!("expected file mount, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_file_mount_dot_dot_slash() {
+    let source = "mount ../shared/util.vr;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::File { path, .. } => {
+            assert_eq!(path.as_str(), "../shared/util.vr");
+        }
+        other => panic!("expected file mount, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_file_mount_with_alias() {
+    let source = "mount ./helper.vr as Helper;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::File { path, .. } => {
+            assert_eq!(path.as_str(), "./helper.vr");
+        }
+        other => panic!("expected file mount, got {:?}", other),
+    }
+    assert!(mount.alias.is_some(), "alias must be captured");
+    if let verum_common::Maybe::Some(alias) = &mount.alias {
+        assert_eq!(alias.name.as_str(), "Helper");
+    }
+}
+
+#[test]
+fn test_file_mount_public() {
+    let source = "public mount ./api.vr as Api;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::File { path, .. } => {
+            assert_eq!(path.as_str(), "./api.vr");
+        }
+        other => panic!("expected file mount, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_file_mount_nested_directory() {
+    let source = "mount ./subdir/nested/util.vr;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::File { path, .. } => {
+            assert_eq!(path.as_str(), "./subdir/nested/util.vr");
+        }
+        other => panic!("expected file mount, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_file_mount_chained_parent() {
+    let source = "mount ../../shared/lib/util.vr;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::File { path, .. } => {
+            assert_eq!(path.as_str(), "../../shared/lib/util.vr");
+        }
+        other => panic!("expected file mount, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_file_mount_rejects_non_vr_extension() {
+    // `.txt` (or any non-`.vr`) → parse error.
+    let source = "mount ./data.txt;";
+    let result = parse(source);
+    assert!(result.is_err(), "non-`.vr` file mount must be rejected");
+}
+
+#[test]
+fn test_file_mount_rejects_traversal_escape() {
+    // `./a/../../escape.vr` reduces to `../escape.vr` after
+    // `..` cancels `a` then escapes — must be rejected at
+    // parse time, not at the loader.
+    let source = "mount ./a/../../escape.vr;";
+    let result = parse(source);
+    assert!(
+        result.is_err(),
+        "file mount that escapes the source directory must be rejected at parse time"
+    );
+}
+
+#[test]
+fn test_file_mount_rejects_directory_terminus() {
+    // Path that ends at `..` instead of a `.vr` file.
+    let source = "mount ./..;";
+    let result = parse(source);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_file_mount_distinguished_from_relative_module_path() {
+    // `mount .config.X;` (relative module path) must still
+    // parse as a Path, NOT as a file mount — the `Slash`
+    // disambiguator after the leading dot is what triggers
+    // file-mount routing.
+    let source = "mount .config.KubeConfig;";
+    let mount = extract_mount(source);
+    match &mount.tree.kind {
+        MountTreeKind::Path(_) => {}
+        other => panic!(
+            "relative module path must NOT route to File variant, got {:?}",
+            other
+        ),
+    }
+}
