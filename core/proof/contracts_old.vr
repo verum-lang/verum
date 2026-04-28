@@ -23,6 +23,16 @@
 // before the body runs, and substitutes the snapshot values into
 // the postcondition for evaluation.
 //
+// ## Architecture: Map / Set, not List<entry>
+//
+// The pre-state snapshot is keyed by location name and queried
+// per-postcondition-eval. Verification packages running a hundred
+// contract sites issue O(N) lookups; backing the snapshot with a
+// linear-scan list would put `O(M·N)` (M = locations per snapshot,
+// N = lookups per session) on the proof hot path. We use
+// `Map<Text, Text>` for snapshots and `Set<Text>` for frames so
+// every lookup / contains-check is O(1) amortised.
+//
 // ## ContractsFrame property
 //
 // A function's *frame* is the set of locations it may modify.
@@ -36,39 +46,47 @@
 
 module core.proof.contracts_old;
 
+mount core.*;
+mount core.collections.map.{Map};
+mount core.collections.set.{Set};
+
 // =============================================================================
 // 1. Pre-state snapshot
 // =============================================================================
 
-/// A single snapshotted (location, value) pair. `value` is the
-/// pre-state value of `loc`, captured before the function body
-/// executed.
-public type SnapshotEntry is { loc: Text, value: Text };
-
-/// A pre-state snapshot.
-public type ContractsSnapshot is { entries: List<SnapshotEntry> };
+/// A pre-state snapshot — Map keyed by location name. O(1) lookup
+/// regardless of snapshot size. Empty snapshot produces no
+/// allocations until the first `snapshot_record` call.
+public type ContractsSnapshot is { entries: Map<Text, Text> };
 
 public fn snapshot_empty() -> ContractsSnapshot {
-    ContractsSnapshot { entries: [] }
+    ContractsSnapshot { entries: Map.new() }
 }
 
-/// Record that `loc` had value `value` before execution.
+/// Record that `loc` had value `value` before execution. Last write
+/// wins for duplicate `loc` — matches the natural snapshot semantics
+/// (re-snapshotting the same location updates to the latest pre-value
+/// the contract references).
 public fn snapshot_record(s: ContractsSnapshot, loc: Text, value: Text) -> ContractsSnapshot {
-    let mut new_entries = s.entries;
-    new_entries.push(SnapshotEntry { loc, value });
-    ContractsSnapshot { entries: new_entries }
+    let mut m = s.entries;
+    m.insert(loc, value);
+    ContractsSnapshot { entries: m }
 }
 
-/// Look up a snapshotted value, defaulting to empty Text if absent.
-public fn snapshot_lookup(s: ContractsSnapshot, loc: Text) -> Text {
-    let mut i: Int = 0;
-    while i < s.entries.len() {
-        if s.entries[i].loc == loc {
-            return s.entries[i].value;
-        }
-        i = i + 1;
-    }
-    ""
+/// Look up a snapshotted value. Returns `None` if `loc` was never
+/// recorded — distinct from `Some("")` which indicates a snapshot of
+/// the empty Text. The previous Text-returning variant collapsed
+/// these two cases, leaving callers unable to distinguish "location
+/// wasn't tracked" from "location had value `\"\"`" — soundness gap
+/// for any postcondition that legitimately compares `old(loc) ==
+/// "")`.
+public fn snapshot_lookup(s: &ContractsSnapshot, loc: Text) -> Maybe<Text> {
+    s.entries.get_optional(loc)
+}
+
+/// Number of distinct locations recorded. O(1).
+public fn snapshot_size(s: &ContractsSnapshot) -> Int {
+    s.entries.len()
 }
 
 // =============================================================================
@@ -84,50 +102,46 @@ public fn old_expr(location: Text) -> OldExpr {
 }
 
 /// A postcondition: the locations it references via `old(...)`
-/// plus the locations it constrains in the post-state.
+/// plus the locations it constrains in the post-state. Both sides
+/// stored as Set<Text> so duplicate registrations don't bloat the
+/// representation, and frame-cross-checking can use set ops in O(n).
 public type Postcondition is {
-    old_refs: List<OldExpr>,
-    mentions_post: List<Text>,
+    old_refs: Set<Text>,
+    mentions_post: Set<Text>,
 };
 
 public fn postcondition_empty() -> Postcondition {
-    Postcondition { old_refs: [], mentions_post: [] }
+    Postcondition { old_refs: Set.new(), mentions_post: Set.new() }
 }
 
 public fn postcondition_with_old(p: Postcondition, loc: Text) -> Postcondition {
     let mut refs = p.old_refs;
-    refs.push(old_expr(loc));
+    refs.insert(loc);
     Postcondition { old_refs: refs, mentions_post: p.mentions_post }
 }
 
 public fn postcondition_with_post(p: Postcondition, loc: Text) -> Postcondition {
     let mut posts = p.mentions_post;
-    posts.push(loc);
+    posts.insert(loc);
     Postcondition { old_refs: p.old_refs, mentions_post: posts }
 }
 
-/// A function's frame: the locations it may modify.
-public type ContractsFrame is { modifies: List<Text> };
+/// A function's frame: the set of locations it may modify. O(1)
+/// contains-check.
+public type ContractsFrame is { modifies: Set<Text> };
 
 public fn frame_empty() -> ContractsFrame {
-    ContractsFrame { modifies: [] }
+    ContractsFrame { modifies: Set.new() }
 }
 
 public fn frame_with(f: ContractsFrame, loc: Text) -> ContractsFrame {
     let mut m = f.modifies;
-    m.push(loc);
+    m.insert(loc);
     ContractsFrame { modifies: m }
 }
 
-public fn frame_contains(f: ContractsFrame, loc: Text) -> Bool {
-    let mut i: Int = 0;
-    while i < f.modifies.len() {
-        if f.modifies[i] == loc {
-            return true;
-        }
-        i = i + 1;
-    }
-    false
+public fn frame_contains(f: &ContractsFrame, loc: Text) -> Bool {
+    f.modifies.contains(loc)
 }
 
 // =============================================================================
@@ -146,40 +160,34 @@ public type FrameAnalysis is {
 
 /// Compute snapshot obligations + soundness warnings from a
 /// postcondition and its declared frame.
-public fn compute_frame_obligations(p: Postcondition, f: ContractsFrame) -> FrameAnalysis {
+///
+/// Complexity: O(|old_refs| + |modifies|), down from O(|old_refs| ×
+/// |modifies|) in the prior list-backed version. Backing structures
+/// are sets, so cross-membership checks short-circuit instead of
+/// scanning.
+public fn compute_frame_obligations(p: &Postcondition, f: &ContractsFrame) -> FrameAnalysis {
+    // Locations that must be snapshot — every old() reference.
     let mut to_snap: List<Text> = [];
-    let mut i: Int = 0;
-    while i < p.old_refs.len() {
-        to_snap.push(p.old_refs[i].location);
-        i = i + 1;
+    for loc in p.old_refs.iter() {
+        to_snap.push(loc.clone());
     }
 
+    // Modified locations the postcondition never references via old().
+    // O(|modifies|) — set lookup against old_refs is O(1) per call.
     let mut unconstrained: List<Text> = [];
-    let mut j: Int = 0;
-    while j < f.modifies.len() {
-        let loc = f.modifies[j];
-        let mut found = false;
-        let mut k: Int = 0;
-        while k < p.old_refs.len() {
-            if p.old_refs[k].location == loc {
-                found = true;
-            }
-            k = k + 1;
+    for loc in f.modifies.iter() {
+        if !p.old_refs.contains(loc.clone()) {
+            unconstrained.push(loc.clone());
         }
-        if !found {
-            unconstrained.push(loc);
-        }
-        j = j + 1;
     }
 
+    // old() refs to locations outside the frame — tautologically
+    // equal to the post-value, so they're redundant. O(|old_refs|).
     let mut redundant: List<Text> = [];
-    let mut m: Int = 0;
-    while m < p.old_refs.len() {
-        let loc = p.old_refs[m].location;
-        if !frame_contains(f, loc) {
-            redundant.push(loc);
+    for loc in p.old_refs.iter() {
+        if !f.modifies.contains(loc.clone()) {
+            redundant.push(loc.clone());
         }
-        m = m + 1;
     }
 
     FrameAnalysis {
@@ -190,6 +198,6 @@ public fn compute_frame_obligations(p: Postcondition, f: ContractsFrame) -> Fram
 }
 
 /// Is the frame analysis clean (no warnings)?
-public fn analysis_is_clean(a: FrameAnalysis) -> Bool {
+public fn analysis_is_clean(a: &FrameAnalysis) -> Bool {
     a.unconstrained_modifications.len() == 0 && a.redundant_old_refs.len() == 0
 }
