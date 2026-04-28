@@ -67,6 +67,37 @@ public type BalanceError is
     | OverCapacity
     | UnderCapacity;
 
+implement Display for BalanceError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidInput(r) => f.write_str(f"sqlite btree balance: invalid input ({r})".as_str()),
+            OverCapacity    => f.write_str("sqlite btree balance: over capacity"),
+            UnderCapacity   => f.write_str("sqlite btree balance: under capacity"),
+        }
+    }
+}
+
+implement Debug for BalanceError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidInput(r) => f.write_str(f"InvalidInput(reason: {r})".as_str()),
+            OverCapacity    => f.write_str("OverCapacity"),
+            UnderCapacity   => f.write_str("UnderCapacity"),
+        }
+    }
+}
+
+implement Eq for BalanceError {
+    fn eq(&self, other: &BalanceError) -> Bool {
+        match (self, other) {
+            (InvalidInput(a), InvalidInput(b)) => a == b,
+            (OverCapacity,    OverCapacity)    => true,
+            (UnderCapacity,   UnderCapacity)   => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Context (pure — no pager reference)
 // -----------------------------------------------------------------------------

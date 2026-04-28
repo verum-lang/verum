@@ -89,6 +89,60 @@ public type PagerErrorKind is
     | Corrupt
     | Closed;
 
+fn pager_error_kind_name(k: &PagerErrorKind) -> Text {
+    match k {
+        InvalidPageSize => "InvalidPageSize".clone(),
+        PageOutOfRange  => "PageOutOfRange".clone(),
+        IoError         => "IoError".clone(),
+        Corrupt         => "Corrupt".clone(),
+        Closed          => "Closed".clone(),
+    }
+}
+
+fn pager_error_kind_tag(k: &PagerErrorKind) -> Int {
+    match k {
+        InvalidPageSize => 0, PageOutOfRange => 1,
+        IoError         => 2, Corrupt        => 3,
+        Closed          => 4,
+    }
+}
+
+implement Display for PagerErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(pager_error_kind_name(self).as_str())
+    }
+}
+
+implement Debug for PagerErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(pager_error_kind_name(self).as_str())
+    }
+}
+
+implement Eq for PagerErrorKind {
+    fn eq(&self, other: &PagerErrorKind) -> Bool {
+        pager_error_kind_tag(self) == pager_error_kind_tag(other)
+    }
+}
+
+implement Display for PagerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"sqlite pager {self.kind}: {self.message}".as_str())
+    }
+}
+
+implement Debug for PagerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"PagerError {{ kind: {self.kind:?}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for PagerError {
+    fn eq(&self, other: &PagerError) -> Bool {
+        self.kind == other.kind && self.message == other.message
+    }
+}
+
 // =============================================================================
 // Pager (v0.1 skeleton)
 // =============================================================================

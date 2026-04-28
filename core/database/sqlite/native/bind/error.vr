@@ -48,3 +48,40 @@ public fn sqlite_error_code(e: &BindError) -> Int {
         BeTooLarge(_)      => 18,
     }
 }
+
+implement Display for BindError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeRange(i)            => f.write_str(f"sqlite bind: index {i} out of range".as_str()),
+            BeWrongType(decl, act)=> f.write_str(f"sqlite bind: declared type {decl}, got {act}".as_str()),
+            BeUnknownName(name)   => f.write_str(f"sqlite bind: unknown parameter {name}".as_str()),
+            BeStmtBusy            => f.write_str("sqlite bind: statement busy"),
+            BeTooLarge(n)         => f.write_str(f"sqlite bind: payload {n} bytes exceeds SQLITE_LIMIT_LENGTH".as_str()),
+        }
+    }
+}
+
+implement Debug for BindError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeRange(i)            => f.write_str(f"BeRange({i})".as_str()),
+            BeWrongType(decl, act)=> f.write_str(f"BeWrongType({decl}, {act})".as_str()),
+            BeUnknownName(name)   => f.write_str(f"BeUnknownName({name})".as_str()),
+            BeStmtBusy            => f.write_str("BeStmtBusy"),
+            BeTooLarge(n)         => f.write_str(f"BeTooLarge({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for BindError {
+    fn eq(&self, other: &BindError) -> Bool {
+        match (self, other) {
+            (BeRange(a),         BeRange(b))         => a == b,
+            (BeWrongType(da, aa),BeWrongType(db, ab))=> da == db && aa == ab,
+            (BeUnknownName(a),   BeUnknownName(b))   => a == b,
+            (BeStmtBusy,         BeStmtBusy)         => true,
+            (BeTooLarge(a),      BeTooLarge(b))      => a == b,
+            _ => false,
+        }
+    }
+}

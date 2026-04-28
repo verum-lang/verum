@@ -134,6 +134,72 @@ public type VfsErrorKind is
     | Corrupt
     | Closed;
 
+fn vfs_error_kind_name(k: &VfsErrorKind) -> Text {
+    match k {
+        NotFound          => "NotFound".clone(),
+        PermissionDenied  => "PermissionDenied".clone(),
+        AlreadyExists     => "AlreadyExists".clone(),
+        InvalidArgument   => "InvalidArgument".clone(),
+        Interrupted       => "Interrupted".clone(),
+        IoError           => "IoError".clone(),
+        ShortRead         => "ShortRead".clone(),
+        WriteFault        => "WriteFault".clone(),
+        LockConflict      => "LockConflict".clone(),
+        Unsupported       => "Unsupported".clone(),
+        DiskFull          => "DiskFull".clone(),
+        Corrupt           => "Corrupt".clone(),
+        Closed            => "Closed".clone(),
+    }
+}
+
+fn vfs_error_kind_tag(k: &VfsErrorKind) -> Int {
+    match k {
+        NotFound         => 0,  PermissionDenied => 1,
+        AlreadyExists    => 2,  InvalidArgument  => 3,
+        Interrupted      => 4,  IoError          => 5,
+        ShortRead        => 6,  WriteFault       => 7,
+        LockConflict     => 8,  Unsupported      => 9,
+        DiskFull         => 10, Corrupt          => 11,
+        Closed           => 12,
+    }
+}
+
+implement Display for VfsErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(vfs_error_kind_name(self).as_str())
+    }
+}
+
+implement Debug for VfsErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(vfs_error_kind_name(self).as_str())
+    }
+}
+
+implement Eq for VfsErrorKind {
+    fn eq(&self, other: &VfsErrorKind) -> Bool {
+        vfs_error_kind_tag(self) == vfs_error_kind_tag(other)
+    }
+}
+
+implement Display for VfsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"sqlite VFS {self.kind}: {self.message}".as_str())
+    }
+}
+
+implement Debug for VfsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"VfsError {{ kind: {self.kind:?}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for VfsError {
+    fn eq(&self, other: &VfsError) -> Bool {
+        self.kind == other.kind && self.message == other.message
+    }
+}
+
 // =============================================================================
 // Access / device flags / timestamps (auxiliary types for the protocol surface)
 // =============================================================================

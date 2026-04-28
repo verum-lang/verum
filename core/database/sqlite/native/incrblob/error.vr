@@ -47,3 +47,46 @@ public fn sqlite_error_code(e: &BlobError) -> Int {
         BeAborted           => 4,
     }
 }
+
+implement Display for BlobError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeNoTable(t)         => f.write_str(f"sqlite blob: no such table {t}".as_str()),
+            BeNoColumn(c)        => f.write_str(f"sqlite blob: no such column {c}".as_str()),
+            BeNoRow(rid)         => f.write_str(f"sqlite blob: no such rowid {rid}".as_str()),
+            BeNotABlob           => f.write_str("sqlite blob: column value is not BLOB"),
+            BeReadOnly           => f.write_str("sqlite blob: write attempt on read-only handle"),
+            BeOutOfRange(off, l) => f.write_str(f"sqlite blob: offset {off} + length {l} past end".as_str()),
+            BeAborted            => f.write_str("sqlite blob: handle aborted by schema change"),
+        }
+    }
+}
+
+implement Debug for BlobError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeNoTable(t)         => f.write_str(f"BeNoTable({t})".as_str()),
+            BeNoColumn(c)        => f.write_str(f"BeNoColumn({c})".as_str()),
+            BeNoRow(rid)         => f.write_str(f"BeNoRow({rid})".as_str()),
+            BeNotABlob           => f.write_str("BeNotABlob"),
+            BeReadOnly           => f.write_str("BeReadOnly"),
+            BeOutOfRange(off, l) => f.write_str(f"BeOutOfRange({off}, {l})".as_str()),
+            BeAborted            => f.write_str("BeAborted"),
+        }
+    }
+}
+
+implement Eq for BlobError {
+    fn eq(&self, other: &BlobError) -> Bool {
+        match (self, other) {
+            (BeNoTable(a),              BeNoTable(b))              => a == b,
+            (BeNoColumn(a),             BeNoColumn(b))             => a == b,
+            (BeNoRow(a),                BeNoRow(b))                => a == b,
+            (BeNotABlob,                BeNotABlob)                => true,
+            (BeReadOnly,                BeReadOnly)                => true,
+            (BeOutOfRange(oa, la),      BeOutOfRange(ob, lb))      => oa == ob && la == lb,
+            (BeAborted,                 BeAborted)                 => true,
+            _ => false,
+        }
+    }
+}

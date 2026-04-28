@@ -52,6 +52,34 @@ public type SnapshotError is
       Closed
     | Stale(latest_wm: Int, our_wm: Int);
 
+implement Display for SnapshotError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed             => f.write_str("sqlite snapshot closed"),
+            Stale(latest, our) => f.write_str(f"sqlite snapshot stale (latest WAL {latest}, ours {our})".as_str()),
+        }
+    }
+}
+
+implement Debug for SnapshotError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed             => f.write_str("Closed"),
+            Stale(latest, our) => f.write_str(f"Stale(latest_wm: {latest}, our_wm: {our})".as_str()),
+        }
+    }
+}
+
+implement Eq for SnapshotError {
+    fn eq(&self, other: &SnapshotError) -> Bool {
+        match (self, other) {
+            (Closed, Closed) => true,
+            (Stale(la, oa), Stale(lb, ob)) => la == lb && oa == ob,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Constructors
 // -----------------------------------------------------------------------------

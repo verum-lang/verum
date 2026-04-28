@@ -33,6 +33,44 @@ public type ReplicationStreamError is
     | SeChecksumMismatch
     | SeApplyFailed(Text);
 
+implement Display for ReplicationStreamError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SeOutOfOrder(exp, got)     =>
+                f.write_str(f"sqlite replication: out-of-order frame (expected position {exp}, got {got})".as_str()),
+            SeEpochMismatch(exp, got)  =>
+                f.write_str(f"sqlite replication: epoch mismatch (expected {exp}, got {got})".as_str()),
+            SeChecksumMismatch         =>
+                f.write_str("sqlite replication: frame checksum mismatch"),
+            SeApplyFailed(reason)      =>
+                f.write_str(f"sqlite replication: apply failed: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for ReplicationStreamError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SeOutOfOrder(exp, got)     => f.write_str(f"SeOutOfOrder({exp}, {got})".as_str()),
+            SeEpochMismatch(exp, got)  => f.write_str(f"SeEpochMismatch({exp}, {got})".as_str()),
+            SeChecksumMismatch         => f.write_str("SeChecksumMismatch"),
+            SeApplyFailed(reason)      => f.write_str(f"SeApplyFailed({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for ReplicationStreamError {
+    fn eq(&self, other: &ReplicationStreamError) -> Bool {
+        match (self, other) {
+            (SeOutOfOrder(ea, ga),    SeOutOfOrder(eb, gb))    => ea == eb && ga == gb,
+            (SeEpochMismatch(ea, ga), SeEpochMismatch(eb, gb)) => ea == eb && ga == gb,
+            (SeChecksumMismatch,      SeChecksumMismatch)      => true,
+            (SeApplyFailed(a),        SeApplyFailed(b))        => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // ReplicaTrack — primary's per-replica state
 // -----------------------------------------------------------------------------

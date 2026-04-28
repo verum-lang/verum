@@ -88,3 +88,102 @@ public fn class_name(c: &ErrorClass) -> Text {
         EcIndex       => "index".clone(),
     }
 }
+
+fn class_tag(c: &ErrorClass) -> Int {
+    match c {
+        EcStructural => 0, EcBtree => 1, EcRecord => 2,
+        EcForeignKey => 3, EcIndex => 4,
+    }
+}
+
+implement Display for ErrorClass {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(class_name(self).as_str())
+    }
+}
+
+implement Debug for ErrorClass {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            EcStructural => "EcStructural",
+            EcBtree      => "EcBtree",
+            EcRecord     => "EcRecord",
+            EcForeignKey => "EcForeignKey",
+            EcIndex      => "EcIndex",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for ErrorClass {
+    fn eq(&self, other: &ErrorClass) -> Bool {
+        class_tag(self) == class_tag(other)
+    }
+}
+
+implement Display for IntegrityError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            IePageNotFound(p)               => f.write_str(f"sqlite integrity {error_kind_name(self)}: page {p}".as_str()),
+            IeWrongPageSize(p, s)           => f.write_str(f"sqlite integrity {error_kind_name(self)}: page {p} found size {s}".as_str()),
+            IeOrphanedPage(p)               => f.write_str(f"sqlite integrity {error_kind_name(self)}: page {p}".as_str()),
+            IeFreelistMismatch(e, found)    => f.write_str(f"sqlite integrity {error_kind_name(self)}: expected {e}, found {found}".as_str()),
+            IeRootPageMismatch(t, e, found) => f.write_str(f"sqlite integrity {error_kind_name(self)}: table {t} expected {e}, found {found}".as_str()),
+            IeUnorderedKeys(p, ci)          => f.write_str(f"sqlite integrity {error_kind_name(self)}: page {p} cell {ci}".as_str()),
+            IeCellSizeViolation(p, c, sz)   => f.write_str(f"sqlite integrity {error_kind_name(self)}: page {p} cell {c} size {sz}".as_str()),
+            IeOverflowChainBroken(p)        => f.write_str(f"sqlite integrity {error_kind_name(self)}: page {p}".as_str()),
+            IeUnusedSpaceMismatch(e, found) => f.write_str(f"sqlite integrity {error_kind_name(self)}: expected {e}, found {found}".as_str()),
+            IeRecordHeaderTooLong(rid)      => f.write_str(f"sqlite integrity {error_kind_name(self)}: rowid {rid}".as_str()),
+            IePayloadCrcMismatch(rid)       => f.write_str(f"sqlite integrity {error_kind_name(self)}: rowid {rid}".as_str()),
+            IeNonNullColumnIsNull(t, c, rid)=> f.write_str(f"sqlite integrity {error_kind_name(self)}: {t}.{c} rowid {rid}".as_str()),
+            IeOrphanFkRow(child, rid, par)  => f.write_str(f"sqlite integrity {error_kind_name(self)}: {child} rowid {rid} → {par}".as_str()),
+            IeIndexExtraRow(idx, rid)       => f.write_str(f"sqlite integrity {error_kind_name(self)}: index {idx} rowid {rid}".as_str()),
+            IeIndexMissingRow(idx, rid)     => f.write_str(f"sqlite integrity {error_kind_name(self)}: index {idx} rowid {rid}".as_str()),
+        }
+    }
+}
+
+implement Debug for IntegrityError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            IePageNotFound(p)               => f.write_str(f"IePageNotFound({p})".as_str()),
+            IeWrongPageSize(p, s)           => f.write_str(f"IeWrongPageSize({p}, {s})".as_str()),
+            IeOrphanedPage(p)               => f.write_str(f"IeOrphanedPage({p})".as_str()),
+            IeFreelistMismatch(e, found)    => f.write_str(f"IeFreelistMismatch({e}, {found})".as_str()),
+            IeRootPageMismatch(t, e, found) => f.write_str(f"IeRootPageMismatch({t}, {e}, {found})".as_str()),
+            IeUnorderedKeys(p, ci)          => f.write_str(f"IeUnorderedKeys({p}, {ci})".as_str()),
+            IeCellSizeViolation(p, c, sz)   => f.write_str(f"IeCellSizeViolation({p}, {c}, {sz})".as_str()),
+            IeOverflowChainBroken(p)        => f.write_str(f"IeOverflowChainBroken({p})".as_str()),
+            IeUnusedSpaceMismatch(e, found) => f.write_str(f"IeUnusedSpaceMismatch({e}, {found})".as_str()),
+            IeRecordHeaderTooLong(rid)      => f.write_str(f"IeRecordHeaderTooLong({rid})".as_str()),
+            IePayloadCrcMismatch(rid)       => f.write_str(f"IePayloadCrcMismatch({rid})".as_str()),
+            IeNonNullColumnIsNull(t, c, rid)=> f.write_str(f"IeNonNullColumnIsNull({t}, {c}, {rid})".as_str()),
+            IeOrphanFkRow(child, rid, par)  => f.write_str(f"IeOrphanFkRow({child}, {rid}, {par})".as_str()),
+            IeIndexExtraRow(idx, rid)       => f.write_str(f"IeIndexExtraRow({idx}, {rid})".as_str()),
+            IeIndexMissingRow(idx, rid)     => f.write_str(f"IeIndexMissingRow({idx}, {rid})".as_str()),
+        }
+    }
+}
+
+implement Eq for IntegrityError {
+    fn eq(&self, other: &IntegrityError) -> Bool {
+        match (self, other) {
+            (IePageNotFound(a),                 IePageNotFound(b))                 => a == b,
+            (IeWrongPageSize(pa, sa),           IeWrongPageSize(pb, sb))           => pa == pb && sa == sb,
+            (IeOrphanedPage(a),                 IeOrphanedPage(b))                 => a == b,
+            (IeFreelistMismatch(ea, fa),        IeFreelistMismatch(eb, fb))        => ea == eb && fa == fb,
+            (IeRootPageMismatch(ta, ea, fa),    IeRootPageMismatch(tb, eb, fb))    => ta == tb && ea == eb && fa == fb,
+            (IeUnorderedKeys(pa, ca),           IeUnorderedKeys(pb, cb))           => pa == pb && ca == cb,
+            (IeCellSizeViolation(pa, ca, sa),   IeCellSizeViolation(pb, cb, sb))   => pa == pb && ca == cb && sa == sb,
+            (IeOverflowChainBroken(a),          IeOverflowChainBroken(b))          => a == b,
+            (IeUnusedSpaceMismatch(ea, fa),     IeUnusedSpaceMismatch(eb, fb))     => ea == eb && fa == fb,
+            (IeRecordHeaderTooLong(a),          IeRecordHeaderTooLong(b))          => a == b,
+            (IePayloadCrcMismatch(a),           IePayloadCrcMismatch(b))           => a == b,
+            (IeNonNullColumnIsNull(ta, ca, ra), IeNonNullColumnIsNull(tb, cb, rb)) => ta == tb && ca == cb && ra == rb,
+            (IeOrphanFkRow(ca, ra, pa),         IeOrphanFkRow(cb, rb, pb))         => ca == cb && ra == rb && pa == pb,
+            (IeIndexExtraRow(ia, ra),           IeIndexExtraRow(ib, rb))           => ia == ib && ra == rb,
+            (IeIndexMissingRow(ia, ra),         IeIndexMissingRow(ib, rb))         => ia == ib && ra == rb,
+            _ => false,
+        }
+    }
+}
