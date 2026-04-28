@@ -373,6 +373,17 @@ implement UdpSocket {
     public fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), IoError> {
         let addrs = addr.to_socket_addrs()?;
 
+        // Track the last syscall error across the candidate
+        // sweep so the failure path surfaces the typed kind
+        // and OS code that the kernel actually returned, not
+        // a generic `Other("Connection failed")` string. The
+        // typical end-of-loop kind is ConnectionRefused
+        // (ECONNREFUSED) but the kernel may report
+        // NetworkUnreachable, HostUnreachable, etc. — all of
+        // which the per-platform errno mapping already
+        // classifies correctly.
+        let mut last_err: Maybe<IoError> = None;
+
         for socket_addr in addrs {
             let addr_bytes = serialize_socket_addr(&socket_addr);
 
@@ -384,13 +395,28 @@ implement UdpSocket {
             let result = sys_connect(self.fd, addr_bytes.as_ptr() as &unsafe Byte,
                                      addr_bytes.len() as Int);
 
-            if result.is_ok() {
-                self.peer_addr = Some(socket_addr);
-                return Ok(());
+            match result {
+                Ok(_) => {
+                    self.peer_addr = Some(socket_addr);
+                    return Ok(());
+                }
+                Err(os_err) => {
+                    last_err = Some(IoError.from_raw_os_error(os_err.code));
+                }
             }
         }
 
-        Err(IoError.Other("Connection failed"))
+        // Surface the last typed kernel error, falling back to
+        // `ConnectionRefused` only when the candidate list was
+        // empty (rare — `to_socket_addrs` would already have
+        // failed with NotFound).
+        match last_err {
+            Some(e) => Err(e),
+            None => Err(IoError {
+                kind: IoErrorKind.ConnectionRefused,
+                message: Some(Text.from("connect: no candidate addresses")),
+            }),
+        }
     }
 
     /// Send data to the connected peer.
