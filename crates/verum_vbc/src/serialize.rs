@@ -148,17 +148,25 @@ impl Serializer {
         let (extensions_offset, extensions_size, extra_flags) =
             self.serialize_extensions(module)?;
 
-        // Compute content hash using blake3 (truncated to u64 for header)
+        // Compute content hash using blake3 (truncated to u64 for header).
+        // blake3::Hash::as_bytes() always returns a 32-byte buffer; `[..8]`
+        // on it is statically safe.  We use `expect` rather than
+        // `unwrap_or([0u8; 8])` because the silent-zero fallback would
+        // DEFEAT the integrity check entirely — every module would write
+        // a zero hash and every verify-side recompute would match it,
+        // making tampering undetectable.  Panic-on-impossible is
+        // architecturally correct; an all-zero hash is worse than a
+        // crash.
         let content_hash = {
             let hash = blake3::hash(&self.output[HEADER_SIZE..]);
-            // blake3 always produces 32 bytes; first 8 bytes always fit [u8; 8]
             u64::from_le_bytes(
-                hash.as_bytes()[..8].try_into()
-                    .unwrap_or([0u8; 8])
+                hash.as_bytes()[..8]
+                    .try_into()
+                    .expect("blake3 always returns 32 bytes; [..8] always fits"),
             )
         };
 
-        // Compute dependency hash using blake3
+        // Compute dependency hash using blake3 — same invariant.
         let mut dep_data = Vec::new();
         for dep in &module.dependencies {
             encode_u64(dep.hash, &mut dep_data);
@@ -166,8 +174,9 @@ impl Serializer {
         let dependency_hash = {
             let hash = blake3::hash(&dep_data);
             u64::from_le_bytes(
-                hash.as_bytes()[..8].try_into()
-                    .unwrap_or([0u8; 8])
+                hash.as_bytes()[..8]
+                    .try_into()
+                    .expect("blake3 always returns 32 bytes; [..8] always fits"),
             )
         };
 

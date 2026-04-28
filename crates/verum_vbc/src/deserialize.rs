@@ -117,9 +117,17 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
     }
     let computed = {
         let hash = blake3::hash(&data[HEADER_SIZE..]);
-        // blake3 always produces 32 bytes; the first 8 always fit.
+        // blake3::Hash::as_bytes() always returns a 32-byte buffer;
+        // `[..8]` on it is statically safe.  `expect` rather than
+        // `unwrap_or([0u8; 8])` because the silent-zero fallback would
+        // make this verifier ACCEPT any module whose serializer also
+        // hit the same fallback (zero hash on both sides matches),
+        // defeating the integrity defense.  Panic-on-impossible is
+        // architecturally correct.
         u64::from_le_bytes(
-            hash.as_bytes()[..8].try_into().unwrap_or([0u8; 8]),
+            hash.as_bytes()[..8]
+                .try_into()
+                .expect("blake3 always returns 32 bytes; [..8] always fits"),
         )
     };
     if computed != expected {
@@ -150,8 +158,13 @@ fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
     }
     let computed = {
         let hash = blake3::hash(&dep_data);
+        // Same invariant as `verify_content_hash` — `expect` rather
+        // than silent-zero fallback, since matching zeros on both
+        // sides would defeat the integrity check.
         u64::from_le_bytes(
-            hash.as_bytes()[..8].try_into().unwrap_or([0u8; 8]),
+            hash.as_bytes()[..8]
+                .try_into()
+                .expect("blake3 always returns 32 bytes; [..8] always fits"),
         )
     };
     let expected = module.header.dependency_hash;
