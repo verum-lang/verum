@@ -123,13 +123,24 @@ pub use eps_mu::check_eps_mu_coherence;
 pub mod universe_ascent;
 pub use universe_ascent::{UniverseTier, check_universe_ascent};
 
-/// `K-Round-Trip` kernel rule (V0/V1) — OC/DC translation round-trip
+/// `K-Round-Trip` kernel rule (V0/V1/V2) — OC/DC translation round-trip
 /// admission for the AC/OC duality (MSFS Theorem 10.4 / Diakrisis
 /// 108.T / 16.10). Hosts `check_round_trip` covering identity
 /// (structural), K-Adj-Unit/Counit shapes, and β-/ι-/δ-equivalence
-/// cases. V2 universal canonicalize (preprint-blocked) extends.
+/// cases. V2 `check_round_trip_v2` ships the universal canonicalize
+/// algorithm with explicit Diakrisis-16.10 bridge admits surfaced
+/// via `BridgeAudit`.
 pub mod round_trip;
-pub use round_trip::check_round_trip;
+pub use round_trip::{canonical_form, check_round_trip, check_round_trip_v2};
+
+/// Diakrisis bridge admits — explicit, named axioms surfacing the
+/// type-theoretic results currently outside the kernel's decidable
+/// fragment. Each admit names a specific Diakrisis preprint result
+/// (paragraph + theorem number) and is consumed by `K-Round-Trip V2`
+/// to make preprint dependencies explicit at the kernel surface.
+/// V3 promotion removes admits as the preprint resolves.
+pub mod diakrisis_bridge;
+pub use diakrisis_bridge::{BridgeAdmit, BridgeAudit, BridgeId};
 
 /// Cubical cofibration calculus — face-formula algebra + interval
 /// subsumption decision procedure (M-VVA-FU Sub-2.4-cubical, V1
