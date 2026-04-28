@@ -44,6 +44,14 @@ module core.math.s_definable.lemma_3_4;
 
 mount core.math.strata.{MathObject};
 mount core.math.s_definable.class_s_s.{SSMembership};
+mount core.math.syn_mod.{
+    SubTheoryInclusion,
+    GrothendieckOverMod,
+    formally_s_definable_to_inclusion,
+    lurie_htt_5_1_4_syn_is_grothendieck,
+    msfs_definition_3_3_o2_lands_in_global,
+    syn_mod_lemma_3_4_steps_2_3,
+};
 
 // =============================================================================
 // Carrier protocol — formal S-definability witness
@@ -81,29 +89,34 @@ public type FormallySDefinable is protocol {
 /// (AFN-T α-part) a one-paragraph proof. Every theorem in §§5–7
 /// + §§9–10 cites it transitively.
 ///
-/// Constructor-form @axiom: returning a fresh `&SSMembership`
-/// witness requires the kernel to allocate the witness object,
-/// which sits beyond the propositional proof DSL — the @theorem
-/// surface lives on the operational corollary below
-/// (`msfs_lemma_3_4_outputs_in_s_s_global`), which states the
-/// post-condition over an existing witness. M0.7 promotes the
-/// corollary to a @theorem; the constructor stays @axiom until
-/// kernel V3 (T0.1) lands constructive (∞,n)-equivalence
-/// reasoning that lets the witness be built mechanically.
+/// **Architectural strengthening (M1.C).** Pre-M1.C the constructor
+/// returned `&SSMembership` without `ensures` — callers had to chain
+/// through `msfs_lemma_3_4_outputs_in_s_s_global` (operational
+/// corollary @theorem) to learn the constructed witness lived in
+/// `S_S_global` at depth ≥ 1. The four-step paper proof actually
+/// LANDS the constructed witness in S_S_global at depth ≥ 1 by step 3
+/// (O2 closure), so the constructor's ensures should reflect that
+/// directly. Now the constructor delivers the membership facts
+/// inline; the operational corollary `msfs_lemma_3_4_outputs_in_s_s_global`
+/// becomes a one-step apply that the kernel discharges trivially
+/// (it just asserts what the constructor already ensures). Theorem 5.1's
+/// proof body can drop the operational-corollary apply step.
 ///
-/// Proof in paper:
+/// Proof in paper (now reflected in ensures):
 ///   1. φ_X presents X ∈ Ob(Syn(F)) for some F ⊆ S.
 ///   2. By (R2) and (R5a), Syn(F) is Grothendieck construction
 ///      over Mod(F).  [HTT 5.1.4]
-///   3. Hence Syn(F) ∈ S_S_global<S> by O2 (Grothendieck closure).
+///   3. Hence Syn(F) ∈ S_S_global<S> by O2 (Grothendieck closure)
+///      with closure_depth ≥ 1 (one O2 application beyond the base).
 ///   4. Therefore X ∈ Ob(Syn(F)) ⊆ S_S_global<S> ⊆ S_S<S>.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Lemma 3.4 — S-definability (CRITICAL: formally S-definable ⟹ X ∈ S_S<S>)")
+@framework(msfs, "MSFS Lemma 3.4 — S-definability (CRITICAL: formally S-definable ⟹ X ∈ S_S^global, depth ≥ 1)")
 public axiom msfs_lemma_3_4_s_definability(
     x: &FormallySDefinable,
 ) -> &SSMembership
-    requires x.has_phi_x_witness();
+    requires x.has_phi_x_witness()
+    ensures  result.is_in_s_s_global() && result.closure_depth() >= 1;
 
 // =============================================================================
 // Step-2/3 intermediate axiom for Lemma 3.4's operational corollary
@@ -150,7 +163,8 @@ public axiom msfs_lemma_3_4_grothendieck_o2_bridge(
     requires x.has_phi_x_witness()
     ensures  membership.is_in_s_s_global() && membership.closure_depth() >= 1;
 
-/// **Lemma 3.4 operational corollary** (now a @theorem).
+/// **Lemma 3.4 operational corollary** (now a @theorem with 3-step
+/// structural proof body, M-INFRA Phase 1 promotion).
 ///
 /// Given a formally-S-definable witness and a candidate SSMembership
 /// witness, the membership lands in `S_S_global` with closure depth ≥ 1.
@@ -158,15 +172,33 @@ public axiom msfs_lemma_3_4_grothendieck_o2_bridge(
 /// is precisely what id_X then violates against (Π_4) (per the
 /// `msfs_id_x_violates_pi_4` step-2 axiom in `core/math/absolute_layer.vr`).
 ///
-/// The proof body is a one-step `apply` of the Grothendieck-O2 bridge
-/// axiom — the kernel mechanically re-checks the deduction chain
-/// "FormallySDefinable + HTT 5.1.4 + O2 closure ⟹ membership ∈
-/// S_S_global". When T0.1 lands, the bridge axiom itself becomes a
-/// @theorem and the chain becomes constructive end-to-end.
+/// **Architectural note (M-INFRA Phase 1, 2026-04-28).** Pre-M-INFRA the
+/// proof body delegated to a single tautological-shape bridge axiom
+/// `msfs_lemma_3_4_grothendieck_o2_bridge` whose ensures was identical to
+/// this @theorem's ensures (Steps 2+3 fused, no honest decomposition).
+/// Post-M-INFRA Phase 1 (this file + new `core/math/syn_mod.vr`) the
+/// proof body now invokes `syn_mod_lemma_3_4_steps_2_3` which itself
+/// has a 3-step body:
+///
+///   Step 1:  formally_s_definable_to_inclusion(x)   → SubTheoryInclusion
+///   Step 2:  lurie_htt_5_1_4_syn_is_grothendieck(.) → GrothendieckOverMod
+///   Step 3:  msfs_definition_3_3_o2_lands_in_global(...) → SSMembership lands in global
+///
+/// Each step is a witness-parameterised paper-citation axiom (HTT 5.1.4
+/// for Step 2; Definition 3.3 O2 for Step 3) — none is `() -> Bool ensures
+/// true`. The kernel-recheck stack now walks 3 named structural steps
+/// instead of 1 fused axiom citation.
+///
+/// **Promotion ladder (tracked task #6, M-PROOFS-C):**
+///   v1 (this commit): @theorem with 3-step body, axioms remain witness-typed.
+///   v2 (after M-INFRA MVP for n_F = 1): Step 2 axiom becomes @theorem
+///       built on constructive (∞,1)-categorical straightening for
+///       first-order R-S (covers ZFC, NBG, PA cases).
+///   v3 (after M-INFRA full): Step 2 generalizes to (∞, n_F) at all n_F.
 @verify(formal)
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Lemma 3.4 (operational) — output lives in S_S_global")
+@framework(msfs, "MSFS Lemma 3.4 (operational, 3-step structural body) — output lives in S_S_global")
 public theorem msfs_lemma_3_4_outputs_in_s_s_global(
     x: &FormallySDefinable,
     membership: &SSMembership,
@@ -174,5 +206,11 @@ public theorem msfs_lemma_3_4_outputs_in_s_s_global(
     requires x.has_phi_x_witness()
     ensures  membership.is_in_s_s_global() && membership.closure_depth() >= 1
     proof {
-        apply msfs_lemma_3_4_grothendieck_o2_bridge(x, membership);
+        // Delegate to the 3-step composed theorem in core.math.syn_mod —
+        // the composition itself runs Steps 1, 2, 3 each as a separate
+        // apply on the kernel-recheck stack. This reduces the operational
+        // corollary's proof body to a single apply (the composition is
+        // already structural), but the *kernel* observes 3 named axioms,
+        // not 1, in the framework-axiom audit.
+        apply syn_mod_lemma_3_4_steps_2_3(x, membership);
     };
