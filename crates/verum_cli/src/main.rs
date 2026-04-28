@@ -1393,6 +1393,10 @@ fn main_inner() {
     // crate::script for the full rationale and invariants. The rewrite is
     // a no-op for any normal subcommand invocation.
     let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(msg) = script::missing_shebang_advisory(&argv) {
+        eprintln!("error: {}", msg);
+        process::exit(2);
+    }
     let argv = script::rewrite_argv_for_script_mode(argv);
     let cli = Cli::parse_from(argv);
 
