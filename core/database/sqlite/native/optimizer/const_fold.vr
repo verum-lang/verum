@@ -51,10 +51,17 @@ fn fold_op(name: &Text, a: Int, b: Int) -> base.Maybe<Int> {
     if name == &"Multiply".clone()  { return base.Some(a * b); }
     if name == &"Divide".clone()    {
         if b == 0 { return base.None; }
+        // Int.MIN / -1 overflows on x86 (#DE / SIGFPE); aarch64
+        // silently wraps. Bail out of folding so the runtime
+        // produces the SQL-spec-defined integer-overflow error
+        // rather than baking platform-divergent behaviour into
+        // the compiled program.
+        if a == Int.MIN && b == -1 { return base.None; }
         return base.Some(a / b);
     }
     if name == &"Remainder".clone() {
         if b == 0 { return base.None; }
+        if a == Int.MIN && b == -1 { return base.None; }
         return base.Some(a % b);
     }
     if name == &"BitAnd".clone()    { return base.Some(a & b); }
