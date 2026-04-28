@@ -116,7 +116,7 @@ pub use depth::{OrdinalDepth, check_refine_omega, m_depth, m_depth_omega};
 /// K-Eps-Mu kernel rule — split . Hosts
 /// `check_eps_mu_coherence` with V0/V1/V2 staging.
 pub mod eps_mu;
-pub use eps_mu::check_eps_mu_coherence;
+pub use eps_mu::{check_eps_mu_coherence, check_eps_mu_coherence_v3_final};
 
 /// Categorical-coherence K-Universe-Ascent kernel rule + UniverseTier.
 /// Hosts `UniverseTier` enum + `check_universe_ascent`.
