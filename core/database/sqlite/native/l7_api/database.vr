@@ -183,6 +183,13 @@ implement Database {
     public fn pragma_cfg_view(&self) -> &PragmaConfig { self.conn.pragma_cfg_view() }
     public fn pragma_cfg_mut(&mut self) -> &mut PragmaConfig { self.conn.pragma_cfg_mut() }
 
+    /// Borrow the underlying L6 Connection.  Required by
+    /// `l7_api.blob` so it can talk to the schema cache + table store
+    /// + blob engine in one logical pass.  Other L7 modules should
+    /// prefer the narrower accessors above.
+    public fn conn_view_for_blob(&self) -> &Connection { &self.conn }
+    public fn conn_mut_for_blob(&mut self) -> &mut Connection { &mut self.conn }
+
     // -------------------------------------------------------------------------
     // Prepare / execute / query
     // -------------------------------------------------------------------------

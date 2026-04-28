@@ -12,6 +12,7 @@ public module transaction;
 public module backup;
 public module hooks;
 public module pragma_api;
+public module blob;
 
 public mount .database.{
     Database, DbError,
@@ -48,4 +49,8 @@ public mount .pragma_api.{
     pragma_get_text, pragma_set_text,
     pragma_get_bool, pragma_set_bool,
     pragma_kind_to_name,
+};
+
+public mount .blob.{
+    blob_open, blob_bytes, blob_read, blob_write, blob_reopen, blob_close,
 };

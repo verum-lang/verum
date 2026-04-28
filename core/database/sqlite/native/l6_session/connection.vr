@@ -50,6 +50,9 @@ mount core.database.sqlite.native.ext.hooks.{
 mount core.database.sqlite.native.pragmas.config.{
     PragmaConfig, pragma_config_default,
 };
+mount core.database.sqlite.native.incrblob.engine.{
+    BlobEngine, engine_new as blob_engine_new,
+};
 
 // -----------------------------------------------------------------------------
 // Mode
@@ -136,6 +139,12 @@ public type Connection is {
     /// set (foreign_keys gate in CHECK violation, query_only gate in
     /// .execute, etc.).
     pragma_cfg: PragmaConfig,
+    /// Live `sqlite3_blob_*` handles owned by this connection.  Each
+    /// `blob_open` call mints a stable handle_id; `blob_close` marks
+    /// the slot closed but keeps the entry so subsequent calls with
+    /// the same id surface a clean `BeAborted` rather than a stale
+    /// reference.  See `core.database.sqlite.native.incrblob`.
+    blob_engine: BlobEngine,
 };
 
 /// Open an in-memory connection with the given mode. All three modes
@@ -155,6 +164,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
         table_store: Map.new(),
         registry: registry_new(),
         pragma_cfg: pragma_config_default(),
+        blob_engine: blob_engine_new(),
     })
 }
 
@@ -193,6 +203,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, Con
         table_store: Map.new(),
         registry: registry_new(),
         pragma_cfg: pragma_config_default(),
+        blob_engine: blob_engine_new(),
     })
 }
 
@@ -282,6 +293,11 @@ implement Connection {
     /// (foreign_keys, query_only, etc.) inline during execution.
     public fn pragma_cfg_view(&self) -> &PragmaConfig { &self.pragma_cfg }
     public fn pragma_cfg_mut(&mut self) -> &mut PragmaConfig { &mut self.pragma_cfg }
+
+    /// Borrow the per-connection BLOB engine — the bookkeeping layer
+    /// for `sqlite3_blob_open` / `_read` / `_write` / `_close`.
+    public fn blob_engine_view(&self) -> &BlobEngine { &self.blob_engine }
+    public fn blob_engine_mut(&mut self) -> &mut BlobEngine { &mut self.blob_engine }
 
     /// Savepoint push — increments depth without replacing `tx.mode`.
     /// Caller is responsible for issuing the SAVEPOINT VDBE opcode.
