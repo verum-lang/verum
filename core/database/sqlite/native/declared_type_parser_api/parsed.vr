@@ -34,12 +34,33 @@ fn is_ident_body(b: u8) -> Bool {
 }
 
 // Parse a u32 starting at `i`; returns (value, next_i).
+//
+// Used to read the optional `(N)` / `(N,M)` width/precision in
+// declared types like `VARCHAR(255)` / `DECIMAL(10, 2)`. The input
+// `bs` is the user's CREATE TABLE column-type declaration; a digit
+// run > 19 chars overflows Int64 and the wrapped value would feed
+// SQLite's affinity logic. Cap at 19 digits + per-step overflow
+// guard, saturating at Int64.MAX on hostile input.
 fn parse_u32(bs: &List<u8>, i: Int) -> (Int64, Int) {
     let mut j: Int = i;
     let mut v: Int64 = 0 as Int64;
+    let mut digit_count: Int = 0;
     while j < bs.len() && is_digit(bs[j]) {
+        if digit_count >= 19 || v > 922_337_203_685_477_580_i64 {
+            // Saturate at Int64.MAX. Skip remaining digits so caller's
+            // cursor lands past the malformed run.
+            v = 9_223_372_036_854_775_807_i64;
+            while j < bs.len() && is_digit(bs[j]) { j = j + 1; }
+            return (v, j);
+        }
         let d = (bs[j] - (0x30 as u8)) as Int64;
         v = v * 10_i64 + d;
+        if v < 0_i64 {
+            v = 9_223_372_036_854_775_807_i64;
+            while j < bs.len() && is_digit(bs[j]) { j = j + 1; }
+            return (v, j);
+        }
+        digit_count = digit_count + 1;
         j = j + 1;
     }
     (v, j)

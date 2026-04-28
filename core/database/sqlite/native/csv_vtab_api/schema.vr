@@ -22,20 +22,32 @@ fn push_text(dst: &mut Text, s: &Text) {
     while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
 }
 
-fn push_int(dst: &mut Text, mut n: Int) {
-    if n < 0 { dst.push_byte(0x2D as u8); n = 0 - n; }
+fn push_int(dst: &mut Text, n: Int) {
+    // Two's-complement-safe magnitude. The naive `n = 0 - n` for the
+    // negative branch overflows on Int.MIN (`0 - Int.MIN` is
+    // unrepresentable, wraps back to Int.MIN), and the subsequent
+    // digit-counting `while x > 0` loop never enters — emitting
+    // garbage like `(` (0x28 = 0x30 + (-8)) instead of the true
+    // value. Accumulate magnitude in UInt64 so every Int including
+    // Int.MIN round-trips exactly.
     if n == 0 { dst.push_byte(0x30 as u8); return; }
-    let mut digits: Int = 0;
-    let mut x: Int = n;
-    while x > 0 { digits = digits + 1; x = x / 10; }
-    let mut buf: Int = 1;
-    let mut d: Int = 1;
-    while d < digits { buf = buf * 10; d = d + 1; }
-    while buf > 0 {
-        let c = (n / buf) - ((n / (buf * 10)) * 10);
-        dst.push_byte((0x30 + c) as u8);
-        buf = buf / 10;
+    let negative = n < 0;
+    if negative { dst.push_byte(0x2D as u8); }
+    let mut mag: UInt64 = if negative {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
+    // Worst case: 20 digits for UInt64.
+    let mut buf: [Byte; 20] = [0_u8; 20];
+    let mut i: Int = 19;
+    while mag > 0_u64 {
+        buf[i] = ((mag % 10_u64) as Byte) + 0x30_u8;
+        mag = mag / 10_u64;
+        i = i - 1;
     }
+    let mut k: Int = i + 1;
+    while k <= 19 { dst.push_byte(buf[k]); k = k + 1; }
 }
 
 public fn infer_schema(opts: &CsvVtabOptions, first_row_columns: Int) -> Text {
