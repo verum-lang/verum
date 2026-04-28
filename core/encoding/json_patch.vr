@@ -75,6 +75,46 @@ public type JsonPatchError is
     | TestFailed(Text)
     | InvalidOp(Text);
 
+implement Display for JsonPatchError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)        => f.write_str(f"JSON Patch: malformed ({reason})".as_str()),
+            BadPointer(reason)       => f.write_str(f"JSON Patch: bad pointer ({reason})".as_str()),
+            MissingField(field)      => f.write_str(f"JSON Patch: missing field {field}".as_str()),
+            TargetNotFound(path)     => f.write_str(f"JSON Patch: target not found at {path}".as_str()),
+            TestFailed(path)         => f.write_str(f"JSON Patch: test op failed at {path}".as_str()),
+            InvalidOp(op)            => f.write_str(f"JSON Patch: invalid op {op}".as_str()),
+        }
+    }
+}
+
+implement Debug for JsonPatchError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)        => f.write_str(f"Malformed({reason})".as_str()),
+            BadPointer(reason)       => f.write_str(f"BadPointer({reason})".as_str()),
+            MissingField(field)      => f.write_str(f"MissingField({field})".as_str()),
+            TargetNotFound(path)     => f.write_str(f"TargetNotFound({path})".as_str()),
+            TestFailed(path)         => f.write_str(f"TestFailed({path})".as_str()),
+            InvalidOp(op)            => f.write_str(f"InvalidOp({op})".as_str()),
+        }
+    }
+}
+
+implement Eq for JsonPatchError {
+    fn eq(&self, other: &JsonPatchError) -> Bool {
+        match (self, other) {
+            (Malformed(a),       Malformed(b))       => a == b,
+            (BadPointer(a),      BadPointer(b))      => a == b,
+            (MissingField(a),    MissingField(b))    => a == b,
+            (TargetNotFound(a),  TargetNotFound(b))  => a == b,
+            (TestFailed(a),      TestFailed(b))      => a == b,
+            (InvalidOp(a),       InvalidOp(b))       => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parse
 // =============================================================================

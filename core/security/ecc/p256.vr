@@ -116,6 +116,50 @@ public type P256Error is
     | DerDecodeError(Text)
     | BackendNotReady;
 
+// VerificationFailed surfaces no detail — ECDSA-P256
+// verification MUST be value-blind (FIPS 186-5 §6.4.2)
+// to avoid an oracle for the secret key.
+
+implement Display for P256Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidPrivateKey(reason) => f.write_str(f"P-256: invalid private key ({reason})".as_str()),
+            InvalidPublicKey(reason)  => f.write_str(f"P-256: invalid public key ({reason})".as_str()),
+            InvalidSignature(reason)  => f.write_str(f"P-256: invalid signature ({reason})".as_str()),
+            VerificationFailed        => f.write_str("P-256: signature verification failed"),
+            DerDecodeError(reason)    => f.write_str(f"P-256: DER decode failed ({reason})".as_str()),
+            BackendNotReady           => f.write_str("P-256: backend intrinsic not ready"),
+        }
+    }
+}
+
+implement Debug for P256Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidPrivateKey(reason) => f.write_str(f"InvalidPrivateKey({reason})".as_str()),
+            InvalidPublicKey(reason)  => f.write_str(f"InvalidPublicKey({reason})".as_str()),
+            InvalidSignature(reason)  => f.write_str(f"InvalidSignature({reason})".as_str()),
+            VerificationFailed        => f.write_str("VerificationFailed"),
+            DerDecodeError(reason)    => f.write_str(f"DerDecodeError({reason})".as_str()),
+            BackendNotReady           => f.write_str("BackendNotReady"),
+        }
+    }
+}
+
+implement Eq for P256Error {
+    fn eq(&self, other: &P256Error) -> Bool {
+        match (self, other) {
+            (InvalidPrivateKey(a), InvalidPrivateKey(b)) => a == b,
+            (InvalidPublicKey(a),  InvalidPublicKey(b))  => a == b,
+            (InvalidSignature(a),  InvalidSignature(b))  => a == b,
+            (VerificationFailed,   VerificationFailed)   => true,
+            (DerDecodeError(a),    DerDecodeError(b))    => a == b,
+            (BackendNotReady,      BackendNotReady)      => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // P-256 namespace
 // =============================================================================

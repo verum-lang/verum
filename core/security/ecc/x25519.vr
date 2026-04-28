@@ -93,6 +93,36 @@ public type X25519Error is
     /// Intrinsic backend unavailable (build misconfiguration).
     | BackendNotReady;
 
+implement Display for X25519Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AllZeroOutput   => "X25519: all-zero shared secret (low-order peer key)",
+            BackendNotReady => "X25519: backend intrinsic not ready",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for X25519Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AllZeroOutput   => "AllZeroOutput",
+            BackendNotReady => "BackendNotReady",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for X25519Error {
+    fn eq(&self, other: &X25519Error) -> Bool {
+        match (self, other) {
+            (AllZeroOutput,   AllZeroOutput)   => true,
+            (BackendNotReady, BackendNotReady) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // X25519 entry points
 // =============================================================================

@@ -66,6 +66,63 @@ public type MsgPackError is
     | ExtTooLong { declared: Int, limit: Int }
     | TrailingBytes(Int);
 
+implement Display for MsgPackError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated(off)                          => f.write_str(f"MsgPack: truncated at offset {off}".as_str()),
+            InvalidPrefix(b)                        => f.write_str(f"MsgPack: invalid prefix byte 0x{b:x}".as_str()),
+            InvalidUtf8                             => f.write_str("MsgPack: invalid UTF-8 in str"),
+            NestingTooDeep                          => f.write_str("MsgPack: nesting too deep"),
+            ArrayTooLarge { declared, limit }       => f.write_str(f"MsgPack: array {declared} exceeds limit {limit}".as_str()),
+            MapTooLarge { declared, limit }         => f.write_str(f"MsgPack: map {declared} exceeds limit {limit}".as_str()),
+            StringTooLong { declared, limit }       => f.write_str(f"MsgPack: string {declared} exceeds limit {limit}".as_str()),
+            BinTooLong { declared, limit }          => f.write_str(f"MsgPack: bin {declared} exceeds limit {limit}".as_str()),
+            ExtTooLong { declared, limit }          => f.write_str(f"MsgPack: ext {declared} exceeds limit {limit}".as_str()),
+            TrailingBytes(n)                        => f.write_str(f"MsgPack: {n} trailing bytes".as_str()),
+        }
+    }
+}
+
+implement Debug for MsgPackError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated(off)                          => f.write_str(f"Truncated({off})".as_str()),
+            InvalidPrefix(b)                        => f.write_str(f"InvalidPrefix(0x{b:x})".as_str()),
+            InvalidUtf8                             => f.write_str("InvalidUtf8"),
+            NestingTooDeep                          => f.write_str("NestingTooDeep"),
+            ArrayTooLarge { declared, limit }       => f.write_str(f"ArrayTooLarge {{ declared: {declared}, limit: {limit} }}".as_str()),
+            MapTooLarge { declared, limit }         => f.write_str(f"MapTooLarge {{ declared: {declared}, limit: {limit} }}".as_str()),
+            StringTooLong { declared, limit }       => f.write_str(f"StringTooLong {{ declared: {declared}, limit: {limit} }}".as_str()),
+            BinTooLong { declared, limit }          => f.write_str(f"BinTooLong {{ declared: {declared}, limit: {limit} }}".as_str()),
+            ExtTooLong { declared, limit }          => f.write_str(f"ExtTooLong {{ declared: {declared}, limit: {limit} }}".as_str()),
+            TrailingBytes(n)                        => f.write_str(f"TrailingBytes({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for MsgPackError {
+    fn eq(&self, other: &MsgPackError) -> Bool {
+        match (self, other) {
+            (Truncated(a),       Truncated(b))       => a == b,
+            (InvalidPrefix(a),   InvalidPrefix(b))   => a == b,
+            (InvalidUtf8,        InvalidUtf8)        => true,
+            (NestingTooDeep,     NestingTooDeep)     => true,
+            (ArrayTooLarge { declared: da, limit: la },
+             ArrayTooLarge { declared: db, limit: lb }) => da == db && la == lb,
+            (MapTooLarge { declared: da, limit: la },
+             MapTooLarge { declared: db, limit: lb })   => da == db && la == lb,
+            (StringTooLong { declared: da, limit: la },
+             StringTooLong { declared: db, limit: lb }) => da == db && la == lb,
+            (BinTooLong { declared: da, limit: la },
+             BinTooLong { declared: db, limit: lb })    => da == db && la == lb,
+            (ExtTooLong { declared: da, limit: la },
+             ExtTooLong { declared: db, limit: lb })    => da == db && la == lb,
+            (TrailingBytes(a),   TrailingBytes(b))     => a == b,
+            _ => false,
+        }
+    }
+}
+
 public const MAX_MSGPACK_NESTING: Int = 128;
 
 /// Per-array element-count cap. The msgpack `array32` prefix carries a

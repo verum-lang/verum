@@ -98,6 +98,42 @@ public type Ed25519Error is
     /// misconfiguration, not a user error.
     | BackendNotReady;
 
+// VerificationFailed Display surfaces no detail — Ed25519
+// signature verification MUST be value-blind (RFC 8032 §5.1)
+// to avoid an oracle for the secret key (same discipline as
+// JwtError / TlsError / CoseError).
+
+implement Display for Ed25519Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)       => f.write_str(f"Ed25519: malformed ({reason})".as_str()),
+            VerificationFailed      => f.write_str("Ed25519: signature verification failed"),
+            BackendNotReady         => f.write_str("Ed25519: backend intrinsic not ready"),
+        }
+    }
+}
+
+implement Debug for Ed25519Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)       => f.write_str(f"Malformed({reason})".as_str()),
+            VerificationFailed      => f.write_str("VerificationFailed"),
+            BackendNotReady         => f.write_str("BackendNotReady"),
+        }
+    }
+}
+
+implement Eq for Ed25519Error {
+    fn eq(&self, other: &Ed25519Error) -> Bool {
+        match (self, other) {
+            (Malformed(a),         Malformed(b))         => a == b,
+            (VerificationFailed,   VerificationFailed)   => true,
+            (BackendNotReady,      BackendNotReady)      => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Ed25519 namespace
 // =============================================================================

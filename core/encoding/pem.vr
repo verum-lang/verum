@@ -85,6 +85,43 @@ public type PemError is
     | Malformed(Text)
     | TooLarge(Int);
 
+implement Display for PemError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoBlockFound           => f.write_str("PEM: no block found"),
+            MismatchedLabels(l)    => f.write_str(f"PEM: mismatched labels ({l})".as_str()),
+            Base64Failed           => f.write_str("PEM: base64 decode failed"),
+            Malformed(reason)      => f.write_str(f"PEM: malformed ({reason})".as_str()),
+            TooLarge(n)            => f.write_str(f"PEM: block exceeds size limit ({n} bytes)".as_str()),
+        }
+    }
+}
+
+implement Debug for PemError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoBlockFound           => f.write_str("NoBlockFound"),
+            MismatchedLabels(l)    => f.write_str(f"MismatchedLabels({l})".as_str()),
+            Base64Failed           => f.write_str("Base64Failed"),
+            Malformed(reason)      => f.write_str(f"Malformed({reason})".as_str()),
+            TooLarge(n)            => f.write_str(f"TooLarge({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for PemError {
+    fn eq(&self, other: &PemError) -> Bool {
+        match (self, other) {
+            (NoBlockFound,        NoBlockFound)        => true,
+            (MismatchedLabels(a), MismatchedLabels(b)) => a == b,
+            (Base64Failed,        Base64Failed)        => true,
+            (Malformed(a),        Malformed(b))        => a == b,
+            (TooLarge(a),         TooLarge(b))         => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Hard cap on a single PEM block's base64 body length (bytes BEFORE
 /// decode). 16 MiB is well above any realistic certificate / key blob:
 ///
