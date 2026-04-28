@@ -11,8 +11,9 @@
 //
 // Pins the compile-time scaling for nested generic instantiation against
 // a stack-overflow-style cliff. The full attack vector is `List<List<...
-// List<Int>>>>` 1024 deep; here we exercise 32 levels which is enough to
-// expose any non-linear monomorphization scaling without timing out CI.
+// List<Int>>>>` 1024 deep; here we exercise 15 doubling-levels —
+// 2^14 = 16,384 effective List wrappings — which is enough to expose
+// any non-linear monomorphization scaling without timing out CI.
 //
 // **Audit reference:** vcs/red-team/round-3-perf.md §1.1.
 //
@@ -40,16 +41,25 @@ type L07<T> is L06<L06<T>>;
 type L08<T> is L07<L07<T>>;
 type L09<T> is L08<L08<T>>;
 type L10<T> is L09<L09<T>>;
+type L11<T> is L10<L10<T>>;
+type L12<T> is L11<L11<T>>;
+type L13<T> is L12<L12<T>>;
+type L14<T> is L13<L13<T>>;
+type L15<T> is L14<L14<T>>;
 
-// Concretise at Int. Even with the doubling-pattern above (each level
-// embeds two of the previous), the type arena must remain finite —
-// the kernel's normalize step deduplicates structurally-equal types.
-type Deep32 is L10<Int>;
+// Concretise at Int.  L15 = 2^14 = 16,384 effective List wrappings.
+// Without structural dedup the type arena would balloon to 2^15 =
+// 32,768 nodes; with dedup it stays at one entry per distinct shape.
+// A regression to non-deduplicating type-canonicalisation would
+// surface as a 30s timeout (this test compiles in well under that).
+type Deep32 is L15<Int>;
 
-fn deep_constructor() -> Deep32 {
-    // Don't actually construct the deeply-nested value — just declare
-    // a function with the type. Compilation = monomorphization runs.
-    Deep32.empty()
+// Function type-signature alone exercises monomorphization on the
+// deeply-nested type without requiring a method-resolution walk
+// over `Deep32` (which at 2^14 wrapping depth would itself stress
+// the resolver).  The body returns via parameter pass-through.
+fn deep_constructor(seed: Deep32) -> Deep32 {
+    seed
 }
 
 fn main() {
