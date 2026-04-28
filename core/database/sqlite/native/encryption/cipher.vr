@@ -151,12 +151,9 @@ implement PageCipher for AesGcmCipher {
         // Wire layout: nonce || ciphertext || tag.
         let total = AES_GCM_NONCE_BYTES + plaintext.len() + AES_GCM_TAG_BYTES;
         let mut out: List<Byte> = List.with_capacity(total);
-        let mut i: Int = 0;
-        while i < AES_GCM_NONCE_BYTES { out.push(nonce[i]); i = i + 1; }
-        let mut j: Int = 0;
-        while j < ciphertext.len() { out.push(ciphertext[j]); j = j + 1; }
-        let mut t: Int = 0;
-        while t < AES_GCM_TAG_BYTES { out.push(tag[t]); t = t + 1; }
+        out.extend_from_slice(&nonce[..]);
+        out.extend_from_slice(ciphertext.as_slice());
+        out.extend_from_slice(&tag[..]);
         Ok(out)
     }
 
@@ -169,14 +166,15 @@ implement PageCipher for AesGcmCipher {
         // Slice the wire layout back apart. The AEAD verifies tag
         // before exposing any plaintext, so wrong-key / tampered
         // input surfaces as TagMismatch — never silent success.
+        let cs = ciphertext.as_slice();
         let mut nonce: [Byte; 12] = [0; 12];
         let mut k: Int = 0;
-        while k < AES_GCM_NONCE_BYTES { nonce[k] = ciphertext[k]; k = k + 1; }
+        while k < AES_GCM_NONCE_BYTES { nonce[k] = cs[k]; k = k + 1; }
 
         let mut tag: [Byte; 16] = [0; 16];
         let tag_off = AES_GCM_NONCE_BYTES + payload_len;
         let mut tt: Int = 0;
-        while tt < AES_GCM_TAG_BYTES { tag[tt] = ciphertext[tag_off + tt]; tt = tt + 1; }
+        while tt < AES_GCM_TAG_BYTES { tag[tt] = cs[tag_off + tt]; tt = tt + 1; }
 
         let body_slice = ciphertext.as_slice();
         let body_view = &body_slice[AES_GCM_NONCE_BYTES..tag_off];
@@ -227,12 +225,9 @@ implement PageCipher for Chacha20Cipher {
 
         let total = CHACHA_NONCE_BYTES + plaintext.len() + CHACHA_TAG_BYTES;
         let mut out: List<Byte> = List.with_capacity(total);
-        let mut i: Int = 0;
-        while i < CHACHA_NONCE_BYTES { out.push(nonce[i]); i = i + 1; }
-        let mut j: Int = 0;
-        while j < ciphertext.len() { out.push(ciphertext[j]); j = j + 1; }
-        let mut t: Int = 0;
-        while t < CHACHA_TAG_BYTES { out.push(tag[t]); t = t + 1; }
+        out.extend_from_slice(&nonce[..]);
+        out.extend_from_slice(ciphertext.as_slice());
+        out.extend_from_slice(&tag[..]);
         Ok(out)
     }
 
@@ -242,17 +237,17 @@ implement PageCipher for Chacha20Cipher {
         }
         let payload_len = ciphertext.len() - CHACHA_NONCE_BYTES - CHACHA_TAG_BYTES;
 
+        let cs = ciphertext.as_slice();
         let mut nonce: ChaChaNonce = [0; 12];
         let mut k: Int = 0;
-        while k < CHACHA_NONCE_BYTES { nonce[k] = ciphertext[k]; k = k + 1; }
+        while k < CHACHA_NONCE_BYTES { nonce[k] = cs[k]; k = k + 1; }
 
         let mut tag: [Byte; 16] = [0; 16];
         let tag_off = CHACHA_NONCE_BYTES + payload_len;
         let mut tt: Int = 0;
-        while tt < CHACHA_TAG_BYTES { tag[tt] = ciphertext[tag_off + tt]; tt = tt + 1; }
+        while tt < CHACHA_TAG_BYTES { tag[tt] = cs[tag_off + tt]; tt = tt + 1; }
 
-        let body_slice = ciphertext.as_slice();
-        let body_view = &body_slice[CHACHA_NONCE_BYTES..tag_off];
+        let body_view = &cs[CHACHA_NONCE_BYTES..tag_off];
 
         let cipher = ChaCha20Poly1305.new(&self.key);
         let aad: [Byte; 0] = [];
@@ -271,9 +266,8 @@ implement PageCipher for Chacha20Cipher {
 // -----------------------------------------------------------------------------
 
 fn clone_bytes(b: &List<Byte>) -> List<Byte> {
-    let mut out: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < b.len() { out.push(b[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(b.len());
+    out.extend_from_slice(b.as_slice());
     out
 }
 
