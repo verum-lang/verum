@@ -552,6 +552,20 @@ public fn get_thread_id() -> UInt64 {
 // all-or-nothing semantics are required.
 // =============================================================================
 
+/// Cross-platform raw-pointer pread — caller-owned buffer + count.
+/// Mirrors `pread` but bypasses the `&mut [Byte]` parameter coercion
+/// path (RUNTIME-3-DEEPER sidestep).  Caller passes the buffer's first
+/// byte plus an explicit byte count.
+public fn pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) -> Result<Int, OSError> {
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.pread_raw(fd, buf, count, offset); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_pread_raw(fd, buf, count, offset); }
+
+    Err(OSError { code: -1, message: "pread_raw: unsupported platform".clone() })
+}
+
 /// Cross-platform `pread(2)` — read into `buf` from `fd` at `offset`.
 public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSError> {
     @cfg(target_os = "linux")
