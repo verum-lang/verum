@@ -50,8 +50,21 @@ module core.base.ulid;
 
 mount core.*;
 mount core.collections.List;
-mount core.base.random;
+mount core.sys.common.random_bytes as sys_random_bytes;
 mount core.time.instant;
+
+// CSPRNG-backed entropy fill. The historical `core.base.random.fill`
+// import resolved to nothing, so every ULID emitted by this stdlib
+// silently had a 10-byte zero tail — UUID-style breakage with worse
+// blast-radius (ULIDs are commonly used as DB primary keys). Wire to
+// the canonical platform source; panic on failure rather than issue
+// a deterministic identifier.
+fn fill_random(buf: &mut [Byte]) {
+    match sys_random_bytes(buf) {
+        Ok(_)  => {},
+        Err(_) => panic("ULID: kernel CSPRNG unavailable — refusing to issue zero-entropy ULID"),
+    }
+}
 
 // =============================================================================
 // Crockford Base32 alphabet (spec §4)
@@ -85,7 +98,7 @@ implement Ulid {
     public fn new() -> Ulid {
         let ts = instant.unix_millis() as UInt64;
         let mut buf: [Byte; 10] = [0_u8; 10];
-        random.fill(&mut buf);
+        fill_random(&mut buf);
         pack(ts, &buf)
     }
 

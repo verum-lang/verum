@@ -55,7 +55,7 @@ module core.async.backoff;
 
 mount core.*;
 mount core.time.duration.{Duration};
-mount core.base.random;
+mount core.sys.common.random_bytes as sys_random_bytes;
 
 // =============================================================================
 // Policy selector
@@ -228,7 +228,16 @@ fn random_u64_in(lo: UInt64, hi: UInt64) -> UInt64 {
 
 fn random_u64() -> UInt64 {
     let mut buf: [Byte; 8] = [0_u8; 8];
-    random.fill(&mut buf);
+    // Backoff jitter sourced from CSPRNG to defeat thundering-herd
+    // attacks on shared backends. The historical `core.base.random.fill`
+    // import resolved to nothing → all clients converged to the
+    // floor wait, defeating the jitter entirely. Wire to the platform
+    // CSPRNG; on entropy failure fall back to a non-zero deterministic
+    // value (better than a coordinated retry storm even if not ideal).
+    match sys_random_bytes(&mut buf) {
+        Ok(_)  => {},
+        Err(_) => return 0xA5A5_A5A5_A5A5_A5A5_u64,
+    }
     let mut r: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < 8 {

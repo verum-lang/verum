@@ -47,8 +47,18 @@ fn unix_millis() -> Int {
     core.time.instant.unix_millis()
 }
 
+// CSPRNG-backed entropy. UUID identity rests on this returning real
+// random bytes — `core.base.random.fill` (the historical name)
+// resolved to nothing, so every Uuid.new_v4() / new_v7() call was
+// silently producing all-zero entropy in the tail. Wire to the
+// canonical platform source and panic on failure: there is no honest
+// fallback for "the kernel can't deliver entropy" when the caller is
+// asking for a unique identifier.
 fn random_bytes(buf: &mut [Byte]) {
-    core.base.random.fill(buf)
+    match core.sys.common.random_bytes(buf) {
+        Ok(_)  => {},
+        Err(_) => panic("UUID: kernel CSPRNG unavailable — refusing to issue zero-entropy UUID"),
+    }
 }
 
 implement Uuid {
