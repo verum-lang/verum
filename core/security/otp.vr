@@ -45,7 +45,7 @@ module core.security.otp;
 mount core.*;
 mount core.collections.List;
 mount core.security.mac.hmac.{hmac_sha1, hmac_sha256, hmac_sha512};
-mount core.security.util.rng.{fill_secure};
+mount core.security.util.rng.{fill_secure_array};
 mount core.security.util.constant_time.{constant_time_eq};
 mount core.encoding.base32.{encode as base32_encode};
 
@@ -208,11 +208,15 @@ public fn totp_verify(
 /// Generate a fresh random TOTP secret of `len_bytes` bytes.
 public fn generate_secret(len_bytes: Int) -> List<Byte> {
     let n = if len_bytes < MIN_SECRET_BYTES { MIN_SECRET_BYTES } else { len_bytes };
-    // Output is exactly `n` bytes — pre-allocate.
+    // Output is exactly `n` bytes — pre-allocate. The CSPRNG draw uses
+    // a fixed-size [Byte; 32] chunk so we route through the array entry
+    // point; the historical `fill_secure(&mut [Byte; 32])` call type-
+    // mismatched the `&mut List<Byte>` signature and was silently
+    // no-op'd by lenient codegen — every TOTP secret had zero entropy.
     let mut buf: List<Byte> = List.with_capacity(n);
     let mut tmp: [Byte; 32] = [0_u8; 32];
     while buf.len() < n {
-        fill_secure(&mut tmp);
+        fill_secure_array(&mut tmp);
         let take = if (n - buf.len()) >= 32 { 32 } else { n - buf.len() };
         let mut i: Int = 0;
         while i < take { buf.push(tmp[i]); i = i + 1; }
