@@ -106,6 +106,37 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
         ),
     );
 
+    // P7 (#20) — `@codegen("path/to/spec.toml")` MVP slice. Parses
+    // a TOML document at compile time and returns it as a
+    // `ConstValue::Map` keyed by Text. Use cases: declarative
+    // schema → record-type derivations, build-time config tables,
+    // structured asset manifests. The full attribute-form
+    // `@codegen` (user meta-fn invocation over the parsed spec) is
+    // a follow-up; this primitive is the foundation. Registered
+    // under both `load_toml` (function-call form) and `codegen`
+    // (macro-call attribute form) so either spelling resolves to
+    // the same dispatcher.
+    map.insert(
+        Text::from("load_toml"),
+        BuiltinInfo::build_assets(
+            meta_load_toml,
+            "Parse a TOML file at compile time. Returns a Map<Text, ConstValue>; \
+             nested tables become nested Maps, arrays become Arrays, datetimes \
+             collapse to RFC 3339 text. Sandbox-restricted to project root.",
+            "(Text) -> Map<Text, Any>",
+        ),
+    );
+    map.insert(
+        Text::from("codegen"),
+        BuiltinInfo::build_assets(
+            meta_load_toml,
+            "@codegen(\"spec.toml\") — load a TOML codegen spec at compile \
+             time. Alias for `load_toml`; returns the parsed document as a \
+             Map<Text, ConstValue> for downstream meta-fn consumption.",
+            "(Text) -> Map<Text, Any>",
+        ),
+    );
+
     // ========================================================================
     // File System Operations (Tier 1 - BuildAssets)
     // ========================================================================
@@ -201,6 +232,28 @@ fn meta_embed_glob(
                 .collect();
             Ok(ConstValue::Array(pairs))
         }
+        _ => Err(MetaError::TypeMismatch {
+            expected: Text::from("Text"),
+            found: args[0].type_name(),
+        }),
+    }
+}
+
+/// `@codegen(path)` / `load_toml(path)` — parse a TOML
+/// document at compile time and return it as a
+/// `ConstValue::Map<Text, ConstValue>`. The MVP foundation for
+/// the full attribute-form `@codegen` (user meta-fn over the
+/// parsed spec) — once user meta-fns can take a Map argument
+/// they can build whatever AST they want from this surface.
+fn meta_load_toml(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
+    if args.len() != 1 {
+        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+    }
+    match &args[0] {
+        ConstValue::Text(path) => ctx.build_assets.load_toml(path.as_str()),
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
@@ -609,6 +662,199 @@ mod tests {
     fn test_embed_glob_arity_check() {
         let (mut ctx, _temp_dir) = create_test_context();
         let result = meta_embed_glob(&mut ctx, List::new());
+        assert!(matches!(result, Err(MetaError::ArityMismatch { .. })));
+    }
+
+    // =====================================================================
+    // #20 / P7 — @codegen / load_toml
+    // =====================================================================
+
+    #[test]
+    fn test_load_toml_registered_under_both_names() {
+        let mut map = BuiltinRegistry::new();
+        register_builtins(&mut map);
+        let load = map
+            .get(&Text::from("load_toml"))
+            .expect("load_toml must be registered");
+        assert_eq!(load.signature, "(Text) -> Map<Text, Any>");
+        let codegen = map
+            .get(&Text::from("codegen"))
+            .expect("@codegen alias must be registered for the macro form");
+        assert_eq!(codegen.signature, "(Text) -> Map<Text, Any>");
+    }
+
+    #[test]
+    fn test_load_toml_basic_table() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("spec.toml");
+        std::fs::write(
+            &path,
+            "name = \"verum\"\nversion = 1\nstable = true\nratio = 0.75\n",
+        )
+        .unwrap();
+        let result = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("spec.toml"))]),
+        )
+        .expect("load_toml should parse a flat table");
+        let map = match result {
+            ConstValue::Map(m) => m,
+            other => panic!("expected Map, got {:?}", other),
+        };
+        match map.get(&Text::from("name")) {
+            Some(ConstValue::Text(t)) => assert_eq!(t.as_str(), "verum"),
+            other => panic!("expected Text for name, got {:?}", other),
+        }
+        match map.get(&Text::from("version")) {
+            Some(ConstValue::Int(i)) => assert_eq!(*i, 1),
+            other => panic!("expected Int for version, got {:?}", other),
+        }
+        match map.get(&Text::from("stable")) {
+            Some(ConstValue::Bool(b)) => assert!(*b),
+            other => panic!("expected Bool for stable, got {:?}", other),
+        }
+        match map.get(&Text::from("ratio")) {
+            Some(ConstValue::Float(f)) => assert!((*f - 0.75).abs() < 1e-9),
+            other => panic!("expected Float for ratio, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_toml_nested_tables_become_nested_maps() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("nested.toml");
+        std::fs::write(
+            &path,
+            "[package]\nname = \"foo\"\n[package.author]\nname = \"alice\"\n",
+        )
+        .unwrap();
+        let result = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("nested.toml"))]),
+        )
+        .expect("load_toml should parse nested tables");
+        let outer = match result {
+            ConstValue::Map(m) => m,
+            other => panic!("expected outer Map, got {:?}", other),
+        };
+        let pkg = match outer.get(&Text::from("package")) {
+            Some(ConstValue::Map(m)) => m.clone(),
+            other => panic!("expected nested Map for package, got {:?}", other),
+        };
+        match pkg.get(&Text::from("name")) {
+            Some(ConstValue::Text(t)) => assert_eq!(t.as_str(), "foo"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+        let author = match pkg.get(&Text::from("author")) {
+            Some(ConstValue::Map(m)) => m.clone(),
+            other => panic!("expected nested Map for author, got {:?}", other),
+        };
+        match author.get(&Text::from("name")) {
+            Some(ConstValue::Text(t)) => assert_eq!(t.as_str(), "alice"),
+            other => panic!("expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_toml_arrays_become_arrays() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("arr.toml");
+        std::fs::write(
+            &path,
+            "tags = [\"a\", \"b\", \"c\"]\nports = [80, 443, 8443]\n",
+        )
+        .unwrap();
+        let result = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("arr.toml"))]),
+        )
+        .expect("load_toml should parse arrays");
+        let map = match result {
+            ConstValue::Map(m) => m,
+            other => panic!("expected Map, got {:?}", other),
+        };
+        match map.get(&Text::from("tags")) {
+            Some(ConstValue::Array(items)) => {
+                assert_eq!(items.len(), 3);
+                match &items[0] {
+                    ConstValue::Text(t) => assert_eq!(t.as_str(), "a"),
+                    other => panic!("expected Text, got {:?}", other),
+                }
+            }
+            other => panic!("expected Array for tags, got {:?}", other),
+        }
+        match map.get(&Text::from("ports")) {
+            Some(ConstValue::Array(items)) => {
+                assert_eq!(items.len(), 3);
+                match &items[2] {
+                    ConstValue::Int(i) => assert_eq!(*i, 8443),
+                    other => panic!("expected Int, got {:?}", other),
+                }
+            }
+            other => panic!("expected Array for ports, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_toml_datetime_collapses_to_text() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("dt.toml");
+        // RFC 3339 datetime — toml crate parses as Datetime which we
+        // collapse to its Display form (RFC 3339 round-trip).
+        std::fs::write(&path, "released = 2026-04-28T12:00:00Z\n").unwrap();
+        let result = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("dt.toml"))]),
+        )
+        .expect("load_toml should accept datetimes");
+        let map = match result {
+            ConstValue::Map(m) => m,
+            other => panic!("expected Map, got {:?}", other),
+        };
+        match map.get(&Text::from("released")) {
+            Some(ConstValue::Text(t)) => assert!(t.as_str().starts_with("2026-04-28")),
+            other => panic!("expected datetime collapsed to Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_toml_rejects_parse_errors() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("bad.toml");
+        std::fs::write(&path, "name = \"unterminated\nport = 80\n").unwrap();
+        let result = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("bad.toml"))]),
+        );
+        match result {
+            Err(MetaError::Other(msg)) => {
+                assert!(
+                    msg.as_str().contains("TOML parse error"),
+                    "expected parse-error diagnostic, got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected parse error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_toml_blocks_path_traversal() {
+        let (mut ctx, _temp_dir) = create_test_context();
+        let result = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("../etc/secret.toml"))]),
+        );
+        assert!(
+            result.is_err(),
+            "load_toml must inherit the same sandbox as load_text"
+        );
+    }
+
+    #[test]
+    fn test_load_toml_arity_check() {
+        let (mut ctx, _temp_dir) = create_test_context();
+        let result = meta_load_toml(&mut ctx, List::new());
         assert!(matches!(result, Err(MetaError::ArityMismatch { .. })));
     }
 }
