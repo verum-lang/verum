@@ -240,7 +240,8 @@ implement WindowsTerminal {
             0 as &mut kernel32.Overlapped,
         );
         self.write_buf.clear();
-        if !ok {
+        // Win32 BOOL: 0 = FALSE. T0.4.5 — extern returns Int32, not Bool.
+        if ok == 0 {
             Err(StreamError.new(IoErrorKind.Other))
         } else {
             Ok(())

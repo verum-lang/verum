@@ -578,7 +578,10 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
                 &mut ov,
             )
         };
-        if !ok {
+        // Win32 BOOL: 0 = FALSE, non-zero = TRUE. T0.4.5 — extern returns
+        // Int32 (the C ABI width) instead of Bool to avoid the i1-truncation
+        // hazard for non-canonical BOOL values.
+        if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
             return Err(OSError { code: err, message: "ReadFile failed" });
         }
@@ -608,7 +611,8 @@ public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError
                 &mut ov,
             )
         };
-        if !ok {
+        // Win32 BOOL: 0 = FALSE. T0.4.5 — see ReadFile site above.
+        if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
             return Err(OSError { code: err, message: "WriteFile failed" });
         }
@@ -652,7 +656,8 @@ public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
                 super.windows.kernel32.Handle(fd.0),
             )
         };
-        if !ok {
+        // Win32 BOOL: 0 = FALSE. T0.4.5 — see ReadFile site above.
+        if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
             return Err(OSError { code: err, message: "FlushFileBuffers failed" });
         }
