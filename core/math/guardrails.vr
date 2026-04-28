@@ -634,8 +634,14 @@ implement<A: Agent> Agent for GuardedAgent<A> {
 //
 // Blocks content containing any of the specified keywords.
 public type KeywordFilter is {
-    // Keywords to block
+    // Keywords to block (original casing — preserved for the
+    // diagnostic returned to the caller on a hit).
     blocked_keywords: List<Text>,
+    // Pre-lowercased copies used for case-insensitive `contains`
+    // probes. Computed once at construction (and refreshed when
+    // `with_case_sensitive` flips). Empty when `case_insensitive`
+    // is false — the filter compares with the original casings then.
+    folded_keywords: List<Text>,
     // Case-insensitive matching
     case_insensitive: Bool,
 };
@@ -643,8 +649,10 @@ public type KeywordFilter is {
 implement KeywordFilter {
     // Create filter with blocked keywords
     public fn new(keywords: List<Text>) -> Self {
+        let folded = fold_each_lowercase(&keywords);
         KeywordFilter {
             blocked_keywords: keywords,
+            folded_keywords: folded,
             case_insensitive: true,
         }
     }
@@ -652,31 +660,54 @@ implement KeywordFilter {
     // Set case sensitivity
     public fn with_case_sensitive(mut self) -> Self {
         self.case_insensitive = false;
+        // Drop the folded cache — case-sensitive mode probes the
+        // original casings directly. Keeping the cache when unused
+        // would only burn memory.
+        self.folded_keywords = [];
         self
     }
 
     // Check if text contains any blocked keywords
     public fn contains_blocked(&self, text: &Text) -> Maybe<Text> {
-        let check_text = if self.case_insensitive {
-            text.to_lowercase()
-        } else {
-            text.clone()
-        };
-
-        for keyword in &self.blocked_keywords {
-            let check_keyword = if self.case_insensitive {
-                keyword.to_lowercase()
-            } else {
-                keyword.clone()
-            };
-
-            if check_text.contains(&check_keyword) {
-                return Maybe.Some(keyword.clone());
+        if self.case_insensitive {
+            // Pre-folded path: lowercase the input ONCE per call,
+            // then compare against the cached folded keywords.
+            // The previous version called `keyword.to_lowercase()`
+            // per iteration of the inner loop — N keywords ⟹ N
+            // fresh allocations per call. The cache makes per-call
+            // cost O(|text| + Σ|keyword|) on the comparison side
+            // and zero alloc on the keyword side.
+            let folded_text = text.to_lowercase();
+            let mut i: Int = 0;
+            while i < self.folded_keywords.len() {
+                if folded_text.contains(&self.folded_keywords[i]) {
+                    return Maybe.Some(self.blocked_keywords[i].clone());
+                }
+                i = i + 1;
             }
+            Maybe.None
+        } else {
+            // Case-sensitive path: zero allocation.
+            let mut i: Int = 0;
+            while i < self.blocked_keywords.len() {
+                if text.contains(&self.blocked_keywords[i]) {
+                    return Maybe.Some(self.blocked_keywords[i].clone());
+                }
+                i = i + 1;
+            }
+            Maybe.None
         }
-
-        Maybe.None
     }
+}
+
+fn fold_each_lowercase(src: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.with_capacity(src.len());
+    let mut i: Int = 0;
+    while i < src.len() {
+        out.push(src[i].to_lowercase());
+        i = i + 1;
+    }
+    out
 }
 
 implement Guardrail for KeywordFilter {
