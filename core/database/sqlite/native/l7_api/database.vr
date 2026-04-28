@@ -32,6 +32,7 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.pager.{Pager};
+mount core.database.sqlite.native.ext.registry.{FnRegistry};
 mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
 mount core.database.sqlite.native.l5_sql.{
     CompileError, Statement, Expr,
@@ -167,6 +168,14 @@ implement Database {
     /// the higher-level operations in `database.vr` itself.
     public fn pager_view(&self) -> &Pager { self.conn.pager() }
     public fn pager_mut(&mut self) -> &mut Pager { self.conn.pager_mut() }
+
+    /// Borrow the connection's function & hook registry.  Used by the
+    /// `l7_api.hooks` surface to expose `set_commit_hook` /
+    /// `set_rollback_hook` / etc. as method-style sugar on Database
+    /// without leaking the underlying Connection through the public
+    /// API.
+    public fn registry_view(&self) -> &FnRegistry { self.conn.registry_view() }
+    public fn registry_mut(&mut self) -> &mut FnRegistry { self.conn.registry_mut() }
 
     // -------------------------------------------------------------------------
     // Prepare / execute / query

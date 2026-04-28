@@ -10,6 +10,7 @@ module core.database.sqlite.native.l7_api;
 public module database;
 public module transaction;
 public module backup;
+public module hooks;
 
 public mount .database.{
     Database, DbError,
@@ -28,4 +29,13 @@ public mount .backup.{
     backup_init_to_path, backup_init_into,
     backup_step, backup_finish, backup_abandon,
     backup_to_path_in_one_go,
+};
+
+public mount .hooks.{
+    set_commit_hook, clear_commit_hook, has_commit_hook,
+    set_rollback_hook, has_rollback_hook,
+    set_update_hook, has_update_hook,
+    set_pre_update_hook,
+    set_authorizer, has_authorizer,
+    set_busy_handler, set_progress_handler, set_trace_hook,
 };
