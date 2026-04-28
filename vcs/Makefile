@@ -171,7 +171,7 @@ endef
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
 .PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team
-.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip
+.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip gate-memory-safety
 
 # =============================================================================
 # Default Target
@@ -1015,6 +1015,12 @@ gate-documentation:
 	$(call PROGRESS,Running documentation gate (#198 gate 5)...)
 	@bash $(VCS_ROOT)/gates/documentation.sh
 
+# Run gate 2 — memory-safety (zero skip / ignore / known-failure
+# markers under vcs/specs/L0-critical/memory-safety/).
+gate-memory-safety:
+	$(call PROGRESS,Running memory-safety gate (#198 gate 2)...)
+	@bash $(VCS_ROOT)/gates/memory_safety.sh
+
 # Run AOT-lenient-skip ratchet gate (#176).
 # Reads vcs/aot_skip_snapshot.txt (produced by CI's full-corpus AOT
 # pass) and compares against vcs/aot_skip_baseline.txt; fails on
@@ -1032,7 +1038,7 @@ gate-aot-skip:
 # CI starts producing snapshot files; can be enabled via
 # `make production-readiness-with-aot-skip` once the snapshot
 # pipeline lands.
-production-readiness: gate-diagnostic gate-soundness gate-documentation diff-red-team
+production-readiness: gate-diagnostic gate-soundness gate-documentation gate-memory-safety diff-red-team
 
 # Aggregator that includes gate-aot-skip — for use by CI runs that
 # produce vcs/aot_skip_snapshot.txt before invoking.
