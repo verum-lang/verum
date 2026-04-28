@@ -111,9 +111,19 @@ emitted bytecode.
 
 ## Vector 3 — VBC interpreter abuse
 
-### 3.1 Assign to read-only register
+### 3.1 Assign to read-only register — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs hand-crafted bytecode harness.
+**Status:** DEFENSE CONFIRMED — closed via the per-instruction bytecode
+validator (round-1 §3.1).  VBC has no concept of "read-only register"
+at the instruction level — registers are simply numbered slots
+`r0..r{register_count}` per function frame.  The attack vector this
+section captures is hand-crafted bytecode that writes past the
+function's declared register file (corrupting an adjacent frame); the
+validator's `RegisterOutOfBounds { reg, max, context }` check rejects
+exactly this case at module load time.
+
+**Cross-reference:** see round-1 §3.1 for the full validator design +
+the 6 guardrail tests.
 
 ### 3.2 Mismatched arity calls — PARTIAL DEFENSE (documented) 2026-04-28
 
@@ -505,7 +515,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 2.3 Deep generics | **DEFENSE CONFIRMED** | ast_to_type cap + 32-OK / 65-fail guardrails (2026-04-28) |
 | 2.4 Recursive impl | **DEFENSE** | guardrail (2026-04-28) |
 | 2.5 Codegen non-determinism | **DEFENSE CONFIRMED** | 4-layer determinism guardrails (2026-04-28) |
-| 3.1 RO register | PENDING | bytecode harness |
+| 3.1 RO register | **DEFENSE CONFIRMED** | round-1 §3.1 validator covers register-OOB (2026-04-28) |
 | 3.2 Arity mismatch | **PARTIAL (documented)** | codegen-enforced; bytecode-validator under round-1 §3.1 |
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
@@ -525,9 +535,9 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**18 vectors confirmed defended (was 15), 9 partial, 0 pending** post
+**19 vectors confirmed defended (was 18), 8 partial, 0 pending** post
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
-RT-2.2.3 + RT-2.5 + RT-2.7.1 closures.  Earlier:
+RT-2.2.3 + RT-2.5 + RT-2.7.1 + RT-2.3.1 closures.  Earlier:
 RT-2.3.2 + RT-2.4.3 + RT-2.4.1 + RT-2.4.2 + RT-2.8.2 + RT-2.6.1 +
 RT-2.6.3 closures. Sections A-C below record real defects already
 closed in the audit pass.

@@ -783,8 +783,12 @@ fn lock_kind_to_ltype(k: FcntlLockKind) -> Int16 {
 ///   * Linux — uses `F_OFD_SETLK` (open-file-description locks). Per-fd
 ///     ownership, so a stray `close()` elsewhere cannot drop the lock.
 ///   * Darwin — uses `F_SETLK`. Traditional POSIX semantics apply.
-///   * Windows — not implemented in v0.1; returns an informative
-///     `OSError`.
+///   * Windows — uses `LockFileEx` / `UnlockFileEx` with the
+///     `LOCKFILE_FAIL_IMMEDIATELY` flag for the try-lock semantics
+///     (returns `ERROR_LOCK_VIOLATION` rather than blocking).
+///     `Exclusive` adds `LOCKFILE_EXCLUSIVE_LOCK`; `Shared` is
+///     advisory-shared.  Region offset is mapped through an
+///     `OVERLAPPED` structure (no shared file pointer mutation).
 public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: Int) -> Result<(), OSError> {
     let mut fl: Flock = Flock {
         l_type: lock_kind_to_ltype(kind),
