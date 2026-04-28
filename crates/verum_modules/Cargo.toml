@@ -33,4 +33,8 @@ parking_lot = { workspace = true }  # For SharedModuleRegistry RwLock
 [dev-dependencies]
 tempfile = "3.14"
 criterion = { workspace = true }
+# Required by file_mount tests to parse loaded `.vr` files
+# end-to-end. Production callers plug their own parser into
+# `resolve_file_mounts` via the callback parameter.
+verum_fast_parser = { workspace = true }
 

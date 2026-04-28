@@ -121,6 +121,10 @@ pub mod error;
 pub mod exports;
 pub mod imports;
 pub mod loader;
+// File-relative mount resolution (#5 / P1.5) — plugs
+// `mount ./helper.vr;` into the existing module-path
+// pipeline by synthesising a module name per loaded file.
+pub mod file_mount;
 pub mod parallel;
 pub mod path;
 pub mod profile;
