@@ -40,8 +40,15 @@ public type ThreadPool is {
 };
 
 /// A handle to a submitted task, used to retrieve the result.
+///
+/// Drop drains the slot if the caller never awaited — keeps the
+/// pool's handle table bounded under fire-and-forget submission.
 public type PoolTaskHandle is {
     handle: Int,
+    /// Tracks whether `await()` was called. Drop reads this so an
+    /// awaited handle's drain is a no-op (the slot was already
+    /// freed inside __pool_await_raw).
+    awaited: Bool,
 };
 
 // Raw intrinsics (wired to C runtime)
@@ -71,10 +78,17 @@ implement ThreadPool {
     /// Submit a task to the pool. Returns a PoolTaskHandle to await the result.
     public fn submit(&self, func: fn(Int) -> Int, arg: Int) -> PoolTaskHandle {
         let h = __pool_submit_raw(self.handle, func as Int, arg);
-        PoolTaskHandle { handle: h }
+        PoolTaskHandle { handle: h, awaited: false }
     }
 
     /// Destroy the pool, joining all worker threads.
+    ///
+    /// Most callers should NOT call this directly — the `Drop` impl
+    /// below releases the pool when the `ThreadPool` value goes out
+    /// of scope. The explicit method is retained for cases where
+    /// the caller needs to release resources before scope-exit
+    /// (e.g. handing ownership across an FFI boundary, or shrinking
+    /// pool count under memory pressure).
     public fn destroy(&self) {
         __pool_destroy_raw(self.handle);
     }
@@ -82,13 +96,46 @@ implement ThreadPool {
     /// Submit a task to the global (lazily initialized) thread pool.
     public fn global_submit(func: fn(Int) -> Int, arg: Int) -> PoolTaskHandle {
         let h = __pool_global_submit_raw(func as Int, arg);
-        PoolTaskHandle { handle: h }
+        PoolTaskHandle { handle: h, awaited: false }
+    }
+}
+
+// RAII: release the underlying pool when the ThreadPool value goes
+// out of scope. Without this, callers had to remember to call
+// destroy() manually — a classic resource-leak hazard in any
+// long-running process where dozens of short-lived task-orchestration
+// pools accumulate (HTTP server per-request pool, batch job pools,
+// etc.). Mirrors the convention established by WaitGroup at
+// core/sync/waitgroup.vr.
+implement Drop for ThreadPool {
+    fn drop(&mut self) {
+        __pool_destroy_raw(self.handle);
     }
 }
 
 implement PoolTaskHandle {
-    /// Block until the task completes and return its result.
-    public fn await(&self) -> Int {
-        __pool_await_raw(self.handle)
+    /// Block until the task completes and return its result. Marks
+    /// the handle as awaited so the Drop impl knows the result has
+    /// already been collected and the handle slot reused.
+    public fn await(&mut self) -> Int {
+        let result = __pool_await_raw(self.handle);
+        self.awaited = true;
+        result
+    }
+}
+
+// RAII for the handle: if the caller never awaits, drain the slot
+// on drop so the pool's handle table doesn't fill up with orphan
+// entries. Awaited handles are no-ops here since __pool_await_raw
+// already drained the slot.
+implement Drop for PoolTaskHandle {
+    fn drop(&mut self) {
+        if !self.awaited {
+            // Drain the result without surfacing it — the caller
+            // discarded the handle so they have no expectation of
+            // observing the value. Keeps the pool's handle table
+            // bounded.
+            let _ = __pool_await_raw(self.handle);
+        }
     }
 }
