@@ -1096,7 +1096,6 @@ fn cli_kind_to_router_scope(
 fn build_script_permission_policy(
     ctx: &crate::script::context::ScriptContext,
 ) -> Option<verum_compiler::session::ScriptPermissionPolicy> {
-    use crate::script::permissions::PermissionKind;
     use verum_compiler::session::ScriptPermissionPolicy;
     use verum_vbc::interpreter::permission::{PermissionDecision, PermissionScope};
 

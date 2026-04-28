@@ -514,7 +514,7 @@ impl<'a> Validator<'a> {
         function_count: u32,
         constant_count: u32,
         string_count: u32,
-        type_count: u32,
+        _type_count: u32,
         pending_jumps: &mut Vec<(u32, u32)>,
     ) {
         // Helper closures to keep the per-variant arms tidy.

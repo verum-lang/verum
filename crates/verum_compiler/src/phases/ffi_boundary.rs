@@ -57,7 +57,7 @@ use anyhow::Result;
 use std::time::Instant;
 
 use verum_ast::ffi::{
-    CallingConvention, ErrorProtocol, FFIBoundary, FFIFunction, MemoryEffects, Ownership,
+    CallingConvention, FFIBoundary, FFIFunction, MemoryEffects, Ownership,
 };
 use verum_ast::ty::{Type, TypeKind};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};

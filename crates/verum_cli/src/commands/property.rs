@@ -20,7 +20,6 @@
 //!     warning, not a hard error — we always want fresh seeds to work.
 
 use crate::error::{CliError, Result};
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;

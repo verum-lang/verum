@@ -54,10 +54,12 @@ use crate::encoding::{
 use crate::error::{VbcError, VbcResult};
 use crate::instruction::{
     BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp,
-    ExtendedSubOpcode, FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg,
+    FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg,
     TensorBinaryOp, TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp,
     TensorReduceOp, TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
 };
+#[cfg(test)]
+use crate::instruction::ExtendedSubOpcode;
 #[cfg(test)]
 use crate::instruction::RegRange;
 use crate::types::{CbgrTier, ContextRef, Mutability, TypeId, TypeParamId, TypeRef};

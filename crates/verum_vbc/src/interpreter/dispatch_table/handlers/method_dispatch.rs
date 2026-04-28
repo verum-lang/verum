@@ -11,7 +11,7 @@
 use crate::instruction::{Reg, RegRange};
 use crate::module::FunctionId;
 use crate::types::{TypeId, StringId};
-use crate::interpreter::state::{GeneratorId, TaskId};
+use crate::interpreter::state::GeneratorId;
 use crate::value::Value;
 use verum_common::well_known_types::WellKnownType as WKT;
 use crate::interpreter::error::{InterpreterError, InterpreterResult};

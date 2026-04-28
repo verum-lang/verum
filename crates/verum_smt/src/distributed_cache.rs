@@ -87,7 +87,6 @@ use verum_common::{Map, Maybe, Text};
 
 #[cfg(feature = "distributed-cache")]
 use {
-    base64::Engine,
     hmac::{Hmac, Mac},
     reqwest::Client,
 };
