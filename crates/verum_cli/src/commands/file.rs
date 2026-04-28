@@ -1010,6 +1010,57 @@ fn compute_path_cog_integrity(root: &std::path::Path) -> String {
     hasher.finalize().to_hex().to_string()
 }
 
+/// Sentinel target_id meaning "wildcard / coarse-mode check".
+/// The FFI dispatch passes this when it doesn't have a structured
+/// target value to hash; the policy treats it as "any grant of
+/// the scope's matching kind allows". Once SCRIPT-5c-followup
+/// extends the gate to extract real targets (path bytes for FS,
+/// host:port for Net), only specific-target lookups will hit the
+/// HashMap and this sentinel becomes the all-grant fallback.
+const WILDCARD_TARGET_ID: u64 = 0;
+
+/// Compute a stable u64 hash of a granted target string. Used at
+/// policy build time to pre-populate the (scope, target_id) →
+/// Allow HashMap; the runtime gate hashes the same string at the
+/// call site and looks up the result.
+///
+/// blake3-32-bit truncated. Collisions over the script's grant
+/// set are vanishingly improbable (≈2⁻³² for unrelated strings)
+/// and would only over-grant — never under-grant — because the
+/// HashMap stores explicit Allow entries and the default is Deny.
+fn hash_grant_target(target: &str) -> u64 {
+    let h = blake3::hash(target.as_bytes());
+    let bytes = h.as_bytes();
+    u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ])
+}
+
+/// Map a CLI permission kind to the runtime PermissionScope used
+/// by the interpreter's `PermissionRouter`. Mirror of the inline
+/// match in `build_script_permission_policy`'s closure — kept
+/// separate so the policy builder and the lookup-key constructor
+/// agree byte-for-byte on the mapping.
+fn cli_kind_to_router_scope(
+    kind: crate::script::permissions::PermissionKind,
+) -> Option<verum_vbc::interpreter::permission::PermissionScope> {
+    use crate::script::permissions::PermissionKind;
+    use verum_vbc::interpreter::permission::PermissionScope;
+    Some(match kind {
+        PermissionKind::Ffi => PermissionScope::Syscall,
+        PermissionKind::FsRead | PermissionKind::FsWrite => PermissionScope::FileSystem,
+        PermissionKind::Net => PermissionScope::Network,
+        PermissionKind::Run => PermissionScope::Process,
+        PermissionKind::Time | PermissionKind::Random => PermissionScope::Time,
+        // `Env` doesn't map cleanly to a Router scope today.
+        // Process covers env-mutating syscalls; pure env reads
+        // aren't gated. Returning None means env-grants don't
+        // contribute Router entries — they remain advisory at
+        // the language-level boundary.
+        PermissionKind::Env => return None,
+    })
+}
+
 /// Build a permission policy from a script's `ScriptContext`.
 /// Returns `None` for scripts whose frontmatter does not declare a
 /// `permissions = [...]` field — such scripts run unrestricted (the
@@ -1059,41 +1110,89 @@ fn build_script_permission_policy(
         return None;
     }
 
-    let perms = ctx.permissions.clone();
-    let policy = move |scope: PermissionScope, _target_id: u64| -> PermissionDecision {
-        let allowed = match scope {
-            PermissionScope::Syscall => {
-                perms.grants_of(PermissionKind::Ffi).next().is_some()
-            }
-            PermissionScope::FileSystem => {
-                perms.grants_of(PermissionKind::FsRead).next().is_some()
-                    || perms.grants_of(PermissionKind::FsWrite).next().is_some()
-            }
-            PermissionScope::Network => {
-                perms.grants_of(PermissionKind::Net).next().is_some()
-            }
-            PermissionScope::Process => {
-                perms.grants_of(PermissionKind::Run).next().is_some()
-            }
-            // Memory operations (mmap, etc.) and cryptography
-            // primitives don't have a script-level grant kind; let
-            // them through. Future work may add `mem` / `crypto`
-            // kinds if the threat model warrants.
-            PermissionScope::Memory => true,
-            PermissionScope::Cryptography => true,
-            PermissionScope::Time => {
-                perms.grants_of(PermissionKind::Time).next().is_some()
-                    || perms.grants_of(PermissionKind::Random).next().is_some()
-            }
+    use crate::script::permissions::PermissionScope as CliScope;
+    use std::collections::HashSet;
+
+    // Pre-compute the (scope, target_id) lookup set. Wildcard
+    // grants ("permissions = [\"net\"]") populate the
+    // (scope, WILDCARD_TARGET_ID) entry; specific grants
+    // ("permissions = [\"net=api.example.com:443\"]") populate
+    // (scope, hash(target)) per target. The runtime gate hashes
+    // the same target at call time and probes both the specific
+    // entry and the wildcard fallback before denying.
+    //
+    // O(1) at check time (one HashSet lookup), bounded by
+    // grant count at build time. No allocation in the hot path.
+    let mut allow_set: HashSet<(PermissionScope, u64)> = HashSet::new();
+    let perms_snapshot = ctx.permissions.clone();
+    for grant in iterate_grants(&perms_snapshot) {
+        let Some(scope) = cli_kind_to_router_scope(grant.kind) else {
+            continue;
         };
-        if allowed {
+        match &grant.scope {
+            CliScope::Any => {
+                allow_set.insert((scope, WILDCARD_TARGET_ID));
+            }
+            CliScope::Targets(targets) => {
+                for t in targets {
+                    allow_set.insert((scope, hash_grant_target(t)));
+                }
+            }
+        }
+        // FsRead and FsWrite share the FileSystem scope. A grant
+        // of either kind contributes to the same map entry; the
+        // gate doesn't distinguish read-vs-write in target_id
+        // space (yet). When fine-grained read/write distinction
+        // lands, add a sub-key suffix to the hash.
+    }
+
+    let policy = move |scope: PermissionScope, target_id: u64| -> PermissionDecision {
+        // Specific-target entry wins; wildcard is the per-scope
+        // fallback. Order avoids a redundant HashSet lookup when
+        // the gate did pass a real target.
+        if allow_set.contains(&(scope, target_id))
+            || allow_set.contains(&(scope, WILDCARD_TARGET_ID))
+        {
             PermissionDecision::Allow
         } else {
-            PermissionDecision::Deny
+            // Memory and Cryptography scopes have no script-level
+            // kind today — leave them open by policy regardless
+            // of the script's declared grants. Future work may
+            // tie them to explicit kinds if the threat model
+            // requires it.
+            match scope {
+                PermissionScope::Memory | PermissionScope::Cryptography => {
+                    PermissionDecision::Allow
+                }
+                _ => PermissionDecision::Deny,
+            }
         }
     };
 
     Some(ScriptPermissionPolicy(Box::new(policy)))
+}
+
+/// Walk every grant in a `PermissionSet`. The set's API exposes
+/// `grants_of(kind)` per-kind iteration — this helper merges all
+/// kinds into a single sequence so the policy builder doesn't
+/// have to enumerate kinds explicitly. Mirrors the canonical
+/// kind list from `script::permissions::PermissionKind`.
+fn iterate_grants<'a>(
+    set: &'a crate::script::permissions::PermissionSet,
+) -> impl Iterator<Item = &'a crate::script::permissions::Permission> {
+    use crate::script::permissions::PermissionKind;
+    [
+        PermissionKind::FsRead,
+        PermissionKind::FsWrite,
+        PermissionKind::Net,
+        PermissionKind::Env,
+        PermissionKind::Run,
+        PermissionKind::Ffi,
+        PermissionKind::Time,
+        PermissionKind::Random,
+    ]
+    .into_iter()
+    .flat_map(move |k| set.grants_of(k))
 }
 
 /// Cache-key contributors specific to the AOT script-binary cache.
