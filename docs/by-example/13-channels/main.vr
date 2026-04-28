@@ -1,0 +1,44 @@
+// docs/by-example/13-channels/main.vr
+// Channels: bounded, async, multi-producer / single-consumer.
+
+mount core.async.channel.{bounded, Sender, Receiver};
+mount core.async.spawn;
+mount core.io.println;
+
+async fn producer(tx: Sender<Int>, start: Int, count: Int) {
+    let mut i = 0;
+    while i < count {
+        tx.send(start + i).await;
+        i = i + 1;
+    }
+}
+
+async fn consumer(rx: Receiver<Int>) {
+    while let Some(v) = rx.recv().await {
+        println(f"got {v}");
+    }
+}
+
+fn main() {
+    // Bounded channel with capacity 4 — `send` blocks when the
+    // buffer is full, `recv` blocks when it's empty. Backpressure
+    // is automatic.
+    let (tx, rx) = bounded::<Int>(4);
+
+    // Two producers feed the same channel. Each gets a clone of
+    // the Sender; the receiver is a single owned handle.
+    let tx2 = tx.clone();
+    let p1 = spawn(producer(tx, 0, 5));
+    let p2 = spawn(producer(tx2, 100, 5));
+
+    // The consumer drains until both senders are dropped.
+    let c = spawn(consumer(rx));
+
+    p1.join();
+    p2.join();
+    // After both producers finish, the channel closes (last Sender
+    // drops). The consumer's `recv()` returns None and the task
+    // ends cleanly — no Done flag, no sentinel value.
+    c.join();
+    println("done");
+}

@@ -1,0 +1,52 @@
+// docs/by-example/14-cbgr-references/main.vr
+// CBGR three-tier references: &T, &checked T, &unsafe T.
+
+mount core.io.println;
+
+type Buffer is {
+    data: List<Byte>,
+    name: Text,
+};
+
+// Tier 0 (default): `&T` — full CBGR generation + epoch protection.
+// ~15ns overhead per dereference; catches use-after-free and
+// out-of-region access at runtime.
+fn print_name(buf: &Buffer) {
+    println(f"buffer name: {buf.name}");
+}
+
+// Tier 1: `&checked T` — compiler proved the borrow safe via escape
+// analysis, runtime checks elided. 0ns overhead. The compiler accepts
+// `&checked` only when it can prove the reference doesn't outlive
+// the referent's region.
+fn buffer_size(buf: &checked Buffer) -> Int {
+    buf.data.len()
+}
+
+// Tier 2: `&unsafe T` — caller manually proves safety. 0ns overhead,
+// no compile-time proof. Use only when crossing FFI boundaries or
+// when the safe tiers can't express the intended pattern.
+unsafe fn raw_first_byte(buf: &unsafe Buffer) -> Byte {
+    buf.data[0]
+}
+
+fn main() {
+    let buf = Buffer {
+        data: [0x48, 0x69, 0x21],   // "Hi!"
+        name: "greeting".clone(),
+    };
+
+    // Default `&` — full safety, every dereference goes through CBGR.
+    print_name(&buf);
+
+    // Compiler proves the borrow stays inside this function — Tier 1
+    // elides the check entirely. The annotation is a contract:
+    // `&checked` always means "0ns overhead AND provably safe".
+    let n = buffer_size(&checked buf);
+    println(f"size: {n}");
+
+    // Tier 2 requires `unsafe` at both call site and callee. The
+    // explicit `unsafe` block is the SAFETY proof — humans audit it.
+    let first = unsafe { raw_first_byte(&unsafe buf) };
+    println(f"first byte: 0x{first:x}");
+}

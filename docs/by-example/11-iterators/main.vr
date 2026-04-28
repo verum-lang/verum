@@ -1,0 +1,41 @@
+// docs/by-example/11-iterators/main.vr
+// Iterators: lazy traversal, chained transforms, eager collect.
+
+mount core.collections.List;
+mount core.io.println;
+
+fn main() {
+    let nums: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    // Iterators are lazy — `.iter().filter().map()` builds a pipeline
+    // that only runs when consumed by a terminal operation like
+    // `.sum()`, `.collect()`, or a `for` loop.
+    let sum_of_doubled_evens: Int = nums
+        .iter()
+        .filter(|x| *x % 2 == 0)   // 2, 4, 6, 8
+        .map(|x| x * 2)            // 4, 8, 12, 16
+        .sum();
+    println(f"sum of doubled evens = {sum_of_doubled_evens}");   // 40
+
+    // `collect` materialises a pipeline into a concrete collection.
+    let squares: List<Int> = nums.iter().map(|x| x * x).collect();
+    println(f"squares = {squares}");
+
+    // `enumerate` yields (index, item) pairs — useful when the index
+    // matters for the transform.
+    for (i, name) in ["alice", "bob", "carol"].iter().enumerate() {
+        println(f"  [{i}] {name}");
+    }
+
+    // Range iterators drive numeric loops without manual counters.
+    let factorial: Int = (1..=6).product();
+    println(f"6! = {factorial}");   // 720
+
+    // `take` / `skip` are lazy — they don't allocate intermediate Lists.
+    let first_three_odds: List<Int> = nums.iter()
+        .filter(|x| *x % 2 == 1)
+        .take(3)
+        .copied()
+        .collect();
+    println(f"first three odds = {first_three_odds}");   // [1, 3, 5]
+}
