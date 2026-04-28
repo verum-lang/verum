@@ -17,6 +17,7 @@
 use verum_common::Text;
 
 use crate::depth::m_depth_omega;
+use crate::diakrisis_bridge::{BridgeAudit, admit_eps_mu_tau_witness};
 use crate::support::{definitional_eq, free_vars};
 use crate::{CoreTerm, KernelError};
 
@@ -187,5 +188,219 @@ pub fn check_eps_mu_coherence(
         _ => Err(KernelError::EpsMuNaturalityFailed {
             context: Text::from(context),
         }),
+    }
+}
+
+// =============================================================================
+// V3-final: τ-witness construction with explicit Diakrisis A-3 bridge admit.
+// =============================================================================
+
+/// V3-final naturality witness — the audit-trail-aware promotion of
+/// [`check_eps_mu_coherence`].
+///
+/// V3-incremental decides necessary conditions structurally
+/// (depth preservation, free-variable preservation, β-normalisation
+/// invariance). V3-final additionally surfaces the σ_α / π_α
+/// sufficient-witness construction as an explicit
+/// [`crate::diakrisis_bridge::BridgeId::EpsMuTauWitness`] admit when
+/// the canonical naturality square is non-trivial — i.e. when the
+/// pair clears all V3-incremental gates but isn't structurally /
+/// β-equivalently the identity case.
+///
+/// **Strictly stronger than V3-incremental**: every pair the V3-
+/// incremental algorithm admits is also admitted by V3-final with
+/// either an empty audit (identity / β-equivalent cases) or with a
+/// single `EpsMuTauWitness` admit recorded (non-identity cases that
+/// rely on Diakrisis A-3).
+///
+/// **Soundness invariant**: V3-final never widens V3-incremental's
+/// accept set — the bridge admit only documents WHICH witness
+/// construction is being relied on, not whether the rule fires. A
+/// pair that V3-incremental rejects (depth / free-var / β-norm
+/// gate failure) is rejected by V3-final too.
+///
+/// **V3 promotion path**: when Diakrisis A-3 lands as a structural
+/// algorithm (Code_S morphism + Perform_{ε_math} naturality),
+/// `admit_eps_mu_tau_witness`'s body is replaced with the actual
+/// witness computation. Every previously-admitted call site mutates
+/// from `audit = {EpsMuTauWitness}` to `audit = {}`, monotonically
+/// shrinking the trusted boundary.
+pub fn check_eps_mu_coherence_v3_final(
+    lhs: &CoreTerm,
+    rhs: &CoreTerm,
+    context: &str,
+) -> Result<BridgeAudit, KernelError> {
+    // Step 1: run V3-incremental gates. Any failure surfaces directly.
+    check_eps_mu_coherence(lhs, rhs, context)?;
+
+    // Step 2: classify the admitted pair to decide whether the
+    // sufficient-witness construction (σ_α / π_α) was needed.
+    let mut audit = BridgeAudit::new();
+
+    // Identity sub-case: structural equality on the entire pair, or
+    // canonical naturality-square shape with structurally-equal inner
+    // M_α and α_rhs. These are decidable without invoking A-3.
+    if lhs == rhs {
+        return Ok(audit);
+    }
+    if let (CoreTerm::EpsilonOf(m_alpha), CoreTerm::AlphaOf(inner_rhs)) = (lhs, rhs) {
+        if let CoreTerm::EpsilonOf(alpha_rhs) = inner_rhs.as_ref() {
+            // V1 identity sub-case (structural).
+            if m_alpha.as_ref() == alpha_rhs.as_ref() {
+                return Ok(audit);
+            }
+            // V3-NEW gate (c) — β-equivalent identity sub-case.
+            if definitional_eq(m_alpha.as_ref(), alpha_rhs.as_ref()) {
+                return Ok(audit);
+            }
+            // Non-identity case: V3-incremental cleared all gates
+            // (depth + free-vars), but the σ_α / π_α witness
+            // construction itself is preprint-blocked. Record A-3.
+            admit_eps_mu_tau_witness(&mut audit, context, lhs);
+            return Ok(audit);
+        }
+    }
+
+    // V3-incremental admitted via some path we don't recognise here
+    // — surface as A-3 admit conservatively (one-sided over-admit
+    // becomes one-sided over-record; safer than silent decidable).
+    admit_eps_mu_tau_witness(&mut audit, context, lhs);
+    Ok(audit)
+}
+
+#[cfg(test)]
+mod v3_final_tests {
+    use super::*;
+    use crate::diakrisis_bridge::BridgeId;
+    use verum_common::Heap;
+
+    fn var(n: &str) -> CoreTerm {
+        CoreTerm::Var(Text::from(n))
+    }
+
+    fn eps(t: CoreTerm) -> CoreTerm {
+        CoreTerm::EpsilonOf(Heap::new(t))
+    }
+
+    fn alpha(t: CoreTerm) -> CoreTerm {
+        CoreTerm::AlphaOf(Heap::new(t))
+    }
+
+    #[test]
+    fn v3_final_admits_structural_identity_with_empty_audit() {
+        let f = var("F");
+        let audit = check_eps_mu_coherence_v3_final(&f, &f, "structural id").unwrap();
+        assert!(audit.is_decidable(),
+            "structural identity must be decidable in V3-final");
+    }
+
+    #[test]
+    fn v3_final_admits_canonical_naturality_identity_with_empty_audit() {
+        // (EpsilonOf(F), AlphaOf(EpsilonOf(F))) — V1 identity sub-case.
+        let f = var("F");
+        let lhs = eps(f.clone());
+        let rhs = alpha(eps(f.clone()));
+        let audit = check_eps_mu_coherence_v3_final(&lhs, &rhs, "K-Eps-Mu identity")
+            .unwrap();
+        assert!(audit.is_decidable(),
+            "canonical identity sub-case must be decidable");
+    }
+
+    #[test]
+    fn v3_final_records_a_3_for_non_identity_canonical_pair() {
+        // Non-identity canonical naturality square that clears V3-
+        // incremental gates: M_α and α have different structure but
+        // matching depth + free-vars + non-β-equal. Since variables
+        // are atomic with depth 0 and no free-vars beyond the var
+        // name itself, we craft (EpsilonOf(F), AlphaOf(EpsilonOf(G)))
+        // where F != G but same structural shape.
+        //
+        // Both F and G are atomic Var with depth 0 — passes V3-incremental
+        // gate (a). free_vars(F) = {F}, free_vars(G) = {G} — they DIFFER,
+        // so V3-incremental REJECTS (gate b). This means it shouldn't
+        // reach the bridge admit path. Let's instead use F twice on lhs
+        // then a structurally-same shape wrapping a β-redex.
+        //
+        // Actually the cleanest non-identity case that clears V3-
+        // incremental is when M_α and α_rhs have the SAME free vars +
+        // SAME depth but are NOT structurally equal AND NOT β-equal.
+        // Constructing such a pair requires careful term shaping.
+        //
+        // Simplest: M_α = App(Var("id"), Var("F"))  and  α_rhs = App(Var("id"), Var("F")).
+        // But those ARE structurally equal — caught by identity case.
+        //
+        // Use App(F, x) on one side, x on the other with same fvs:
+        // m_α = App(Var("F"), Var("x"))  ; depth 0, fvs {F, x}
+        // α_rhs needs same fvs {F, x} and same depth.
+        //   α_rhs = App(Var("x"), Var("F"))  ; depth 0, fvs {F, x}, distinct shape.
+        //
+        // Not β-equal (no Lam to reduce). V3-incremental admits.
+        // V3-final routes through the bridge admit.
+        let m_alpha = CoreTerm::App(Heap::new(var("F")), Heap::new(var("x")));
+        let alpha_rhs = CoreTerm::App(Heap::new(var("x")), Heap::new(var("F")));
+        let lhs = eps(m_alpha);
+        let rhs = alpha(eps(alpha_rhs));
+        let audit = check_eps_mu_coherence_v3_final(&lhs, &rhs, "non-identity")
+            .unwrap();
+        assert!(!audit.is_decidable(),
+            "non-identity case must record an A-3 admit");
+        let admits = audit.admits();
+        assert_eq!(admits.len(), 1);
+        assert_eq!(admits[0].bridge, BridgeId::EpsMuTauWitness);
+    }
+
+    #[test]
+    fn v3_final_rejects_depth_mismatch() {
+        // V3-incremental rejects on depth mismatch — V3-final must
+        // surface the same rejection (V3-final is strictly stronger,
+        // not strictly weaker).
+        // ModalBox bumps depth by 1; if lhs has Box and rhs doesn't,
+        // depths differ → V3-incremental rejects via gate (a).
+        let f = var("F");
+        let lhs = eps(CoreTerm::ModalBox(Heap::new(f.clone())));
+        let rhs = alpha(eps(f));
+        let result = check_eps_mu_coherence_v3_final(&lhs, &rhs, "depth-mismatch");
+        assert!(result.is_err(),
+            "depth-mismatch must be rejected by V3-final too");
+    }
+
+    #[test]
+    fn v3_final_rejects_free_var_mismatch() {
+        // Same depth (both depth-0), DIFFERENT free vars → gate (b) rejects.
+        // m_α = Var("F"), α_rhs = Var("G")  — fvs differ.
+        let lhs = eps(var("F"));
+        let rhs = alpha(eps(var("G")));
+        let result = check_eps_mu_coherence_v3_final(&lhs, &rhs, "free-var-mismatch");
+        assert!(result.is_err(),
+            "free-var-mismatch must be rejected by V3-final too");
+    }
+
+    #[test]
+    fn v3_final_rejects_malformed_pair() {
+        // (EpsilonOf(F), AlphaOf(Var("G")))  — inner of AlphaOf is
+        // not an EpsilonOf, so V3-incremental rejects shape.
+        let lhs = eps(var("F"));
+        let rhs = alpha(var("G"));
+        let result = check_eps_mu_coherence_v3_final(&lhs, &rhs, "malformed");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn v3_final_audit_records_one_admit_per_bridge_invocation() {
+        // Audit dedup: the same callsite invoking the same bridge
+        // logs once. We invoke the function twice on the same pair
+        // — each invocation gets its OWN BridgeAudit, so the
+        // single-context-single-admit invariant is per-call.
+        let m_alpha = CoreTerm::App(Heap::new(var("F")), Heap::new(var("x")));
+        let alpha_rhs = CoreTerm::App(Heap::new(var("x")), Heap::new(var("F")));
+        let lhs = eps(m_alpha);
+        let rhs = alpha(eps(alpha_rhs));
+        let audit1 = check_eps_mu_coherence_v3_final(&lhs, &rhs, "ctx-A").unwrap();
+        let audit2 = check_eps_mu_coherence_v3_final(&lhs, &rhs, "ctx-B").unwrap();
+        assert_eq!(audit1.admits().len(), 1);
+        assert_eq!(audit2.admits().len(), 1);
+        assert_ne!(audit1.admits()[0].context.as_str(),
+                   audit2.admits()[0].context.as_str(),
+                   "different contexts must produce distinct audit entries");
     }
 }

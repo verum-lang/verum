@@ -34,6 +34,14 @@
 //!     adjunction triple. Required for `Flat(Sharp(x))` collapse
 //!     under the right adjoint side.
 //!
+//!   * `BridgeId::EpsMuTauWitness` — Diakrisis Axiom A-3 σ_α / π_α
+//!     τ-witness construction. The K-Eps-Mu rule's V3-incremental
+//!     decides necessary conditions structurally; the V3-final
+//!     sufficient witness construction (σ_α from the Code_S
+//!     morphism + π_α from Perform_{ε_math} naturality through
+//!     axiom A-3) is the residual preprint-blocked step. V3-final
+//!     surfaces the construction as this admit.
+//!
 //! Each admit has a kernel re-check facade — `check_<bridge>` —
 //! that audits the bridge invocation site (recording the
 //! [`BridgeAdmit`] in a returned audit trail) but does NOT verify
@@ -76,6 +84,15 @@ pub enum BridgeId {
     /// `Flat(Sharp(x))` and `Sharp(Flat(x))` collapse on the
     /// appropriate adjunction side.
     CohesiveAdjunctionUnitCounit,
+
+    /// Diakrisis Axiom A-3 — σ_α / π_α τ-witness for the K-Eps-Mu
+    /// naturality rule. V3-incremental decides the necessary
+    /// conditions (depth preservation, free-variable preservation,
+    /// β-normalisation invariance) structurally; this admit covers
+    /// the V3-final sufficient witness construction
+    /// (σ_α from the Code_S morphism + π_α from
+    /// Perform_{ε_math} naturality).
+    EpsMuTauWitness,
 }
 
 impl BridgeId {
@@ -85,6 +102,7 @@ impl BridgeId {
             Self::ConfluenceOfModalRewrite => "diakrisis-16.10",
             Self::QuotientCanonicalRepresentative => "diakrisis-16.7",
             Self::CohesiveAdjunctionUnitCounit => "diakrisis-14.3",
+            Self::EpsMuTauWitness => "diakrisis-A-3",
         }
     }
 
@@ -99,6 +117,9 @@ impl BridgeId {
             }
             Self::CohesiveAdjunctionUnitCounit => {
                 "unit/counit naturality for the cohesive triple adjunction (∫ ⊣ ♭ ⊣ ♯)"
+            }
+            Self::EpsMuTauWitness => {
+                "σ_α / π_α τ-witness for K-Eps-Mu naturality (Code_S + Perform_{ε_math})"
             }
         }
     }
@@ -200,6 +221,21 @@ pub fn admit_cohesive_adjunction_unit_counit(
     term.clone()
 }
 
+/// Bridge invocation: K-Eps-Mu σ_α / π_α τ-witness construction.
+/// V3-final hands off to this admit when V3-incremental gates pass
+/// but the sufficient witness construction is still preprint-blocked
+/// on Diakrisis A-3. The term is returned unchanged — purely an
+/// audit-recording hook. V3 promotion replaces the body with the
+/// structural Code_S / Perform_{ε_math} computation.
+pub fn admit_eps_mu_tau_witness(
+    audit: &mut BridgeAudit,
+    context: impl Into<Text>,
+    term: &CoreTerm,
+) -> CoreTerm {
+    audit.record(BridgeId::EpsMuTauWitness, context);
+    term.clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +330,10 @@ mod tests {
             BridgeId::CohesiveAdjunctionUnitCounit.as_audit_str(),
             "diakrisis-14.3"
         );
+        assert_eq!(
+            BridgeId::EpsMuTauWitness.as_audit_str(),
+            "diakrisis-A-3"
+        );
     }
 
     #[test]
@@ -307,5 +347,18 @@ mod tests {
         assert!(BridgeId::CohesiveAdjunctionUnitCounit
             .description()
             .contains("cohesive"));
+        assert!(BridgeId::EpsMuTauWitness
+            .description()
+            .contains("τ-witness"));
+    }
+
+    #[test]
+    fn admit_eps_mu_tau_witness_records_and_returns_unchanged() {
+        let mut a = BridgeAudit::new();
+        let term = CoreTerm::Var(Text::from("F"));
+        let out = admit_eps_mu_tau_witness(&mut a, "K-Eps-Mu callsite", &term);
+        assert_eq!(out, term);
+        assert_eq!(a.admits().len(), 1);
+        assert_eq!(a.admits()[0].bridge, BridgeId::EpsMuTauWitness);
     }
 }
