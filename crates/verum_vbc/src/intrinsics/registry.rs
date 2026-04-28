@@ -231,6 +231,15 @@ pub enum CodegenStrategy {
     /// Maps to TensorExtExtended opcode (0xFC 0x00) with an ext sub-opcode.
     /// Used for extended tensor operations: RmsNorm, FlashAttention, Fft, Scatter.
     TensorExtExtendedOpcode(TensorExtSubOpcode),
+
+    /// Maps to the generic Extended opcode (0x1F) with a sub-opcode.
+    /// Used for first-class control-flow extensions whose handler lives
+    /// in the dispatcher's general-purpose extension table — e.g.,
+    /// process termination (sub-op 0x10). Wire format:
+    /// `[0x1F][sub_op:u8][operands…]`. The codegen lowers this by
+    /// emitting an `Instruction::Extended { sub_op, operands }` whose
+    /// `operands` carry exactly the encoded argument registers.
+    ExtendedSubOp(crate::instruction::ExtendedSubOpcode),
 }
 
 /// Identifier for pre-defined inline instruction sequences.
@@ -3545,6 +3554,25 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::DirectOpcode(Opcode::Unreachable),
         mlir_op: Some("llvm.trap"),
         doc: "Abort immediately",
+    },
+    // First-class process termination — the divergent control-flow
+    // primitive symmetric with `panic` and `unreachable`. Reached via
+    // the `@intrinsic("verum.process.exit")` declaration on
+    // `core.base.panic::exit_process`. Lowers to `Opcode::Extended`
+    // sub-op `ProcessExit` (0x10) under both Tier 0 (interpreter calls
+    // `std::process::exit`) and Tier 1 (LLVM emits a real C-level
+    // `_exit` with `noreturn`).
+    Intrinsic {
+        name: "verum.process.exit",
+        category: IntrinsicCategory::Control,
+        hints: &[IntrinsicHint::Cold, IntrinsicHint::MayTrap],
+        param_count: 1, // exit code
+        return_count: 0, // ! (never returns)
+        strategy: CodegenStrategy::ExtendedSubOp(
+            crate::instruction::ExtendedSubOpcode::ProcessExit,
+        ),
+        mlir_op: Some("verum.process.exit"),
+        doc: "Terminate the process with the given exit code",
     },
     Intrinsic {
         name: "debug_assert",
