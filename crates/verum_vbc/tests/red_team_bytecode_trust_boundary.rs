@@ -327,3 +327,76 @@ fn deserialize_validated_accepts_well_formed_module() {
     deserialize_module_validated(&bytes)
         .expect("well-formed module must validate cleanly");
 }
+
+#[test]
+fn interpreter_try_new_validated_rejects_invalid_module() {
+    use verum_vbc::instruction::RegRange;
+
+    // Hand-craft a module whose body calls FunctionId(99) — out of
+    // range against the 1-function table.  `Interpreter::try_new`
+    // (the non-validating constructor) accepts the module; only
+    // `try_new_validated` rejects, with a `ValidationFailed` error
+    // carrying the rendered `VbcError`.
+    let mut module = VbcModule::new("rt_3_1_interp".to_string());
+    let mut f = FunctionDescriptor::new(StringId::EMPTY);
+    f.id = FunctionId(0);
+    f.bytecode_offset = 0;
+    f.register_count = 4;
+
+    let mut bc = Vec::new();
+    bytecode::encode_instruction(
+        &Instruction::Call {
+            dst: Reg(0),
+            func_id: 99,
+            args: RegRange { start: Reg(0), count: 0 },
+        },
+        &mut bc,
+    );
+    bytecode::encode_instruction(&Instruction::Ret { value: Reg(0) }, &mut bc);
+    f.bytecode_length = bc.len() as u32;
+    module.functions.push(f);
+    module.bytecode = bc;
+    module.header.function_table_count = 1;
+
+    let arc = Arc::new(module);
+
+    // try_new accepts (lenient — trusted source).  Use `is_ok()`
+    // since `Interpreter` doesn't implement `Debug`.
+    assert!(
+        Interpreter::try_new(Arc::clone(&arc)).is_ok(),
+        "try_new must accept under the trusted-source contract",
+    );
+
+    // try_new_validated rejects with ValidationFailed.
+    match Interpreter::try_new_validated(arc) {
+        Ok(_) => panic!("try_new_validated must reject hand-crafted invalid module"),
+        Err(InterpreterError::ValidationFailed { reason, .. }) => {
+            assert!(
+                reason.contains("InvalidFunctionId")
+                    || reason.contains("invalid function reference"),
+                "expected ValidationFailed mentioning InvalidFunctionId, got reason: {}",
+                reason,
+            );
+        }
+        Err(other) => panic!("expected ValidationFailed, got: {:?}", other),
+    }
+}
+
+#[test]
+fn interpreter_try_new_validated_accepts_well_formed_module() {
+    // Sanity baseline: well-formed minimal module must construct
+    // through the validating constructor without error.  We have
+    // to reify a fresh Arc with synced header counts because
+    // `build_minimal_module` (shared with the other tests) doesn't
+    // set the header count fields the validator checks.
+    let mut module = (*build_minimal_module()).clone();
+    module.header.function_table_count = module.functions.len() as u32;
+    let arc = Arc::new(module);
+    match Interpreter::try_new_validated(arc) {
+        Ok(_) => {}
+        Err(e) => panic!(
+            "well-formed module must construct via try_new_validated, got: {:?}",
+            e
+        ),
+    }
+}
