@@ -157,9 +157,19 @@ lands fully.
 
 ## Vector 4 — Bytecode-format pathological cases
 
-### 4.1 Long single-instruction basic-block chain
+### 4.1 Long single-instruction basic-block chain — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs synthetic bytecode generator.
+**Status:** DEFENSE CONFIRMED — VBC's encoder/decoder pair has no implicit
+i16 cap on instruction count, only the i32 branch-target cap pinned by
+round-2 §2.2.  A function body of 100,000 straight-line `Mov` instructions
+(~600 KB of bytecode, tens of orders of magnitude beyond what real codegen
+emits) round-trips cleanly.  If the encoder ever introduced a per-block
+instruction-count cap, the test fires.
+
+**Guardrail:** `crates/verum_vbc/tests/red_team_bytecode_trust_boundary.rs::long_basic_block_chain_roundtrips`
+— builds 100,000 Mov instructions in a row, encodes them into one
+contiguous bytecode buffer, then walks the buffer and asserts exactly
+100,000 Mov instructions decode back with zero spurious bytes left over.
 
 Designed to maximize interpreter dispatch overhead. Compare Tier-0 dispatch
 cost against AOT-compiled equivalent.
