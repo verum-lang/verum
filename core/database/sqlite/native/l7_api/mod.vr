@@ -11,6 +11,7 @@ public module database;
 public module transaction;
 public module backup;
 public module hooks;
+public module pragma_api;
 
 public mount .database.{
     Database, DbError,
@@ -38,4 +39,13 @@ public mount .hooks.{
     set_pre_update_hook,
     set_authorizer, has_authorizer,
     set_busy_handler, set_progress_handler, set_trace_hook,
+};
+
+public mount .pragma_api.{
+    PragmaValue, PvNull, PvInt, PvText, PvBool,
+    pragma_get, pragma_set,
+    pragma_get_int, pragma_set_int,
+    pragma_get_text, pragma_set_text,
+    pragma_get_bool, pragma_set_bool,
+    pragma_kind_to_name,
 };

@@ -33,6 +33,7 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.pager.{Pager};
 mount core.database.sqlite.native.ext.registry.{FnRegistry};
+mount core.database.sqlite.native.pragmas.config.{PragmaConfig};
 mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
 mount core.database.sqlite.native.l5_sql.{
     CompileError, Statement, Expr,
@@ -176,6 +177,11 @@ implement Database {
     /// API.
     public fn registry_view(&self) -> &FnRegistry { self.conn.registry_view() }
     public fn registry_mut(&mut self) -> &mut FnRegistry { self.conn.registry_mut() }
+
+    /// Borrow the connection's per-connection PRAGMA state.  Used by
+    /// the `l7_api.pragma_api` surface for typed pragma_get / _set.
+    public fn pragma_cfg_view(&self) -> &PragmaConfig { self.conn.pragma_cfg_view() }
+    public fn pragma_cfg_mut(&mut self) -> &mut PragmaConfig { self.conn.pragma_cfg_mut() }
 
     // -------------------------------------------------------------------------
     // Prepare / execute / query
