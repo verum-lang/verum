@@ -215,6 +215,24 @@ implement Debug for UnixError {
     }
 }
 
+implement Eq for UnixError {
+    fn eq(&self, other: &UnixError) -> Bool {
+        match (self, other) {
+            (UnixError.IoError(a),     UnixError.IoError(b))     => a == b,
+            (
+                UnixError.PathTooLong { limit: la, actual: aa },
+                UnixError.PathTooLong { limit: lb, actual: ab },
+            ) => la == lb && aa == ab,
+            (UnixError.InvalidPath(a), UnixError.InvalidPath(b)) => a == b,
+            (UnixError.PermissionDenied, UnixError.PermissionDenied) => true,
+            (UnixError.PathInUse(a),   UnixError.PathInUse(b))   => a == b,
+            (UnixError.NotFound(a),    UnixError.NotFound(b))    => a == b,
+            (UnixError.PeerClosed,     UnixError.PeerClosed)     => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // sockaddr_un — POSIX Unix-domain address
 // =============================================================================
@@ -926,6 +944,61 @@ public type FdPassingError is
     | NotImplemented(Text)
     | ControlBufferTooSmall { need: Int, have: Int }
     | Malformed(Text);
+
+// Display + Debug + Eq for FdPassingError — adds the
+// standard stdlib protocol impls so call sites that
+// log / format / compare these errors don't have to
+// roll their own match block.
+
+implement Display for FdPassingError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FdPassingError.NotImplemented(msg) => {
+                f.write_str("fd passing not implemented: ")?;
+                f.write_str(msg.as_str())
+            },
+            FdPassingError.ControlBufferTooSmall { need, have } =>
+                f.write_str(f"fd passing control buffer too small: need={need} have={have}".as_str()),
+            FdPassingError.Malformed(msg) => {
+                f.write_str("malformed fd-passing control message: ")?;
+                f.write_str(msg.as_str())
+            },
+        }
+    }
+}
+
+implement Debug for FdPassingError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FdPassingError.NotImplemented(msg) => {
+                f.write_str("NotImplemented(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            FdPassingError.ControlBufferTooSmall { need, have } =>
+                f.write_str(f"ControlBufferTooSmall {{ need: {need}, have: {have} }}".as_str()),
+            FdPassingError.Malformed(msg) => {
+                f.write_str("Malformed(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+        }
+    }
+}
+
+implement Eq for FdPassingError {
+    fn eq(&self, other: &FdPassingError) -> Bool {
+        match (self, other) {
+            (FdPassingError.NotImplemented(a), FdPassingError.NotImplemented(b)) => a == b,
+            (
+                FdPassingError.ControlBufferTooSmall { need: na, have: ha },
+                FdPassingError.ControlBufferTooSmall { need: nb, have: hb },
+            ) => na == nb && ha == hb,
+            (FdPassingError.Malformed(a), FdPassingError.Malformed(b)) => a == b,
+            _ => false,
+        }
+    }
+}
 
 implement UnixStream {
     /// Send `buf` plus file descriptors `fds` over this stream. The
