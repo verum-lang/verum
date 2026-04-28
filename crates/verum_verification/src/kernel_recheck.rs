@@ -43,7 +43,7 @@ use verum_ast::ty::{PathSegment, RefinementPredicate as AstRefinementPredicate, 
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::{
     CoreTerm, KernelError, UniverseTier, check_eps_mu_coherence, check_refine_omega,
-    check_universe_ascent,
+    check_round_trip, check_universe_ascent,
 };
 use verum_types::refinement::{RefinementBinding, RefinementPredicate as TypesRefinementPredicate};
 use verum_types::ty::Type as TypesType;
@@ -74,6 +74,15 @@ pub enum KernelRecheckError {
     #[error("kernel-recheck: K-Eps-Mu failed at '{context}': {source}")]
     EpsMu {
         /// Human-readable call-site context.
+        context: Text,
+        /// Wrapped kernel error.
+        source: KernelError,
+    },
+    /// `K-Round-Trip` rejected the AC/OC duality round-trip.
+    #[error("kernel-recheck: K-Round-Trip failed at '{context}': {source}")]
+    RoundTrip {
+        /// Human-readable call-site context (typically the AC/OC
+        /// duality theorem name).
         context: Text,
         /// Wrapped kernel error.
         source: KernelError,
@@ -173,6 +182,33 @@ impl KernelRecheck {
     ) -> Result<(), KernelRecheckError> {
         check_eps_mu_coherence(lhs, rhs, context).map_err(|err| {
             KernelRecheckError::EpsMu {
+                context: Text::from(context),
+                source: err,
+            }
+        })
+    }
+
+    /// `K-Round-Trip` recheck for the AC/OC duality round-trip
+    /// `canonicalise(inverse(translate(α))) ≡ canonicalise(α)`.
+    /// Routes through [`check_round_trip`] and lifts any kernel
+    /// error into [`KernelRecheckError::RoundTrip`] tagged with the
+    /// callsite context.
+    ///
+    /// Admit-set (V0/V1):
+    ///   - structural identity (`α == α`),
+    ///   - K-Adj-Unit shape `AlphaOf(EpsilonOf(F)) ↔ F`,
+    ///   - K-Adj-Counit shape `EpsilonOf(AlphaOf(F)) ↔ F`,
+    ///   - β-/ι-/δ-equivalence (definitional_eq).
+    ///
+    /// V2 (preprint-blocked on Diakrisis 16.10) adds the universal
+    /// canonicalize algorithm.
+    pub fn round_trip(
+        lhs: &CoreTerm,
+        rhs: &CoreTerm,
+        context: &str,
+    ) -> Result<(), KernelRecheckError> {
+        check_round_trip(lhs, rhs, context).map_err(|err| {
+            KernelRecheckError::RoundTrip {
                 context: Text::from(context),
                 source: err,
             }
@@ -1101,6 +1137,38 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    // ---- K-Round-Trip façade ----
+    //
+    // M-VVA Sub-2.1 closure (round_trip kernel rule integration).
+    // The façade lifts `verum_kernel::check_round_trip` to a typed
+    // KernelRecheckError variant.
+
+    #[test]
+    fn round_trip_facade_accepts_identity() {
+        let f = var("F");
+        assert!(KernelRecheck::round_trip(&f, &f, "test-identity").is_ok());
+    }
+
+    #[test]
+    fn round_trip_facade_accepts_alpha_of_epsilon_of_x_vs_x() {
+        let f = var("F");
+        let aef = CoreTerm::AlphaOf(Heap::new(CoreTerm::EpsilonOf(Heap::new(f.clone()))));
+        assert!(KernelRecheck::round_trip(&aef, &f, "K-Adj-Unit").is_ok());
+    }
+
+    #[test]
+    fn round_trip_facade_rejects_distinct_atoms_with_typed_error() {
+        let alpha = var("alpha");
+        let beta = var("beta");
+        let err = KernelRecheck::round_trip(&alpha, &beta, "AC/OC duality").unwrap_err();
+        match err {
+            KernelRecheckError::RoundTrip { context, .. } => {
+                assert_eq!(context.as_str(), "AC/OC duality");
+            }
+            other => panic!("expected RoundTrip, got {:?}", other),
+        }
     }
 
     // ---- K-Universe-Ascent ----
