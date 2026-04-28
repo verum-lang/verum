@@ -52,6 +52,17 @@ const TRACEPARENT_FIELD: &'static Text = "traceparent";
 const TRACESTATE_FIELD: &'static Text = "tracestate";
 const TRACEPARENT_VERSION: &'static Text = "00";
 
+/// Maximum number of tracestate list members. W3C Trace Context §3.3.1.4
+/// specifies "MUST NOT include more than 32 list-members" — anything past
+/// the cap MUST be dropped. We surface that as a hard parser cap so a
+/// hostile upstream cannot smuggle unbounded entries past us.
+const MAX_TRACESTATE_ENTRIES: Int = 32;
+
+/// Maximum total length of the tracestate header. W3C §3.3.1.4 caps the
+/// combined header at 512 bytes; we accept up to 4096 to tolerate
+/// non-compliant clients while still bounding memory.
+const MAX_TRACESTATE_HEADER_BYTES: Int = 4096;
+
 
 implement W3CTraceContext {
     public fn new() -> W3CTraceContext { () }
@@ -167,10 +178,17 @@ fn encode_tracestate(state: &TraceState) -> Text {
 
 fn decode_tracestate(bytes: &[Byte]) -> TraceState {
     // Comma-separated k=v pairs; per spec trim OWS and skip malformed.
+    // W3C §3.3.1.4: header capped at 32 list-members and 512 bytes;
+    // we tolerate 4096 bytes but hard-cap entry count to 32 so a
+    // hostile upstream can't smuggle unbounded tracestate fan-out.
     let mut state = TraceState.empty();
+    if bytes.len() > MAX_TRACESTATE_HEADER_BYTES {
+        return state;
+    }
     let mut start = 0;
     let mut i = 0;
-    while i <= bytes.len() {
+    let mut count = 0;
+    while i <= bytes.len() && count < MAX_TRACESTATE_ENTRIES {
         if i == bytes.len() || bytes[i] == 0x2C /* ',' */ {
             if i > start {
                 let segment = &bytes[start..i];
@@ -178,7 +196,10 @@ fn decode_tracestate(bytes: &[Byte]) -> TraceState {
                 match split_kv(trimmed) {
                     Some((k, v)) => {
                         match (Text.from_utf8(k), Text.from_utf8(v)) {
-                            (Ok(key), Ok(val)) => { state = state.with(key, val); }
+                            (Ok(key), Ok(val)) => {
+                                state = state.with(key, val);
+                                count = count + 1;
+                            }
                             _ => {}
                         }
                     }
@@ -204,13 +225,22 @@ fn find_header(headers: &List<(Text, Text)>, name: &Text) -> Maybe<&Text> {
 }
 
 fn ascii_eq_ci_text(a: &Text, b: &Text) -> Bool {
+    // ASCII case-insensitive byte-by-byte comparison. Naively OR-ing
+    // 0x20 into both sides folds A-Z to a-z but ALSO mutates non-
+    // alphabetic chars: e.g. '@' (0x40) | 0x20 == '`' (0x60), so
+    // `ascii_eq_ci("@", "`")` would return true under that variant —
+    // a real header-name comparator with a real bug. Fold only when
+    // the byte is in the A-Z range so the equivalence respects ASCII
+    // letter classes and nothing else.
     let ab = a.as_bytes();
     let bb = b.as_bytes();
     if ab.len() != bb.len() { return false; }
     let mut i = 0;
     while i < ab.len() {
-        let ca = ab[i] | 0x20;
-        let cb = bb[i] | 0x20;
+        let ra = ab[i];
+        let rb = bb[i];
+        let ca = if ra >= 0x41_u8 && ra <= 0x5A_u8 { ra | 0x20_u8 } else { ra };
+        let cb = if rb >= 0x41_u8 && rb <= 0x5A_u8 { rb | 0x20_u8 } else { rb };
         if ca != cb { return false; }
         i = i + 1;
     }
