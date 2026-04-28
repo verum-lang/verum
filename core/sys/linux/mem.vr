@@ -228,14 +228,14 @@ public const MFD_EXEC: UInt32 = 0x0010;
 /// # Arguments
 /// * `addr` - Start address (must be page-aligned)
 /// * `len` - Length of region
-/// * `prot` - New protection (PROT_* flags)
-public fn mprotect(addr: &unsafe Byte, len: USize, prot: Int) -> Result<(), OSError> {
+/// * `prot` - New protection (PROT_* flags). C: `int prot` (Int32).
+public fn mprotect(addr: &unsafe Byte, len: USize, prot: Int32) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_MPROTECT,
             addr as Int,
             len as Int,
-            prot,
+            prot as Int,
             0, 0, 0
         )
     };
@@ -252,14 +252,14 @@ public fn mprotect(addr: &unsafe Byte, len: USize, prot: Int) -> Result<(), OSEr
 /// # Arguments
 /// * `addr` - Start address
 /// * `len` - Length of region
-/// * `advice` - Advice (MADV_* constant)
-public fn madvise(addr: &unsafe Byte, len: USize, advice: Int) -> Result<(), OSError> {
+/// * `advice` - Advice (MADV_* constant). C: `int advice` (Int32).
+public fn madvise(addr: &unsafe Byte, len: USize, advice: Int32) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_MADVISE,
             addr as Int,
             len as Int,
-            advice,
+            advice as Int,
             0, 0, 0
         )
     };
@@ -283,7 +283,7 @@ public fn mremap(
     old_addr: &unsafe Byte,
     old_size: USize,
     new_size: USize,
-    flags: Int,
+    flags: Int32,
     new_addr: Maybe<&unsafe Byte>
 ) -> Result<&unsafe Byte, OSError> {
     let new_addr_val = match new_addr {
@@ -297,7 +297,7 @@ public fn mremap(
             old_addr as Int,
             old_size as Int,
             new_size as Int,
-            flags,
+            flags as Int,
             new_addr_val,
             0
         )
@@ -315,14 +315,14 @@ public fn mremap(
 /// # Arguments
 /// * `addr` - Start address
 /// * `len` - Length
-/// * `flags` - MS_* flags
-public fn msync(addr: &unsafe Byte, len: USize, flags: Int) -> Result<(), OSError> {
+/// * `flags` - MS_* flags. C: `int flags` (Int32).
+public fn msync(addr: &unsafe Byte, len: USize, flags: Int32) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_MSYNC,
             addr as Int,
             len as Int,
-            flags,
+            flags as Int,
             0, 0, 0
         )
     };
