@@ -153,66 +153,76 @@ extern {
     /// Get parent process ID
     fn getppid() -> Int;
 
-    /// Get user ID
-    fn getuid() -> Int;
+    /// Get user ID. C: `uid_t getuid(void);` (`uid_t = uint32_t`).
+    fn getuid() -> UInt32;
 
-    /// Get effective user ID
-    fn geteuid() -> Int;
+    /// Get effective user ID. C: `uid_t geteuid(void);`.
+    fn geteuid() -> UInt32;
 
-    /// Get group ID
-    fn getgid() -> Int;
+    /// Get group ID. C: `gid_t getgid(void);` (`gid_t = uint32_t`).
+    fn getgid() -> UInt32;
 
-    /// Get effective group ID
-    fn getegid() -> Int;
+    /// Get effective group ID. C: `gid_t getegid(void);`.
+    fn getegid() -> UInt32;
 
-    /// Exit process
-    fn exit(status: Int) -> !;
+    /// Exit process. C: `void exit(int status);`.
+    fn exit(status: Int32) -> !;
 
-    /// Exit process (alternate)
-    fn _exit(status: Int) -> !;
+    /// Exit process (alternate). C: `void _exit(int status);`.
+    fn _exit(status: Int32) -> !;
 
-    /// Fork process
-    fn fork() -> Int;
+    /// Fork process. C: `pid_t fork(void);` (`pid_t = int32_t`).
+    fn fork() -> Int32;
 
-    /// Execute program (absolute path)
-    fn execve(path: &Byte, argv: &(&Byte), envp: &(&Byte)) -> Int;
+    /// Execute program (absolute path).
+    /// C: `int execve(const char *path, char *const argv[], char *const envp[]);`.
+    fn execve(path: &Byte, argv: &(&Byte), envp: &(&Byte)) -> Int32;
 
-    /// Execute program (search PATH)
-    fn execvp(file: &Byte, argv: &(&Byte)) -> Int;
+    /// Execute program (search PATH).
+    /// C: `int execvp(const char *file, char *const argv[]);`.
+    fn execvp(file: &Byte, argv: &(&Byte)) -> Int32;
 
-    /// Wait for child process
-    fn waitpid(pid: Int, status: &mut Int, options: Int) -> Int;
+    /// Wait for child process.
+    /// C: `pid_t waitpid(pid_t pid, int *status, int options);`.
+    fn waitpid(pid: Int32, status: &mut Int32, options: Int32) -> Int32;
 
-    /// Send signal
-    fn kill(pid: Int, sig: Int) -> Int;
+    /// Send signal. C: `int kill(pid_t pid, int sig);`.
+    fn kill(pid: Int32, sig: Int32) -> Int32;
 
     // =========================================================================
     // kqueue - Event Notification
     // =========================================================================
 
-    /// Create kqueue
-    public fn kqueue() -> Int;
+    /// Create kqueue. C: `int kqueue(void);` (returns a file descriptor,
+    /// POSIX `int`).
+    public fn kqueue() -> Int32;
 
-    /// Register/poll events
+    /// Register/poll events.
+    /// C: `int kevent(int kq, const struct kevent *changelist, int nchanges,
+    ///                struct kevent *eventlist, int nevents,
+    ///                const struct timespec *timeout);`
+    /// All count parameters and return value are POSIX `int` (Int32).
     public fn kevent(
-        kq: Int,
+        kq: Int32,
         changelist: &KEvent,
-        nchanges: Int,
+        nchanges: Int32,
         eventlist: &unsafe KEvent,
-        nevents: Int,
+        nevents: Int32,
         timeout: &DarwinTimespec,
-    ) -> Int;
+    ) -> Int32;
 
-    /// kevent64 (extended)
+    /// kevent64 (extended). Same `int`/Int32 discipline as `kevent`;
+    /// `flags` is the size_t-shaped 64-bit `unsigned int` per the macOS
+    /// kevent64.h declaration.
     public fn kevent64(
-        kq: Int,
+        kq: Int32,
         changelist: &KEvent64,
-        nchanges: Int,
+        nchanges: Int32,
         eventlist: &unsafe KEvent64,
-        nevents: Int,
+        nevents: Int32,
         flags: USize,
         timeout: &DarwinTimespec,
-    ) -> Int;
+    ) -> Int32;
 
     // =========================================================================
     // pthread - Threading
@@ -221,59 +231,61 @@ extern {
     /// Get current thread
     public fn pthread_self() -> PthreadT;
 
+    // pthread_* functions all return `int` (POSIX); 0 on success, an
+    // errno-numbered value on failure. Migrated to Int32 for ABI honesty.
     /// Create thread
     public fn pthread_create(
         thread: &mut PthreadT,
         attr: &PthreadAttr,
         start_routine: fn(&unsafe Byte) -> &unsafe Byte,
         arg: &unsafe Byte,
-    ) -> Int;
+    ) -> Int32;
 
     /// Join thread
-    public fn pthread_join(thread: PthreadT, value_ptr: &mut (&unsafe Byte)) -> Int;
+    public fn pthread_join(thread: PthreadT, value_ptr: &mut (&unsafe Byte)) -> Int32;
 
     /// Detach thread
-    public fn pthread_detach(thread: PthreadT) -> Int;
+    public fn pthread_detach(thread: PthreadT) -> Int32;
 
     /// Exit thread
     public fn pthread_exit(value_ptr: &unsafe Byte) -> !;
 
     /// Initialize mutex
-    public fn pthread_mutex_init(mutex: &mut PthreadMutex, attr: &PthreadMutexAttr) -> Int;
+    public fn pthread_mutex_init(mutex: &mut PthreadMutex, attr: &PthreadMutexAttr) -> Int32;
 
     /// Destroy mutex
-    public fn pthread_mutex_destroy(mutex: &mut PthreadMutex) -> Int;
+    public fn pthread_mutex_destroy(mutex: &mut PthreadMutex) -> Int32;
 
     /// Lock mutex
-    public fn pthread_mutex_lock(mutex: &mut PthreadMutex) -> Int;
+    public fn pthread_mutex_lock(mutex: &mut PthreadMutex) -> Int32;
 
     /// Try lock mutex
-    public fn pthread_mutex_trylock(mutex: &mut PthreadMutex) -> Int;
+    public fn pthread_mutex_trylock(mutex: &mut PthreadMutex) -> Int32;
 
     /// Unlock mutex
-    public fn pthread_mutex_unlock(mutex: &mut PthreadMutex) -> Int;
+    public fn pthread_mutex_unlock(mutex: &mut PthreadMutex) -> Int32;
 
     /// Initialize condition variable
-    public fn pthread_cond_init(cond: &mut PthreadCond, attr: &PthreadCondAttr) -> Int;
+    public fn pthread_cond_init(cond: &mut PthreadCond, attr: &PthreadCondAttr) -> Int32;
 
     /// Destroy condition variable
-    public fn pthread_cond_destroy(cond: &mut PthreadCond) -> Int;
+    public fn pthread_cond_destroy(cond: &mut PthreadCond) -> Int32;
 
     /// Wait on condition variable
-    public fn pthread_cond_wait(cond: &mut PthreadCond, mutex: &mut PthreadMutex) -> Int;
+    public fn pthread_cond_wait(cond: &mut PthreadCond, mutex: &mut PthreadMutex) -> Int32;
 
     /// Timed wait on condition variable
     public fn pthread_cond_timedwait(
         cond: &mut PthreadCond,
         mutex: &mut PthreadMutex,
         abstime: &DarwinTimespec,
-    ) -> Int;
+    ) -> Int32;
 
     /// Signal condition variable
-    public fn pthread_cond_signal(cond: &mut PthreadCond) -> Int;
+    public fn pthread_cond_signal(cond: &mut PthreadCond) -> Int32;
 
     /// Broadcast condition variable
-    public fn pthread_cond_broadcast(cond: &mut PthreadCond) -> Int;
+    public fn pthread_cond_broadcast(cond: &mut PthreadCond) -> Int32;
 
     // =========================================================================
     // Low-level ulock (futex equivalent on macOS/XNU)
@@ -295,19 +307,20 @@ extern {
     public fn __ulock_wake(operation: UInt32, addr: &unsafe Byte, wake_value: UInt64) -> Int;
 
     /// TLS key create
-    public fn pthread_key_create(key: &mut PthreadKey, destructor: fn(&unsafe Byte)) -> Int;
+    public fn pthread_key_create(key: &mut PthreadKey, destructor: fn(&unsafe Byte)) -> Int32;
 
     /// TLS key delete
-    public fn pthread_key_delete(key: PthreadKey) -> Int;
+    public fn pthread_key_delete(key: PthreadKey) -> Int32;
 
     /// TLS get specific
     public fn pthread_getspecific(key: PthreadKey) -> &unsafe Byte;
 
     /// TLS set specific
-    public fn pthread_setspecific(key: PthreadKey, value: &unsafe Byte) -> Int;
+    public fn pthread_setspecific(key: PthreadKey, value: &unsafe Byte) -> Int32;
 
-    /// Get thread ID (macOS extension)
-    public fn pthread_threadid_np(thread: PthreadT, thread_id: &mut UInt64) -> Int;
+    /// Get thread ID (macOS extension). C: `int pthread_threadid_np(pthread_t,
+    /// uint64_t *)`.
+    public fn pthread_threadid_np(thread: PthreadT, thread_id: &mut UInt64) -> Int32;
 
     // =========================================================================
     // Time
