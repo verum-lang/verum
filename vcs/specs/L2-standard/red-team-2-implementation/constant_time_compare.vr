@@ -1,0 +1,142 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, constant-time, crypto, mac, timing-attack
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173 vector A —
+// audit-confirmed defense B: Constant-time crypto comparison).
+//
+// Pins the documented contract of `constant_time_eq` /
+// `constant_time_compare`: no early exit on mismatch, length
+// mismatch handled at boundary (length is non-secret per threat
+// model). Pre-fix history: an earlier `constant_time_compare`
+// implementation used `if diff == 0` as a per-iteration short-
+// circuit, leaking timing about which byte first differed —
+// commit reverted to branchless mask form (memory).
+//
+// This test pins the BEHAVIORAL contract:
+//   1. Equal-length identical inputs → true.
+//   2. Equal-length differing inputs → false (any byte position).
+//   3. Different-length inputs → false.
+//   4. Both empty → true.
+//
+// Timing properties are NOT asserted here (require microbench
+// harness with cycle-accurate measurement); the codegen-side
+// `@verify(constant_time)` annotation is the static side of the
+// contract.
+
+mount core.security.util.constant_time.{constant_time_eq, constant_time_compare};
+
+fn ct_eq_identical_returns_true() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    assert(constant_time_eq(a.as_slice(), b.as_slice()),
+           "identical inputs must return true");
+}
+
+fn ct_eq_first_byte_diff_returns_false() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    let b: List<Byte> = [0xFF_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    assert(!constant_time_eq(a.as_slice(), b.as_slice()),
+           "first-byte difference must return false");
+}
+
+fn ct_eq_last_byte_diff_returns_false() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0xFF_u8];
+    assert(!constant_time_eq(a.as_slice(), b.as_slice()),
+           "last-byte difference must return false");
+}
+
+fn ct_eq_middle_byte_diff_returns_false() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0xFF_u8, 0x78_u8];
+    assert(!constant_time_eq(a.as_slice(), b.as_slice()),
+           "middle-byte difference must return false");
+}
+
+fn ct_eq_length_mismatch_returns_false() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8, 0x78_u8];
+    assert(!constant_time_eq(a.as_slice(), b.as_slice()),
+           "different-length inputs must return false");
+    // Symmetric.
+    assert(!constant_time_eq(b.as_slice(), a.as_slice()),
+           "different-length symmetric must return false");
+}
+
+fn ct_eq_both_empty_returns_true() {
+    let a: List<Byte> = [];
+    let b: List<Byte> = [];
+    assert(constant_time_eq(a.as_slice(), b.as_slice()),
+           "both empty must return true");
+}
+
+fn ct_eq_empty_vs_nonempty_returns_false() {
+    let a: List<Byte> = [];
+    let b: List<Byte> = [0x00_u8];
+    assert(!constant_time_eq(a.as_slice(), b.as_slice()),
+           "empty vs non-empty must return false");
+}
+
+fn ct_compare_returns_zero_on_equal() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8];
+    assert(constant_time_compare(a.as_slice(), b.as_slice()) == 0,
+           "equal inputs must compare zero");
+}
+
+fn ct_compare_returns_negative_on_a_less_than_b() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x55_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8];
+    let c = constant_time_compare(a.as_slice(), b.as_slice());
+    assert(c < 0, "a < b must compare negative");
+}
+
+fn ct_compare_returns_positive_on_a_greater_than_b() {
+    let a: List<Byte> = [0x12_u8, 0x34_u8, 0x57_u8];
+    let b: List<Byte> = [0x12_u8, 0x34_u8, 0x56_u8];
+    let c = constant_time_compare(a.as_slice(), b.as_slice());
+    assert(c > 0, "a > b must compare positive");
+}
+
+// Pin: with a 32-byte input mismatching only at the last byte, the
+// result is identical to a 32-byte input mismatching at the first
+// byte — both are `false`. (We can't directly assert *timing*
+// equality at the .vr layer, but we can assert that both probes
+// produce the same Bool result, which is the behavioural contract.)
+fn ct_eq_consistent_across_diff_position() {
+    let mut a: List<Byte> = [];
+    let mut b_first_diff: List<Byte> = [];
+    let mut b_last_diff: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 {
+        a.push(0x42_u8);
+        b_first_diff.push(if i == 0 { 0xFF_u8 } else { 0x42_u8 });
+        b_last_diff.push(if i == 31 { 0xFF_u8 } else { 0x42_u8 });
+        i = i + 1;
+    }
+    let r_first = constant_time_eq(a.as_slice(), b_first_diff.as_slice());
+    let r_last = constant_time_eq(a.as_slice(), b_last_diff.as_slice());
+    // Both diverge from a → both must return false.
+    assert(!r_first, "first-byte diff returns false");
+    assert(!r_last,  "last-byte diff returns false");
+    // Same Bool result (the same `false`); behavioural-equivalence
+    // contract that the constant-time mask preserves.
+    assert(r_first == r_last, "comparison result must not depend on diff position");
+}
+
+fn main() {
+    ct_eq_identical_returns_true();
+    ct_eq_first_byte_diff_returns_false();
+    ct_eq_last_byte_diff_returns_false();
+    ct_eq_middle_byte_diff_returns_false();
+    ct_eq_length_mismatch_returns_false();
+    ct_eq_both_empty_returns_true();
+    ct_eq_empty_vs_nonempty_returns_false();
+    ct_compare_returns_zero_on_equal();
+    ct_compare_returns_negative_on_a_less_than_b();
+    ct_compare_returns_positive_on_a_greater_than_b();
+    ct_eq_consistent_across_diff_position();
+}
