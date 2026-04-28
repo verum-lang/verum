@@ -10007,6 +10007,10 @@ mod tests {
             ("regex_find_all", 2, 1),
             ("regex_replace_all", 3, 1),
             ("regex_split", 2, 1),
+            // #25 close-out: single-match / capture variants.
+            ("regex_find", 2, 1),
+            ("regex_replace", 3, 1),
+            ("regex_captures", 2, 1),
         ] {
             let intr = INTRINSIC_REGISTRY
                 .lookup(name)
@@ -10022,5 +10026,8 @@ mod tests {
         // Guard against re-introduction of the uppercase typo.
         assert!(INTRINSIC_REGISTRY.lookup("REGEX_FIND_ALL").is_none());
         assert!(INTRINSIC_REGISTRY.lookup("REGEX_REPLACE_ALL").is_none());
+        assert!(INTRINSIC_REGISTRY.lookup("REGEX_FIND").is_none());
+        assert!(INTRINSIC_REGISTRY.lookup("REGEX_REPLACE").is_none());
+        assert!(INTRINSIC_REGISTRY.lookup("REGEX_CAPTURES").is_none());
     }
 }
