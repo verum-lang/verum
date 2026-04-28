@@ -12165,33 +12165,45 @@ impl<'s> CompilationPipeline<'s> {
         );
     }
 
-    /// Find the main function in the module and return its VBC function ID.
+    /// Find the program entry function in the VBC module and return
+    /// its function ID.
     ///
-    /// Lookup order:
-    /// 1. `main` — explicit user-declared entry. Always preferred when
-    ///    present so script-mode files with both top-level statements
-    ///    AND a hand-rolled `fn main()` keep `main()` as the entry.
-    /// 2. `__verum_script_main` — the wrapper synthesised by the parser
-    ///    when script-mode is on. The AST-level entry-detection pass
-    ///    (`phases/entry_detection.rs`) selects the same wrapper, but
-    ///    that decision must also reach the VBC layer where the
-    ///    interpreter resolves entry by name. Without this fallback the
-    ///    pipeline would parse the script successfully then fail at
-    ///    `Phase 7: Execution` with "No main function found in VBC
-    ///    module".
+    /// Strict mode separation (matches the AST-level
+    /// `EntryDetectionPhase::detect_entry_point`):
+    ///
+    ///   • **Application** entry = `main` (in a non-script module).
+    ///     Prefer it when present.
+    ///   • **Script** entry = `__verum_script_main` (the synthesised
+    ///     wrapper from script-tagged modules).
+    ///
+    /// The two are not interchangeable. A `fn main` declared *inside*
+    /// a script module is a regular callable function, not the
+    /// program entry — the AST-level pass already filtered such
+    /// `main`s out, so by the time we reach the VBC the only `main`
+    /// in the function table came from an application module. We
+    /// preserve the precedence (`main` first, then wrapper) only as
+    /// a defence-in-depth: if both names somehow appear in the VBC,
+    /// the application entry still wins.
     fn find_main_function_id(&self, vbc_module: &VbcModule) -> Result<VbcFunctionId> {
-        // First pass: explicit `main`.
+        // First pass: script entry `__verum_script_main`. Its presence
+        // is sufficient evidence that the source was a script, and the
+        // strict-role contract says a script's entry is the wrapper —
+        // never any user-declared `fn main` that may also be in the
+        // function table (it's a regular callable function in script
+        // mode, not the program entry).
         for (idx, func_desc) in vbc_module.functions.iter().enumerate() {
             if let Some(name) = vbc_module.get_string(func_desc.name) {
-                if name == "main" {
+                if name == "__verum_script_main" {
                     return Ok(VbcFunctionId(idx as u32));
                 }
             }
         }
-        // Second pass: synthesised script wrapper.
+        // Second pass: application entry `main`. Reached only when no
+        // script wrapper exists, i.e. the source is an application
+        // (no shebang, has `fn main()`).
         for (idx, func_desc) in vbc_module.functions.iter().enumerate() {
             if let Some(name) = vbc_module.get_string(func_desc.name) {
-                if name == "__verum_script_main" {
+                if name == "main" {
                     return Ok(VbcFunctionId(idx as u32));
                 }
             }
