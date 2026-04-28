@@ -31,6 +31,7 @@ module core.database.sqlite.native.l7_api.database;
 mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.pager.{Pager};
 mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
 mount core.database.sqlite.native.l5_sql.{
     CompileError, Statement, Expr,
@@ -159,6 +160,13 @@ implement Database {
     public fn mode(&self) -> ConnectionMode { self.conn.mode() }
     public fn is_in_tx(&self) -> Bool { self.conn.is_in_tx() }
     public fn schema_generation(&self) -> Int { self.conn.schema_generation() }
+
+    /// Borrow the underlying L1 pager — used by the online-backup
+    /// surface (`l7_api/backup.vr`) and other low-level callers that
+    /// need to walk pages directly.  External crates should prefer
+    /// the higher-level operations in `database.vr` itself.
+    public fn pager_view(&self) -> &Pager { self.conn.pager() }
+    public fn pager_mut(&mut self) -> &mut Pager { self.conn.pager_mut() }
 
     // -------------------------------------------------------------------------
     // Prepare / execute / query

@@ -1,0 +1,317 @@
+module core.database.sqlite.native.l7_api.backup;
+
+// =============================================================================
+// l7_api/backup.vr — online backup (sqlite-native.md §13.4 / database.md §6.2.7)
+// =============================================================================
+// Layer: 7 — public API.
+// Spec: sqlite-native.md §13.4 (online_backup); SQLite sqlite3_backup_*.
+//
+// Online backup copies a source database to a destination *while the
+// source is being read or written by other transactions*.  The
+// canonical SQLite C API:
+//
+//     handle = sqlite3_backup_init(pDest, "main", pSrc, "main");
+//     while (sqlite3_backup_step(handle, pages_per_step) == SQLITE_OK)
+//         /* poll progress, optionally sleep */;
+//     sqlite3_backup_finish(handle);
+//
+// Pure-Verum equivalent:
+//
+//     let mut session = backup_init(&mut dst_db, &src_db)?;
+//     loop {
+//         match backup_step(&mut session, pages_per_step) {
+//             BoOk      => { sleep_or_yield(); continue; }
+//             BoDone    => break;
+//             BoBusy | BoLocked => { backoff(); continue; }
+//             BoFailed { code, reason } => return Err(...);
+//         }
+//     }
+//     backup_finish(session);
+//
+// Concurrent-writer safety.
+//
+// SQLite's online backup tolerates concurrent writers on the source by
+// re-reading any page that was modified since the last `backup_step`
+// (the destination is written page-by-page; if a source page changes
+// before we copy it, the next step picks up the new image).  The v1
+// loom backup runs page-by-page through `pager_read` / `pager_write`
+// — both of which are actor-mediated single-writer operations on
+// their respective Pager instances, so the per-page copy is itself
+// race-free.  Multi-step concurrency story: every `backup_step` reads
+// `total_pages` afresh from the source, so a source that grows
+// mid-backup has its tail picked up on the next step.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l1_pager.pager.{
+    Pager, PageFrame, pager_read, pager_write,
+};
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.{ memdb_size };
+mount core.database.sqlite.native.l1_pager.pager.{
+    PagerBackend, BeMemory, BeFile,
+};
+mount core.database.sqlite.native.backup_api.handle.{
+    BackupHandle, new_handle,
+};
+mount core.database.sqlite.native.backup_api.outcome.{
+    BackupOutcome, BoOk, BoDone, BoBusy, BoLocked, BoFailed,
+};
+mount core.database.sqlite.native.backup_api.request.{
+    BackupStepRequest, requested_pages, is_noop,
+    from_n_pages,
+};
+mount core.database.sqlite.native.errors.code.{ ExtendedCode, ExtIoErrRead, ExtIoErrWrite };
+mount core.database.sqlite.native.l7_api.database.{
+    Database, DbError,
+    DbCannotOpen, DbIoError, DbCorrupt, DbReadonly,
+    open_path_admin,
+};
+mount core.database.sqlite.native.l6_session.{ ConnectionMode, CmAdmin };
+
+// -----------------------------------------------------------------------------
+// BackupSession — affine handle binding the source / destination pair
+// -----------------------------------------------------------------------------
+
+/// A live backup operation.  `affine` so callers can't drop the
+/// session without `backup_finish` (which closes the destination DB).
+///
+/// Holds the destination Database (owned — no other writer should
+/// touch the destination during a backup) plus the source's resolved
+/// pager state at-init time.  Fresh pages added to the source after
+/// init are picked up on each subsequent `backup_step` because
+/// `read_total_pages` is re-read every step.
+public type affine BackupSession is {
+    /// The destination database (owned — backup writes pages directly
+    /// into this Database's pager).
+    dst: Database,
+    /// Page size locked in at init.  Source and destination share it;
+    /// mismatched page sizes are rejected during init.
+    page_size: Int,
+    /// Progress tracking — total / remaining counters.
+    progress: BackupHandle,
+    /// Next source page index to copy (1-based).  Walks through 1..N
+    /// over successive `backup_step` calls.
+    next_page_no: Int,
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — read source page total without holding the source mutably
+// -----------------------------------------------------------------------------
+
+/// Compute the total page count of `src` from its backing file size.
+fn read_total_pages(src: &Database) -> Int {
+    let p = src.pager_view();
+    let backend = p.backend_view();
+    let size_bytes: Int = match backend {
+        BeMemory(ref f) => memdb_size(f),
+        BeFile(ref f)   => match f.file_size() {
+            Ok(n)  => n,
+            Err(_) => 0,
+        },
+    };
+    if p.page_size_view() <= 0 { return 0; }
+    // Round up so a half-filled tail page still counts.
+    (size_bytes + p.page_size_view() - 1) / p.page_size_view()
+}
+
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
+
+/// Open a destination database at `dst_path` (admin mode, RWC) and
+/// initialise an online-backup session that will copy from `src` to it.
+///
+/// Returns `Err(DbCannotOpen)` if the destination cannot be opened,
+/// `Err(DbReadonly)` if the destination opens but isn't writable, or
+/// `Err(DbCorrupt)` if the source page-size disagrees with what the
+/// destination would adopt.
+public fn backup_init_to_path(
+    src: &Database,
+    dst_path: &Text,
+) -> Result<BackupSession, DbError> {
+    let mut dst = match open_path_admin(dst_path) {
+        Ok(d)  => d,
+        Err(e) => { return Err(e); }
+    };
+    backup_init_into(src, dst)
+}
+
+/// Initialise a backup writing into an already-open destination.
+/// Useful for tests with `:memory:` destinations and for advanced
+/// flows that have already configured the destination.
+public fn backup_init_into(
+    src: &Database,
+    dst: Database,
+) -> Result<BackupSession, DbError> {
+    let src_page_size = src.pager_view().page_size_view();
+    let dst_page_size = dst.pager_view().page_size_view();
+    if src_page_size != dst_page_size {
+        return Err(DbCorrupt(
+            "backup_init: src and dst page sizes disagree".clone(),
+        ));
+    }
+    if src_page_size <= 0 {
+        return Err(DbCorrupt("backup_init: invalid page size on src".clone()));
+    }
+    let total = read_total_pages(src);
+    let progress = new_handle(
+        0 as Int64,
+        0 as Int64, "main".clone(),
+        0 as Int64, "main".clone(),
+        total,
+    );
+    Ok(BackupSession {
+        dst: dst,
+        page_size: src_page_size,
+        progress: progress,
+        next_page_no: 1,
+    })
+}
+
+/// Copy up to `pages` source pages into the destination.  `pages` is
+/// clamped against the remaining count.  Use `BsrAll` (via
+/// `from_n_pages(-1)`) to drain in one call.
+///
+/// Returns `BoOk` while pages remain (the caller may then `sleep` and
+/// loop), `BoDone` when the source is exhausted, `BoFailed` on
+/// unrecoverable I/O.  `BoBusy` / `BoLocked` are reserved for future
+/// VFS-locked source / destination scenarios.
+public fn backup_step(
+    session: &mut BackupSession,
+    src: &mut Database,
+    req: BackupStepRequest,
+) -> BackupOutcome {
+    if is_noop(&req) {
+        return BoOk;
+    }
+    if !session.progress.is_live() {
+        return BoDone;
+    }
+
+    // Refresh source's total — cheap probe; lets backups follow a
+    // growing source (writers appending pages mid-backup).
+    let current_total = read_total_pages(src);
+    if current_total > session.progress.total_pages {
+        let added = current_total - session.progress.total_pages;
+        session.progress.total_pages = current_total;
+        session.progress.remaining_pages = session.progress.remaining_pages + added;
+    }
+
+    let remaining = session.progress.remaining_pages;
+    if remaining <= 0 {
+        session.progress.finish();
+        return BoDone;
+    }
+
+    let to_copy = requested_pages(&req, remaining);
+    let mut copied: Int = 0;
+
+    while copied < to_copy {
+        let src_page_no = session.next_page_no;
+        if src_page_no > session.progress.total_pages {
+            break;
+        }
+
+        let frame = match pager_read(src.pager_mut(), src_page_no) {
+            Ok(f) => f,
+            Err(_) => {
+                return BoFailed {
+                    code: ExtIoErrRead,
+                    reason: f"backup: pager_read failed at page {src_page_no}".clone(),
+                };
+            }
+        };
+        // Destination expects the same page_size; we already rejected
+        // mismatched sizes in backup_init_into.
+        let dst_frame = PageFrame {
+            page_no: frame.page_no,
+            data: frame.data.clone(),
+            dirty: false,
+        };
+        match pager_write(session.dst.pager_mut(), &dst_frame) {
+            Ok(_) => {}
+            Err(_) => {
+                return BoFailed {
+                    code: ExtIoErrWrite,
+                    reason: f"backup: pager_write failed at page {src_page_no}".clone(),
+                };
+            }
+        }
+
+        session.next_page_no = session.next_page_no + 1;
+        copied = copied + 1;
+    }
+
+    session.progress.record_progress(copied);
+
+    if session.progress.remaining_pages == 0 {
+        session.progress.finish();
+        return BoDone;
+    }
+    BoOk
+}
+
+/// Consume the session.  In v1 this releases the destination Database
+/// (whose `Drop` flushes any pending writes through the pager); the
+/// returned Database can then be reopened by the caller for inspection.
+///
+/// Returns the destination Database to the caller for further use (a
+/// common pattern: backup, then continue using the dst as a working
+/// copy).  Affine consume guarantees the session is no longer
+/// referenced after this call.
+public fn backup_finish(session: BackupSession) -> Database {
+    // Move the destination out of the session before it goes out of scope.
+    let dst = session.dst;
+    let _ = session.progress;
+    let _ = session.page_size;
+    let _ = session.next_page_no;
+    dst
+}
+
+/// Affine consume that abandons the backup, returning the destination
+/// for cleanup (e.g. unlink the partial file).  Equivalent to
+/// `backup_finish` semantically — naming preserved for symmetry with
+/// SQLite C API where `sqlite3_backup_finish` is the only terminator.
+public fn backup_abandon(session: BackupSession) -> Database {
+    backup_finish(session)
+}
+
+// -----------------------------------------------------------------------------
+// Convenience — high-level "backup to path, drain in one go"
+// -----------------------------------------------------------------------------
+
+/// Single-shot backup: open dst, copy *everything* in one step,
+/// finish, return the new database.  Suitable for tests and for
+/// short-lived backups where you don't need to interleave progress
+/// reporting.  For long backups use `backup_init_to_path` +
+/// `backup_step` + `backup_finish` so the user can throttle / sleep
+/// between steps.
+public fn backup_to_path_in_one_go(
+    src: &mut Database,
+    dst_path: &Text,
+) -> Result<Database, DbError> {
+    let session = match backup_init_to_path(src, dst_path) {
+        Ok(s)  => s,
+        Err(e) => { return Err(e); }
+    };
+    let mut sess = session;
+    let req = from_n_pages(-1);   // BsrAll
+    loop {
+        let outcome = backup_step(&mut sess, src, req.clone());
+        match outcome {
+            BoDone => { return Ok(backup_finish(sess)); }
+            BoOk   => {}   // shouldn't happen with BsrAll, but loop safely
+            BoBusy | BoLocked => {
+                // No real busy story for a same-process source; convert to error
+                let _ = sess;
+                return Err(DbIoError("backup: source unexpectedly busy".clone()));
+            }
+            BoFailed { code: _code, reason } => {
+                let _ = sess;
+                return Err(DbIoError(reason));
+            }
+        }
+    }
+}

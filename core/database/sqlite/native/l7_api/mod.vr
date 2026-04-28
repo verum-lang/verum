@@ -9,6 +9,7 @@ module core.database.sqlite.native.l7_api;
 
 public module database;
 public module transaction;
+public module backup;
 
 public mount .database.{
     Database, DbError,
@@ -20,4 +21,11 @@ public mount .database.{
 public mount .transaction.{
     Transaction, TxKind,
     TkDeferred, TkImmediate, TkExclusive,
+};
+
+public mount .backup.{
+    BackupSession,
+    backup_init_to_path, backup_init_into,
+    backup_step, backup_finish, backup_abandon,
+    backup_to_path_in_one_go,
 };
