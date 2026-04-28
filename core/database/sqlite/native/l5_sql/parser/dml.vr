@@ -43,6 +43,7 @@ mount core.database.sqlite.native.l5_sql.parser.token_stream.{
     SqlTokenStream, ParseError, parse_error,
 };
 mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
+mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
 
 // -----------------------------------------------------------------------------
 // INSERT
@@ -128,10 +129,19 @@ fn parse_insert_source(ts: &mut SqlTokenStream) -> Result<InsertSource, ParseErr
         }
         return Ok(IsValues(rows));
     }
-    // SELECT source lands when select's sub-query path is wired; for
-    // the v1 insert we expose the gap.
+    // INSERT ... SELECT — delegates to parse_select.  Wraps the parsed
+    // SELECT statement in IsSelect(Heap.new(...)).  Bulk-load idiom:
+    //   INSERT INTO archive (id, payload) SELECT id, payload FROM live;
+    if ts.check_keyword(KwSelect) {
+        let sel = match parse_select(ts) {
+            Ok(s)  => s,
+            Err(e) => { return Err(e); }
+        };
+        return Ok(IsSelect(Heap.new(sel)));
+    }
+
     Err(parse_error(
-        "INSERT ... SELECT not yet supported in L5.4 initial cut".clone(),
+        "INSERT source: expected VALUES, DEFAULT VALUES, or SELECT".clone(),
         ts.position(),
     ))
 }
