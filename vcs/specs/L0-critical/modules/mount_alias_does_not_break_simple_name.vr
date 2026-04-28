@@ -1,0 +1,48 @@
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: red-team, modules, mount-alias, name-shadow
+// @description: Round-1 harness vector 4.3 (#207).
+//
+// Pins the architectural invariant that mount-alias `as` does NOT
+// break the simple-name resolution guarantee. A mount-alias rebinds
+// the imported name to a new symbol in the importing module's
+// namespace; it must NOT silently shadow built-in identifiers like
+// `Some` / `None` / `Result` / `Maybe`.
+//
+// This is a parse-pass test: the file declares an alias `Bar`
+// pointing at module_a.Foo, then uses `Bar` and an unrelated
+// built-in identifier in the same scope. The alias must rebind
+// only its own name, not affect the built-in resolution.
+
+module module_a {
+    pub type Foo is {
+        x: Int,
+    };
+
+    pub fn make() -> Foo {
+        Foo { x: 42 }
+    }
+}
+
+module consumer {
+    // Valid alias that doesn't shadow anything built-in.
+    mount cog.module_a.Foo as Bar;
+    mount cog.module_a.make as make_foo;
+
+    pub fn use_alias() -> Bar {
+        make_foo()
+    }
+
+    // Sanity: built-in `Some` / `None` from `Maybe` are unaffected
+    // by the alias. `Some(42)` MUST resolve to the built-in
+    // constructor, not to anything from module_a.
+    pub fn use_builtin_maybe() -> Maybe<Int> {
+        Some(42)
+    }
+
+    // Sanity: built-in `Ok` / `Err` from `Result` unaffected.
+    pub fn use_builtin_result() -> Result<Int, Text> {
+        Ok(7)
+    }
+}
