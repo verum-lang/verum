@@ -85,6 +85,16 @@ public fn write_varint(out: &mut List<Byte>, value: UInt64) {
 }
 
 /// Read an unsigned 64-bit varint. Consumes up to 10 bytes.
+///
+/// Rejects non-canonical encodings where the 10th byte carries
+/// data bits that would overflow `UInt64`. Bytes 0..8 each
+/// contribute 7 data bits (= 63 bits total); the 10th byte
+/// contributes only one final bit at position 63. Its data bits
+/// 1..6 (mask `0x7E`) cannot be represented in 64 bits and a
+/// `(byte & 0x7F) << 63` would silently truncate them — letting a
+/// hostile peer submit multiple distinct encodings that decode to
+/// the same `UInt64`. Matches Google protobuf's reference
+/// validation (see `google/protobuf/io/coded_stream.cc`).
 public fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), ProtobufError> {
     let mut v: UInt64 = 0;
     let mut shift = 0;
@@ -93,6 +103,10 @@ public fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), ProtobufE
     while bytes_read < 10 {
         if p >= buf.len() { return Err(ProtobufError.UnexpectedEof); }
         let b = buf[p] as UInt64;
+        if bytes_read == 9 && (b & 0x7F) > 1 {
+            // Tenth byte must encode at most bit 63 of the result.
+            return Err(ProtobufError.VarintOverflow);
+        }
         v = v | ((b & 0x7F) << shift);
         p = p + 1;
         bytes_read = bytes_read + 1;
