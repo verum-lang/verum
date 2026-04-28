@@ -614,6 +614,56 @@ impl<'a> Validator<'a> {
             }
 
             // -----------------------------------------------------------
+            // Switch — multiple branch targets (default + per-case).
+            // Every offset must land on a known instruction-start
+            // boundary inside the function's bytecode region.
+            // -----------------------------------------------------------
+            Instruction::Switch { value, default_offset, cases } => {
+                self.check_reg(*value, max_reg, &func_name);
+                let default_target = (next_offset as i64 + *default_offset as i64) as u32;
+                pending_jumps.push((instr_start as u32, default_target));
+                for (_case_value, case_offset) in cases {
+                    let target = (next_offset as i64 + *case_offset as i64) as u32;
+                    pending_jumps.push((instr_start as u32, target));
+                }
+            }
+
+            // -----------------------------------------------------------
+            // TryBegin — handler offset is a branch target like Jmp's.
+            // Crafted bytecode could land the handler mid-instruction
+            // and cause the interpreter to decode arbitrary opcodes
+            // when an exception fires.
+            // -----------------------------------------------------------
+            Instruction::TryBegin { handler_offset } => {
+                let target = (next_offset as i64 + *handler_offset as i64) as u32;
+                pending_jumps.push((instr_start as u32, target));
+            }
+
+            // -----------------------------------------------------------
+            // Closure construction — `func_id` references the function
+            // table.  Every captured-value register must also be in
+            // bounds.
+            // -----------------------------------------------------------
+            Instruction::NewClosure { dst, func_id, captures } => {
+                if *func_id >= function_count {
+                    self.errors.push(VbcError::InvalidFunctionId(*func_id));
+                }
+                self.check_reg(*dst, max_reg, &func_name);
+                for r in captures {
+                    self.check_reg(*r, max_reg, &func_name);
+                }
+            }
+
+            // -----------------------------------------------------------
+            // Panic — message_id references the string table.
+            // -----------------------------------------------------------
+            Instruction::Panic { message_id } => {
+                if *message_id >= string_count {
+                    self.errors.push(VbcError::InvalidStringId(*message_id));
+                }
+            }
+
+            // -----------------------------------------------------------
             // All remaining instructions — register-only validation.
             // We don't enumerate every variant (the Instruction enum
             // is huge); the call-site cross-references and branch
@@ -913,5 +963,80 @@ mod tests {
         };
         validate_module_with_options(&module, &opts)
             .expect("skip flag must bypass bytecode validation");
+    }
+
+    #[test]
+    fn validator_rejects_new_closure_with_oor_function_id() {
+        // Closure body referencing FunctionId(42) in a 1-function
+        // module must be rejected at load time.
+        let bad_closure = Instruction::NewClosure {
+            dst: Reg(0),
+            func_id: 42,
+            captures: vec![],
+        };
+        let module = build_module_with_instr(bad_closure, 4, 1);
+        let err = validate_module(&module).expect_err("must reject");
+        let has_err = matches!(&err, VbcError::InvalidFunctionId(42))
+            || matches!(&err, VbcError::MultipleErrors(errs)
+                if errs.iter().any(|e| matches!(e, VbcError::InvalidFunctionId(42))));
+        assert!(has_err, "expected InvalidFunctionId(42), got: {:?}", err);
+    }
+
+    #[test]
+    fn validator_rejects_panic_with_oor_message_id() {
+        // Panic referencing string id 999 in a module whose string
+        // table only has the module name (id 0) must be rejected.
+        let bad_panic = Instruction::Panic { message_id: 999 };
+        let module = build_module_with_instr(bad_panic, 4, 1);
+        let err = validate_module(&module).expect_err("must reject");
+        let has_err = matches!(&err, VbcError::InvalidStringId(999))
+            || matches!(&err, VbcError::MultipleErrors(errs)
+                if errs.iter().any(|e| matches!(e, VbcError::InvalidStringId(999))));
+        assert!(has_err, "expected InvalidStringId(999), got: {:?}", err);
+    }
+
+    #[test]
+    fn validator_rejects_try_begin_with_handler_past_function_end() {
+        // TryBegin's handler_offset is a branch target; landing it
+        // far past the function's bytecode region is rejected.  The
+        // offset of 0x7FFF_FFFF can surface as either:
+        //   * `JumpOutOfBounds` — our post-walk boundary check fires
+        //     after the byte walk completes, OR
+        //   * `InvalidInstructionEncoding` — the trailing Ret can't
+        //     decode because the giant signed-varint offset consumed
+        //     more bytes than the descriptor's `bytecode_length`
+        //     budgeted for.
+        // Both rejections satisfy the load-time-defense invariant.
+        let bad_try = Instruction::TryBegin {
+            handler_offset: 0x7FFF_FFFF,
+        };
+        let module = build_module_with_instr(bad_try, 4, 1);
+        let err = validate_module(&module).expect_err("must reject");
+        let any_acceptable = |e: &VbcError| matches!(
+            e,
+            VbcError::JumpOutOfBounds { .. } | VbcError::InvalidInstructionEncoding { .. }
+        );
+        let has_err = any_acceptable(&err)
+            || matches!(&err, VbcError::MultipleErrors(errs)
+                if errs.iter().any(any_acceptable));
+        assert!(has_err, "expected JumpOutOfBounds or InvalidInstructionEncoding for TryBegin, got: {:?}", err);
+    }
+
+    #[test]
+    fn validator_rejects_switch_with_case_target_past_function_end() {
+        // Switch with one case-offset jumping far past EOF must be
+        // rejected — every case offset is validated identically to
+        // Jmp's.
+        let bad_switch = Instruction::Switch {
+            value: Reg(0),
+            default_offset: 0,
+            cases: vec![(7_u32, 0x7FFF_FFFF_i32)],
+        };
+        let module = build_module_with_instr(bad_switch, 4, 1);
+        let err = validate_module(&module).expect_err("must reject");
+        let has_err = matches!(&err, VbcError::JumpOutOfBounds { .. })
+            || matches!(&err, VbcError::MultipleErrors(errs)
+                if errs.iter().any(|e| matches!(e, VbcError::JumpOutOfBounds { .. })));
+        assert!(has_err, "expected JumpOutOfBounds for Switch case, got: {:?}", err);
     }
 }
