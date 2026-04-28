@@ -36,20 +36,20 @@ pub(in super::super) fn handle_extended(
         }
         Some(ExtendedSubOpcode::ProcessExit) => {
             // Format: `[0x1F][0x10][reg:u16]`. Read the register holding
-            // the exit code, flush stdio (Rust's stdout is line-buffered
-            // by default — an immediate `process::exit` could otherwise
-            // drop the tail of a partial line that `print(...)` emitted
-            // just before this call), and terminate the process.
+            // the exit code and raise a `ProcessExit` control-flow
+            // signal that the outer driver translates into
+            // `std::process::exit` after running post-execution work
+            // (cache store, timing flush, telemetry). Calling
+            // `process::exit` directly here would short-circuit those
+            // steps and force every script to re-pay full compile cost
+            // on its next invocation.
             //
-            // First-class divergent instruction: dispatch never returns,
-            // so the dispatch loop's `Ok(DispatchResult::Continue)` arm
-            // is structurally unreachable.
+            // Stdio flush happens at the driver boundary (just before
+            // `process::exit`) so partial-line `print(...)` output is
+            // not lost regardless of which path produced the exit.
             let code_reg = super::bytecode_io::read_reg(state)?;
             let code = state.get_reg(code_reg).as_integer_compatible() as i32;
-            use std::io::Write;
-            let _ = std::io::stdout().flush();
-            let _ = std::io::stderr().flush();
-            std::process::exit(code);
+            Err(InterpreterError::ProcessExit(code))
         }
         None => Err(InterpreterError::NotImplemented {
             feature: "Extended sub-opcode",

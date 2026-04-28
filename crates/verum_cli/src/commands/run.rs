@@ -194,6 +194,16 @@ fn run_vbc_interpreted(
     let elapsed = start.elapsed();
     ui::note(&format!("executed in {}", ui::format_duration(elapsed)));
 
+    // Translate the program's recorded exit code to a process exit.
+    // The pipeline records via `Session::record_exit_code` instead of
+    // calling `process::exit` directly, so any post-execution work
+    // (timing prints, future telemetry flushes) runs first. `None`
+    // means the program returned `()` or a non-numeric value — exit
+    // 0 by convention, which the CLI's normal Ok-path delivers.
+    if let Some(code) = session.take_exit_code() {
+        std::process::exit(code);
+    }
+
     Ok(())
 }
 

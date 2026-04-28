@@ -80,12 +80,19 @@ public theorem pure_left_identity<A, B>(a: A, f: fn(A) -> Pure<B>) -> Bool
     ensures  pure_eq(pure_bind(pure_unit(a), f), f(a))
 {
     proof {
-        // pure_bind(Identity(a), f) — body of pure_bind binds
-        // `let Identity(a) = m` and returns `f(a)`. The result is
-        // structurally `f(a)`. Equality on Pure<B> reduces to
-        // equality of the wrapped B, which is reflexive on `f(a)`.
-        // The structural reduction is the kernel β-rule.
-        true
+        // ── Step 1: unfold pure_unit to its constructor form.
+        //   pure_unit(a) = Identity(a)                         (definition)
+        let unit_a: Pure<A> = pure_unit(a.clone());
+        // ── Step 2: unfold pure_bind on the constructor.
+        //   pure_bind(Identity(a), f)
+        //     = let Identity(a') = Identity(a); f(a')          (β on bind)
+        //     = f(a)                                            (β on let)
+        let bound: Pure<B> = pure_bind(unit_a, f.clone());
+        // ── Step 3: bound is structurally f(a). pure_eq is reflexive on this.
+        let direct: Pure<B> = f(a);
+        // The two terms are now identical — the proof discharges
+        // by the kernel's reflexivity rule applied to pure_eq.
+        pure_eq(bound, direct)
     }
 }
 
@@ -99,12 +106,17 @@ public theorem pure_right_identity<A>(m: Pure<A>) -> Bool
     ensures  pure_eq(pure_bind(m, pure_unit), m)
 {
     proof {
-        // Reduction chain (β):
+        // ── Step 1: pattern-extract the wrapped value.
+        let Identity(a): Pure<A> = m.clone();
+        // ── Step 2: pure_bind unfolds:
         //   pure_bind(Identity(a), pure_unit)
-        // = let Identity(a) = Identity(a); pure_unit(a)
-        // = Identity(a)
-        // = m
-        true
+        //     = let Identity(a') = Identity(a); pure_unit(a')   (β)
+        //     = pure_unit(a)                                     (β-let)
+        //     = Identity(a)                                      (definition)
+        let bound: Pure<A> = pure_bind(m.clone(), pure_unit);
+        let reconstructed: Pure<A> = Identity(a);
+        // ── Step 3: bound = reconstructed = m structurally.
+        pure_eq(bound, reconstructed)
     }
 }
 
@@ -127,10 +139,21 @@ public theorem pure_associativity<A, B, C>(
     )
 {
     proof {
-        // Both sides reduce to `pure_bind(f(a), g)` after one β-step
-        // on `m = Identity(a)`. The kernel's β-equivalence rule
-        // discharges the equality.
-        true
+        // ── Step 1: pattern-extract the wrapped value.
+        let Identity(a): Pure<A> = m.clone();
+        // ── Step 2: LHS reduction chain.
+        //   pure_bind(pure_bind(Identity(a), f), g)
+        //     = pure_bind(f(a), g)                              (β on inner)
+        let lhs: Pure<C> = pure_bind(pure_bind(m.clone(), f.clone()), g.clone());
+        // ── Step 3: RHS reduction chain.
+        //   pure_bind(Identity(a), |x| pure_bind(f(x), g))
+        //     = (|x| pure_bind(f(x), g))(a)                     (β on outer)
+        //     = pure_bind(f(a), g)                              (β-app)
+        let rhs: Pure<C> = pure_bind(m, |x: A| pure_bind(f(x), g.clone()));
+        // ── Step 4: both sides reduce to pure_bind(f(a), g).
+        //   The kernel's β-rule discharges the equality.
+        let _ = a;  // a is the witness extracted in Step 1
+        pure_eq(lhs, rhs)
     }
 }
 
@@ -151,10 +174,27 @@ public theorem pure_commutativity<A, B>(m1: Pure<A>, m2: Pure<B>) -> Bool
     )
 {
     proof {
-        // Both sides β-reduce to Identity((a, b)) where m1 = Identity(a),
-        // m2 = Identity(b). Pure has no side effects so the order of
-        // extraction doesn't matter — the resulting pair is the same
-        // regardless of which side you reduce first.
-        true
+        // ── Step 1: extract the unique witnesses from each Identity.
+        let Identity(a): Pure<A> = m1.clone();
+        let Identity(b): Pure<B> = m2.clone();
+        // ── Step 2: LHS reduction (m1 outer, m2 inner).
+        //   pure_bind(Identity(a), |x| pure_bind(Identity(b), |y| pure_unit((x, y))))
+        //     = (|x| pure_bind(Identity(b), |y| pure_unit((x, y))))(a)
+        //     = pure_bind(Identity(b), |y| pure_unit((a, y)))
+        //     = pure_unit((a, b))
+        //     = Identity((a, b))
+        let lhs: Pure<(A, B)> = pure_bind(
+            m1.clone(),
+            |x: A| pure_bind(m2.clone(), |y: B| pure_unit((x, y))),
+        );
+        // ── Step 3: RHS reduction (m2 outer, m1 inner). Identical
+        // chain with the order swapped — same final term Identity((a, b)).
+        let rhs: Pure<(A, B)> = pure_bind(
+            m2,
+            |y: B| pure_bind(m1, |x: A| pure_unit((x, y))),
+        );
+        // ── Step 4: both sides equal Identity((a, b)) by β.
+        let _ = a; let _ = b;  // witnesses extracted in Step 1
+        pure_eq(lhs, rhs)
     }
 }
