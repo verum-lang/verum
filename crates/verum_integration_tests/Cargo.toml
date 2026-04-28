@@ -23,6 +23,8 @@ verum_common.workspace = true
 verum_compiler.workspace = true
 verum_types.workspace = true
 verum_vbc.workspace = true
+verum_modules.workspace = true
+verum_fast_parser.workspace = true
 
 # External dependencies
 serde.workspace = true
