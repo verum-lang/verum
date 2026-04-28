@@ -40,6 +40,7 @@ module core.security.x509.trust_store;
 
 mount core.*;
 mount core.collections.List;
+mount core.encoding.pem.{decode_all as pem_decode_all, PemBlock};
 mount core.security.x509.certificate.{X509Certificate, parse_certificate};
 mount core.security.x509.name.{DistinguishedName};
 
@@ -188,91 +189,40 @@ fn load_bundled_mozilla() -> Result<TrustStore, TrustError> {
 }
 
 // =============================================================================
-// PEM parser (minimal — single-line-begin, base64 body, single-line-end)
+// PEM-bundle parsing — delegates to `core.encoding.pem`
 // =============================================================================
 //
-// PEM format per RFC 7468 §3:
+// The historical inline parser here called `core.encoding.base64.decode_bytes`
+// — a function that never existed. Lenient-skip codegen swallowed the
+// missing-symbol error and `parse_pem_bundle` consequently returned an
+// empty list for every input, so `TrustStore.system()` and
+// `TrustStore.from_pem_bundle(...)` produced anchor-free trust stores.
+// Any TLS / X.509 client that did `trust_store.system()?` and then trusted
+// the result was operating with zero anchors — fail-closed at best,
+// any-cert-accepted in any code path that didn't strictly validate the
+// store size.
 //
-//   -----BEGIN CERTIFICATE-----
-//   <base64 body, may be line-wrapped at 64 chars>
-//   -----END CERTIFICATE-----
-//
-// Multiple blocks concatenate. We accept CRLF or LF line endings and
-// skip blank lines + "# comment" lines between blocks.
+// Delegate to `core.encoding.pem` (size-capped per #203, RFC 7468) and
+// filter for the `CERTIFICATE` label — the only block kind a trust store
+// has any business consuming.
 // =============================================================================
 
 fn parse_pem_bundle(pem: &Text) -> Result<List<List<Byte>>, TrustError> {
-    let bytes = pem.as_bytes();
+    let blocks: List<PemBlock> = match pem_decode_all(pem) {
+        Ok(b)  => b,
+        Err(_) => return Err(TrustError.IoError(Text.from_str("PEM decode failed"))),
+    };
     let mut out: List<List<Byte>> = [];
     let mut i: Int = 0;
-    let begin = Text.from_str("-----BEGIN CERTIFICATE-----");
-    let end   = Text.from_str("-----END CERTIFICATE-----");
-    let begin_b = begin.as_bytes();
-    let end_b   = end.as_bytes();
-
-    while i < bytes.len() {
-        let start = find_slice(bytes, begin_b, i);
-        match start {
-            None => break,
-            Some(s) => {
-                let body_start = s + begin_b.len();
-                // Find line end
-                let mut body_begin = body_start;
-                while body_begin < bytes.len()
-                    && (bytes[body_begin] == ('\r' as Byte) || bytes[body_begin] == ('\n' as Byte)) {
-                    body_begin = body_begin + 1;
-                }
-                let end_pos = find_slice(bytes, end_b, body_begin);
-                match end_pos {
-                    None => break,
-                    Some(e) => {
-                        // Extract base64 body, stripping whitespace.
-                        let body = strip_whitespace(&bytes[body_begin..e]);
-                        let der = decode_base64(&body)
-                            .map_err(|_| TrustError.IoError(Text.from_str("PEM base64 decode failed")))?;
-                        out.push(der);
-                        i = e + end_b.len();
-                    },
-                }
-            },
+    while i < blocks.len() {
+        // Bundles commonly include "TRUSTED CERTIFICATE" / "X509 CRL" /
+        // "ENCRYPTED PRIVATE KEY" entries alongside ordinary anchors —
+        // filter strictly to "CERTIFICATE" so we don't try to parse a
+        // CRL or PKCS#8 key as an X.509 anchor.
+        if blocks[i].label.as_bytes() == b"CERTIFICATE" {
+            out.push(blocks[i].contents.clone());
         }
+        i = i + 1;
     }
     Ok(out)
-}
-
-fn find_slice(haystack: &[Byte], needle: &[Byte], from: Int) -> Maybe<Int> {
-    if needle.len() == 0 { return Some(from); }
-    let mut i: Int = from;
-    while i + needle.len() <= haystack.len() {
-        let mut j: Int = 0;
-        let mut all_eq = true;
-        while j < needle.len() {
-            if haystack[i + j] != needle[j] { all_eq = false; break; }
-            j = j + 1;
-        }
-        if all_eq { return Some(i); }
-        i = i + 1;
-    }
-    None
-}
-
-fn strip_whitespace(input: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = 0;
-    while i < input.len() {
-        let b = input[i];
-        if b != (' ' as Byte) && b != ('\t' as Byte)
-            && b != ('\r' as Byte) && b != ('\n' as Byte) {
-            out.push(b);
-        }
-        i = i + 1;
-    }
-    out
-}
-
-fn decode_base64(body: &List<Byte>) -> Result<List<Byte>, TrustError> {
-    match core.encoding.base64.decode_bytes(body.as_slice()) {
-        Ok(v) => Ok(v),
-        Err(_) => Err(TrustError.IoError(Text.from_str("base64 decode"))),
-    }
 }
