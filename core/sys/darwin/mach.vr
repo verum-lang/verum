@@ -312,8 +312,12 @@ extern {
 // Type Definitions
 // =============================================================================
 
-/// Kernel return type
-public type KernReturn is (Int);
+/// Kernel return type. C: `typedef int kern_return_t;` (32-bit signed).
+/// T0.4.2 Phase 3 — was `(Int)` (i64) which made the AOT extern-call
+/// lowering pick up the i64 result register and inherit the high 32
+/// bits of register garbage from libSystem's epilogue. Now stores
+/// `Int32` so the deref reads exactly the 4 bytes the kernel wrote.
+public type KernReturn is (Int32);
 
 /// VM address type
 public type VmAddress is (Int);
@@ -327,11 +331,12 @@ public type VmSize is (Int);
 
 implement IntCoercible for VmSize {}
 
-/// VM protection type
-public type VmProt is (Int);
+/// VM protection type. C: `typedef int vm_prot_t;` (32-bit signed).
+public type VmProt is (Int32);
 
-/// VM inheritance type
-type VmInherit is (Int);
+/// VM inheritance type. C: `typedef unsigned int vm_inherit_t;` —
+/// promoted to UInt32 to match the kernel ABI.
+type VmInherit is (UInt32);
 
 /// Memory object type
 type MemoryObject is (MachPort);
