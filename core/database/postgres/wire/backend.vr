@@ -124,6 +124,48 @@ public fn parse_parameter_status(payload: List<Byte>) -> Result<ParameterStatus,
     Ok(ParameterStatus { name: name, value: value })
 }
 
+// -----------------------------------------------------------------------------
+// NotificationResponse — async LISTEN/NOTIFY delivery (BE_NOTIFICATION 'A')
+// -----------------------------------------------------------------------------
+//
+// Wire layout:
+//     i32  process_id (sender's backend pid)
+//     cstr channel name (NUL-terminated)
+//     cstr payload (NUL-terminated; "" if NOTIFY had no payload arg)
+//
+// Spec: postgres §6.1.7.  These messages may arrive at any time the
+// connection is in a "the server is allowed to push" state — typically
+// after each ReadyForQuery and during long blocking operations.
+
+public type NotificationResponse is {
+    process_id: Int,
+    channel: Text,
+    payload: Text,
+};
+
+public fn parse_notification_response(payload: List<Byte>)
+    -> Result<NotificationResponse, BackendDecodeError>
+{
+    let mut r = WireReader.new(payload);
+    let pid = match r.read_i32_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+    };
+    let channel = match r.read_cstr() {
+        Ok(s)  => s,
+        Err(_) => { return Err(BdInvalidUtf8); }
+    };
+    let body = match r.read_cstr() {
+        Ok(s)  => s,
+        Err(_) => { return Err(BdInvalidUtf8); }
+    };
+    Ok(NotificationResponse {
+        process_id: pid,
+        channel: channel,
+        payload: body,
+    })
+}
+
 public type BackendKeyData is { process_id: Int, secret_key: Int };
 
 public fn parse_backend_key_data(payload: List<Byte>) -> Result<BackendKeyData, BackendDecodeError> {
@@ -340,6 +382,7 @@ public type BackendMessage is
     | BmEmptyQueryResponse
     | BmError(Diagnostic)
     | BmNotice(Diagnostic)
+    | BmNotification(NotificationResponse)
     | BmParseComplete
     | BmBindComplete
     | BmCloseComplete
@@ -363,6 +406,7 @@ public fn parse_backend(frame: Frame, data_row_formats: &List<Int>) -> Result<Ba
     if tag == BE_EMPTY_QUERY_RES  { return Ok(BmEmptyQueryResponse); }
     if tag == BE_ERROR_RESPONSE   { return Ok(BmError(parse_error_response(payload)?)); }
     if tag == BE_NOTICE_RESPONSE  { return Ok(BmNotice(parse_error_response(payload)?)); }
+    if tag == BE_NOTIFICATION     { return Ok(BmNotification(parse_notification_response(payload)?)); }
     if tag == BE_PARSE_COMPLETE   { return Ok(BmParseComplete); }
     if tag == BE_BIND_COMPLETE    { return Ok(BmBindComplete); }
     if tag == BE_CLOSE_COMPLETE   { return Ok(BmCloseComplete); }
