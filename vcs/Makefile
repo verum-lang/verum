@@ -170,8 +170,8 @@ endef
 .PHONY: list list-l0 list-l1 list-l2 list-l3 list-l4 list-all list-by-tag
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
-.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team
-.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip gate-memory-safety
+.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team diff-full-corpus
+.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip gate-memory-safety gate-tier-equivalence
 
 # =============================================================================
 # Default Target
@@ -1059,6 +1059,28 @@ diff-red-team: build
 		fi; \
 	done
 	$(call SUCCESS,Red-team audit-armor differential tests completed)
+
+# Full-corpus differential — runs every .vr under vcs/specs/ across
+# Tier-0 and Tier-1 and asserts byte-identical exit codes / stdout /
+# stderr / panic messages. This is gate 1 from #198 spec ("Tier-
+# equivalence gate"), running over the FULL corpus rather than just
+# the red-team audit-armor subset.
+#
+# Reports JSON results under $(REPORT_DIR)/differential/full-corpus/
+# for the production-readiness dashboard to ingest.
+diff-full-corpus: build
+	$(call PROGRESS,Running full-corpus differential (Tier-0 vs Tier-1)...)
+	@mkdir -p $(REPORT_DIR)/differential/full-corpus
+	@$(VTEST) run $(VCS_ROOT)/specs --tier 0,1 --parallel $(PARALLEL) \
+		--config $(CONFIG_FILE) \
+		--format json --output $(REPORT_DIR)/differential/full-corpus/tier-0-vs-1.json || \
+	  { echo "diff-full-corpus: divergence detected; see $(REPORT_DIR)/differential/full-corpus/"; exit 1; }
+	$(call SUCCESS,Full-corpus differential completed (Tier-0 == Tier-1))
+
+# Tier-equivalence gate (#198 gate 1) — alias for diff-full-corpus
+# that the production-readiness aggregator can pin without binding
+# to the differential machinery's name.
+gate-tier-equivalence: diff-full-corpus
 
 # =============================================================================
 # List Targets
