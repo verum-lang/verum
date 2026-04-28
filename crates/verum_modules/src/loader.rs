@@ -729,6 +729,122 @@ impl ModuleLoader {
         path
     }
 
+    /// Load a file-relative mount (`mount ./foo.vr;` /
+    /// `mount ../shared/util.vr as Util;`) — #5 / P1.5.
+    ///
+    /// `rel_path` is the literal source-relative path as
+    /// written (already validated by the parser to start
+    /// with `./` or `../` and end with `.vr`).  It is
+    /// resolved against `source_file_path` (the directory
+    /// of the importing `.vr` file), then sandboxed against
+    /// the loader's `root_path` — the resolved file MUST
+    /// lie inside the cog root.  Any escape collapses to
+    /// `ModuleError::PathTraversal`.
+    ///
+    /// On success returns a `ModuleSource` carrying the
+    /// resolved absolute path, the file contents, and a
+    /// freshly-allocated FileId. The caller is responsible
+    /// for parsing it (`parse_module`) and binding the
+    /// resulting `ModuleInfo` under the mount alias
+    /// (or the file's basename when no alias was supplied).
+    ///
+    /// Symlink handling: `canonicalize` is used so symlink
+    /// chains are resolved before the sandbox check —
+    /// otherwise a symlink that points outside the root
+    /// would silently bypass it.
+    pub fn load_file_mount(
+        &mut self,
+        rel_path: &str,
+        source_file_path: &Path,
+    ) -> ModuleResult<ModuleSource> {
+        // Defence-in-depth: re-validate parser-side
+        // invariants in case `rel_path` was constructed
+        // synthetically (e.g. via @quote).
+        if !(rel_path.starts_with("./") || rel_path.starts_with("../")) {
+            return Err(ModuleError::Other {
+                message: Text::from(format!(
+                    "file mount path `{}` must start with `./` or `../`",
+                    rel_path
+                )),
+                span: None,
+            });
+        }
+        if !rel_path.ends_with(".vr") {
+            return Err(ModuleError::Other {
+                message: Text::from(format!(
+                    "file mount path `{}` must end with `.vr`",
+                    rel_path
+                )),
+                span: None,
+            });
+        }
+        if rel_path.contains('\0') || rel_path.contains('\n') || rel_path.contains('\r') {
+            return Err(ModuleError::Other {
+                message: Text::from(format!(
+                    "file mount path `{}` contains a control character",
+                    rel_path
+                )),
+                span: None,
+            });
+        }
+
+        // The importing file's directory anchors the
+        // resolution.  When `source_file_path` is a regular
+        // file we take its parent; when it's already a
+        // directory (the loader sometimes passes one in
+        // tests) we use it verbatim.
+        let anchor: PathBuf = if source_file_path.is_file() {
+            source_file_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+        } else {
+            source_file_path.to_path_buf()
+        };
+
+        let target = anchor.join(rel_path);
+
+        // Canonicalise so symlinks resolve before the
+        // sandbox check.  If the file doesn't exist,
+        // canonicalize() fails — surface a clean
+        // ModuleNotFound at this point rather than letting
+        // load_file's read_to_string surface a generic
+        // IoError later.
+        let canonical = match std::fs::canonicalize(&target) {
+            Ok(c) => c,
+            Err(_) => {
+                return Err(ModuleError::Other {
+                    message: Text::from(format!(
+                        "file mount `{}` could not be resolved (path: {})",
+                        rel_path,
+                        target.display()
+                    )),
+                    span: None,
+                });
+            }
+        };
+
+        // Sandbox: the canonical resolved file MUST lie
+        // inside the cog root.  Canonicalise the root too
+        // so the comparison is symlink-stable.
+        let canonical_root = std::fs::canonicalize(&self.root_path)
+            .unwrap_or_else(|_| self.root_path.clone());
+        if !canonical.starts_with(&canonical_root) {
+            return Err(ModuleError::Other {
+                message: Text::from(format!(
+                    "file mount `{}` resolves outside the cog root \
+                     (resolved path `{}` is not inside `{}`)",
+                    rel_path,
+                    canonical.display(),
+                    canonical_root.display()
+                )),
+                span: None,
+            });
+        }
+
+        self.load_file(&canonical)
+    }
+
     /// Load a file and allocate a FileId.
     fn load_file(&mut self, file_path: &Path) -> ModuleResult<ModuleSource> {
         // Check cache
@@ -1253,5 +1369,125 @@ mod tests {
         // Verify custom cfg is set
         assert!(loader.cfg_evaluator().config().is_set("my_cfg"));
         assert!(loader.cfg_evaluator().config().matches("my_cfg", "enabled"));
+    }
+
+    // ========================================================================
+    // #5 / P1.5 — File-relative mount loader (`mount ./foo.vr;`)
+    // ========================================================================
+
+    fn temp_cog_root() -> tempfile::TempDir {
+        tempfile::TempDir::new().expect("temp dir")
+    }
+
+    #[test]
+    fn test_load_file_mount_resolves_sibling() {
+        let root = temp_cog_root();
+        std::fs::write(
+            root.path().join("main.vr"),
+            "module main;\nmount ./helper.vr;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("helper.vr"),
+            "module helper;\nfn ping() -> Int { 42 }\n",
+        )
+        .unwrap();
+
+        let mut loader = ModuleLoader::new(root.path());
+        let main_path = root.path().join("main.vr");
+        let source = loader
+            .load_file_mount("./helper.vr", &main_path)
+            .expect("sibling .vr file mount should succeed");
+
+        assert!(
+            source.file_path.ends_with("helper.vr"),
+            "loaded path must point at the resolved file, got {:?}",
+            source.file_path
+        );
+        assert!(
+            source.source.as_str().contains("fn ping"),
+            "loaded file contents must be the resolved file"
+        );
+    }
+
+    #[test]
+    fn test_load_file_mount_resolves_parent_directory() {
+        let root = temp_cog_root();
+        let sub = root.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(root.path().join("util.vr"), "module util;\n").unwrap();
+        let importing = sub.join("inner.vr");
+        std::fs::write(&importing, "module inner;\n").unwrap();
+
+        let mut loader = ModuleLoader::new(root.path());
+        let source = loader
+            .load_file_mount("../util.vr", &importing)
+            .expect("`../util.vr` should resolve to the sibling under the cog root");
+        assert!(source.file_path.ends_with("util.vr"));
+    }
+
+    #[test]
+    fn test_load_file_mount_rejects_escape_via_canonicalize() {
+        // The loader's sandbox uses canonicalize() so even
+        // a `../../../../../../etc/passwd`-style path is
+        // rejected before any filesystem read happens.
+        let root = temp_cog_root();
+        let importing = root.path().join("inside.vr");
+        std::fs::write(&importing, "module inside;\n").unwrap();
+
+        let mut loader = ModuleLoader::new(root.path());
+        let result = loader.load_file_mount(
+            "../../../../../../../../../etc/passwd.vr",
+            &importing,
+        );
+        assert!(
+            result.is_err(),
+            "escape attempt must be rejected by the sandbox"
+        );
+    }
+
+    #[test]
+    fn test_load_file_mount_rejects_missing_prefix() {
+        let root = temp_cog_root();
+        let importing = root.path().join("inside.vr");
+        std::fs::write(&importing, "module inside;\n").unwrap();
+
+        let mut loader = ModuleLoader::new(root.path());
+        // No `./` or `../` prefix — defence-in-depth check
+        // against synthesised paths that bypass the parser.
+        let result = loader.load_file_mount("helper.vr", &importing);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_file_mount_rejects_non_vr_extension() {
+        let root = temp_cog_root();
+        let importing = root.path().join("inside.vr");
+        std::fs::write(&importing, "module inside;\n").unwrap();
+        std::fs::write(root.path().join("data.txt"), "raw").unwrap();
+
+        let mut loader = ModuleLoader::new(root.path());
+        let result = loader.load_file_mount("./data.txt", &importing);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_file_mount_missing_file_clean_error() {
+        let root = temp_cog_root();
+        let importing = root.path().join("inside.vr");
+        std::fs::write(&importing, "module inside;\n").unwrap();
+
+        let mut loader = ModuleLoader::new(root.path());
+        let result = loader.load_file_mount("./does_not_exist.vr", &importing);
+        match result {
+            Err(ModuleError::Other { message, .. }) => {
+                assert!(
+                    message.as_str().contains("could not be resolved"),
+                    "expected resolution-failure diagnostic, got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Other error, got {:?}", other),
+        }
     }
 }
