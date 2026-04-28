@@ -55,5 +55,5 @@ public mount .strict.{
 public mount .type_coercion.{
     SqliteValue, ValueClass,
     classify, looks_int, looks_real,
-    coerce, parse_int64, parse_float64,
+    coerce, parse_int64, parse_int64_checked, parse_float64,
 };

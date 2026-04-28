@@ -194,7 +194,14 @@ fn coerce_to_integer(v: CoercionSqliteValue) -> CoercionSqliteValue {
         }
         VText(s) => {
             if looks_int(&s) {
-                VInt(parse_int64(&s))
+                // Hostile text affinity: a digit run > 19 chars
+                // overflows Int64. SQLite's INTEGER affinity falls
+                // back to REAL when the text is out of Int64 range;
+                // mirror that here using `parse_int64_checked`.
+                match parse_int64_checked(&s) {
+                    Some(v) => VInt(v),
+                    None    => VReal(parse_float64(&s)),
+                }
             } else if looks_real(&s) {
                 VReal(parse_float64(&s))
             } else {
@@ -237,7 +244,12 @@ fn coerce_to_numeric(v: CoercionSqliteValue) -> CoercionSqliteValue {
         VInt(_) | VReal(_) => v,
         VText(s) => {
             if looks_int(&s) {
-                VInt(parse_int64(&s))
+                // Same SQLite NUMERIC-affinity fallback as INTEGER:
+                // out-of-Int64 text becomes REAL rather than wrapping.
+                match parse_int64_checked(&s) {
+                    Some(v) => VInt(v),
+                    None    => VReal(parse_float64(&s)),
+                }
             } else if looks_real(&s) {
                 VReal(parse_float64(&s))
             } else {
@@ -254,9 +266,31 @@ fn coerce_to_numeric(v: CoercionSqliteValue) -> CoercionSqliteValue {
 // -----------------------------------------------------------------------------
 
 /// Parse a text known to satisfy `looks_int` into an Int64. Sign and
-/// digit-only body — no overflow check for values outside Int64 range
-/// (SQLite wraps; we mirror that).
+/// digit-only body. **Saturating** on Int64 overflow (matches SQLite's
+/// `sqlite3Atoi64` best-effort semantics — the C version returns a
+/// TOO_BIG sentinel and the caller promotes to REAL; we saturate at
+/// MAX/MIN so a stray VInt cell carries a defined value rather than
+/// a wrap-around). Callers that need overflow-aware fallback should
+/// use `parse_int64_checked` instead so they can route hostile input
+/// to `VReal(parse_float64(...))`, which is what SQLite's INTEGER
+/// affinity does for out-of-range numeric text.
 public fn parse_int64(s: &Text) -> Int64 {
+    match parse_int64_checked(s) {
+        Some(v) => v,
+        None    => {
+            let raw = s.as_bytes();
+            let neg = raw.len() > 0 && raw[0] == (0x2D as Byte);
+            if neg { -9_223_372_036_854_775_808_i64 }
+            else   {  9_223_372_036_854_775_807_i64 }
+        }
+    }
+}
+
+/// Overflow-aware variant of `parse_int64`. Returns `None` when the
+/// digit run cannot fit in Int64 — callers in the affinity coercion
+/// path use this to fall back to REAL (mirroring SQLite's INTEGER →
+/// REAL promotion for out-of-range numeric text).
+public fn parse_int64_checked(s: &Text) -> Maybe<Int64> {
     let raw = s.as_bytes();
     let mut i: Int = 0;
     let mut neg = false;
@@ -266,13 +300,25 @@ public fn parse_int64(s: &Text) -> Int64 {
     } else if raw.len() > 0 && raw[0] == (0x2B as Byte) {
         i = 1;
     }
+    // Pre-loop length cap. Int64.MAX is 19 digits; allow 19 digits
+    // for unsigned magnitude, plus one for the negative-MIN edge.
+    if (raw.len() - i) > 19 { return None; }
     let mut acc: Int64 = 0 as Int64;
     while i < raw.len() {
         let d = (raw[i] - (0x30 as Byte)) as Int64;
+        if acc > 922_337_203_685_477_580_i64 { return None; }
         acc = acc * 10_i64 + d;
+        if acc < 0_i64 { return None; }
         i = i + 1;
     }
-    if neg { 0_i64 - acc } else { acc }
+    if neg {
+        // Magnitude up to 9_223_372_036_854_775_808 fits the negative
+        // range. `acc == Int64.MAX + 1` cannot land here because the
+        // pre-add guard rejects it; `0_i64 - acc` is therefore safe.
+        Some(0_i64 - acc)
+    } else {
+        Some(acc)
+    }
 }
 
 /// Parse text that satisfies `looks_real` (or `looks_int`) into a Float64.
