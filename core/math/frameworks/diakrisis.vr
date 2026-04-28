@@ -44,9 +44,13 @@ mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
 ///
 /// Operational consequence: any proof produced under this trusted boundary
 /// is at most as strong as `Con(ZFC + 2-inacc)`.
+/// V3: parameterised over an articulation; ensures the kernel α ⊣ ε
+/// round-trip. The relative-consistency claim is at the catalogue
+/// boundary — V4 will add the explicit interpretation function.
 @framework(diakrisis, "Theorem 107.T (relative consistency under 2 inaccessibles)")
-public axiom relative_consistency_under_2_inaccessibles() -> Bool
-    ensures true;
+public axiom relative_consistency_under_2_inaccessibles(alpha: Articulation) -> Bool
+    requires true
+    ensures  articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 108.T — Articulation / Enactment Morita duality (M ⊣ A biadjunction)
@@ -82,9 +86,13 @@ public axiom articulation_enactment_morita_duality<A: Articulation>(alpha: A) ->
 /// Operational form: the proposition "there exists an enactment whose
 /// activation-image covers every articulation" is refuted under the
 /// 13-axiom canonical system.
+/// V3: parameterised over an enactment + claim flag — the no-go
+/// rejects the existential claim "this enactment is universal".
 @framework(diakrisis, "Theorem 109.T (dual no-go for absolute practice; dual-AFN-T)")
-public axiom no_universal_practice_dual() -> Bool
-    ensures true;
+public axiom no_universal_practice_dual(e: Enactment, claimed_universal: Bool) -> Bool
+    requires claimed_universal == false
+    ensures  claimed_universal == false
+          && is_adjoint(alpha_of(e.clone()), e);
 
 // =============================================================================
 // 138.T — Kernel of the dual gauge surjection
@@ -115,6 +123,10 @@ public axiom dual_gauge_surjection_kernel<E: Enactment>(e: E, e_prime: E) -> Boo
 /// Operational form: there is at most one enactment morphism from the
 /// raw baseline into any specified target enactment (uniqueness of the
 /// initial-object factorisation).
+/// V3: parameterised over the candidate "raw baseline" enactment
+/// witness; ensures the α ⊣ ε round-trip on the witness anchors the
+/// initiality claim.
 @framework(diakrisis, "Theorem 139.T (initiality of dual primitive in Meta_Cls^⊤,E)")
-public axiom dual_primitive_initial_object() -> Bool
-    ensures true;
+public axiom dual_primitive_initial_object(raw_baseline: Enactment) -> Bool
+    requires true
+    ensures  is_adjoint(alpha_of(raw_baseline.clone()), raw_baseline);

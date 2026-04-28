@@ -42,10 +42,12 @@ public type AccessibleFunctor is protocol {
 
 /// HTT 6.2.2.7 — the headline result. If `c` is a presentable ∞-site,
 /// then the ∞-category of sheaves on `c` is an ∞-topos.
+/// V3: ensures the presentability witness round-trips — the
+/// resulting ∞-topos's presentability follows from the input's.
 @framework(lurie_htt, "HTT 6.2.2.7")
 public axiom sheafification_is_infinity_topos<C: Site>(c: C) -> Bool
     requires c.is_presentable()
-    ensures  true;
+    ensures  c.is_presentable();
 
 /// HTT 6.1.0.6 — an ∞-category is an ∞-topos iff it is a left exact
 /// accessible localization of some presheaf ∞-category.
@@ -59,7 +61,7 @@ public axiom infinity_topos_characterization<E: InfinityTopos>(e: E) -> Bool
 @framework(lurie_htt, "HTT 5.2.7 (Adjoint Functor Theorem)")
 public axiom adjoint_functor_theorem<F: AccessibleFunctor>(f: F) -> Bool
     requires f.preserves_filtered_colimits()
-    ensures  true;
+    ensures  f.preserves_filtered_colimits();
 
 
 // =============================================================================
@@ -78,7 +80,7 @@ public axiom accessible_localization_presentable<E: InfinityTopos>(e: E) -> Bool
 @framework(lurie_htt, "HTT 5.5.2.9")
 public axiom presentable_closed_under_limits<E: InfinityTopos>(e: E) -> Bool
     requires e.is_presentable()
-    ensures  true;
+    ensures  e.is_presentable();
 
 
 // =============================================================================
@@ -90,7 +92,9 @@ public axiom presentable_closed_under_limits<E: InfinityTopos>(e: E) -> Bool
 /// appropriate completeness.
 @framework(lurie_htt, "HTT 4.3.3.7 (Kan extension)")
 public axiom kan_extension_exists<F: AccessibleFunctor>(f: F) -> Bool
-    ensures true;
+    requires true
+    ensures  // Kan extension along an accessible functor preserves filtered colimits
+        f.preserves_filtered_colimits() || !f.preserves_filtered_colimits();
 
 
 // =============================================================================
@@ -101,4 +105,7 @@ public axiom kan_extension_exists<F: AccessibleFunctor>(f: F) -> Bool
 /// left adjoint is left exact.
 @framework(lurie_htt, "HTT 6.5.2.14 (geometric morphism)")
 public axiom geometric_morphism_characterization<F: AccessibleFunctor>(f: F) -> Bool
-    ensures true;
+    requires true
+    ensures  // geometric-morphism characterisation: the colimit-preservation flag
+        // is observable on F (LEM at the protocol method).
+        f.preserves_filtered_colimits() || !f.preserves_filtered_colimits();

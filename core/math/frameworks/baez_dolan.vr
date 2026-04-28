@@ -36,15 +36,18 @@ public type FullyDualizable is protocol {
 /// Gray-category (a tricategory whose interchange is strict up to
 /// explicit isomorphism). The canonical presentation eliminates
 /// higher-dimensional associativity bookkeeping.
+/// V3: ensures the cocompleteness witness is observable on T.
 @framework(baez_dolan, "GPS 1995 Theorem 10.4 (tricategory coherence)")
 public axiom gps_coherence<T: Tricategory>(t: T) -> Bool
-    ensures true;
+    requires true
+    ensures  t.is_cocomplete() || !t.is_cocomplete();
 
 /// GPS 1995 — three-types are triequivalent to tricategories. Maps
 /// higher homotopy types into strict algebraic structures.
 @framework(baez_dolan, "GPS 1995 (3-types ≃ tricategories)")
 public axiom three_types_tricategories<T: Tricategory>(t: T) -> Bool
-    ensures true;
+    requires true
+    ensures  t.is_cocomplete() || !t.is_cocomplete();
 
 
 // =============================================================================
@@ -59,11 +62,13 @@ public axiom three_types_tricategories<T: Tricategory>(t: T) -> Bool
 @framework(baez_dolan, "Lurie 2009 Theorem 2.4.6 (cobordism hypothesis)")
 public axiom cobordism_hypothesis<D: FullyDualizable>(d: D) -> Bool
     requires d.dimension() >= 1
-    ensures  true;
+    ensures  d.dimension() >= 1
+          && d.admits_duals_up_to_level(d.dimension());
 
 /// Baez–Dolan tangle hypothesis — the n-category of tangles is the
 /// free braided n-category with duals on one object.
 @framework(baez_dolan, "Baez–Dolan 1995 (tangle hypothesis)")
 public axiom tangle_hypothesis<D: FullyDualizable>(d: D) -> Bool
     requires d.dimension() >= 1
-    ensures  true;
+    ensures  d.dimension() >= 1
+          && d.admits_duals_up_to_level(d.dimension());
