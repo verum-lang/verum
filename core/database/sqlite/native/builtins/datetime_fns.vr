@@ -106,12 +106,18 @@ public fn julian_to_cal(jd: Float64) -> Calendar {
 
 fn parse_uint(bs: &List<Byte>, start: Int, len: Int) -> Maybe<Int> {
     if start + len > bs.len() { return None; }
+    // Defence-in-depth: callers pass small `len` (4 for year, 2 for
+    // month/day/etc.) but a buggy or hostile caller could pass a
+    // length up to bs.len(), wrapping `n * 10 + d` past Int.MAX.
+    if len > 19 { return None; }
     let mut n: Int = 0;
     let mut i: Int = 0;
     while i < len {
         let b = bs[start + i];
         if b < (48 as Byte) || b > (57 as Byte) { return None; }
+        if n > 922_337_203_685_477_580 { return None; }
         n = n * 10 + ((b as Int) - 48);
+        if n < 0 { return None; }
         i = i + 1;
     }
     Some(n)
