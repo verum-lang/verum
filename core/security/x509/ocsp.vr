@@ -191,6 +191,53 @@ public type OcspError is
     | ResponseExpired
     | Truncated;
 
+// Display + Debug + Eq for OcspError — standard stdlib
+// protocol impls.  SignatureNotVerified deliberately
+// surfaces no detail (RFC 6960 §4 — value-blind).
+
+implement Display for OcspError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OcspError.DerParseError(e)       => f.write_str(f"OCSP DER parse error: {e}".as_str()),
+            OcspError.BadStatus(b)           => f.write_str(f"OCSP responseStatus {b} not 'successful'".as_str()),
+            OcspError.BadStructure(m)        => f.write_str(f"OCSP bad structure: {m}".as_str()),
+            OcspError.SignatureNotVerified   => f.write_str("OCSP signature verification failed"),
+            OcspError.ResponderNotTrusted    => f.write_str("OCSP responder not trusted"),
+            OcspError.ResponseExpired        => f.write_str("OCSP response expired (thisUpdate/nextUpdate)"),
+            OcspError.Truncated              => f.write_str("OCSP response truncated"),
+        }
+    }
+}
+
+implement Debug for OcspError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OcspError.DerParseError(e)       => f.write_str(f"DerParseError({e:?})".as_str()),
+            OcspError.BadStatus(b)           => f.write_str(f"BadStatus({b})".as_str()),
+            OcspError.BadStructure(m)        => f.write_str(f"BadStructure({m})".as_str()),
+            OcspError.SignatureNotVerified   => f.write_str("SignatureNotVerified"),
+            OcspError.ResponderNotTrusted    => f.write_str("ResponderNotTrusted"),
+            OcspError.ResponseExpired        => f.write_str("ResponseExpired"),
+            OcspError.Truncated              => f.write_str("Truncated"),
+        }
+    }
+}
+
+implement Eq for OcspError {
+    fn eq(&self, other: &OcspError) -> Bool {
+        match (self, other) {
+            (OcspError.DerParseError(a),     OcspError.DerParseError(b))     => a == b,
+            (OcspError.BadStatus(a),         OcspError.BadStatus(b))         => a == b,
+            (OcspError.BadStructure(a),      OcspError.BadStructure(b))      => a == b,
+            (OcspError.SignatureNotVerified, OcspError.SignatureNotVerified) => true,
+            (OcspError.ResponderNotTrusted,  OcspError.ResponderNotTrusted)  => true,
+            (OcspError.ResponseExpired,      OcspError.ResponseExpired)      => true,
+            (OcspError.Truncated,            OcspError.Truncated)            => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parser (scaffold — v1.1 will integrate DerReader + algorithm + Name parsing)
 // =============================================================================

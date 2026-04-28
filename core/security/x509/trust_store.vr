@@ -53,6 +53,40 @@ public type TrustError is
     | InvalidCertificate(Int)         // index
     | IoError(Text);
 
+// Display + Debug + Eq for TrustError — standard stdlib
+// protocol impls.
+
+implement Display for TrustError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TrustError.NoSystemStore         => f.write_str("X.509 trust store unavailable on this platform"),
+            TrustError.InvalidCertificate(i) => f.write_str(f"X.509 trust anchor at index {i} failed to parse".as_str()),
+            TrustError.IoError(msg)          => f.write_str(f"X.509 trust store I/O error: {msg}".as_str()),
+        }
+    }
+}
+
+implement Debug for TrustError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TrustError.NoSystemStore         => f.write_str("NoSystemStore"),
+            TrustError.InvalidCertificate(i) => f.write_str(f"InvalidCertificate({i})".as_str()),
+            TrustError.IoError(msg)          => f.write_str(f"IoError({msg})".as_str()),
+        }
+    }
+}
+
+implement Eq for TrustError {
+    fn eq(&self, other: &TrustError) -> Bool {
+        match (self, other) {
+            (TrustError.NoSystemStore,         TrustError.NoSystemStore)         => true,
+            (TrustError.InvalidCertificate(a), TrustError.InvalidCertificate(b)) => a == b,
+            (TrustError.IoError(a),            TrustError.IoError(b))            => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // TrustStore
 // =============================================================================

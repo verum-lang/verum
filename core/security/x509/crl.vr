@@ -92,6 +92,40 @@ public type CrlError is
     | BadStructure(Text)
     | Truncated;
 
+// Display + Debug + Eq for CrlError — standard stdlib
+// protocol impls.
+
+implement Display for CrlError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CrlError.DerParseError(e) => f.write_str(f"CRL DER parse error: {e}".as_str()),
+            CrlError.BadStructure(m)  => f.write_str(f"CRL bad structure: {m}".as_str()),
+            CrlError.Truncated        => f.write_str("CRL truncated"),
+        }
+    }
+}
+
+implement Debug for CrlError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CrlError.DerParseError(e) => f.write_str(f"DerParseError({e:?})".as_str()),
+            CrlError.BadStructure(m)  => f.write_str(f"BadStructure({m})".as_str()),
+            CrlError.Truncated        => f.write_str("Truncated"),
+        }
+    }
+}
+
+implement Eq for CrlError {
+    fn eq(&self, other: &CrlError) -> Bool {
+        match (self, other) {
+            (CrlError.DerParseError(a), CrlError.DerParseError(b)) => a == b,
+            (CrlError.BadStructure(a),  CrlError.BadStructure(b))  => a == b,
+            (CrlError.Truncated,        CrlError.Truncated)        => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parser (TBSCertList DER → CertificateList)
 // =============================================================================

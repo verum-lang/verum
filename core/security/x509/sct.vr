@@ -84,6 +84,43 @@ public type SctError is
     | BadExtensionStructure
     | BadSignatureLength;
 
+// Display + Debug + Eq for SctError — standard stdlib
+// protocol impls.
+
+implement Display for SctError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SctError.Truncated             => f.write_str("SCT truncated"),
+            SctError.UnknownVersion(v)     => f.write_str(f"SCT unknown version {v}".as_str()),
+            SctError.BadExtensionStructure => f.write_str("SCT extension structure malformed"),
+            SctError.BadSignatureLength    => f.write_str("SCT signature length malformed"),
+        }
+    }
+}
+
+implement Debug for SctError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SctError.Truncated             => f.write_str("Truncated"),
+            SctError.UnknownVersion(v)     => f.write_str(f"UnknownVersion({v})".as_str()),
+            SctError.BadExtensionStructure => f.write_str("BadExtensionStructure"),
+            SctError.BadSignatureLength    => f.write_str("BadSignatureLength"),
+        }
+    }
+}
+
+implement Eq for SctError {
+    fn eq(&self, other: &SctError) -> Bool {
+        match (self, other) {
+            (SctError.Truncated,             SctError.Truncated)             => true,
+            (SctError.UnknownVersion(a),     SctError.UnknownVersion(b))     => a == b,
+            (SctError.BadExtensionStructure, SctError.BadExtensionStructure) => true,
+            (SctError.BadSignatureLength,    SctError.BadSignatureLength)    => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Byte readers (big-endian helpers)
 // =============================================================================
