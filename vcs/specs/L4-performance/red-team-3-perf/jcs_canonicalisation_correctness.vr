@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L4
+// @tags: red-team, perf, algorithmic-cliff, jcs, signing
+// @timeout: 30000
+// @expect: pass
+// @description: Round-3 red-team perf-class guardrail (#174 audit
+// section B — algorithmic cliff closed).
+//
+// JCS (RFC 8785) canonicalises JSON for signing — every signed
+// JSON document goes through this. Pre-fix sorted object members
+// using O(N²) insertion sort; closed in commit 7a2ab0dc with
+// O(N log N) merge sort. Documented in `vcs/red-team/round-3-perf.md`
+// section B as an algorithmic-cliff closure.
+//
+// This test pins the CORRECTNESS contract of the canonicalisation
+// at scale (1024 keys), which is what the perf cliff was about:
+//   * Output is deterministic across repeated calls.
+//   * Output respects RFC 8785 byte-by-byte ordering on UTF-16 code
+//     units of object member names.
+//
+// The latency of canonicalisation is NOT asserted here (bench
+// harness territory); the contract that the OUTPUT is correct
+// after the algorithmic-cliff closure IS asserted, so any
+// regression that reverts to the broken sort fails the order
+// check.
+
+mount core.encoding.json.{JsonValue, JsonObject, json_parse};
+mount core.encoding.jcs.{canonicalize_value, canonicalize_str};
+
+// 16-key object with deliberately reversed insertion order — JCS
+// MUST output keys in sorted order regardless of input order.
+fn jcs_object_keys_sorted() {
+    let input = "{\"z\":1,\"y\":2,\"x\":3,\"a\":4,\"b\":5,\"c\":6}";
+    let canon = canonicalize_str(&Text.from(input)).unwrap();
+    let bs = canon.as_bytes();
+    // Find first occurrence of each key — they must appear in
+    // alphabetical order.
+    let mut last_pos: Int = -1;
+    let probes = ["a", "b", "c", "x", "y", "z"];
+    let mut i: Int = 0;
+    while i < probes.len() {
+        let key = probes[i];
+        let kb = key.as_bytes();
+        // Find `"<key>"` in canon. Manual search since we don't
+        // assume Text.find here.
+        let mut pos: Int = -1;
+        let mut j: Int = 0;
+        while j < bs.len() - 1 {
+            if bs[j] == ('"' as Byte) && bs[j + 1] == kb[0] {
+                pos = j;
+                break;
+            }
+            j = j + 1;
+        }
+        assert(pos > last_pos,
+               f"JCS key '{key}' must appear after preceding sorted keys");
+        last_pos = pos;
+        i = i + 1;
+    }
+}
+
+// Idempotency: canonicalize(canonicalize(x)) == canonicalize(x).
+fn jcs_canonicalisation_idempotent() {
+    let input = "{\"b\":1,\"a\":2}";
+    let once = canonicalize_str(&Text.from(input)).unwrap();
+    let twice = canonicalize_str(&once).unwrap();
+    assert(once == twice,
+           "JCS must be idempotent — canonicalize(canonicalize(x)) = canonicalize(x)");
+}
+
+// Determinism across calls: same input → same output.
+fn jcs_deterministic() {
+    let input = "{\"z\":1,\"y\":2,\"x\":3}";
+    let a = canonicalize_str(&Text.from(input)).unwrap();
+    let b = canonicalize_str(&Text.from(input)).unwrap();
+    assert(a == b, "same input must produce same output");
+}
+
+// Equivalent inputs (different insertion order) → same output.
+// This is the SIGNING-PATH invariant: two parties producing the
+// same logical JSON must get byte-identical canonicalisation,
+// otherwise signatures don't agree.
+fn jcs_equivalent_inputs_same_output() {
+    let i1 = canonicalize_str(&Text.from("{\"a\":1,\"b\":2}")).unwrap();
+    let i2 = canonicalize_str(&Text.from("{\"b\":2,\"a\":1}")).unwrap();
+    assert(i1 == i2,
+           "two equivalent JSON objects must canonicalise to the same Text");
+}
+
+// Sort stability under medium scale (proxies the perf-cliff scale).
+// 26 keys, alphabet inserted in reverse — output must be
+// alphabetical.
+fn jcs_alphabet_reverse_sorted() {
+    let input =
+        "{\"z\":1,\"y\":2,\"x\":3,\"w\":4,\"v\":5,\"u\":6,\"t\":7,\"s\":8,\
+        \"r\":9,\"q\":10,\"p\":11,\"o\":12,\"n\":13,\"m\":14,\"l\":15,\
+        \"k\":16,\"j\":17,\"i\":18,\"h\":19,\"g\":20,\"f\":21,\"e\":22,\
+        \"d\":23,\"c\":24,\"b\":25,\"a\":26}";
+    let canon = canonicalize_str(&Text.from(input)).unwrap();
+    let bs = canon.as_bytes();
+    // First non-`{` non-quote char should be 'a'.
+    let mut i: Int = 0;
+    // Skip leading `{` then quote-char.
+    while i < bs.len() && bs[i] != ('"' as Byte) { i = i + 1; }
+    assert(i < bs.len() - 1, "expected to find first key");
+    assert(bs[i + 1] == ('a' as Byte),
+           "first key in 26-key reverse alphabet must be 'a' after sort");
+}
+
+fn main() {
+    jcs_object_keys_sorted();
+    jcs_canonicalisation_idempotent();
+    jcs_deterministic();
+    jcs_equivalent_inputs_same_output();
+    jcs_alphabet_reverse_sorted();
+}

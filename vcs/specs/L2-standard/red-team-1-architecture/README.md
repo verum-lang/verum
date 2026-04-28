@@ -9,6 +9,7 @@ or marked as a partial defense needing a guardrail.
 | File | Vector pinned |
 |---|---|
 | `hash_iter_determinism.vr` | Vector 7.2 — hash-table iteration determinism |
+| `text_eq_ignore_case_ascii_fast_path.vr` | Section C — Text.eq_ignore_case ASCII fast-path behavioural contract |
 
 ## Pending vectors needing harness infrastructure
 

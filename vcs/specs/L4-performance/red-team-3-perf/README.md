@@ -15,6 +15,7 @@ a resize cascade.
 | File | Vector pinned |
 |---|---|
 | `wire_frame_alloc_baseline.vr` | Vector 2.1 — wire-frame allocation reduction (audit-confirmed defense) |
+| `jcs_canonicalisation_correctness.vr` | Section B — JCS O(N²)→O(N log N) sort behavioural correctness |
 
 ## Pending vectors
 

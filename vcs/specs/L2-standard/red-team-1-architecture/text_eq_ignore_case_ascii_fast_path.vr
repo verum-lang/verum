@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, architecture, case-fold, allocator-pressure
+// @timeout: 10000
+// @expect: pass
+// @description: Round-1 red-team architectural guardrail (#172
+// audit Section C — hot-path case-fold caching).
+//
+// `Text.eq_ignore_case` had an ASCII fast path added during the
+// audit to eliminate the per-call `to_lowercase()` × 2 allocator
+// pressure. The architectural contract pinned here is the
+// BEHAVIORAL semantics of case-insensitive equality, NOT timing
+// (which lives in the bench harness).
+//
+// Pre-audit: every call allocated two lowercased Text values (~|a|
+// + |b| heap traffic per call) before comparing. Used in HTTP
+// header lookup (RFC 7230 §3.2 case-insensitive), DNS-name compare
+// (per IDNA), TLS SNI compare. Audit fix (commits a220e107 +
+// adjacent): ASCII fast path that folds-and-compares in place,
+// zero alloc.
+//
+// This test pins:
+//   1. Equal ASCII strings → true regardless of case.
+//   2. Differing ASCII strings → false regardless of case.
+//   3. Length mismatch → false.
+//   4. Mixed case in either side → match if case-insensitively
+//      equal.
+
+mount core.text.text.{Text};
+
+fn ascii_eq_ignore_case_identical_returns_true() {
+    let a = Text.from("hello");
+    let b = Text.from("hello");
+    assert(a.eq_ignore_case(&b),
+           "identical ASCII strings must compare ignore-case true");
+}
+
+fn ascii_eq_ignore_case_uppercase_lowercase_returns_true() {
+    let a = Text.from("HELLO");
+    let b = Text.from("hello");
+    assert(a.eq_ignore_case(&b),
+           "uppercase vs lowercase same letters must compare true");
+    // Symmetric.
+    assert(b.eq_ignore_case(&a),
+           "case-fold symmetric");
+}
+
+fn ascii_eq_ignore_case_mixed_case_returns_true() {
+    let a = Text.from("HelLo");
+    let b = Text.from("hELlO");
+    assert(a.eq_ignore_case(&b),
+           "mixed-case strings of same letters must compare true");
+}
+
+fn ascii_eq_ignore_case_different_letters_returns_false() {
+    let a = Text.from("hello");
+    let b = Text.from("world");
+    assert(!a.eq_ignore_case(&b),
+           "different letters must compare false");
+}
+
+fn ascii_eq_ignore_case_length_mismatch_returns_false() {
+    let a = Text.from("hello");
+    let b = Text.from("hell");
+    assert(!a.eq_ignore_case(&b),
+           "length-mismatched strings must compare false");
+}
+
+fn ascii_eq_ignore_case_empty_returns_true() {
+    let a = Text.from("");
+    let b = Text.from("");
+    assert(a.eq_ignore_case(&b),
+           "two empty strings must compare ignore-case true");
+}
+
+// ASCII boundary: chars on the cusp of letter / non-letter (e.g.
+// '@' = 0x40 vs '`' = 0x60 differ only in bit 5 like A/a). A
+// naïve OR'ing of bit 5 across the range would conflate them.
+// The audit fix folds ONLY in the A-Z range. Pin: '@' and '`'
+// must NOT be considered equal.
+fn ascii_eq_ignore_case_non_letter_bit5_distinct() {
+    let a = Text.from("@");
+    let b = Text.from("`");
+    assert(!a.eq_ignore_case(&b),
+           "'@' and '`' (differ only in bit 5) MUST be distinct");
+}
+
+// HTTP header lookup is case-insensitive (RFC 7230 §3.2).
+// Common: "Content-Type" vs "content-type".
+fn ascii_eq_ignore_case_http_header_canonical() {
+    let a = Text.from("Content-Type");
+    let b = Text.from("content-type");
+    assert(a.eq_ignore_case(&b),
+           "HTTP header case-insensitive lookup foundation");
+}
+
+fn main() {
+    ascii_eq_ignore_case_identical_returns_true();
+    ascii_eq_ignore_case_uppercase_lowercase_returns_true();
+    ascii_eq_ignore_case_mixed_case_returns_true();
+    ascii_eq_ignore_case_different_letters_returns_false();
+    ascii_eq_ignore_case_length_mismatch_returns_false();
+    ascii_eq_ignore_case_empty_returns_true();
+    ascii_eq_ignore_case_non_letter_bit5_distinct();
+    ascii_eq_ignore_case_http_header_canonical();
+}
