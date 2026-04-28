@@ -125,27 +125,28 @@ exactly this case at module load time.
 **Cross-reference:** see round-1 §3.1 for the full validator design +
 the 6 guardrail tests.
 
-### 3.2 Mismatched arity calls — PARTIAL DEFENSE (documented) 2026-04-28
+### 3.2 Mismatched arity calls — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — by design the interpreter trusts well-formed
-bytecode for internal `Call` dispatch (`crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs:22`),
-which reads `args.count` from the bytecode stream and copies that many
-values into the new frame's registers. Codegen always emits the correct
-arity (verified at the type-check + monomorphization layer); FFI arity
-mismatches are caught at codegen via the `crates/verum_vbc/src/codegen/context.rs:1560`
-type-vs-arity audit. Hand-crafted-bytecode arity attacks are addressed
-by the bytecode validator track tracked under round-1 §3.1 (PENDING).
+**Status:** DEFENSE CONFIRMED — closed by the round-1 §3.1 bytecode
+validator's arity-checking pass.  `validate_instruction` for `Call` /
+`TailCall` / `CallG` now invokes `check_call_arity(func_id, args.count)`
+which loads the target `FunctionDescriptor` and verifies
+`params.len() == args.count`.  Mismatches surface as
+`VbcError::InvalidInstructionEncoding { reason: "call-arity mismatch in
+fn#X@0xY: target FunctionId(N) declares M parameters, but call site
+passes K" }`.
 
-**Trust model:** the runtime contract is "bytecode well-formed by
-codegen ⇒ arity matches function descriptor." The interpreter does NOT
-add a runtime arity check on the hot dispatch path because (a) codegen
-already enforces it and (b) adding it would penalise every call by
-~2-3 instructions for a defense already provided one layer up.
+The runtime hot-dispatch path remains arity-check-free for performance
+(every call would otherwise pay ~2-3 instructions of overhead).  The
+load-time check is a one-shot O(N_instructions) walk that catches every
+hand-crafted arity attack BEFORE any code runs.
 
-**Future work:** when round-1 §3.1 lands a bytecode validator, the
-validator runs once per module load and checks every Call/CallR/CallM
-site has `args.count == params.len()`. Until then, the trust boundary
-is "module load = trusted source."
+**Guardrail:** `validate::tests::validator_rejects_call_with_arity_mismatch`
+— hand-crafted `Call { func_id: 0, args: { count: 3 } }` against a
+0-parameter target FunctionDescriptor; validator rejects at module
+load with the typed error.
+
+**Cross-reference:** see round-1 §3.1 for the full validator design.
 
 ### 3.3 FunctionId(N) out of range — DEFENSE CONFIRMED 2026-04-28
 
@@ -516,7 +517,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 2.4 Recursive impl | **DEFENSE** | guardrail (2026-04-28) |
 | 2.5 Codegen non-determinism | **DEFENSE CONFIRMED** | 4-layer determinism guardrails (2026-04-28) |
 | 3.1 RO register | **DEFENSE CONFIRMED** | round-1 §3.1 validator covers register-OOB (2026-04-28) |
-| 3.2 Arity mismatch | **PARTIAL (documented)** | codegen-enforced; bytecode-validator under round-1 §3.1 |
+| 3.2 Arity mismatch | **DEFENSE CONFIRMED** | bytecode-validator arity check (round-1 §3.1) — 2026-04-28 |
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
 | 4.1 LibraryCall collision | **DEFENSE CONFIRMED** | strategy removed entirely under #168 (2026-04-28) |
@@ -535,9 +536,9 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**19 vectors confirmed defended (was 18), 8 partial, 0 pending** post
+**20 vectors confirmed defended (was 19), 7 partial, 0 pending** post
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
-RT-2.2.3 + RT-2.5 + RT-2.7.1 + RT-2.3.1 closures.  Earlier:
+RT-2.2.3 + RT-2.5 + RT-2.7.1 + RT-2.3.1 + RT-2.3.2 closures.  Earlier:
 RT-2.3.2 + RT-2.4.3 + RT-2.4.1 + RT-2.4.2 + RT-2.8.2 + RT-2.6.1 +
 RT-2.6.3 closures. Sections A-C below record real defects already
 closed in the audit pass.
