@@ -108,6 +108,30 @@ impl ExportFormat {
     }
 }
 
+/// A simplified representation of a Verum-side proof body that the
+/// per-target emitters can lower without re-walking the full AST.
+/// Currently the M0.A pattern is the only shape recognised:
+///
+///   `proof { apply <name>(<args>); }`
+///
+/// is captured as `SimpleApply { lemma, args }` with the args rendered
+/// to source-form text. Other tactic shapes (induction, cases, calc, …)
+/// are recorded as `Other` so the emitters keep falling through to
+/// the per-target admitted scaffold (sorry / Admitted / `?`).
+#[derive(Debug, Clone)]
+enum SimpleProofBody {
+    /// `apply <name>(<args>);` — a single-tactic proof body. Recognised
+    /// as the M0.A canonical shape. Each emitter translates this to
+    /// its target syntax (`exact <name> <args>` for Lean,
+    /// `apply <name>(<args>); reflexivity.` for Coq, etc.).
+    SimpleApply { lemma: Text, args: Vec<Text> },
+    /// Any other tactic shape — preserved as a verbatim source-form
+    /// string for downstream comment / fallback rendering. Currently
+    /// stored but not used by the emitters; reserved for richer
+    /// translation in a future pass.
+    Other,
+}
+
 /// A single declaration collected from the project's AST.
 #[derive(Debug, Clone)]
 struct Declaration {
@@ -135,6 +159,13 @@ struct Declaration {
     /// behaviour matches V1 exactly.
     #[allow(dead_code)]
     certificate: Option<verum_kernel::SmtCertificate>,
+    /// Captured Verum-side proof body — `None` for axioms (no proof)
+    /// and for theorems whose proof shape isn't recognised. M0.A's
+    /// `proof { apply X(c); }` lifts to `SimpleApply { lemma: "X",
+    /// args: ["c"] }` via `extract_simple_proof_body` so the
+    /// emitters can produce real per-target tactic invocations
+    /// rather than `:= sorry`.
+    proof_body: Option<SimpleProofBody>,
 }
 
 /// Options for the `verum export` command.
@@ -432,13 +463,141 @@ fn collect_declaration(
         verum_common::Maybe::None => None,
     };
 
+    // Try to capture the verum-side proof body in a shape the per-
+    // target emitters can lower (M0.D). Currently only the M0.A
+    // single-`apply` form is recognised; richer shapes fall through
+    // to the per-target admitted scaffold.
+    let proof_body = match &item.kind {
+        ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+            extract_simple_proof_body(&decl.proof)
+        }
+        _ => None,
+    };
+
     Some(Declaration {
         kind,
         name,
         source: rel_path.to_path_buf(),
         framework,
         certificate,
+        proof_body,
     })
+}
+
+/// Recognise the M0.A `proof { apply <name>(<args>); }` shape and
+/// lift it to a `SimpleProofBody::SimpleApply { lemma, args }`. Any
+/// other tactic shape returns `Some(SimpleProofBody::Other)` so the
+/// per-target emitter can decide whether to render it as a comment
+/// or fall back to the admitted scaffold; absent proof bodies (axioms,
+/// missing `proof { ... }` block) return `None`.
+fn extract_simple_proof_body(
+    body: &Maybe<verum_ast::ProofBody>,
+) -> Option<SimpleProofBody> {
+    use verum_ast::pretty::format_expr;
+    use verum_ast::{ProofBody, ProofStepKind, TacticExpr};
+    let body = match body {
+        Maybe::Some(b) => b,
+        Maybe::None => return None,
+    };
+    let tactic = match body {
+        ProofBody::Tactic(t) => t,
+        ProofBody::Structured(s) => {
+            // M0.A canonical shape: structured proof with one Tactic
+            // step (the `apply ...;` line) and no conclusion. Anything
+            // else is recorded as Other.
+            let mut iter = s.steps.iter();
+            let only_step = iter.next();
+            let extra = iter.next();
+            if extra.is_some() || matches!(s.conclusion, Maybe::Some(_)) {
+                return Some(SimpleProofBody::Other);
+            }
+            match only_step {
+                Some(step) => match &step.kind {
+                    ProofStepKind::Tactic(t) => t,
+                    _ => return Some(SimpleProofBody::Other),
+                },
+                None => return Some(SimpleProofBody::Other),
+            }
+        }
+        _ => return Some(SimpleProofBody::Other),
+    };
+    match tactic {
+        TacticExpr::Apply { lemma, args } => {
+            // Strip Verum's relative-mount prefix (e.g.
+            // `super.super.super.msfs.five_axis.msfs_theorem_7_1_horizontal`
+            // → `msfs_theorem_7_1_horizontal`). External proof
+            // assistants don't understand `super.` qualifiers; the
+            // basename suffices because the corpus uses globally
+            // unique theorem names.
+            let lemma_text = Text::from(strip_module_qualifier(
+                format_expr(lemma).as_str(),
+            ));
+            let arg_texts: Vec<Text> = args
+                .iter()
+                .map(|a| Text::from(strip_module_qualifier(
+                    format_expr(a).as_str(),
+                )))
+                .collect();
+            Some(SimpleProofBody::SimpleApply {
+                lemma: lemma_text,
+                args: arg_texts,
+            })
+        }
+        _ => Some(SimpleProofBody::Other),
+    }
+}
+
+/// Strip a Verum relative-mount qualifier from a name expression so
+/// it lands in target-assistant-acceptable form. Verum's
+/// `super.<segment>.<segment>.X` lifts X out of a parent module; the
+/// translation drops every `super.<segment>.` prefix because external
+/// assistants don't have an equivalent of relative mount paths and
+/// the corpus's theorem names are globally unique by convention.
+fn strip_module_qualifier(s: &str) -> String {
+    if let Some(idx) = s.rfind('.') {
+        s[idx + 1..].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+/// Lower a `SimpleProofBody` to a Lean-syntax body following
+/// `theorem X : Prop ` (the prefix is appended by the caller). For
+/// the `SimpleApply` form, emit `:= <lemma> <args>` (term-style
+/// application); for `Other` / `None` fall through to `:= sorry`.
+fn lean_body_for_proof(proof: &Option<SimpleProofBody>) -> String {
+    match proof {
+        Some(SimpleProofBody::SimpleApply { lemma, args }) => {
+            let mut s = String::from(":= ");
+            s.push_str(lemma.as_str());
+            for a in args {
+                s.push(' ');
+                s.push_str(a.as_str());
+            }
+            s
+        }
+        _ => String::from(":= sorry"),
+    }
+}
+
+/// Lower a `SimpleProofBody` to a Coq-syntax body following
+/// `Theorem X : Prop.` (the prefix is appended by the caller). For
+/// the `SimpleApply` form, emit `Proof. apply <lemma>; reflexivity. Qed.`;
+/// for `Other` / `None` fall through to `Admitted.`.
+fn coq_body_for_proof(proof: &Option<SimpleProofBody>) -> String {
+    match proof {
+        Some(SimpleProofBody::SimpleApply { lemma, args }) => {
+            let mut s = String::from("Proof. apply ");
+            s.push_str(lemma.as_str());
+            for a in args {
+                s.push(' ');
+                s.push_str(a.as_str());
+            }
+            s.push_str(". Qed.");
+            s
+        }
+        _ => String::from("Admitted."),
+    }
 }
 
 /// apply the proof-replay
@@ -804,15 +963,21 @@ fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::Pr
                     ));
                 }
                 _ => {
-                    // Consult the proof-replay registry for a Coq
-                    // tactic chain. Falls back to `Proof. Admitted.`
-                    // when no certificate is loaded (current state).
-                    let proof_body = replay_or_admitted(
+                    // Three-step decision (M0.D Phase 1.5, mirror of
+                    // emit_lean): cert replay first, then verum-side
+                    // M0.A simple-apply translation, then admitted
+                    // scaffold.
+                    let replayed = replay_or_admitted(
                         replay_registry,
                         "coq",
                         d,
                         "Proof. Admitted.",
                     );
+                    let proof_body = if replayed != "Proof. Admitted." {
+                        replayed
+                    } else {
+                        coq_body_for_proof(&d.proof_body)
+                    };
                     out.push_str(&format!(
                         "Theorem {} : Prop.\n{}\n\n",
                         mangle(&d.name),
@@ -981,9 +1146,13 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                     out.push_str(&format!("axiom {} : Prop\n\n", mangle(&d.name)));
                 }
                 _ => {
-                    // Replay or sorry-fallback. LeanProofReplay
-                    // produces a `by ... ` block; we splice it after
-                    // `:=` to form a complete term-style theorem.
+                    // Three-step decision (M0.D Phase 1.5):
+                    //   1. SmtCertificate replay via LeanProofReplay
+                    //      when a cert is loaded (V-stage state).
+                    //   2. Verum-side `proof { apply X(c); }` body
+                    //      when the AST captured a M0.A simple-apply
+                    //      shape — emit `:= X c` term-style.
+                    //   3. Fall through to `:= sorry` scaffold.
                     let proof = replay_or_admitted(
                         replay_registry,
                         "lean",
@@ -991,9 +1160,15 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                         ":= sorry",
                     );
                     let body = if proof.starts_with("by") {
+                        // SMT-replay produced a `by ...` tactic block.
                         format!(":= {}", proof)
-                    } else {
+                    } else if proof != ":= sorry" {
+                        // Replay produced a non-default term — use as-is.
                         proof
+                    } else {
+                        // No cert; project the verum-side proof body
+                        // through the M0.D simple-apply translator.
+                        lean_body_for_proof(&d.proof_body)
                     };
                     out.push_str(&format!(
                         "theorem {} : Prop {}\n\n",
@@ -1588,6 +1763,7 @@ mod format_tests {
             source: PathBuf::from("src/lib.vr"),
             framework: Maybe::None,
             certificate: None,
+            proof_body: None,
         }];
         let registry = verum_smt::proof_replay::default_registry();
         let out = emit_agda(&decls, &registry);
