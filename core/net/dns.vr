@@ -68,6 +68,7 @@ mount sys.darwin.libsystem.{
 };
 @cfg(target_os = "macos")
 mount sys.common.{FileDesc, OSError};
+mount core.io.protocols.{IoError, IoErrorKind};
 
 // Windows: Use GetNetworkParams from iphlpapi.dll to read system DNS servers.
 // No file-based resolv.conf on Windows — DNS config is in the registry,
@@ -174,8 +175,35 @@ implement DnsError {
     }
 
     /// Create a DnsError from an I/O error.
+    ///
+    /// The pre-fix collapse `NetworkError(f"{e}")` threw away
+    /// the typed `IoErrorKind` — callers had no way to
+    /// distinguish a DNS-server timeout from a transport
+    /// connection refusal without substring-matching the
+    /// formatted message. Now each kind that has a clean
+    /// DNS-domain analogue maps to a typed variant; the
+    /// transport-level catch-all remains `NetworkError`.
+    ///
+    /// Mapping:
+    ///   * `TimedOut`         → `DnsError.Timeout`
+    ///   * `NotFound`         → `DnsError.HostNotFound`
+    ///     (the DNS-server-supplied result for an unknown
+    ///     host bubbles up through the IoError surface in
+    ///     resolver-stub paths)
+    ///   * `ConnectionRefused`→ `DnsError.Refused`
+    ///   * `WouldBlock` /
+    ///     `Interrupted`      → `DnsError.TryAgain`
+    ///     (transient — caller should retry)
+    ///   * everything else    → `NetworkError(<formatted>)`
     fn from_io_error(e: IoError) -> DnsError {
-        DnsError.NetworkError(f"{e}")
+        match e.kind {
+            IoErrorKind.TimedOut          => DnsError.Timeout,
+            IoErrorKind.NotFound          => DnsError.HostNotFound,
+            IoErrorKind.ConnectionRefused => DnsError.Refused,
+            IoErrorKind.WouldBlock        => DnsError.TryAgain,
+            IoErrorKind.Interrupted       => DnsError.TryAgain,
+            _                             => DnsError.NetworkError(f"{e}"),
+        }
     }
 }
 
