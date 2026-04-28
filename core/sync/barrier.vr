@@ -37,6 +37,7 @@ mount core.*;
 mount .atomic.*;
 mount .mutex.*;
 mount .condvar.*;
+mount core.intrinsics.runtime.time.{monotonic_nanos};
 
 // =============================================================================
 // Barrier
@@ -507,14 +508,40 @@ implement CountDownLatch {
     /// Block until count reaches zero || timeout expires.
     ///
     /// Returns true if count reached zero, false if timed out.
+    ///
+    /// **Correctness:** loops on the predicate (count > 0) under the
+    /// mutex, recomputing remaining_ns against an absolute monotonic
+    /// deadline each iteration. The earlier single-shot impl returned
+    /// `false` on the first spurious condvar wake even when count was
+    /// still > 0, and equivalently could wait for many multiples of
+    /// `timeout_ns` if it naively re-passed the original duration on
+    /// each retry. The deadline arithmetic keeps total elapsed time
+    /// within the user-requested budget regardless of spurious wakes.
     public fn wait_for_zero_timeout(&self, timeout_ns: Int) -> Bool {
         if self.count.load(MemoryOrdering.SeqCst) == 0 {
             return true;
         }
+        if timeout_ns <= 0 {
+            return self.count.load(MemoryOrdering.SeqCst) == 0;
+        }
 
-        let guard = self.latch_lock.lock().unwrap_or_else(|p| p.into_inner());
-        let (_, timed_out) = self.condvar.wait_timeout(guard, timeout_ns).unwrap();
-        !timed_out && self.count.load(MemoryOrdering.SeqCst) == 0
+        let deadline = monotonic_nanos() as Int + timeout_ns;
+        let mut guard = self.latch_lock.lock().unwrap_or_else(|p| p.into_inner());
+        while self.count.load(MemoryOrdering.SeqCst) > 0 {
+            let remaining = deadline - (monotonic_nanos() as Int);
+            if remaining <= 0 {
+                return false;
+            }
+            let (next_guard, _timed_out) = self.condvar
+                .wait_timeout(guard, remaining)
+                .unwrap();
+            guard = next_guard;
+            // Re-check the predicate under the loop head — spurious
+            // wakeup or the kernel-clock racing the user-supplied
+            // budget both fall through to the next iteration where
+            // the count load + deadline check decide the outcome.
+        }
+        true
     }
 
     /// Get the current count.
