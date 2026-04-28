@@ -59,9 +59,34 @@ public type MsgPackError is
     | InvalidPrefix(Byte)
     | InvalidUtf8
     | NestingTooDeep
+    | ArrayTooLarge { declared: Int, limit: Int }
+    | MapTooLarge { declared: Int, limit: Int }
+    | StringTooLong { declared: Int, limit: Int }
+    | BinTooLong { declared: Int, limit: Int }
+    | ExtTooLong { declared: Int, limit: Int }
     | TrailingBytes(Int);
 
 public const MAX_MSGPACK_NESTING: Int = 128;
+
+/// Per-array element-count cap. The msgpack `array32` prefix carries a
+/// full UInt32 length — without this cap a hostile peer can declare an
+/// array of 4 billion items and the decoder will loop / allocate
+/// unbounded. Matches the JSON / CBOR caps in sibling modules (#203).
+public const MAX_MSGPACK_ARRAY_ITEMS: Int = 1_000_000;
+
+/// Per-map entry-count cap. Same hostile-input class as the array cap.
+public const MAX_MSGPACK_MAP_ENTRIES: Int = 1_000_000;
+
+/// Per-string byte cap. `str32` allows 4 GiB; cap at 32 MiB (matches
+/// JSON's `MAX_JSON_STRING_BYTES`).
+public const MAX_MSGPACK_STRING_BYTES: Int = 32 * 1024 * 1024;
+
+/// Per-binary byte cap. Same threat-model as strings.
+public const MAX_MSGPACK_BIN_BYTES: Int = 32 * 1024 * 1024;
+
+/// Per-ext payload byte cap. Ext objects are application-defined but
+/// bounded by the same memory-DoS threat model.
+public const MAX_MSGPACK_EXT_BYTES: Int = 32 * 1024 * 1024;
 
 // =============================================================================
 // Encode
@@ -360,6 +385,9 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<MsgPackValue
 }
 
 fn decode_str(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
+    if n < 0 || n > MAX_MSGPACK_STRING_BYTES {
+        return Err(MsgPackError.StringTooLong { declared: n, limit: MAX_MSGPACK_STRING_BYTES });
+    }
     if *pos + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
     let mut buf: List<Byte> = [];
     let mut i: Int = 0;
@@ -369,6 +397,9 @@ fn decode_str(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, Msg
 }
 
 fn decode_bin(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
+    if n < 0 || n > MAX_MSGPACK_BIN_BYTES {
+        return Err(MsgPackError.BinTooLong { declared: n, limit: MAX_MSGPACK_BIN_BYTES });
+    }
     if *pos + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
     let mut buf: List<Byte> = [];
     let mut i: Int = 0;
@@ -378,6 +409,9 @@ fn decode_bin(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, Msg
 }
 
 fn decode_array(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
+    if n < 0 || n > MAX_MSGPACK_ARRAY_ITEMS {
+        return Err(MsgPackError.ArrayTooLarge { declared: n, limit: MAX_MSGPACK_ARRAY_ITEMS });
+    }
     let mut items: List<MsgPackValue> = [];
     let mut i: Int = 0;
     while i < n {
@@ -388,6 +422,9 @@ fn decode_array(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<Msg
 }
 
 fn decode_map(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
+    if n < 0 || n > MAX_MSGPACK_MAP_ENTRIES {
+        return Err(MsgPackError.MapTooLarge { declared: n, limit: MAX_MSGPACK_MAP_ENTRIES });
+    }
     let mut entries: List<(MsgPackValue, MsgPackValue)> = [];
     let mut i: Int = 0;
     while i < n {
@@ -400,6 +437,9 @@ fn decode_map(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPa
 }
 
 fn decode_ext(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
+    if n < 0 || n > MAX_MSGPACK_EXT_BYTES {
+        return Err(MsgPackError.ExtTooLong { declared: n, limit: MAX_MSGPACK_EXT_BYTES });
+    }
     if *pos + 1 + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
     let type_id_byte = bytes[*pos];
     *pos = *pos + 1;
