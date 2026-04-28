@@ -131,6 +131,19 @@ pub use universe_ascent::{UniverseTier, check_universe_ascent};
 pub mod round_trip;
 pub use round_trip::check_round_trip;
 
+/// Cubical cofibration calculus — face-formula algebra + interval
+/// subsumption decision procedure (M-VVA-FU Sub-2.4-cubical, V1
+/// shipped 2026-04-28). Per VVA spec L579 the cubical cofibration
+/// calculus was deferred; this module provides:
+///   * `FaceLit` — atomic literal `(i = 0)` / `(i = 1)`.
+///   * `Clause` — DNF clause (conjunction of literals).
+///   * `FaceFormula` — full DNF with ⊤/⊥/AND/OR + decidable
+///     `implies` (subsumption via per-clause set inclusion).
+/// Wired into HComp / Transp / Glue rules in `infer.rs` for
+/// cofibration-coherence checking.
+pub mod cofibration;
+pub use cofibration::{Clause, FaceFormula, FaceLit};
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
