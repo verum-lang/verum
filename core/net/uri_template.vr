@@ -193,6 +193,15 @@ fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTempla
         }
         if colon > 0 {
             name_end = colon;
+            // RFC 6570 §2.4.1 caps prefix-length at 9999. A longer
+            // digit-run is either malformed or a wrap-around attack
+            // against `n * 10 + digit` — reject pre-loop. Also keeps
+            // `max_len` bounded so downstream string-slicing can't
+            // be coaxed into asymmetric allocation by a hostile peer.
+            let digit_count = end - (colon + 1);
+            if digit_count == 0 || digit_count > 4 {
+                return Err(UriTemplateError.Malformed(Text.from("bad prefix len")));
+            }
             let mut n: Int = 0;
             let mut j: Int = colon + 1;
             while j < end {
@@ -202,6 +211,11 @@ fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTempla
                 }
                 n = n * 10 + ((c - ('0' as Byte)) as Int);
                 j = j + 1;
+            }
+            // Spec ceiling — even 4 digits permits 9999 which is the
+            // RFC's hard cap; any larger value is invalid.
+            if n > 9999 {
+                return Err(UriTemplateError.Malformed(Text.from("prefix len > 9999")));
             }
             max_len = Some(n);
         }
