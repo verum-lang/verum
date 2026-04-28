@@ -342,9 +342,8 @@ fn merge_pairs(pairs: &mut List<(List<UInt16>, Text)>, start: Int, mid: Int, end
 }
 
 fn clone_u16_vec(src: &List<UInt16>) -> List<UInt16> {
-    let mut out: List<UInt16> = [];
-    let mut i: Int = 0;
-    while i < src.len() { out.push(src[i]); i = i + 1; }
+    let mut out: List<UInt16> = List.with_capacity(src.len());
+    out.extend_from_slice(src.as_slice());
     out
 }
 
@@ -408,6 +407,5 @@ fn utf8_to_utf16(bytes: &[Byte]) -> List<UInt16> {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }

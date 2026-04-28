@@ -102,8 +102,7 @@ public fn encode(input: &[Byte]) -> List<Byte> {
 
     // Copy input into a mutable buffer we can divide in place.
     let mut buf: List<Byte> = List.with_capacity(n);
-    let mut i: Int = 0;
-    while i < n { buf.push(input[i]); i = i + 1; }
+    buf.extend_from_slice(input);
 
     // Repeatedly divide by 58 and collect remainders.
     let mut digits_rev: List<Byte> = List.with_capacity(cap);
@@ -207,10 +206,8 @@ public fn encode_check(payload: &[Byte]) -> List<Byte> {
     let checksum = compute_checksum(payload);
     // payload + 4-byte trailing checksum.
     let mut wire: List<Byte> = List.with_capacity(payload.len() + 4);
-    let mut i: Int = 0;
-    while i < payload.len() { wire.push(payload[i]); i = i + 1; }
-    let mut j: Int = 0;
-    while j < 4 { wire.push(checksum[j]); j = j + 1; }
+    wire.extend_from_slice(payload);
+    wire.extend_from_slice(&checksum[..]);
     encode(wire.as_slice())
 }
 
@@ -221,8 +218,7 @@ public fn decode_check(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
     }
     let payload_len = decoded.len() - 4;
     let mut payload: List<Byte> = List.with_capacity(payload_len);
-    let mut i: Int = 0;
-    while i < payload_len { payload.push(decoded[i]); i = i + 1; }
+    payload.extend_from_slice(&decoded.as_slice()[..payload_len]);
     let expected = compute_checksum(payload.as_slice());
     let mut j: Int = 0;
     while j < 4 {

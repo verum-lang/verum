@@ -277,8 +277,7 @@ fn find_sub(haystack: &[Byte], needle: &[Byte], from: Int) -> Maybe<Int> {
 fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
     // Output is exactly `end - start` bytes.
     let mut out: List<Byte> = List.with_capacity(end - start);
-    let mut i: Int = start;
-    while i < end { out.push(bytes[i]); i = i + 1; }
+    out.extend_from_slice(&bytes[start..end]);
     Text.from_utf8_unchecked(out.as_slice())
 }
 
@@ -298,8 +297,7 @@ fn trim_base64_bytes(bytes: &[Byte], start: Int, end: Int) -> List<Byte> {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 fn text_eq(a: &Text, b: &Text) -> Bool {
