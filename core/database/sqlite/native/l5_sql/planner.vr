@@ -711,28 +711,103 @@ fn plan_from_for_select(
             };
             // RIGHT OUTER JOIN normalizes to LEFT OUTER with sides
             // swapped (the preserved side becomes the outer loop).
+            // FULL OUTER JOIN rewrites to (LEFT JOIN) UNION ALL
+            // (swapped-LEFT-JOIN-WHERE-IS-NULL) — handled separately
+            // below since it produces a non-PnNestedLoopJoin top node.
+            if jc.kind == JFullOuter {
+                let lmeta_full = match schema.lookup_table(&lt_orig.schema, &lt_orig.name) {
+                    Ok(m)  => m,
+                    Err(_) => { return Err(plan_error("JOIN left table unknown".clone())); }
+                };
+                let rmeta_full = match schema.lookup_table(&rt_orig.schema, &rt_orig.name) {
+                    Ok(m)  => m,
+                    Err(_) => { return Err(plan_error("JOIN right table unknown".clone())); }
+                };
+
+                // Side 1: A LEFT JOIN B ON c — scopes [A@0, B@1].
+                let mut scopes_l: List<ColumnScope> = List.new();
+                scopes_l.push(scope_from_table_meta(0, lt_orig.alias.clone(), &lmeta_full));
+                scopes_l.push(scope_from_table_meta(1, rt_orig.alias.clone(), &rmeta_full));
+                let on_l: Maybe<Expr> = match jc.on {
+                    Some(ref e) => match resolve_expr(e, &scopes_l) {
+                        Ok(r)  => Some(r),
+                        Err(_) => { return Err(plan_error("FULL OUTER JOIN ON resolve (left side) failed".clone())); }
+                    },
+                    None => None,
+                };
+                let left_join = PnNestedLoopJoin(
+                    clone_table_ref(lt_orig), 0, lmeta_full.columns.len(),
+                    clone_table_ref(rt_orig), 1, rmeta_full.columns.len(),
+                    on_l, true,
+                );
+
+                // Side 2: B LEFT JOIN A ON c — scopes [B@0, A@1] (sides swapped).
+                let mut scopes_r: List<ColumnScope> = List.new();
+                scopes_r.push(scope_from_table_meta(0, rt_orig.alias.clone(), &rmeta_full));
+                scopes_r.push(scope_from_table_meta(1, lt_orig.alias.clone(), &lmeta_full));
+                let on_r: Maybe<Expr> = match jc.on {
+                    Some(ref e) => match resolve_expr(e, &scopes_r) {
+                        Ok(r)  => Some(r),
+                        Err(_) => { return Err(plan_error("FULL OUTER JOIN ON resolve (right side) failed".clone())); }
+                    },
+                    None => None,
+                };
+                let swapped = PnNestedLoopJoin(
+                    clone_table_ref(rt_orig), 0, rmeta_full.columns.len(),
+                    clone_table_ref(lt_orig), 1, lmeta_full.columns.len(),
+                    on_r, true,
+                );
+
+                // Filter: emit only rows where A had no match — A.<col0> IS NULL
+                // (LEFT JOIN nullifies ALL right-side cols on no-match, so
+                // any one column suffices as the sentinel).  A is at cursor
+                // 1 in the swapped scope.
+                if lmeta_full.columns.len() == 0 {
+                    return Err(plan_error("FULL OUTER JOIN with empty-column left table".clone()));
+                }
+                let null_filter = EBinary(
+                    BIs,
+                    Heap(EColumnRef(1, 0)),
+                    Heap(ELit(LNull)),
+                );
+                let filtered = PnFilter(Heap(swapped), null_filter);
+
+                // PnProject: reorder swapped output [B.cols..., A.cols...]
+                // → [A.cols..., B.cols...] so the UNION ALL operands have
+                // matching column shape.
+                let mut project_cols: List<PlanColumn> = List.new();
+                let mut ai: Int = 0;
+                while ai < lmeta_full.columns.len() {
+                    project_cols.push(PlanColumn {
+                        alias: lmeta_full.columns[ai].name.clone(),
+                        expr:  EColumnRef(1, ai),    // A is at cursor 1
+                    });
+                    ai = ai + 1;
+                }
+                let mut bj: Int = 0;
+                while bj < rmeta_full.columns.len() {
+                    project_cols.push(PlanColumn {
+                        alias: rmeta_full.columns[bj].name.clone(),
+                        expr:  EColumnRef(0, bj),    // B is at cursor 0
+                    });
+                    bj = bj + 1;
+                }
+                let projected = PnProject(Heap(filtered), project_cols);
+
+                let union_node = PnUnionAll(Heap(left_join), Heap(projected));
+
+                // Outer scope for the surrounding query: A@0, B@1 (matches
+                // left_join's natural shape, which UNION ALL preserves).
+                let mut scopes_out: List<ColumnScope> = List.new();
+                scopes_out.push(scope_from_table_meta(0, lt_orig.alias.clone(), &lmeta_full));
+                scopes_out.push(scope_from_table_meta(1, rt_orig.alias.clone(), &rmeta_full));
+                return Ok((union_node, scopes_out, lmeta_full, 0));
+            }
+
             let (lt, rt, is_left_outer) = match jc.kind {
                 JInner | JCross => (lt_orig, rt_orig, false),
                 JLeftOuter      => (lt_orig, rt_orig, true),
                 JRightOuter     => (rt_orig, lt_orig, true),
-                JFullOuter => {
-                    // FULL OUTER JOIN A B ON c is logically equivalent to
-                    //   (A LEFT JOIN B ON c) UNION ALL
-                    //   (B LEFT JOIN A ON c WHERE A.<key> IS NULL)
-                    // i.e. all left-anchored rows plus the right-anchored
-                    // rows that have no left match.  The plan-rewrite needs
-                    // a PnProject after the swapped LEFT JOIN to align the
-                    // column shape — non-trivial because the join's column
-                    // scopes are computed AFTER this match-arm.  Tracked
-                    // separately as SQL-2 follow-up; reject with the
-                    // workaround SQL spelled out so the caller can apply
-                    // it inline.
-                    return Err(plan_error(
-                        "FULL OUTER JOIN not yet supported — rewrite as: \
-                         (A LEFT JOIN B ON …) UNION ALL \
-                         (B LEFT JOIN A ON … WHERE A.<key> IS NULL)".clone()
-                    ));
-                }
                 _ => { return Err(plan_error("unrecognised JOIN kind".clone())); }
             };
             let lmeta = match schema.lookup_table(&lt.schema, &lt.name) {
