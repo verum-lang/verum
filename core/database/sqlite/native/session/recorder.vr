@@ -207,14 +207,13 @@ implement PreUpdateHook for Session {
 // -----------------------------------------------------------------------------
 
 fn clone_bools(b: &List<Bool>) -> List<Bool> {
-    let mut out: List<Bool> = List.new();
-    let mut i: Int = 0;
-    while i < b.len() { out.push(b[i]); i = i + 1; }
+    let mut out: List<Bool> = List.with_capacity(b.len());
+    out.extend_from_slice(b.as_slice());
     out
 }
 
 fn clone_row(r: &List<Register>) -> List<Register> {
-    let mut out: List<Register> = List.new();
+    let mut out: List<Register> = List.with_capacity(r.len());
     let mut i: Int = 0;
     while i < r.len() { out.push(clone_register(&r[i])); i = i + 1; }
     out
@@ -227,9 +226,8 @@ fn clone_register(r: &Register) -> Register {
         core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
         core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
         core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(b.len());
+            out.extend_from_slice(b.as_slice());
             core.database.sqlite.native.l4_vdbe.register.RBlob(out)
         }
         core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),

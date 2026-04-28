@@ -153,7 +153,7 @@ fn trim_ascii(s: &Text) -> Text {
     let mut end: Int = bs.len();
     while start < end && is_ws(bs[start]) { start = start + 1; }
     while end > start && is_ws(bs[end - 1]) { end = end - 1; }
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(end - start);
     let mut i: Int = start;
     while i < end { out.push_byte(bs[i]); i = i + 1; }
     out
@@ -235,9 +235,7 @@ public fn infer_schema(rows: &List<CsvRow>, opts: &CsvOptions) -> VtabSchema {
 }
 
 fn append_text(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+    dst.push_str(s);
 }
 
 fn append_int(dst: &mut Text, n: Int) {

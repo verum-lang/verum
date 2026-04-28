@@ -384,9 +384,8 @@ public fn combinations(n: Int{>= 0}, k: Int{>= 0, <= n}) -> List<List<Int>> {
 }
 
 fn clone_int_list(xs: &List<Int>) -> List<Int> {
-    let mut out: List<Int> = [];
-    let mut i: Int = 0;
-    while i < xs.len() { out.push(xs[i]); i = i + 1; }
+    let mut out: List<Int> = List.with_capacity(xs.len());
+    out.extend_from_slice(xs.as_slice());
     out
 }
 
@@ -463,8 +462,8 @@ fn merge_with_sign(a: &List<Int>, b: &List<Int>) -> (List<Int>, Int) {
             j = j + 1;
         }
     }
-    while i < a.len() { out.push(a[i]); i = i + 1; }
-    while j < b.len() { out.push(b[j]); j = j + 1; }
+    if i < a.len() { out.extend_from_slice(&a.as_slice()[i..]); }
+    if j < b.len() { out.extend_from_slice(&b.as_slice()[j..]); }
     (out, sign)
 }
 
