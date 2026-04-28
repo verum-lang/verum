@@ -8,10 +8,16 @@ module core.database.sqlite.native.l7_api;
 // =============================================================================
 
 public module database;
+public module transaction;
 
 public mount .database.{
     Database, DbError,
     open_memory_db, open_readonly, open_readwrite, open_admin,
     open_path, open_path_readonly, open_path_readwrite, open_path_admin,
     db_error_from_conn,
+};
+
+public mount .transaction.{
+    Transaction, TxKind,
+    TkDeferred, TkImmediate, TkExclusive,
 };

@@ -1,0 +1,96 @@
+module core.database.sqlite.native.l7_api.transaction;
+
+// =============================================================================
+// l7_api/transaction.vr — affine user-facing Transaction handle
+// =============================================================================
+// Layer: 7 — public API.
+// Spec: database.md §4.1 + §5.5; sqlite-native.md §13.
+//
+// `Transaction` is the affine handle the user MUST consume by calling
+// `Database.commit_tx(tx)` or `Database.rollback_tx(tx)`.  Forgetting
+// to consume it is a *compile-time* error — the type system refuses to
+// drop an affine value out of scope, which makes "leaked transaction"
+// (the most common SQL bug in production) lexically impossible.
+//
+// Why a token instead of a borrowed Database?
+//
+//   The spec ideal (`tx.commit(self)`) requires Tx to hold `&mut Database`
+//   so the call can dispatch back through the connection.  Verum's
+//   present field-type surface allows owned values but not borrowed
+//   references in struct fields, so we use the dual form: methods on
+//   `Database` that *consume* a `Transaction` token.  Identical
+//   semantics, identical safety; the only API difference is
+//   `db.commit_tx(tx)` vs `tx.commit()`.
+//
+//   The `with_transaction` callback combinator wraps both halves so most
+//   user code never names a `Transaction` value at all — see
+//   `Database.with_transaction` in `database.vr`.
+//
+// Defence-in-depth fields:
+//
+//   * `started_at_depth` — snapshot of `Connection.tx_depth()` when
+//     `begin_tx` fired.  `commit_tx` / `rollback_tx` cross-check the
+//     current depth before issuing the underlying VDBE COMMIT /
+//     ROLLBACK so accidentally pairing a Tx with the wrong nested
+//     scope (e.g. consumed inside a savepoint) is caught at runtime
+//     with `DbMisuse(..)` rather than corrupting tx state.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+
+/// Transaction-isolation flavour that shapes the underlying BEGIN.
+///
+/// Mirrors SQLite's three flavours:
+///
+///   * `Deferred`  — no locks until first read/write (BEGIN; default)
+///   * `Immediate` — RESERVED lock immediately (BEGIN IMMEDIATE)
+///   * `Exclusive` — EXCLUSIVE lock immediately (BEGIN EXCLUSIVE)
+///
+/// `Deferred` is the right pick for read-heavy workloads; `Immediate`
+/// avoids SQLITE_BUSY surprises in concurrent-writer setups.
+public type TxKind is TkDeferred | TkImmediate | TkExclusive;
+
+/// Affine transaction handle.  Constructed only by
+/// `Database.begin_tx_*`; consumed only by
+/// `Database.commit_tx` / `Database.rollback_tx` (or the
+/// `Database.with_transaction` combinator that wraps both).
+///
+/// Affine semantics:
+///   * Cannot be copied.
+///   * Cannot be dropped without consumption — compile-time error.
+///   * `commit_tx` / `rollback_tx` take `Transaction` by value; the
+///     compiler then has no live binding to use after the call.
+public type affine Transaction is {
+    /// Tx-depth snapshot for outer-vs-savepoint sanity checking.
+    started_at_depth: Int,
+    /// Isolation flavour the BEGIN ran with.  Surfaced for tracing and
+    /// for the rare caller that wants to assert on it.
+    kind: TxKind,
+};
+
+/// Construct a fresh transaction handle.  Internal — use
+/// `Database.begin_tx_*` from user code.
+public fn tx_make(started_at_depth: Int, kind: TxKind) -> Transaction {
+    Transaction { started_at_depth: started_at_depth, kind: kind }
+}
+
+implement Transaction {
+    /// Tx-depth at the moment `begin_tx` was issued.  Used by the
+    /// commit/rollback pair to verify they're closing the *outermost*
+    /// transaction (depth_now == started_at_depth + 1) rather than a
+    /// nested savepoint that the user forgot to release.
+    public fn started_at_depth(&self) -> Int { self.started_at_depth }
+
+    /// The isolation flavour this transaction began with.
+    public fn kind(&self) -> TxKind { self.kind }
+
+    /// Render the kind as the SQL keyword we'd emit on BEGIN.
+    public fn begin_keyword(&self) -> Text {
+        match self.kind {
+            TkDeferred  => "DEFERRED".clone(),
+            TkImmediate => "IMMEDIATE".clone(),
+            TkExclusive => "EXCLUSIVE".clone(),
+        }
+    }
+}

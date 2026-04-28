@@ -44,6 +44,10 @@ mount core.database.sqlite.native.l6_session.{
     table_meta_from_create,
     seed_cursors_from_connection, writeback_cursors_to_connection,
 };
+mount core.database.sqlite.native.l7_api.transaction.{
+    Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
+    tx_make,
+};
 
 // -----------------------------------------------------------------------------
 // DbError — SQLSTATE-style tagged sum
@@ -358,30 +362,131 @@ implement Database {
     }
 
     // -------------------------------------------------------------------------
-    // Transaction sugar
+    // Transaction — affine handle API
     // -------------------------------------------------------------------------
+    //
+    // Spec database.md §4.1+§5.5: `Transaction` is `affine` — the value
+    // MUST be consumed by exactly one of `commit_tx` / `rollback_tx`.
+    // The compiler refuses to drop a Transaction out of scope, which
+    // makes "leaked transaction" (the most common production SQL bug)
+    // lexically impossible.
+    //
+    // For the 90% case use `with_transaction(|d| body)`; for the
+    // advanced manual case use `begin_tx_*` + `commit_tx`/`rollback_tx`.
 
-    public fn begin(&mut self) -> Result<(), DbError> {
+    /// Begin a deferred transaction (BEGIN).  Returns the affine
+    /// handle the caller MUST consume.
+    public fn begin_tx(&mut self) -> Result<Transaction, DbError> {
+        let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmDeferred) {
-            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+            Ok(_)  => Ok(tx_make(depth, TkDeferred)),
+            Err(e) => Err(db_error_from_conn(e)),
         }
     }
 
-    public fn begin_immediate(&mut self) -> Result<(), DbError> {
+    /// Begin an IMMEDIATE transaction (RESERVED lock at start).
+    public fn begin_tx_immediate(&mut self) -> Result<Transaction, DbError> {
+        let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmImmediate) {
-            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+            Ok(_)  => Ok(tx_make(depth, TkImmediate)),
+            Err(e) => Err(db_error_from_conn(e)),
         }
     }
 
-    public fn commit(&mut self) -> Result<(), DbError> {
+    /// Begin an EXCLUSIVE transaction.
+    public fn begin_tx_exclusive(&mut self) -> Result<Transaction, DbError> {
+        let depth = self.conn.tx_depth();
+        match self.conn.begin_tx(TmExclusive) {
+            Ok(_)  => Ok(tx_make(depth, TkExclusive)),
+            Err(e) => Err(db_error_from_conn(e)),
+        }
+    }
+
+    /// Consume the transaction handle and COMMIT.  Returns
+    /// `DbMisuse(...)` if the connection's tx-depth no longer matches
+    /// what `tx` recorded at begin time (savepoint left dangling).
+    public fn commit_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
+        let started = tx.started_at_depth();
+        let _ = tx;     // affine consume — no further use of `tx` is possible.
+        let now = self.conn.tx_depth();
+        if now != started + 1 {
+            // The user opened a savepoint and forgot to release it before
+            // committing the outer tx.  We refuse and let them clean up.
+            return Err(DbMisuse(
+                "commit_tx called with stale tx-depth — release nested savepoints first"
+                    .clone(),
+            ));
+        }
         match self.conn.commit_tx() {
-            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+            Ok(_)  => Ok(()),
+            Err(e) => Err(db_error_from_conn(e)),
         }
     }
 
-    public fn rollback(&mut self) -> Result<(), DbError> {
+    /// Consume the transaction handle and ROLLBACK.  Tolerant of stale
+    /// depth — rollback is a recovery path, so we issue the ROLLBACK
+    /// regardless.
+    public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
+        let _ = tx;
         match self.conn.rollback_tx() {
-            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+            Ok(_)  => Ok(()),
+            Err(e) => Err(db_error_from_conn(e)),
+        }
+    }
+
+    /// Run `body` inside an automatically-managed deferred transaction.
+    /// Begins, runs, and commits on success; rolls back on either a
+    /// `body` error or a panic propagating through the closure.
+    ///
+    /// This is the recommended entry point for almost all transactional
+    /// code — the affine `Transaction` value is created and consumed
+    /// internally so the caller never has to thread it.
+    public fn with_transaction<R>(
+        &mut self,
+        body: fn(&mut Database) -> Result<R, DbError>,
+    ) -> Result<R, DbError> {
+        let tx = match self.begin_tx() {
+            Ok(t)  => t,
+            Err(e) => { return Err(e); }
+        };
+        let body_result = body(self);
+        match body_result {
+            Ok(r) => {
+                match self.commit_tx(tx) {
+                    Ok(_)  => Ok(r),
+                    Err(e) => Err(e),
+                }
+            }
+            Err(body_err) => {
+                // Best-effort rollback — the original body error wins.
+                let _ = self.rollback_tx(tx);
+                Err(body_err)
+            }
+        }
+    }
+
+    /// IMMEDIATE-mode variant of `with_transaction`.  Useful in
+    /// concurrent-writer setups to avoid SQLITE_BUSY.
+    public fn with_transaction_immediate<R>(
+        &mut self,
+        body: fn(&mut Database) -> Result<R, DbError>,
+    ) -> Result<R, DbError> {
+        let tx = match self.begin_tx_immediate() {
+            Ok(t)  => t,
+            Err(e) => { return Err(e); }
+        };
+        let body_result = body(self);
+        match body_result {
+            Ok(r) => {
+                match self.commit_tx(tx) {
+                    Ok(_)  => Ok(r),
+                    Err(e) => Err(e),
+                }
+            }
+            Err(body_err) => {
+                let _ = self.rollback_tx(tx);
+                Err(body_err)
+            }
         }
     }
 
