@@ -287,3 +287,34 @@ public type HealthCheckError is
       Connect(Text)
     | Timeout
     | InvalidResponse;
+
+implement Display for HealthCheckError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Connect(reason)  => f.write_str(f"upstream health check connect failed: {reason}".as_str()),
+            Timeout          => f.write_str("upstream health check timed out"),
+            InvalidResponse  => f.write_str("upstream health check: invalid response"),
+        }
+    }
+}
+
+implement Debug for HealthCheckError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Connect(reason)  => f.write_str(f"Connect({reason})".as_str()),
+            Timeout          => f.write_str("Timeout"),
+            InvalidResponse  => f.write_str("InvalidResponse"),
+        }
+    }
+}
+
+implement Eq for HealthCheckError {
+    fn eq(&self, other: &HealthCheckError) -> Bool {
+        match (self, other) {
+            (Connect(a),       Connect(b))       => a == b,
+            (Timeout,          Timeout)          => true,
+            (InvalidResponse,  InvalidResponse)  => true,
+            _ => false,
+        }
+    }
+}
