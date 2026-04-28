@@ -13,7 +13,18 @@ public type Interpretation is
     ;
 
 public fn classify(n: Int) -> Interpretation {
-    if n >= 0 { InPages(n) } else { InKib(-n) }
+    if n >= 0 {
+        InPages(n)
+    } else {
+        // Int.MIN-safe magnitude — `-n` for `n == Int.MIN` wraps back
+        // to Int.MIN.  Saturate via the canonical bit-flip pattern;
+        // 2^40 KiB is the sanity cap also enforced by
+        // `effective_page_count`.
+        let mag_u: UInt64 = ((!n) as UInt64) + 1_u64;
+        let cap: UInt64 = 1099511627776_u64;
+        let mag = if mag_u > cap { cap as Int } else { mag_u as Int };
+        InKib(mag)
+    }
 }
 
 public fn interp_name(i: &Interpretation) -> Text {
@@ -24,13 +35,25 @@ public fn interp_name(i: &Interpretation) -> Text {
 }
 
 // Effective page count given page_size (bytes).
+//
+// SOUNDNESS: pragma_value is a user-supplied PRAGMA argument.
+// `(-pragma_value)` would wrap back to Int.MIN if pragma_value were
+// Int.MIN, and `kib * 1024` would silently overflow Int64 on
+// |pragma_value| > ~2^53 KiB.  Reject Int.MIN explicitly and cap |kib|
+// at 2^40 (1 PiB of cache, comfortably beyond any production cache),
+// so the multiply by 1024 cannot overflow Int64.
 public fn effective_page_count(pragma_value: Int, page_size_bytes: Int) -> Int {
     if pragma_value >= 0 { return pragma_value; }
     if page_size_bytes <= 0 { return 0; }
-    let kib = (-pragma_value) as Int64;
-    let bytes = kib * 1024_i64;
-    let pages = bytes / (page_size_bytes as Int64);
-    pages as Int
+    // Canonical Int.MIN-safe negation: `(!n) + 1` produces UInt64 magnitude
+    // even when n is Int.MIN.  Same recipe as sqlite_version_fmt::int_to_text.
+    let kib_u: UInt64 = ((!pragma_value) as UInt64) + 1_u64;
+    if kib_u > 1099511627776_u64 {                 // 2^40 — sanity cap
+        return 0;
+    }
+    let bytes_u: UInt64 = kib_u * 1024_u64;        // safe: kib_u ≤ 2^40 ⇒ ≤ 2^50
+    let pages_u: UInt64 = bytes_u / (page_size_bytes as UInt64);
+    pages_u as Int
 }
 
 public fn is_unlimited(pragma_value: Int) -> Bool {
