@@ -173,8 +173,7 @@ fn decode_settings(buf: &[Byte], start: Int, end: Int) -> Result<List<(UInt64, U
 
 fn take_bytes(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
     let mut out: List<Byte> = List.with_capacity(end - start);
-    let mut i: Int = start;
-    while i < end { out.push(buf[i]); i = i + 1; }
+    out.extend_from_slice(&buf[start..end]);
     out
 }
 
@@ -255,8 +254,7 @@ public fn encode_frame(frame: &H3Frame, out: &mut List<Byte>) {
 }
 
 fn append(out: &mut List<Byte>, src: &List<Byte>) {
-    let mut i: Int = 0;
-    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out.extend_from_slice(src.as_slice());
 }
 
 // =============================================================================

@@ -289,9 +289,8 @@ fn is_param_delim(c: Byte) -> Bool {
 }
 
 fn slice_text(b: &[Byte], start: Int, end: Int) -> Text {
-    let mut out: List<Byte> = [];
-    let mut i: Int = start;
-    while i < end { out.push(b[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    out.extend_from_slice(&b[start..end]);
     Text.from_utf8_unchecked(out.as_slice())
 }
 
@@ -312,6 +311,5 @@ fn to_lower(c: Byte) -> Byte {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }

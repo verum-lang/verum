@@ -243,9 +243,8 @@ fn mask_equal(a: &[Byte], b: &[Byte], prefix_len: Int) -> Bool {
 // =============================================================================
 
 fn slice_text(src: &[Byte], start: Int, end: Int) -> Text {
-    let mut out: List<Byte> = [];
-    let mut i: Int = start;
-    while i < end { out.push(src[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    out.extend_from_slice(&src[start..end]);
     Text.from_utf8_unchecked(out.as_slice())
 }
 

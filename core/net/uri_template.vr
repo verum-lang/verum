@@ -109,9 +109,8 @@ implement UriTemplate {
                 // Gather literal up to next '{'.
                 let start = i;
                 while i < b.len() && b[i] != ('{' as Byte) { i = i + 1; }
-                let mut buf: List<Byte> = [];
-                let mut k: Int = start;
-                while k < i { buf.push(b[k]); k = k + 1; }
+                let mut buf: List<Byte> = List.with_capacity(i - start);
+                buf.extend_from_slice(&b[start..i]);
                 parts.push(TemplatePart.Literal(Text.from_utf8_unchecked(buf.as_slice())));
             }
         }
@@ -221,9 +220,8 @@ fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTempla
         }
     }
 
-    let mut name_bytes: List<Byte> = [];
-    let mut m: Int = start;
-    while m < name_end { name_bytes.push(b[m]); m = m + 1; }
+    let mut name_bytes: List<Byte> = List.with_capacity(name_end - start);
+    name_bytes.extend_from_slice(&b[start..name_end]);
     Ok(VarSpec {
         name: Text.from_utf8_unchecked(name_bytes.as_slice()),
         max_len: max_len,
@@ -340,9 +338,7 @@ fn emit_spec(out: &mut List<Byte>, op: &ExprOp, spec: &VarSpec, v: &TemplateValu
                 let mut i: Int = 0;
                 while i < items.len() {
                     if i > 0 { joined.push(',' as Byte); }
-                    let b = items[i].as_bytes();
-                    let mut j: Int = 0;
-                    while j < b.len() { joined.push(b[j]); j = j + 1; }
+                    joined.extend_from_slice(items[i].as_bytes());
                     i = i + 1;
                 }
                 emit_named_prefix(out, op, spec, &joined);
@@ -436,13 +432,11 @@ fn is_empty_value(v: &TemplateValue) -> Bool {
 }
 
 fn push_all(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 fn slice_vec(src: &[Byte], start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = start;
-    while i < end { out.push(src[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    out.extend_from_slice(&src[start..end]);
     out
 }
