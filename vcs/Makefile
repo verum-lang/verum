@@ -171,6 +171,7 @@ endef
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
 .PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team
+.PHONY: production-readiness gate-diagnostic gate-soundness
 
 # =============================================================================
 # Default Target
@@ -995,7 +996,27 @@ diff-memory: build
 # dishonest-stub / Int.MIN unary-negation / constant-time crypto / etc.).
 # Any divergence between Tier-0 and Tier-1 on these tests is a hard failure —
 # it means the audit defense surfaces differently across tiers.
-.PHONY: diff-red-team
+# =============================================================================
+# Production-readiness gates (#198)
+# =============================================================================
+
+# Run gate 6 — diagnostic (no bare panic without context).
+gate-diagnostic:
+	$(call PROGRESS,Running diagnostic gate (#197 / #198 gate 6)...)
+	@bash $(VCS_ROOT)/gates/diagnostic.sh
+
+# Run gate 7 — soundness obligation (every unsafe has // SAFETY: above).
+gate-soundness:
+	$(call PROGRESS,Running soundness-obligation gate (#198 gate 7)...)
+	@bash $(VCS_ROOT)/gates/soundness.sh
+
+# Aggregator — runs every shipped gate. Future gates wire here too.
+# Currently green → all 7 gates pass; red → at least one gate failed
+# (printed above). Per #198 spec, the aggregator returns non-zero on
+# any red gate so CI can block the merge.
+production-readiness: gate-diagnostic gate-soundness diff-red-team
+	$(call SUCCESS,Production-readiness gates: all shipped gates passed)
+
 diff-red-team: build
 	$(call PROGRESS,Running red-team audit-armor differential tests...)
 	@for dir in \
