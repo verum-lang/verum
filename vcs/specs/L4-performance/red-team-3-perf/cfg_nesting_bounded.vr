@@ -74,11 +74,92 @@ fn cfg_not_windows() -> Int { 11 }
 ))
 fn cfg_bsd_or_unix() -> Int { 12 }
 
+// -----------------------------------------------------------------------------
+// Bulk @cfg expansion — push past the 12-predicate scale to 64+
+// -----------------------------------------------------------------------------
+// Independent feature flags.  If the walker were exponential in the
+// number of distinct cfg predicates, K = 50 here (combined with the
+// 12 above + 16 nested-any/all/not below) would force ~2^60+ work per
+// compilation.  In practice the walker is linear — each cfg-leaf
+// participates independently in type registration — so this batch
+// adds only a few microseconds to the predicate evaluation phase.
+@cfg(feature = "verum_cfg_bulk_01") fn cfg_bulk_01() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_02") fn cfg_bulk_02() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_03") fn cfg_bulk_03() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_04") fn cfg_bulk_04() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_05") fn cfg_bulk_05() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_06") fn cfg_bulk_06() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_07") fn cfg_bulk_07() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_08") fn cfg_bulk_08() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_09") fn cfg_bulk_09() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_10") fn cfg_bulk_10() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_11") fn cfg_bulk_11() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_12") fn cfg_bulk_12() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_13") fn cfg_bulk_13() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_14") fn cfg_bulk_14() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_15") fn cfg_bulk_15() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_16") fn cfg_bulk_16() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_17") fn cfg_bulk_17() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_18") fn cfg_bulk_18() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_19") fn cfg_bulk_19() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_20") fn cfg_bulk_20() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_21") fn cfg_bulk_21() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_22") fn cfg_bulk_22() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_23") fn cfg_bulk_23() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_24") fn cfg_bulk_24() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_25") fn cfg_bulk_25() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_26") fn cfg_bulk_26() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_27") fn cfg_bulk_27() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_28") fn cfg_bulk_28() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_29") fn cfg_bulk_29() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_30") fn cfg_bulk_30() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_31") fn cfg_bulk_31() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_32") fn cfg_bulk_32() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_33") fn cfg_bulk_33() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_34") fn cfg_bulk_34() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_35") fn cfg_bulk_35() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_36") fn cfg_bulk_36() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_37") fn cfg_bulk_37() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_38") fn cfg_bulk_38() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_39") fn cfg_bulk_39() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_40") fn cfg_bulk_40() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_41") fn cfg_bulk_41() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_42") fn cfg_bulk_42() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_43") fn cfg_bulk_43() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_44") fn cfg_bulk_44() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_45") fn cfg_bulk_45() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_46") fn cfg_bulk_46() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_47") fn cfg_bulk_47() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_48") fn cfg_bulk_48() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_49") fn cfg_bulk_49() -> Int { 100 }
+@cfg(feature = "verum_cfg_bulk_50") fn cfg_bulk_50() -> Int { 100 }
+
+// 16 nested any/all/not combinations — adversarial against the
+// predicate-tree expander.  A naive walker that materialised the
+// disjunctive normal form would here produce ~2^16 clauses.
+@cfg(all(any(feature = "verum_cfg_bulk_01", feature = "verum_cfg_bulk_02"), not(target_os = "haiku"))) fn cfg_combo_01() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_03", feature = "verum_cfg_bulk_04"), not(target_os = "haiku"))) fn cfg_combo_02() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_05", feature = "verum_cfg_bulk_06"), not(target_os = "haiku"))) fn cfg_combo_03() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_07", feature = "verum_cfg_bulk_08"), not(target_os = "haiku"))) fn cfg_combo_04() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_09", feature = "verum_cfg_bulk_10"), not(target_os = "haiku"))) fn cfg_combo_05() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_11", feature = "verum_cfg_bulk_12"), not(target_os = "haiku"))) fn cfg_combo_06() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_13", feature = "verum_cfg_bulk_14"), not(target_os = "haiku"))) fn cfg_combo_07() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_15", feature = "verum_cfg_bulk_16"), not(target_os = "haiku"))) fn cfg_combo_08() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_17", feature = "verum_cfg_bulk_18"), not(target_os = "haiku"))) fn cfg_combo_09() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_19", feature = "verum_cfg_bulk_20"), not(target_os = "haiku"))) fn cfg_combo_10() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_21", feature = "verum_cfg_bulk_22"), not(target_os = "haiku"))) fn cfg_combo_11() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_23", feature = "verum_cfg_bulk_24"), not(target_os = "haiku"))) fn cfg_combo_12() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_25", feature = "verum_cfg_bulk_26"), not(target_os = "haiku"))) fn cfg_combo_13() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_27", feature = "verum_cfg_bulk_28"), not(target_os = "haiku"))) fn cfg_combo_14() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_29", feature = "verum_cfg_bulk_30"), not(target_os = "haiku"))) fn cfg_combo_15() -> Int { 200 }
+@cfg(all(any(feature = "verum_cfg_bulk_31", feature = "verum_cfg_bulk_32"), not(target_os = "haiku"))) fn cfg_combo_16() -> Int { 200 }
+
 fn main() {
     // Don't actually call the cfg-gated functions — their existence
     // alone proves @cfg-walker acceptance. The compiler evaluates each
     // predicate against the build target and prunes accordingly; the
     // walker must remain bounded regardless of how many @cfg attributes
-    // appear.
+    // appear.  Total predicate count (this file): 12 (original) +
+    // 50 (bulk) + 16 (nested combos) = 78 distinct @cfg attributes.
     print("L4-perf: red-team-3.5.2 @cfg nesting walker bounded");
 }
