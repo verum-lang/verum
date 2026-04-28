@@ -1,0 +1,70 @@
+// =============================================================================
+// L0-critical: Red-team Round 1 §4.3 — Mount alias shadowing built-in identifier
+// =============================================================================
+// @test: typecheck-pass
+// @tier: all
+// @level: L0
+// @tags: modules, imports, mount, alias, shadowing, red-team-1.4.3
+// @timeout: 30000
+// =============================================================================
+//
+// Pins the contract for `mount path as Alias` when `Alias` shadows a
+// built-in / stdlib identifier. Two concerns:
+//
+//   1. The compiler must NOT have hardcoded knowledge that "Maybe / None /
+//      Some / Result / Ok / Err are sacred names" — per the architectural
+//      rule in `crates/verum_types/src/CLAUDE.md`. User code must be free
+//      to introduce a `mount X as Maybe` aliasing.
+//
+//   2. The shadowing must follow lexical scoping: within the module that
+//      issued the mount-as, `Maybe` resolves to the alias. Outside the
+//      module (or before the mount statement) it resolves to the built-in.
+//
+// **Audit reference:** vcs/red-team/round-1-architecture.md §4.3
+// **Related architectural rule:** "Variant constructors: User-defined
+// variant names (Nil, Cons, etc.) must freely override built-in
+// convenience aliases" (verum_types/CLAUDE.md).
+
+module module_with_local_maybe {
+    /// A locally-defined sum type using the name `Maybe` — completely
+    /// unrelated to the stdlib `Maybe<T>`. The compiler must accept this
+    /// per the registration-order / first-registered-wins semantics.
+    pub type Maybe is { code: Int, label: Text };
+
+    pub fn make_local_maybe() -> Maybe {
+        Maybe { code: 42, label: "local" }
+    }
+}
+
+module consumer_with_alias {
+    // Mount the local module's Maybe under an alias, NOT under the built-in
+    // name — exercises the cleanest path: user picks a non-conflicting alias.
+    mount cog.module_with_local_maybe.Maybe as LocalMaybe;
+
+    pub fn use_alias() -> LocalMaybe {
+        LocalMaybe { code: 1, label: "via alias" }
+    }
+}
+
+module consumer_explicit_path {
+    // Reach the local Maybe via fully-qualified path — alternative to alias.
+    pub fn use_qualified() -> cog.module_with_local_maybe.Maybe {
+        cog.module_with_local_maybe.Maybe { code: 2, label: "qualified" }
+    }
+}
+
+fn main() {
+    // The aliasing module's Maybe and the built-in Maybe<T> coexist —
+    // the compiler does NOT panic on "Maybe is reserved". The
+    // architectural rule says built-in names are NOT in a hardcoded
+    // protected list.
+
+    let a = consumer_with_alias.use_alias();
+    let b = consumer_explicit_path.use_qualified();
+
+    // Built-in Maybe<Int> still works in main's scope (no shadowing
+    // here, since main does not mount anything as Maybe).
+    let m: Maybe<Int> = Maybe.Some(42);
+
+    print("L0-critical: mount alias does not panic on built-in name");
+}

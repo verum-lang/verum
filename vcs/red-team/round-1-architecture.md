@@ -127,9 +127,22 @@ but explicit on the `unix` predicate.
 **Status:** DEFENSE CONFIRMED — currently returns input unchanged at the lexer
 level. No confused-deputy callers found through audit.
 
-### 4.3 Mount alias shadowing built-in identifier
+### 4.3 Mount alias shadowing built-in identifier — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs test of `mount X.None as Some` form.
+**Status:** DEFENSE CONFIRMED — guardrail test `mount_alias_shadows_builtin.vr`
+covers the path. The compiler does NOT have a hardcoded list of protected
+built-in names; per `crates/verum_types/src/CLAUDE.md`'s architectural rule
+("Variant constructors: User-defined variant names must freely override
+built-in convenience aliases"), user code is free to mount-alias under
+names that overlap with `core.base.option.Maybe`, `core.base.result.Ok`,
+etc. Lexical scoping ensures the alias only shadows within the consuming
+module — main scope still resolves to the built-in.
+
+**Guardrail:** `vcs/specs/L0-critical/modules/mount_alias_shadows_builtin.vr`
+exercises (a) a locally-defined `type Maybe` coexisting with built-in
+`Maybe<T>`, (b) mount-as alias to a non-conflicting name, (c)
+fully-qualified path resolution, (d) main scope using built-in `Maybe<Int>`
+unaffected by the modules' aliasing.
 
 ---
 
@@ -328,7 +341,7 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 3.3 Lenient SKIP | PARTIAL | #176 |
 | 4.1 Same-name @cfg types | DEFENSE | — |
 | 4.2 Deep super | DEFENSE | — |
-| 4.3 Mount alias shadow | PENDING | dedicated test |
+| 4.3 Mount alias shadow | **DEFENSE CONFIRMED** | guardrail (2026-04-28) |
 | 5.1 Z3 timeout policy | **DEFENSE CONFIRMED** | 9-site audit + 3 guardrails (2026-04-28) |
 | 5.2 Always-timeout | **DEFENSE CONFIRMED** | guardrails pin fail-closed (2026-04-28) |
 | 6.1 Capability monomorph | PENDING | monomorph audit |
@@ -336,8 +349,8 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 7.1 Tier-0 vs Tier-1 | PENDING | #196 |
 | 7.2 Hash determinism | **DEFENSE CONFIRMED** | full audit + 7 L0 guardrails (2026-04-28) |
 
-**9 vectors confirmed defended (full or partial), 9 pending** (post 2026-04-28
-RT-1.5 + RT-1.2.2 + RT-1.7.2 closures). Round 1 success condition: every PENDING entry has either a
+**10 vectors confirmed defended (full or partial), 8 pending** (post 2026-04-28
+RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 closures). Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.
