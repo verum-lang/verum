@@ -35,12 +35,27 @@ public type DivMode is
 // Division Operations
 // =============================================================================
 
+// Internal: signed-division overflow check. The single Int signed-
+// division case that overflows is `Int.MIN / -1` — the mathematical
+// quotient `2^63` is unrepresentable in signed Int64. Hardware
+// behaviour varies (x86 raises #DE; aarch64 silently returns Int.MIN);
+// detect and panic with a documented contract surface so every signed
+// division routes through a uniform error path.
+@inline(always)
+fn check_signed_div_overflow(a: Int, b: Int, fn_name: &Text) {
+    if a == Int.MIN && b == -1 {
+        panic(f"{fn_name}: Int.MIN / -1 overflows (|result| = 2^63 unrepresentable); use the try_* variant or pre-validate");
+    }
+}
+
 // Floor division (rounds toward -∞)
 // Result satisfies: result * b <= a < (result + 1) * b for b > 0
 //
 // Refinement type guarantees non-zero divisor at compile time.
+// Panics on `Int.MIN / -1` (the only signed-division overflow case).
 @inline(always)
 public fn div_floor(a: Int, b: Int{!= 0}) -> Int {
+    check_signed_div_overflow(a, b, "div_floor");
     let q = a / b;  // Truncate division
     let r = a % b;
 
@@ -56,6 +71,7 @@ public fn div_floor(a: Int, b: Int{!= 0}) -> Int {
 // Result satisfies: (result - 1) * b < a <= result * b for b > 0
 @inline(always)
 public fn div_ceiling(a: Int, b: Int{!= 0}) -> Int {
+    check_signed_div_overflow(a, b, "div_ceiling");
     let q = a / b;
     let r = a % b;
 
@@ -71,6 +87,7 @@ public fn div_ceiling(a: Int, b: Int{!= 0}) -> Int {
 // Result satisfies: a = result * b + r where 0 <= r < |b|
 @inline(always)
 public fn div_euclidean(a: Int, b: Int{!= 0}) -> Int {
+    check_signed_div_overflow(a, b, "div_euclidean");
     let q = a / b;
     let r = a % b;
 
@@ -101,6 +118,7 @@ public fn mod_euclidean(a: Int, b: Int{!= 0}) -> Int{>= 0} {
 // Result has same sign as divisor (or is zero).
 @inline(always)
 public fn mod_floor(a: Int, b: Int{!= 0}) -> Int {
+    check_signed_div_overflow(a, b, "mod_floor");
     let r = a % b;
     if r != 0 && ((r < 0) != (b < 0)) {
         r + b
@@ -115,11 +133,19 @@ public fn mod_floor(a: Int, b: Int{!= 0}) -> Int {
 
 // Generic division with specified rounding mode
 public fn div(a: Int, b: Int{!= 0}, mode: DivMode) -> Int {
-    match mode {
-        DivMode.Truncate => a / b,
-        DivMode.Floor => div_floor(a, b),
-        DivMode.Ceiling => div_ceiling(a, b),
-        DivMode.Euclidean => div_euclidean(a, b),
+    // The Truncate arm calls `a / b` directly, bypassing the
+    // overflow checks in the named division helpers; mirror the
+    // guard here so all four modes share the same panic surface.
+    if mode is DivMode.Truncate {
+        check_signed_div_overflow(a, b, "div");
+        a / b
+    } else {
+        match mode {
+            DivMode.Truncate => a / b,
+            DivMode.Floor => div_floor(a, b),
+            DivMode.Ceiling => div_ceiling(a, b),
+            DivMode.Euclidean => div_euclidean(a, b),
+        }
     }
 }
 
