@@ -41,6 +41,11 @@ public mount .connection.{
     SvNull, SvInt, SvReal, SvText, SvBlob,
     ScRead, ScReadWrite, ScAdmin,
     Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
+    BackupSession, BackupOutcome, BackupStepRequest,
+    PragmaValue, PvNull, PvInt, PvText, PvBool,
+    PragmaKind,
+    CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
+    AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
 };
 public mount .error.dberr_from_loom;
 public mount .pool.SqlitePool;
