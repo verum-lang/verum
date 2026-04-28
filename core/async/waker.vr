@@ -184,10 +184,29 @@ public fn noop_waker() -> Waker {
     }
 }
 
+// Static no-op waker — backing storage for the &Waker that
+// `noop_context` returns. Module-scoped so the reference handed to
+// the Context outlives every caller's stack frame; a previous
+// implementation built a local `let waker = noop_waker()` and
+// returned `Context.from_waker(&waker)`, leaving the Context with
+// a dangling pointer to a stack frame that had already returned.
+static NOOP_WAKER: Waker = Waker {
+    raw: RawWaker {
+        data: null_ptr(),
+        vtable: &NOOP_VTABLE,
+    },
+};
+
 // Create a context with noop waker.
 // Useful for testing futures synchronously.
+//
+// SOUNDNESS: returns a Context whose `&Waker` points at the
+// module-static NOOP_WAKER, not at a stack-local. The earlier
+// implementation captured a local `let waker = noop_waker()` and
+// returned `&waker` — the local dropped at function exit, leaving
+// every caller with use-after-free on the first wake / clone
+// attempt. The fix routes through a static so the reference is
+// 'static-lived.
 public fn noop_context() -> Context {
-    // Note: This creates a temporary waker, which is safe for single-use
-    let waker = noop_waker();
-    Context.from_waker(&waker)
+    Context.from_waker(&NOOP_WAKER)
 }
