@@ -107,8 +107,7 @@ public fn hkdf_expand_sha256(
         let t_i = mac.finalize();
 
         let take = if produced + SHA256_LEN > length { length - produced } else { SHA256_LEN };
-        let mut j = 0;
-        while j < take { out.push(t_i[j]); j = j + 1; }
+        out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
@@ -173,8 +172,7 @@ public fn hkdf_expand_sha384(
         let t_i = mac.finalize();
 
         let take = if produced + SHA384_LEN > length { length - produced } else { SHA384_LEN };
-        let mut j = 0;
-        while j < take { out.push(t_i[j]); j = j + 1; }
+        out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
@@ -238,8 +236,7 @@ public fn hkdf_expand_sha512(
         let t_i = mac.finalize();
 
         let take = if produced + SHA512_LEN > length { length - produced } else { SHA512_LEN };
-        let mut j = 0;
-        while j < take { out.push(t_i[j]); j = j + 1; }
+        out.extend_from_slice(&t_i[..take]);
         produced = produced + take;
 
         let mut k = 0;
