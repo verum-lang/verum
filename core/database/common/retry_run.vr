@@ -26,10 +26,51 @@
 module core.database.common.retry_run;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe, Some, None};
 mount async.timer.sleep_ms;
 mount core.database.common.error.DbError;
 mount core.database.common.retry.{RetryPolicy, RetryAttemptInfo};
+
+// -----------------------------------------------------------------------------
+// Internal — initialise the per-call PRNG state from the policy.
+// -----------------------------------------------------------------------------
+//
+// Centralised so the three retry variants below share one canonical
+// seed initialiser.  An earlier revision had three copies of the
+// `seed == 0 ? default : seed` decision drifting independently.
+
+/// Default-seed constant used when `policy.seed == 0`.  Fixed value
+/// makes the no-explicit-seed path deterministic across runs (good
+/// for replay-able tests); for real-world jitter the caller passes
+/// a non-zero seed (e.g. wall-clock micros).
+const RETRY_DEFAULT_SEED: Int = 0x1A2B3C4D5E6F7080;
+
+fn init_prng_state(policy: &RetryPolicy) -> Int {
+    if policy.seed == 0 { RETRY_DEFAULT_SEED } else { policy.seed }
+}
+
+// -----------------------------------------------------------------------------
+// Decision helper — given the policy + current attempt + error,
+// decide whether to retry and how long to wait.  Sharing this
+// across sync / async / inspect variants keeps the rules single-
+// sourced; behaviour-changing tweaks land in one place.
+// -----------------------------------------------------------------------------
+
+type RetryDecision is
+      RdSurface(DbError)              // give up; surface to caller
+    | RdRetry { delay_ms: Int };      // sleep then retry
+
+fn decide_retry(
+    policy: &RetryPolicy,
+    attempt: Int,
+    err: DbError,
+    prng_state: &mut Int,
+) -> RetryDecision {
+    if attempt >= policy.max_attempts { return RdSurface(err); }
+    if !err.is_retryable()             { return RdSurface(err); }
+    let delay = policy.jittered_delay_ms(attempt, prng_state);
+    RdRetry { delay_ms: delay }
+}
 
 // -----------------------------------------------------------------------------
 // Synchronous variant — for SQLite (and any other adapter exposing a
@@ -37,7 +78,7 @@ mount core.database.common.retry.{RetryPolicy, RetryAttemptInfo};
 // -----------------------------------------------------------------------------
 
 /// Run `body` against the configured policy, retrying on retryable
-/// errors with full-jitter exponential backoff. Returns the first
+/// errors with full-jitter exponential backoff.  Returns the first
 /// `Ok(R)` or the final `Err(DbError)` after the budget is spent.
 ///
 /// The body is expected to be idempotent — the framework does not
@@ -48,31 +89,18 @@ public fn run_with_retry_sync<R, F: fn() -> Result<R, DbError>>(
     policy: RetryPolicy,
     body: F,
 ) -> Result<R, DbError> {
-    let mut prng_state: Int = if policy.seed == 0 {
-        // Cheap process-default seed — wall-clock millis would be
-        // ideal but we don't bring `core.time` into scope here.
-        // 0xDEAD_BEEF_CAFE_BABE rolls over deterministically; for
-        // production randomness the caller passes a real seed.
-        0x1A2B3C4D5E6F7080
-    } else {
-        policy.seed
-    };
-
+    let mut prng_state: Int = init_prng_state(&policy);
     let mut attempt: Int = 0;
     loop {
         match body() {
             Ok(value) => { return Ok(value); }
             Err(e) => {
                 attempt = attempt + 1;
-                if attempt >= policy.max_attempts {
-                    return Err(e);
-                }
-                if !e.is_retryable() {
-                    return Err(e);
-                }
-                let delay_ms = policy.jittered_delay_ms(attempt, &mut prng_state);
-                if delay_ms > 0 {
-                    let _ = sleep_ms(delay_ms);
+                match decide_retry(&policy, attempt, e, &mut prng_state) {
+                    RdSurface(final_err) => { return Err(final_err); }
+                    RdRetry { delay_ms } => {
+                        if delay_ms > 0 { let _ = sleep_ms(delay_ms); }
+                    }
                 }
             }
         }
@@ -84,32 +112,24 @@ public fn run_with_retry_sync<R, F: fn() -> Result<R, DbError>>(
 // -----------------------------------------------------------------------------
 
 /// Async equivalent — the body produces an awaitable `Future<Result<R,
-/// DbError>>`. Same retry rules; the inter-attempt sleep is awaited
+/// DbError>>`.  Same retry rules; the inter-attempt sleep is awaited
 /// instead of blocking.
 public async fn run_with_retry<R, F: fn() -> Result<R, DbError>>(
     policy: RetryPolicy,
     body: F,
 ) -> Result<R, DbError> {
-    let mut prng_state: Int = if policy.seed == 0 {
-        0x1A2B3C4D5E6F7080
-    } else {
-        policy.seed
-    };
+    let mut prng_state: Int = init_prng_state(&policy);
     let mut attempt: Int = 0;
     loop {
         match body() {
             Ok(value) => { return Ok(value); }
             Err(e) => {
                 attempt = attempt + 1;
-                if attempt >= policy.max_attempts {
-                    return Err(e);
-                }
-                if !e.is_retryable() {
-                    return Err(e);
-                }
-                let delay_ms = policy.jittered_delay_ms(attempt, &mut prng_state);
-                if delay_ms > 0 {
-                    let _ = sleep_ms(delay_ms).await;
+                match decide_retry(&policy, attempt, e, &mut prng_state) {
+                    RdSurface(final_err) => { return Err(final_err); }
+                    RdRetry { delay_ms } => {
+                        if delay_ms > 0 { let _ = sleep_ms(delay_ms).await; }
+                    }
                 }
             }
         }
@@ -122,38 +142,63 @@ public async fn run_with_retry<R, F: fn() -> Result<R, DbError>>(
 // -----------------------------------------------------------------------------
 
 /// Like `run_with_retry_sync` but threads each attempt's
-/// `RetryAttemptInfo` through `inspector` before sleeping. Useful for
-/// metrics labels and DST replay diagnostics.
+/// `RetryAttemptInfo` through `inspector` before sleeping.  Useful
+/// for metrics labels and DST replay diagnostics.
 public fn run_with_retry_inspect_sync<R, F: fn() -> Result<R, DbError>, G: fn(RetryAttemptInfo) -> ()>(
     policy: RetryPolicy,
     body: F,
     inspector: G,
 ) -> Result<R, DbError> {
-    let mut prng_state: Int = if policy.seed == 0 {
-        0x1A2B3C4D5E6F7080
-    } else {
-        policy.seed
-    };
+    let mut prng_state: Int = init_prng_state(&policy);
     let mut attempt: Int = 0;
     loop {
         match body() {
             Ok(value) => { return Ok(value); }
             Err(e) => {
                 attempt = attempt + 1;
-                if attempt >= policy.max_attempts {
-                    return Err(e);
+                let msg = e.message();
+                match decide_retry(&policy, attempt, e, &mut prng_state) {
+                    RdSurface(final_err) => { return Err(final_err); }
+                    RdRetry { delay_ms } => {
+                        inspector(RetryAttemptInfo {
+                            attempt: attempt,
+                            last_error: msg,
+                            next_delay_ms: delay_ms,
+                        });
+                        if delay_ms > 0 { let _ = sleep_ms(delay_ms); }
+                    }
                 }
-                if !e.is_retryable() {
-                    return Err(e);
-                }
-                let delay_ms = policy.jittered_delay_ms(attempt, &mut prng_state);
-                inspector(RetryAttemptInfo {
-                    attempt: attempt,
-                    last_error: e.message(),
-                    next_delay_ms: delay_ms,
-                });
-                if delay_ms > 0 {
-                    let _ = sleep_ms(delay_ms);
+            }
+        }
+    }
+}
+
+/// Async variant of the inspect-able runner.  Same shape, awaited
+/// sleep — used by Postgres and MySQL handlers that want OTel-span-
+/// per-attempt observability.
+public async fn run_with_retry_inspect<R, F: fn() -> Result<R, DbError>, G: fn(RetryAttemptInfo) -> ()>(
+    policy: RetryPolicy,
+    body: F,
+    inspector: G,
+) -> Result<R, DbError> {
+    let mut prng_state: Int = init_prng_state(&policy);
+    let mut attempt: Int = 0;
+    loop {
+        match body() {
+            Ok(value) => { return Ok(value); }
+            Err(e) => {
+                attempt = attempt + 1;
+                let msg = e.message();
+                match decide_retry(&policy, attempt, e, &mut prng_state) {
+                    RdSurface(final_err) => { return Err(final_err); }
+                    RdRetry { delay_ms } => {
+                        inspector(RetryAttemptInfo {
+                            attempt: attempt,
+                            last_error: msg,
+                            next_delay_ms: delay_ms,
+                        });
+                        if delay_ms > 0 { let _ = sleep_ms(delay_ms).await; }
+                    }
                 }
             }
         }
