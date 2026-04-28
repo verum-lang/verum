@@ -48,30 +48,6 @@ implement<T> Poll<T> {
         }
     }
 
-    // Map ready to result.
-    public fn map_ok<U, E, F: fn(T) -> U>(self, f: F) -> Poll<Result<U, E>>
-    where T: Into<Result<T, E>>
-    {
-        match self {
-            Ready(Ok(t)) => Ready(Ok(f(t))),
-            Ready(Err(e)) => Ready(Err(e)),
-            Pending => Pending,
-            Ready(_) => unreachable(),
-        }
-    }
-
-    // Map ready error.
-    public fn map_err<U, E, F: fn(E) -> U>(self, f: F) -> Poll<Result<T, U>>
-    where T: Into<Result<T, E>>
-    {
-        match self {
-            Ready(Ok(t)) => Ready(Ok(t)),
-            Ready(Err(e)) => Ready(Err(f(e))),
-            Pending => Pending,
-            Ready(_) => unreachable(),
-        }
-    }
-
     // Get the ready value, panicking if pending.
     public fn unwrap(self) -> T {
         match self {
@@ -98,6 +74,15 @@ implement<T> Poll<T> {
 }
 
 // For Poll<Result<T, E>>
+//
+// `map_ok` / `map_err` live HERE rather than the generic
+// `implement<T> Poll<T>` block above because they destructure
+// `Ready(Ok(_))` / `Ready(Err(_))` — operations only valid when
+// `T == Result<_, _>`. The earlier placement put them under
+// `implement<T> Poll<T>` with a `where T: Into<Result<T, E>>`
+// constraint that recursed on itself (T into Result<T, E> into
+// Result<T, E>…) — meaningless. A trailing `Ready(_) =>
+// unreachable()` arm covered the type-confusion gap silently.
 implement<T, E> Poll<Result<T, E>> {
     // Shorthand for creating Ready(Ok(t)).
     public fn ready_ok(t: T) -> Poll<Result<T, E>> {
@@ -107,6 +92,24 @@ implement<T, E> Poll<Result<T, E>> {
     // Shorthand for creating Ready(Err(e)).
     public fn ready_err(e: E) -> Poll<Result<T, E>> {
         Ready(Err(e))
+    }
+
+    /// Map the Ok value, leaving Err and Pending unchanged.
+    public fn map_ok<U, F: fn(T) -> U>(self, f: F) -> Poll<Result<U, E>> {
+        match self {
+            Ready(Ok(t))  => Ready(Ok(f(t))),
+            Ready(Err(e)) => Ready(Err(e)),
+            Pending       => Pending,
+        }
+    }
+
+    /// Map the Err value, leaving Ok and Pending unchanged.
+    public fn map_err<U, F: fn(E) -> U>(self, f: F) -> Poll<Result<T, U>> {
+        match self {
+            Ready(Ok(t))  => Ready(Ok(t)),
+            Ready(Err(e)) => Ready(Err(f(e))),
+            Pending       => Pending,
+        }
     }
 }
 
