@@ -261,11 +261,19 @@ implement Path {
             return None;
         }
 
-        // Find the last separator
-        let mut last_sep = -1;
-        for (i, c) in self.inner.chars().enumerate() {
+        // Find the last separator's BYTE offset. Earlier impl used
+        // `chars().enumerate()` and the resulting `i` was a char
+        // index, but `Text.slice(0, i)` is byte-indexed and panics
+        // on non-UTF-8 boundaries. For paths with non-ASCII names
+        // (every Cyrillic / CJK / accented filename), the char
+        // index after the separator landed inside a multi-byte
+        // sequence and `slice` asserted. `char_indices()` yields
+        // `(byte_offset, Char)` pairs so the index is byte-correct
+        // by construction.
+        let mut last_sep: Int = -1;
+        for (b, c) in self.inner.char_indices() {
             if is_separator(c) {
-                last_sep = i as Int;
+                last_sep = b as Int;
             }
         }
 
@@ -282,7 +290,7 @@ implement Path {
             return Some(Path.new(&Text.from(MAIN_SEPARATOR)));
         }
 
-        Some(Path.new(&self.inner.slice(0, last_sep as Int)))
+        Some(Path.new(&self.inner.slice(0, last_sep)))
     }
 
     /// Get the ancestors of this path.
@@ -307,18 +315,24 @@ implement Path {
             return None;
         }
 
-        // Find the last separator
-        let mut last_sep = -1;
-        for (i, c) in path.chars().enumerate() {
+        // Find the last separator's BYTE offset, plus the byte
+        // length of THAT separator (1 for ASCII '/', 1 for '\').
+        // Same byte-vs-char hazard as `parent()`: `slice(last_sep + 1,
+        // ...)` is byte-indexed, so `last_sep` must also be a byte
+        // index. `char_indices` yields the byte offset directly.
+        let mut last_sep: Int = -1;
+        let mut last_sep_byte_len: Int = 0;
+        for (b, c) in path.char_indices() {
             if is_separator(c) {
-                last_sep = i as Int;
+                last_sep = b as Int;
+                last_sep_byte_len = c.len_utf8();
             }
         }
 
         let name = if last_sep < 0 {
             path.clone()
         } else {
-            path.slice(last_sep + 1, path.len())
+            path.slice(last_sep + last_sep_byte_len, path.len())
         };
 
         if name == ".." || name == "." || name.is_empty() {
