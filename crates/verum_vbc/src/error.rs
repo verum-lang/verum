@@ -214,8 +214,13 @@ pub enum VbcError {
         computed: u64,
     },
 
-    /// Multiple validation errors.
-    #[error("validation failed with {} errors", .0.len())]
+    /// Multiple validation errors collected during a single
+    /// validator pass.  The `Display` impl renders an aggregate
+    /// header followed by each individual error on its own indented
+    /// line — much more useful than `"validation failed with N
+    /// errors"` for a developer running `verum_vbc::validate` on a
+    /// hand-crafted or corrupted module.
+    #[error("{}", render_multiple_errors(.0))]
     MultipleErrors(Vec<VbcError>),
 
     // === I/O Errors ===
@@ -269,6 +274,33 @@ pub enum VbcError {
     Deserialization(String),
 }
 
+/// Renders the body of `VbcError::MultipleErrors` for `Display`.
+///
+/// Produces the form:
+///
+/// ```text
+/// validation failed with 3 errors:
+///   1. invalid function reference: FunctionId(99)
+///   2. register r10 out of bounds (max: 4) in fn#0@0x0
+///   3. invalid type reference: TypeId(9999)
+/// ```
+///
+/// Indented per-error lines mean any caller that prints the error
+/// gets the full forensic detail without needing to walk the inner
+/// `Vec<VbcError>` manually.  Used by the validator and by
+/// `Interpreter::try_new_validated` (which renders `VbcError` into
+/// `InterpreterError::ValidationFailed.reason`).
+fn render_multiple_errors(errs: &[VbcError]) -> String {
+    use std::fmt::Write as _;
+    let mut s = format!("validation failed with {} errors:", errs.len());
+    for (i, e) in errs.iter().enumerate() {
+        // `write!` to a `String` cannot fail; explicit ignore is
+        // explicitly fine here.
+        let _ = write!(s, "\n  {}. {}", i + 1, e);
+    }
+    s
+}
+
 impl VbcError {
     /// Creates an invalid type ID error.
     pub fn invalid_type(id: TypeId) -> Self {
@@ -320,5 +352,68 @@ impl VbcError {
                 | VbcError::SectionOutOfBounds { .. }
                 | VbcError::SectionOverflow { .. }
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiple_errors_render_includes_each_inner_error() {
+        let aggregate = VbcError::MultipleErrors(vec![
+            VbcError::InvalidFunctionId(99),
+            VbcError::InvalidConstId(5),
+            VbcError::InvalidStringId(7),
+        ]);
+        let rendered = aggregate.to_string();
+
+        // Header line carries the count.
+        assert!(
+            rendered.contains("validation failed with 3 errors"),
+            "missing aggregate header in:\n{}",
+            rendered,
+        );
+
+        // Each inner error appears on its own indented line.  Pin
+        // the rendering format used by the validator + by
+        // `Interpreter::try_new_validated`'s
+        // `ValidationFailed.reason` — a regression to the bare
+        // `"validation failed with N errors"` form would lose all
+        // forensic detail.
+        assert!(
+            rendered.contains("invalid function reference: FunctionId(99)"),
+            "missing first inner error in:\n{}",
+            rendered,
+        );
+        assert!(
+            rendered.contains("invalid constant reference: ConstId(5)"),
+            "missing second inner error in:\n{}",
+            rendered,
+        );
+        assert!(
+            rendered.contains("invalid string reference: StringId(7)"),
+            "missing third inner error in:\n{}",
+            rendered,
+        );
+
+        // Per-error line numbering ("1." / "2." / "3.") is part of
+        // the contract — pin it explicitly so a future refactor
+        // can't quietly drop it.
+        assert!(rendered.contains("1. "), "missing entry 1 marker");
+        assert!(rendered.contains("2. "), "missing entry 2 marker");
+        assert!(rendered.contains("3. "), "missing entry 3 marker");
+    }
+
+    #[test]
+    fn multiple_errors_with_empty_list_renders_zero_count() {
+        // Edge case: validator collected zero errors but the result
+        // type required a `MultipleErrors` carrier.  This shouldn't
+        // happen in practice (single-error path takes the
+        // `errors.pop()` branch), but the renderer must remain
+        // total — never panic on `.len() == 0`.
+        let aggregate = VbcError::MultipleErrors(Vec::new());
+        let rendered = aggregate.to_string();
+        assert_eq!(rendered, "validation failed with 0 errors:");
     }
 }
