@@ -206,3 +206,280 @@ public fn unpack_primary(extended: Int) -> Int {
 public fn unpack_subcode(extended: Int) -> Int {
     extended >> 8
 }
+
+// =============================================================================
+// Display + Debug + Eq for the opcode-catalog error taxonomy
+// =============================================================================
+
+implement Display for OpcodeErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(primary_name(self).as_str())
+    }
+}
+
+implement Debug for OpcodeErrorCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(primary_name(self).as_str())
+    }
+}
+
+implement Eq for OpcodeErrorCode {
+    fn eq(&self, other: &OpcodeErrorCode) -> Bool {
+        primary_wire(self) == primary_wire(other)
+    }
+}
+
+fn constraint_kind_name(k: &ConstraintKind) -> Text {
+    match k {
+        CkCheck       => "CHECK".clone(),
+        CkCommitHook  => "COMMITHOOK".clone(),
+        CkForeignKey  => "FOREIGN_KEY".clone(),
+        CkFunction    => "FUNCTION".clone(),
+        CkNotNull     => "NOT_NULL".clone(),
+        CkPrimaryKey  => "PRIMARY_KEY".clone(),
+        CkRowId       => "ROWID".clone(),
+        CkTrigger     => "TRIGGER".clone(),
+        CkUnique      => "UNIQUE".clone(),
+        CkVirtual     => "VIRTUAL".clone(),
+        CkPinned      => "PINNED".clone(),
+    }
+}
+
+fn constraint_kind_tag(k: &ConstraintKind) -> Int {
+    match k {
+        CkCheck       => 0,  CkCommitHook => 1,
+        CkForeignKey  => 2,  CkFunction   => 3,
+        CkNotNull     => 4,  CkPrimaryKey => 5,
+        CkRowId       => 6,  CkTrigger    => 7,
+        CkUnique      => 8,  CkVirtual    => 9,
+        CkPinned      => 10,
+    }
+}
+
+implement Display for ConstraintKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(constraint_kind_name(self).as_str())
+    }
+}
+
+implement Debug for ConstraintKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            CkCheck       => "CkCheck",
+            CkCommitHook  => "CkCommitHook",
+            CkForeignKey  => "CkForeignKey",
+            CkFunction    => "CkFunction",
+            CkNotNull     => "CkNotNull",
+            CkPrimaryKey  => "CkPrimaryKey",
+            CkRowId       => "CkRowId",
+            CkTrigger     => "CkTrigger",
+            CkUnique      => "CkUnique",
+            CkVirtual     => "CkVirtual",
+            CkPinned      => "CkPinned",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for ConstraintKind {
+    fn eq(&self, other: &ConstraintKind) -> Bool {
+        constraint_kind_tag(self) == constraint_kind_tag(other)
+    }
+}
+
+fn corruption_kind_name(k: &CorruptionKind) -> Text {
+    match k {
+        CrkSchema   => "schema".clone(),
+        CrkPage     => "page".clone(),
+        CrkIndex    => "index".clone(),
+        CrkCellSize => "cell_size".clone(),
+        CrkVTab     => "vtab".clone(),
+        CrkSequence => "sequence".clone(),
+    }
+}
+
+fn corruption_kind_tag(k: &CorruptionKind) -> Int {
+    match k {
+        CrkSchema   => 0,  CrkPage  => 1,
+        CrkIndex    => 2,  CrkCellSize => 3,
+        CrkVTab     => 4,  CrkSequence => 5,
+    }
+}
+
+implement Display for CorruptionKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(corruption_kind_name(self).as_str())
+    }
+}
+
+implement Debug for CorruptionKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            CrkSchema   => "CrkSchema",
+            CrkPage     => "CrkPage",
+            CrkIndex    => "CrkIndex",
+            CrkCellSize => "CrkCellSize",
+            CrkVTab     => "CrkVTab",
+            CrkSequence => "CrkSequence",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for CorruptionKind {
+    fn eq(&self, other: &CorruptionKind) -> Bool {
+        corruption_kind_tag(self) == corruption_kind_tag(other)
+    }
+}
+
+fn io_subkind_name(k: &IoSubKind) -> Text {
+    match k {
+        IokRead              => "read".clone(),
+        IokShortRead         => "short_read".clone(),
+        IokWrite             => "write".clone(),
+        IokFsync             => "fsync".clone(),
+        IokDirFsync          => "dir_fsync".clone(),
+        IokTruncate          => "truncate".clone(),
+        IokFstat             => "fstat".clone(),
+        IokUnlock            => "unlock".clone(),
+        IokRDLock            => "rdlock".clone(),
+        IokDelete            => "delete".clone(),
+        IokBlocked           => "blocked".clone(),
+        IokNoMem             => "nomem".clone(),
+        IokAccess            => "access".clone(),
+        IokCheckReservedLock => "check_reserved_lock".clone(),
+        IokLock              => "lock".clone(),
+        IokClose             => "close".clone(),
+    }
+}
+
+fn io_subkind_tag(k: &IoSubKind) -> Int {
+    match k {
+        IokRead              => 0,  IokShortRead => 1,
+        IokWrite             => 2,  IokFsync     => 3,
+        IokDirFsync          => 4,  IokTruncate  => 5,
+        IokFstat             => 6,  IokUnlock    => 7,
+        IokRDLock            => 8,  IokDelete    => 9,
+        IokBlocked           => 10, IokNoMem     => 11,
+        IokAccess            => 12, IokCheckReservedLock => 13,
+        IokLock              => 14, IokClose     => 15,
+    }
+}
+
+implement Display for IoSubKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(io_subkind_name(self).as_str())
+    }
+}
+
+implement Debug for IoSubKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            IokRead              => "IokRead",
+            IokShortRead         => "IokShortRead",
+            IokWrite             => "IokWrite",
+            IokFsync             => "IokFsync",
+            IokDirFsync          => "IokDirFsync",
+            IokTruncate          => "IokTruncate",
+            IokFstat             => "IokFstat",
+            IokUnlock            => "IokUnlock",
+            IokRDLock            => "IokRDLock",
+            IokDelete            => "IokDelete",
+            IokBlocked           => "IokBlocked",
+            IokNoMem             => "IokNoMem",
+            IokAccess            => "IokAccess",
+            IokCheckReservedLock => "IokCheckReservedLock",
+            IokLock              => "IokLock",
+            IokClose             => "IokClose",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for IoSubKind {
+    fn eq(&self, other: &IoSubKind) -> Bool {
+        io_subkind_tag(self) == io_subkind_tag(other)
+    }
+}
+
+implement Display for OpcodeDbError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DbeOk                       => f.write_str("OK"),
+            DbeGeneric(m)               => f.write_str(f"sqlite error: {m}".as_str()),
+            DbeBusy                     => f.write_str("sqlite database busy"),
+            DbeLocked                   => f.write_str("sqlite database locked"),
+            DbeOutOfMemory              => f.write_str("sqlite out of memory"),
+            DbeReadOnly                 => f.write_str("sqlite database read-only"),
+            DbeInterrupted              => f.write_str("sqlite operation interrupted"),
+            DbeIo(k, m)                 => f.write_str(f"sqlite I/O error ({io_subkind_name(k)}): {m}".as_str()),
+            DbeCorrupt(k, m)            => f.write_str(f"sqlite corruption ({corruption_kind_name(k)}): {m}".as_str()),
+            DbeFull                     => f.write_str("sqlite database full"),
+            DbeCannotOpen(m)            => f.write_str(f"sqlite cannot open: {m}".as_str()),
+            DbeConstraint(k, m)         => f.write_str(f"sqlite {constraint_kind_name(k)} constraint failed: {m}".as_str()),
+            DbeDataTypeMismatch         => f.write_str("sqlite data type mismatch"),
+            DbeMisuse                   => f.write_str("sqlite library misuse"),
+            DbeAuthDenied               => f.write_str("sqlite authorization denied"),
+            DbeBindRange                => f.write_str("sqlite bind index out of range"),
+            DbeNotADatabase             => f.write_str("sqlite file is not a database"),
+            DbeSchemaChanged            => f.write_str("sqlite schema changed"),
+            DbeProtocolFailure          => f.write_str("sqlite locking protocol failure"),
+            DbeAbort(m)                 => f.write_str(f"sqlite operation aborted: {m}".as_str()),
+        }
+    }
+}
+
+implement Debug for OpcodeDbError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DbeOk                       => f.write_str("DbeOk"),
+            DbeGeneric(m)               => f.write_str(f"DbeGeneric({m})".as_str()),
+            DbeBusy                     => f.write_str("DbeBusy"),
+            DbeLocked                   => f.write_str("DbeLocked"),
+            DbeOutOfMemory              => f.write_str("DbeOutOfMemory"),
+            DbeReadOnly                 => f.write_str("DbeReadOnly"),
+            DbeInterrupted              => f.write_str("DbeInterrupted"),
+            DbeIo(k, m)                 => f.write_str(f"DbeIo({k:?}, {m})".as_str()),
+            DbeCorrupt(k, m)            => f.write_str(f"DbeCorrupt({k:?}, {m})".as_str()),
+            DbeFull                     => f.write_str("DbeFull"),
+            DbeCannotOpen(m)            => f.write_str(f"DbeCannotOpen({m})".as_str()),
+            DbeConstraint(k, m)         => f.write_str(f"DbeConstraint({k:?}, {m})".as_str()),
+            DbeDataTypeMismatch         => f.write_str("DbeDataTypeMismatch"),
+            DbeMisuse                   => f.write_str("DbeMisuse"),
+            DbeAuthDenied               => f.write_str("DbeAuthDenied"),
+            DbeBindRange                => f.write_str("DbeBindRange"),
+            DbeNotADatabase             => f.write_str("DbeNotADatabase"),
+            DbeSchemaChanged            => f.write_str("DbeSchemaChanged"),
+            DbeProtocolFailure          => f.write_str("DbeProtocolFailure"),
+            DbeAbort(m)                 => f.write_str(f"DbeAbort({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for OpcodeDbError {
+    fn eq(&self, other: &OpcodeDbError) -> Bool {
+        match (self, other) {
+            (DbeOk, DbeOk)                                        => true,
+            (DbeGeneric(a),         DbeGeneric(b))                => a == b,
+            (DbeBusy, DbeBusy)                                    => true,
+            (DbeLocked, DbeLocked)                                => true,
+            (DbeOutOfMemory, DbeOutOfMemory)                      => true,
+            (DbeReadOnly, DbeReadOnly)                            => true,
+            (DbeInterrupted, DbeInterrupted)                      => true,
+            (DbeIo(ka, ma),         DbeIo(kb, mb))                => ka == kb && ma == mb,
+            (DbeCorrupt(ka, ma),    DbeCorrupt(kb, mb))           => ka == kb && ma == mb,
+            (DbeFull, DbeFull)                                    => true,
+            (DbeCannotOpen(a),      DbeCannotOpen(b))             => a == b,
+            (DbeConstraint(ka, ma), DbeConstraint(kb, mb))        => ka == kb && ma == mb,
+            (DbeDataTypeMismatch, DbeDataTypeMismatch)            => true,
+            (DbeMisuse, DbeMisuse)                                => true,
+            (DbeAuthDenied, DbeAuthDenied)                        => true,
+            (DbeBindRange, DbeBindRange)                          => true,
+            (DbeNotADatabase, DbeNotADatabase)                    => true,
+            (DbeSchemaChanged, DbeSchemaChanged)                  => true,
+            (DbeProtocolFailure, DbeProtocolFailure)              => true,
+            (DbeAbort(a),           DbeAbort(b))                  => a == b,
+            _ => false,
+        }
+    }
+}
