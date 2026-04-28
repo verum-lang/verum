@@ -76,15 +76,32 @@ public type Face is
     | And(Heap<Face>, Heap<Face>) // φ ∧ ψ
     | Or(Heap<Face>, Heap<Face>); // φ ∨ ψ
 
-/// Evaluate a face formula at given interval values.
-public fn eval_face(f: &Face, i: I) -> Bool {
+/// Evaluate a face formula. Each leaf constraint (`IsZero(j)` /
+/// `IsOne(j)`) is decided by `interval_eq` against the
+/// corresponding endpoint — `j` is the stored interval value at
+/// the face's leaf, NOT a free interval variable to be substituted
+/// at evaluation time. The face is therefore decided completely by
+/// the endpoint values of its `IsZero` / `IsOne` leaves and the
+/// boolean structure of its `And` / `Or` connectives.
+///
+/// Full multi-dimensional cube evaluation (face formulas containing
+/// free interval variables that need a per-dimension valuation) is
+/// the kernel's responsibility — see `@builtin_face_eval` in
+/// `verum_types.cubical`. This Verum-side helper covers the
+/// endpoint-resolved case used for debug / shape checks.
+///
+/// The previous signature took an unused `i: I` argument that was
+/// threaded through the recursive arms but never consulted — a
+/// vestige from an earlier multi-dim sketch that this surface
+/// never grew into.
+public fn eval_face(f: &Face) -> Bool {
     match f {
         Face.Top => true,
         Face.Bot => false,
         Face.IsZero(j) => interval_eq(*j, i0),
         Face.IsOne(j) => interval_eq(*j, i1),
-        Face.And(a, b) => eval_face(a, i) && eval_face(b, i),
-        Face.Or(a, b) => eval_face(a, i) || eval_face(b, i),
+        Face.And(a, b) => eval_face(a) && eval_face(b),
+        Face.Or(a, b) => eval_face(a) || eval_face(b),
     }
 }
 
