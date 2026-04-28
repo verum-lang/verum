@@ -200,6 +200,22 @@ public fn pager_close(p: &mut Pager) -> Result<(), PagerError> {
     Ok(())
 }
 
+implement Pager {
+    /// The configured page size in bytes — locked at open time, not
+    /// changeable for the lifetime of the pager.
+    public fn page_size_view(&self) -> Int { self.page_size }
+
+    /// Borrow the underlying backend variant.  Consumers that need to
+    /// distinguish in-memory vs. file backing (online backup, VACUUM,
+    /// integrity_check) match on the variant directly.
+    public fn backend_view(&self) -> &PagerBackend { &self.backend }
+
+    /// Whether this pager has been closed.  Read-only callers can
+    /// short-circuit instead of round-tripping through pager_read for
+    /// a closed pager.
+    public fn is_closed(&self) -> Bool { self.closed }
+}
+
 // =============================================================================
 // Read / write surface
 // =============================================================================
