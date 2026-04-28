@@ -21,6 +21,7 @@ verum_types = { workspace = true }
 verum_error = { workspace = true }
 verum_diagnostics = { workspace = true }
 verum_vbc = { workspace = true, features = ["codegen"] }
+verum_kernel = { workspace = true }
 # CBGR escape analysis for optimization
 verum_cbgr = { workspace = true, optional = true }
 

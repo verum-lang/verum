@@ -124,6 +124,10 @@ pub mod runtime_stubs;
 pub mod error;
 pub use error::{CodegenError, Result as CodegenResult};
 
+// Proof-term export — `verum_kernel::CoreTerm` → Lean 4 / Coq /
+// Agda syntax (M-VVA-FU Sub-2.5/2.6/2.7 V0/V1).
+pub mod proof_export;
+
 // Re-export verum_mlir for low-level access
 pub use verum_mlir;
 
