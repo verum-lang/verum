@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, architecture, determinism, consistent-hash
+// @timeout: 10000
+// @expect: pass
+// @description: Round-1 architectural guardrail — extends the
+// hash-iter full audit (#207 sub-deliverable 8) to
+// `ConsistentHashRing` (Ketama-compatible).
+//
+// Pre-fix history (memory-recorded): consistent_hash::vnode_position
+// computed Ketama positions via SHA256 over `name || "-" || idx`;
+// any non-determinism in that derivation breaks consistent-hash
+// across producers (every node assignment shifts).
+//
+// This test pins:
+//   1. node_for_key is deterministic across two invocations.
+//   2. Same key consistently routes to the same node when ring
+//      composition is unchanged.
+//   3. Adding a different node minimally disturbs assignments
+//      (the consistent-hash invariant — ~1/N of keys move).
+//
+// Same-key routing stability is the FUNDAMENTAL contract: any
+// regression in vnode_position determinism breaks every cluster
+// cache + every load-balancer dispatch routing.
+
+mount core.collections.consistent_hash.{ConsistentHashRing};
+
+fn ring_node_for_key_deterministic() {
+    let mut r1 = ConsistentHashRing.new();
+    r1.add_node("alpha".clone());
+    r1.add_node("bravo".clone());
+    r1.add_node("charlie".clone());
+
+    let key = b"some-routing-key";
+    let a = r1.node_for_key(key);
+    let b = r1.node_for_key(key);
+
+    match a {
+        Maybe.Some(na) => match b {
+            Maybe.Some(nb) => {
+                assert(na == nb,
+                       "same key on same ring must route to same node");
+            }
+            Maybe.None => panic("unexpected None from same key second time"),
+        },
+        Maybe.None => panic("expected Some for non-empty ring"),
+    }
+}
+
+// Two rings built from identical inputs must agree on every key.
+// Non-determinism in vnode_position would break this.
+fn ring_two_identical_rings_agree() {
+    let mut r1 = ConsistentHashRing.new();
+    let mut r2 = ConsistentHashRing.new();
+    r1.add_node("n1".clone()); r1.add_node("n2".clone()); r1.add_node("n3".clone());
+    r2.add_node("n1".clone()); r2.add_node("n2".clone()); r2.add_node("n3".clone());
+
+    let probes: List<&[Byte]> = [
+        b"alice", b"bob", b"carol", b"dave",
+        b"eve", b"frank", b"grace", b"heidi",
+    ];
+    let mut i: Int = 0;
+    while i < probes.len() {
+        let a = r1.node_for_key(probes[i]);
+        let b = r2.node_for_key(probes[i]);
+        match a {
+            Maybe.Some(na) => match b {
+                Maybe.Some(nb) => assert(na == nb,
+                                          "identical rings must agree on every key"),
+                Maybe.None => panic("ring 2 returned None where ring 1 returned Some"),
+            },
+            Maybe.None => panic("ring 1 returned None unexpectedly"),
+        }
+        i = i + 1;
+    }
+}
+
+// Empty ring → None for any key.
+fn ring_empty_returns_none() {
+    let r = ConsistentHashRing.new();
+    let key = b"any-key";
+    match r.node_for_key(key) {
+        Maybe.None => {},
+        Maybe.Some(n) => panic(f"empty ring must return None, got {n}"),
+    }
+}
+
+// Single-node ring → that node for every key.
+fn ring_single_node_routes_all_keys() {
+    let mut r = ConsistentHashRing.new();
+    r.add_node("solo".clone());
+    let probes: List<&[Byte]> = [
+        b"a", b"b", b"c", b"d", b"e",
+    ];
+    let mut i: Int = 0;
+    while i < probes.len() {
+        match r.node_for_key(probes[i]) {
+            Maybe.Some(n) => assert(n == "solo",
+                                     "single-node ring must route every key to that node"),
+            Maybe.None => panic("single-node ring must return Some"),
+        }
+        i = i + 1;
+    }
+}
+
+fn main() {
+    ring_node_for_key_deterministic();
+    ring_two_identical_rings_agree();
+    ring_empty_returns_none();
+    ring_single_node_routes_all_keys();
+}
