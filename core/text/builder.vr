@@ -143,8 +143,9 @@ implement TextBuilder {
 implement Debug for TextBuilder {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("TextBuilder { len: ")?;
-        // Total length display
+        self.total_len.fmt_debug(f)?;
         f.write_str(", chunks: ")?;
+        self.chunks.len().fmt_debug(f)?;
         f.write_str(" }")
     }
 }
