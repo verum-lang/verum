@@ -1178,10 +1178,28 @@ fn emit_having_expr(
                 Ok(_)  => {}, Err(er) => { return Err(er); }
             }
             match op {
-                BAdd => { let _ = st.program.emit(Add(ra, rb, dst)); Ok(()) }
-                BSub => { let _ = st.program.emit(Subtract(ra, rb, dst)); Ok(()) }
-                BMul => { let _ = st.program.emit(Multiply(ra, rb, dst)); Ok(()) }
-                BDiv => { let _ = st.program.emit(Divide(ra, rb, dst)); Ok(()) }
+                BAdd    => { let _ = st.program.emit(Add(ra, rb, dst));        Ok(()) }
+                BSub    => { let _ = st.program.emit(Subtract(ra, rb, dst));   Ok(()) }
+                BMul    => { let _ = st.program.emit(Multiply(ra, rb, dst));   Ok(()) }
+                BDiv    => { let _ = st.program.emit(Divide(ra, rb, dst));     Ok(()) }
+                BMod    => { let _ = st.program.emit(Remainder(ra, rb, dst));  Ok(()) }
+                BBitAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst));     Ok(()) }
+                BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst));      Ok(()) }
+                BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst));  Ok(()) }
+                BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Ok(()) }
+                BAnd | BOr => {
+                    // Logical AND/OR: result is the truth value of both
+                    // operands ANDed/ORed.  Both ra/rb are already 0 or 1
+                    // (HAVING children produce boolean integers), so use
+                    // bitwise AND/OR which yield the correct logical
+                    // result for those inputs.
+                    match op {
+                        BAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst)); }
+                        BOr  => { let _ = st.program.emit(BitOr(ra, rb, dst));  }
+                        _    => {}
+                    }
+                    Ok(())
+                }
                 BEq | BNe | BLt | BLe | BGt | BGe => {
                     // Use the same Eq-builder pattern as regular emit_binary.
                     let _ = st.program.emit(Integer(0, dst));
@@ -1210,7 +1228,7 @@ fn emit_having_expr(
                     st.program.replace(goto_idx, Goto(after));
                     Ok(())
                 }
-                _ => Err(unsupported("HAVING binop not supported in v1".clone())),
+                _ => Err(unsupported("HAVING binop: BConcat / BIs / BIsNot pending".clone())),
             }
         }
         EColumnRef(_cid, _idx) => {
