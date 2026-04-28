@@ -496,11 +496,12 @@ extern {
     /// Get environment variable (returns null if not set)
     fn getenv(name: &Byte) -> &Byte;
 
-    /// Set environment variable (overwrite: 1 to replace existing, 0 to preserve)
-    fn setenv(name: &Byte, value: &Byte, overwrite: Int) -> Int;
+    /// Set environment variable (overwrite: 1 to replace existing, 0 to preserve).
+    /// C: `int setenv(const char *name, const char *value, int overwrite);`.
+    fn setenv(name: &Byte, value: &Byte, overwrite: Int32) -> Int32;
 
-    /// Remove environment variable
-    fn unsetenv(name: &Byte) -> Int;
+    /// Remove environment variable. C: `int unsetenv(const char *name);`.
+    fn unsetenv(name: &Byte) -> Int32;
 
     // =========================================================================
     // Command Line Arguments (macOS-specific)
@@ -588,25 +589,31 @@ extern {
     /// Get Mach thread port
     fn mach_thread_self() -> MachPort;
 
-    /// Allocate VM
+    /// Allocate VM. C: `kern_return_t vm_allocate(vm_map_t target_task,
+    ///   vm_address_t *address, vm_size_t size, int flags);`
+    /// `kern_return_t` and `flags` are `int` (Int32); `vm_address_t` and
+    /// `vm_size_t` are pointer-width (Int on 64-bit Darwin).
     fn vm_allocate(
         target_task: MachPort,
         address: &mut Int,
         size: Int,
-        flags: Int,
-    ) -> Int;
+        flags: Int32,
+    ) -> Int32;
 
-    /// Deallocate VM
-    fn vm_deallocate(target_task: MachPort, address: Int, size: Int) -> Int;
+    /// Deallocate VM. C: `kern_return_t vm_deallocate(vm_map_t,
+    /// vm_address_t, vm_size_t);`
+    fn vm_deallocate(target_task: MachPort, address: Int, size: Int) -> Int32;
 
-    /// Protect VM
+    /// Protect VM. C: `kern_return_t vm_protect(vm_map_t, vm_address_t,
+    /// vm_size_t, boolean_t set_maximum, vm_prot_t new_protection);`
+    /// `boolean_t` and `vm_prot_t` are `int` (Int32).
     fn vm_protect(
         target_task: MachPort,
         address: Int,
         size: Int,
-        set_maximum: Int,
-        new_protection: Int,
-    ) -> Int;
+        set_maximum: Int32,
+        new_protection: Int32,
+    ) -> Int32;
 }
 
 // =============================================================================
