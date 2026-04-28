@@ -12,9 +12,26 @@
 // proof checker. The recipient verifies proofs rather than
 // re-running analysis.
 //
+// ## Storage model
+//
+// Certificates are stored in a `Map<Text, ProofCertificate>` keyed
+// by goal-hash digest. Lookup is O(1) amortised — the natural
+// access pattern for content-addressed PCC where every recipient
+// queries certificates by their goal hash. The previous
+// `List<BundleCert>` storage was O(N) per lookup, putting an
+// N²-shaped scan on the proof-checking hot path of every consumer.
+//
+// `bundle_add` is idempotent on `(hash, cert)` pairs: re-adding a
+// certificate with the same goal hash replaces the prior entry and
+// adjusts `total_duration_ms` by the delta. Catches duplicate-add
+// in callers that batch-rebuild bundles across analysis re-runs.
+//
 // =============================================================================
 
 module core.proof.pcc;
+
+mount core.*;
+mount core.collections.map.{Map};
 
 /// A goal hash — content-addressed identifier of a verification
 /// obligation. Computed from the textual representation of the
@@ -54,20 +71,14 @@ public type BundleMetadata is {
 
 /// A complete proof bundle: certificates keyed by goal hash.
 public type ProofBundle is {
-    certificates: List<BundleCert>,
+    certificates: Map<Text, ProofCertificate>,
     metadata: BundleMetadata,
-};
-
-/// A certificate paired with its key.
-public type BundleCert is {
-    hash: GoalHash,
-    cert: ProofCertificate,
 };
 
 /// Build an empty proof bundle with initial metadata.
 public fn empty_bundle(compiler: Text, source: Text) -> ProofBundle {
     ProofBundle {
-        certificates: [],
+        certificates: Map.new(),
         metadata: BundleMetadata {
             compiler_version: compiler,
             source_path: source,
@@ -77,12 +88,27 @@ public fn empty_bundle(compiler: Text, source: Text) -> ProofBundle {
     }
 }
 
-/// Add a certificate to the bundle.
+/// Add (or replace) a certificate in the bundle.
+///
+/// Idempotent on goal-hash collision: re-adding the same hash
+/// replaces the prior certificate and adjusts `total_duration_ms`
+/// by `(new_dur - prior_dur)`; `certificate_count` stays unchanged.
+/// Without this, a caller re-running analysis after a partial
+/// proof attempt would silently double-count durations and report
+/// inflated audit metadata.
 public fn bundle_add(b: ProofBundle, h: GoalHash, c: ProofCertificate) -> ProofBundle {
     let mut certs = b.certificates;
-    certs.push(BundleCert { hash: h, cert: c });
-    let new_count = b.metadata.certificate_count + 1;
-    let new_dur = b.metadata.total_duration_ms + c.duration_ms;
+    let prior_dur: Int = match certs.get_optional(h.digest.clone()) {
+        Some(prior) => prior.duration_ms,
+        None        => 0,
+    };
+    let new_count = if prior_dur == 0 && !certs.contains_key(h.digest.clone()) {
+        b.metadata.certificate_count + 1
+    } else {
+        b.metadata.certificate_count
+    };
+    let new_dur = b.metadata.total_duration_ms + c.duration_ms - prior_dur;
+    certs.insert(h.digest, c);
     ProofBundle {
         certificates: certs,
         metadata: BundleMetadata {
@@ -94,14 +120,12 @@ public fn bundle_add(b: ProofBundle, h: GoalHash, c: ProofCertificate) -> ProofB
     }
 }
 
-/// Look up a certificate by its goal hash digest.
-public fn bundle_lookup(b: ProofBundle, digest: Text) -> Maybe<ProofCertificate> {
-    let mut i: Int = 0;
-    while i < b.certificates.len() {
-        if b.certificates[i].hash.digest == digest {
-            return Some(b.certificates[i].cert);
-        }
-        i = i + 1;
-    }
-    None
+/// Look up a certificate by its goal hash digest. O(1) amortised.
+public fn bundle_lookup(b: &ProofBundle, digest: Text) -> Maybe<ProofCertificate> {
+    b.certificates.get_optional(digest)
+}
+
+/// Number of distinct goal hashes in the bundle. O(1).
+public fn bundle_size(b: &ProofBundle) -> Int {
+    b.certificates.len()
 }
