@@ -219,10 +219,9 @@ implement ConsistentHashRing {
 /// interpreted as little-endian u64. Matches memcached Ketama, Ruby's
 /// `redis-client`, Envoy's `envoy.load_balancing_policies.ring_hash`.
 fn vnode_position(name: &Text, vnode_idx: Int) -> UInt64 {
-    let mut buf: List<Byte> = [];
     let nb = name.as_bytes();
-    let mut i: Int = 0;
-    while i < nb.len() { buf.push(nb[i]); i = i + 1; }
+    let mut buf: List<Byte> = List.with_capacity(nb.len() + 12);
+    buf.extend_from_slice(nb);
     buf.push('-' as Byte);
     // Decimal form of vnode_idx to match Ketama's string join.
     let mut digits: List<Byte> = [];
