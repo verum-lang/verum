@@ -1,0 +1,198 @@
+name: Cross-format proof re-check
+
+# M-EXPORT V1 — gates the proof-term lowerers in
+# `verum_codegen::proof_export` (CoreTerm → Lean / Coq / Agda /
+# Dedukti / Metamath) and runs each downstream verifier on lowerer-
+# emitted fixtures.
+#
+# Two gating tiers:
+#
+#   * `emit-fixtures` (HARD gate, blocks merge): runs the lowerer
+#     unit tests + the integration test that emits the standalone
+#     fixture files.  Failure here means the lowerers regressed.
+#
+#   * per-format re-check jobs (SOFT gate, `continue-on-error: true`
+#     in V1): install each downstream verifier and re-check the
+#     lowerer-emitted fixture.  V1 is fixture-validity signal;
+#     hardened to a HARD gate in V2 once verifier installation is
+#     stable across runner refresh cycles.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/verum_codegen/src/proof_export.rs'
+      - 'crates/verum_codegen/tests/cross_format_emit.rs'
+      - 'crates/verum_codegen/Cargo.toml'
+      - '.github/workflows/cross-format-recheck.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/verum_codegen/src/proof_export.rs'
+      - 'crates/verum_codegen/tests/cross_format_emit.rs'
+      - 'crates/verum_codegen/Cargo.toml'
+      - '.github/workflows/cross-format-recheck.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # HARD gate — lowerer tests + fixture emission.  Blocks merge.
+  # ---------------------------------------------------------------------------
+  emit-fixtures:
+    name: Emit fixtures + lowerer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-format-recheck
+
+      - name: Run proof_export unit tests
+        run: cargo test -p verum_codegen --lib proof_export
+
+      - name: Emit cross-format fixtures
+        run: cargo test -p verum_codegen --test cross_format_emit
+
+      - name: List emitted fixtures
+        run: ls -la target/cross-format-out/ target/cross-format-out/*/
+
+      - name: Upload fixture artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-format-fixtures
+          path: target/cross-format-out/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # SOFT gate — per-format re-check.  V1: continue-on-error.
+  # ---------------------------------------------------------------------------
+  lean-recheck:
+    name: Lean 4 re-check
+    needs: emit-fixtures
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-format-fixtures
+          path: ./fixtures/
+
+      - name: Install elan + Lean 4
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v4.13.0
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Verify lowerer-emitted fixture
+        run: |
+          lean --version
+          lean ./fixtures/lean/Identity.lean
+
+  coq-recheck:
+    name: Coq re-check
+    needs: emit-fixtures
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: coqorg/coq:8.20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-format-fixtures
+          path: ./fixtures/
+
+      - name: Verify lowerer-emitted fixture
+        run: |
+          coqc --version
+          coqc ./fixtures/coq/Identity.v
+
+  agda-recheck:
+    name: Agda re-check
+    needs: emit-fixtures
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-format-fixtures
+          path: ./fixtures/
+
+      - name: Install Agda
+        uses: wenkokke/setup-agda@v2
+        with:
+          agda-version: '2.7.0.1'
+
+      - name: Verify lowerer-emitted fixture
+        run: |
+          agda --version
+          agda --safe ./fixtures/agda/Identity.agda
+
+  dedukti-recheck:
+    name: Dedukti re-check
+    needs: emit-fixtures
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-format-fixtures
+          path: ./fixtures/
+
+      - name: Install opam
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends opam
+
+      - name: Initialise opam + install Dedukti
+        run: |
+          opam init -y --disable-sandboxing --bare
+          opam switch create dk-switch 4.14.1
+          eval $(opam env --switch=dk-switch)
+          opam install -y dedukti
+
+      - name: Verify lowerer-emitted fixture
+        run: |
+          eval $(opam env --switch=dk-switch)
+          dkcheck --version || dkcheck -version || true
+          dkcheck ./fixtures/dedukti/Identity.dk
+
+  metamath-recheck:
+    name: Metamath re-check
+    needs: emit-fixtures
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-format-fixtures
+          path: ./fixtures/
+
+      - name: Install Metamath
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends metamath
+
+      - name: Verify lowerer-emitted fixture
+        run: |
+          metamath --version || true
+          # Metamath's CLI is interactive; pipe the verify command in.
+          # `read` parses, `verify proof '*'` re-checks all proofs in
+          # the loaded database; on a no-proof file it succeeds with
+          # a count of 0 verified.
+          printf 'read "./fixtures/metamath/identity.mm"\nverify proof *\nexit\n' \
+            | metamath
