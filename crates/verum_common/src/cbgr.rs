@@ -979,4 +979,77 @@ mod tests {
         assert_eq!(Capability::from_bits(caps::OWNER), Capability::Owner);
         assert_eq!(Capability::from_bits(caps::ALL), Capability::All);
     }
+
+    // =========================================================================
+    // Round 2 §7.1 — Generation counter race (DEFENSE CONFIRMED guardrail)
+    // =========================================================================
+    //
+    // Red-team scenario: N threads concurrently call `increment_generation`
+    // on the same `CbgrHeader`.  The CAS-loop must produce exactly N
+    // distinct increments — no lost updates, no duplicate values, no
+    // value past `GEN_MAX` (the wraparound branch resets cleanly to
+    // `GEN_INITIAL`).  A regression to a non-atomic add or to AcqRel
+    // ordering being relaxed would surface as either a generation count
+    // < N×threads (lost updates) or a generation past `GEN_MAX` (CAS
+    // race on the wraparound branch).
+    //
+    // The test uses 8 threads × 5,000 increments each = 40,000 total.
+    // We start at `GEN_INITIAL` (1), so the final generation is the
+    // count of CAS-successes mod (GEN_MAX - GEN_INITIAL + 1) — for 40k
+    // iterations and `GEN_MAX = u32::MAX - 1` the wraparound never
+    // triggers, so the final generation equals exactly
+    // `GEN_INITIAL + 40_000`.
+
+    #[test]
+    fn test_generation_counter_concurrent_stress() {
+        use std::sync::Arc;
+        use std::thread;
+
+        const THREADS: u32 = 8;
+        const ITERS_PER_THREAD: u32 = 5_000;
+        const TOTAL: u32 = THREADS * ITERS_PER_THREAD;
+
+        let header = Arc::new(CbgrHeader::new(0));
+        let mut handles = Vec::with_capacity(THREADS as usize);
+
+        for _ in 0..THREADS {
+            let h = Arc::clone(&header);
+            handles.push(thread::spawn(move || {
+                for _ in 0..ITERS_PER_THREAD {
+                    let _ = h.increment_generation();
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().expect("worker thread panicked");
+        }
+
+        // Exactly TOTAL successful CAS-add operations must have landed.
+        // No lost updates → final generation = GEN_INITIAL + TOTAL.
+        let final_gen = header.generation();
+        assert_eq!(
+            final_gen,
+            GEN_INITIAL + TOTAL,
+            "lost updates under contention: expected {}, got {}",
+            GEN_INITIAL + TOTAL,
+            final_gen
+        );
+
+        // Sanity: the value must not have wrapped past GEN_MAX (we sized
+        // the workload to stay well below).  If this fires, the
+        // wraparound branch was hit unexpectedly — re-run with a
+        // smaller workload and investigate.
+        assert!(
+            final_gen < GEN_MAX,
+            "unexpected wraparound: final_gen {} >= GEN_MAX {}",
+            final_gen,
+            GEN_MAX
+        );
+
+        // Capabilities + epoch must be untouched by generation increments.
+        // (The wraparound branch DOES touch them, but we asserted above
+        // that we didn't hit it.)
+        assert_eq!(header.epoch(), 0, "generation race must not touch epoch");
+    }
 }
