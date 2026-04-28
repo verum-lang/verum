@@ -16,6 +16,7 @@ a resize cascade.
 |---|---|
 | `wire_frame_alloc_baseline.vr` | Vector 2.1 — wire-frame allocation reduction (audit-confirmed defense) |
 | `jcs_canonicalisation_correctness.vr` | Section B — JCS O(N²)→O(N log N) sort behavioural correctness |
+| `keyword_filter_cached_folds.vr` | Section C — KeywordFilter cached-fold contract (case-insensitive + case-sensitive paths) |
 
 ## Pending vectors
 

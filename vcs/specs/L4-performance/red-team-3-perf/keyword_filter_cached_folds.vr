@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L4
+// @tags: red-team, perf, allocator, case-fold, cached
+// @timeout: 10000
+// @expect: pass
+// @description: Round-3 red-team perf-class guardrail (#174 audit
+// Section C — hot-path case-fold caching).
+//
+// `KeywordFilter` had two regressions closed in commit 75b67897:
+//   1. Was lowercasing every keyword inside the inner per-call loop —
+//      N×M alloc per call (N keywords × M calls).
+//   2. Case-sensitive path cloned the input via text.clone() before
+//      contains() — unnecessary alloc.
+// Audit fix:
+//   * Pre-compute folded keyword copies once in `new()`.
+//   * Refresh them when `with_case_sensitive` flips.
+//   * Per-call cost: 1 lowercase on input + 0 keyword allocs.
+//
+// This test pins the BEHAVIORAL CONTRACT that the audit fix
+// preserves. Per-call latency lives in the bench harness; the
+// contract that case-insensitive vs case-sensitive paths produce
+// CORRECT results matters here.
+
+mount core.math.guardrails.{KeywordFilter};
+
+fn ci_match_uppercase_blocked() {
+    let f = KeywordFilter.new(["secret".clone(), "password".clone()]);
+    match f.contains_blocked(&"my SECRET token".clone()) {
+        Maybe.Some(k) => assert(k == "secret",
+                                 "case-insensitive lookup must return the matched keyword"),
+        Maybe.None => panic("case-insensitive must match uppercase"),
+    }
+}
+
+fn ci_match_mixed_case_blocked() {
+    let f = KeywordFilter.new(["secret".clone()]);
+    match f.contains_blocked(&"my SeCrEt is".clone()) {
+        Maybe.Some(_) => {},
+        Maybe.None => panic("case-insensitive must match mixed case"),
+    }
+}
+
+fn ci_no_match_returns_none() {
+    let f = KeywordFilter.new(["secret".clone()]);
+    match f.contains_blocked(&"nothing here".clone()) {
+        Maybe.Some(_) => panic("non-matching input must return None"),
+        Maybe.None => {},
+    }
+}
+
+// Case-sensitive path: with_case_sensitive() drops the cached folds
+// and compares directly. "SECRET" must NOT match "secret".
+fn cs_uppercase_does_not_match_lowercase() {
+    let f = KeywordFilter.new(["secret".clone()]).with_case_sensitive();
+    match f.contains_blocked(&"my SECRET token".clone()) {
+        Maybe.Some(_) => panic(
+            "case-sensitive must NOT match different case"),
+        Maybe.None => {},
+    }
+}
+
+fn cs_exact_match_blocked() {
+    let f = KeywordFilter.new(["secret".clone()]).with_case_sensitive();
+    match f.contains_blocked(&"my secret token".clone()) {
+        Maybe.Some(k) => assert(k == "secret",
+                                 "case-sensitive exact match returns keyword"),
+        Maybe.None => panic("case-sensitive must match exact string"),
+    }
+}
+
+// Multiple-keyword behaviour: returns the FIRST match by insertion
+// order of the keyword list (the cache preserves the index relationship
+// to blocked_keywords).
+fn ci_multiple_keywords_first_match() {
+    let f = KeywordFilter.new([
+        "alpha".clone(),
+        "beta".clone(),
+        "gamma".clone(),
+    ]);
+    match f.contains_blocked(&"GAMMA before alpha".clone()) {
+        Maybe.Some(k) => {
+            // Both alpha and gamma are present; either is acceptable
+            // (implementation defines which is "first" — pin only that
+            // it's one of the inserted keys).
+            assert(k == "alpha" || k == "gamma",
+                   "match must return one of the blocked keywords");
+        }
+        Maybe.None => panic("at least one keyword must match"),
+    }
+}
+
+// Empty-keyword filter never matches.
+fn ci_empty_filter_never_matches() {
+    let f = KeywordFilter.new([]);
+    match f.contains_blocked(&"anything".clone()) {
+        Maybe.Some(_) => panic("empty-keyword filter must never match"),
+        Maybe.None => {},
+    }
+}
+
+fn main() {
+    ci_match_uppercase_blocked();
+    ci_match_mixed_case_blocked();
+    ci_no_match_returns_none();
+    cs_uppercase_does_not_match_lowercase();
+    cs_exact_match_blocked();
+    ci_multiple_keywords_first_match();
+    ci_empty_filter_never_matches();
+}
