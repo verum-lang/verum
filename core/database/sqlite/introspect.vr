@@ -262,24 +262,38 @@ fn parse_int_lossy(t: &Text) -> Int {
     let n = bytes.len();
     let mut neg = false;
     if n > 0 && bytes[0] == (0x2D as Byte) { neg = true; i = 1; }
+    // 3-layer overflow defense — introspection input arrives from
+    // schema text / DDL fragments which can be hostile.
     let mut acc: Int = 0;
+    let mut digit_count: Int = 0;
     while i < n {
         let b = bytes[i];
         if b < (0x30 as Byte) || b > (0x39 as Byte) { break; }
+        if digit_count >= 19 || acc > 922_337_203_685_477_580 { return 0; }
         acc = acc * 10 + ((b as Int) - 0x30);
+        if acc < 0 { return 0; }
+        digit_count = digit_count + 1;
         i = i + 1;
     }
-    if neg { -acc } else { acc }
+    if neg { 0 - acc } else { acc }
 }
 
 fn itoa(n: Int) -> Text {
+    // Int.MIN-safe magnitude — `-n` for `n == Int.MIN` overflows
+    // back to Int.MIN, leaving `abs < 0` and the digit loop never
+    // entering (output renders as "-" with no magnitude). Use
+    // UInt64 magnitude so every Int round-trips exactly.
     if n == 0 { return "0".clone(); }
     let neg = n < 0;
-    let mut abs = if neg { -n } else { n };
+    let mut mag: UInt64 = if neg {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
     let mut digits: List<Byte> = List.new();
-    while abs > 0 {
-        digits.push(((abs % 10) + 0x30) as Byte);
-        abs = abs / 10;
+    while mag > 0_u64 {
+        digits.push(((mag % 10_u64) + 0x30_u64) as Byte);
+        mag = mag / 10_u64;
     }
     let mut out: List<Byte> = List.new();
     if neg { out.push(0x2D as Byte); }

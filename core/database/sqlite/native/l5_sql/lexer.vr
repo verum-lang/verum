@@ -592,11 +592,22 @@ fn lex_number(st: &mut LexerState) -> Result<SqlToken, SqlLexError> {
 }
 
 fn parse_int_from_bytes(b: &List<Byte>) -> Int64 {
+    // SQL integer literals come from user-supplied SQL — apply
+    // 3-layer overflow defense. Saturates at Int64.MAX on hostile
+    // input (matches SQLite's `sqlite3DecOrHexToI64` best-effort
+    // behaviour: tokens that don't fit get capped, the rest of the
+    // statement still parses).
     let mut v: Int64 = 0 as Int64;
     let mut i: Int = 0;
     while i < b.len() {
+        if i >= 19 || v > 922_337_203_685_477_580_i64 {
+            // Saturate; consume remaining digits so the lexer
+            // cursor lands past the malformed literal.
+            return 9_223_372_036_854_775_807_i64;
+        }
         let d = (b[i] - (0x30 as Byte)) as Int64;
         v = v * 10_i64 + d;
+        if v < 0_i64 { return 9_223_372_036_854_775_807_i64; }
         i = i + 1;
     }
     v
@@ -664,9 +675,24 @@ fn lex_anon_or_indexed(st: &mut LexerState) -> SqlToken {
     if at_eof(st) || !is_digit(peek(st, 0)) {
         return TVariable(VAnon);
     }
+    // `?N` indexed-parameter index. SQLite caps at SQLITE_LIMIT_VARIABLE_NUMBER
+    // (default 999, hard max 32766). Cap the digit run at 6 — enough for any
+    // legal value, blocks `?99999999999999999999`-style overflow attacks
+    // that would wrap n past Int.MAX into a small positive value.
     let mut n: Int = 0;
+    let mut digit_count: Int = 0;
     while !at_eof(st) && is_digit(peek(st, 0)) {
+        if digit_count >= 6 {
+            // Consume the rest of the digits so the cursor advances
+            // past the malformed token; saturate at 32767 (one past
+            // SQLite's hard limit, which downstream handlers reject).
+            while !at_eof(st) && is_digit(peek(st, 0)) {
+                st.pos = st.pos + 1;
+            }
+            return TVariable(VIndexed(32767));
+        }
         n = n * 10 + ((peek(st, 0) - (0x30 as Byte)) as Int);
+        digit_count = digit_count + 1;
         st.pos = st.pos + 1;
     }
     TVariable(VIndexed(n))
