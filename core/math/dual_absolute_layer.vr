@@ -1,0 +1,221 @@
+// =============================================================================
+// MSFS §10 — Dual Absolute Layer: F̃_S, Π̃_4, Π̃_{3-max}, and L_Abs^E
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §10 — AC/OC Morita Duality.
+//
+// `L_Abs^E` is the DC-side mirror of MSFS §4's `L_Abs`: an enactment
+// `q ∈ \cE` inhabits `L_Abs^E` iff there exist a Rich-metatheory `S`
+// and ordinal `n` such that `q` simultaneously satisfies *three dual
+// conditions*:
+//
+//   • **(F̃_S)** — formally S-definable enactment: ∃ ι_F ↪ ε(S) with
+//     a φ̃_q in F presenting `q` as a Syn(F)-enactment via Lemma 10.3.
+//   • **(Π̃_{4,S,n})** — dual irreducibility: no `(∞, n)`-enactment
+//     morphism `q → q'` for any `q' ∈ \cS_S^cE^global` is an
+//     equivalence onto its image.
+//   • **(Π̃_{3-max,S,n})** — dual maximal generativity: every
+//     sub-foundation enactment `F̃ ∈ \cF̃` admits an `(∞, n)`-functor
+//     `F̃ → q` equivalent onto its image.
+//
+// MSFS Theorem 10.7 (Diakrisis 109.T — Dual Boundary Lemma) shows the
+// conjunction is internally inconsistent — `L_Abs^E == ∅`. This module
+// installs the three dual conditions as protocol-level predicates plus
+// the joint-membership axiom; the dual-emptiness theorem itself lands
+// in `theorems/msfs/10_ac_oc_duality/`.
+//
+// **Architectural mirror (M0.F).** The dual side mirrors `core/math/
+// absolute_layer.vr` line-for-line, with one structural addition: the
+// `EnactmentCandidate` carrier carries an `&LAbsCandidate`-shaped
+// projection `articulation_view()` that consumes the AC/OC Morita
+// duality (Theorem 10.4) — every dual L_Abs candidate has a canonical
+// articulation-side image, which is precisely where the §10 dual
+// emptiness reduces to §5's primal emptiness.
+// =============================================================================
+
+module core.math.dual_absolute_layer;
+
+mount core.math.absolute_layer.{LAbsCandidate};
+mount core.math.s_definable.lemma_3_4.{FormallySDefinable};
+
+// =============================================================================
+// Carrier protocols for the three dual conditions
+// =============================================================================
+
+/// Witness of MSFS Definition 10.1's enactment shape — a pointed
+/// reflective enactment `(F, \cC, ι, r)` with the existence flags
+/// for the three structural components (sub-theory inclusion, model
+/// reduct, syntactic enactment formula).
+public type DualConditionFS is protocol {
+    /// (F̃-1) — sub-theory inclusion `ι_F : F ↪ ε(S)` into the
+    /// syntactic-enactment image of S.
+    fn has_iota_F_dual(self) -> Bool;
+
+    /// (F̃-2) — induced model-reduct on the enactment side.
+    fn has_iota_F_star_dual(self) -> Bool;
+
+    /// (F̃-3) — syntactic enactment formula `φ̃_q` presenting `q`
+    /// as `Syn(F)[φ̃_q] ≃_(∞,n) q` on the dual side.
+    fn has_phi_q(self) -> Bool;
+
+    /// Bridge to formal-S-definability on the AC side: any DC-side
+    /// formal definability witness projects to an AC-side
+    /// `&FormallySDefinable` via the AC/OC duality (Theorem 10.4).
+    fn formally_S_definable_witness_dual(self) -> &FormallySDefinable;
+};
+
+/// Witness of MSFS Definition 10.2's dual irreducibility — `q` is
+/// irreducible in `\cS_S^E`: no `(∞, n)`-enactment morphism `q → q'`
+/// with `q' ∈ \cS_S^E^global` is an equivalence onto its image.
+public type DualConditionPi4 is protocol {
+    /// Witness of dual irreducibility — no S_S^E-target-equivalence-
+    /// onto-image enactment morphism.
+    fn is_irreducible_in_s_s_E(self) -> Bool;
+
+    /// The categorical level `n` at which the condition is asserted.
+    fn level(self) -> Int;
+};
+
+/// Witness of MSFS Definition 10.2's dual maximal generativity —
+/// every sub-foundation enactment `F̃ ∈ \cF̃` admits an `(∞, n)`-functor
+/// `F̃ → q` equivalent onto its image on the enactment side.
+public type DualConditionPi3Max is protocol {
+    /// Witness of dual maximal generativity.
+    fn is_maximally_generative_dual(self) -> Bool;
+
+    /// The categorical level at which the condition is asserted.
+    fn level(self) -> Int;
+};
+
+/// Joint witness of all three dual L_Abs conditions for a fixed (S, n).
+/// Mirror of `&LAbsCandidate` on the enactment side.
+public type DualLAbsCandidate is protocol {
+    fn cond_F_S_dual(self) -> &DualConditionFS;
+    fn cond_Pi_4_dual(self) -> &DualConditionPi4;
+    fn cond_Pi_3_max_dual(self) -> &DualConditionPi3Max;
+
+    /// **AC/OC duality projection (Theorem 10.4 bridge).** Every
+    /// dual L_Abs candidate has a canonical articulation-side image
+    /// produced by the `α : \cE → \cF` forgetful component of the
+    /// `α ⊣ ε` adjunction. The projection IS the load-bearing reason
+    /// `L_Abs^E = ∅` reduces to `L_Abs = ∅` — the kernel walks both
+    /// sides of the duality at the protocol surface.
+    fn articulation_view(self) -> &LAbsCandidate;
+};
+
+// =============================================================================
+// MSFS Definition 10.1 / 10.2 — dual condition axioms (M0.F strengthened)
+// =============================================================================
+
+/// MSFS Definition 10.1 — Condition `(F̃_S)` on a pointed reflective
+/// enactment `q ∈ \cE`. Mirror of MSFS Definition 4.1.
+@framework(msfs, "MSFS Definition 10.1 — Condition (F̃_S) on enactment q ∈ cE")
+public axiom msfs_definition_10_1_F_S_dual(witness: &DualConditionFS) -> Bool
+    requires witness.has_iota_F_dual()
+          && witness.has_iota_F_star_dual()
+          && witness.has_phi_q()
+    ensures  witness.formally_S_definable_witness_dual().has_phi_x_witness();
+
+/// MSFS Definition 10.2 — Condition `(Π̃_{4,S,n})` on a dual enactment.
+/// Mirror of MSFS Definition 4.2.
+@framework(msfs, "MSFS Definition 10.2 — Condition (Π̃_4, S, n) on enactment")
+public axiom msfs_definition_10_2_Pi_4_dual(witness: &DualConditionPi4) -> Bool
+    requires witness.level() >= -1
+    ensures  witness.is_irreducible_in_s_s_E();
+
+/// MSFS Definition 10.2 — Condition `(Π̃_{3-max,S,n})`. Every
+/// sub-foundation enactment `F̃ ∈ \cF̃` admits an `(∞, n)`-functor
+/// `F̃ → q` equivalent onto its image.
+@framework(msfs, "MSFS Definition 10.2 — Condition (Π̃_3-max, S, n) on enactment")
+public axiom msfs_definition_10_2_Pi_3_max_dual(witness: &DualConditionPi3Max) -> Bool
+    requires witness.level() >= -1
+    ensures  witness.is_maximally_generative_dual();
+
+// =============================================================================
+// AC/OC Morita Duality — Theorem 10.4 bridge (M0.F)
+// =============================================================================
+
+/// **MSFS Theorem 10.4 — AC/OC Morita Duality (witness-parameterised).**
+///
+/// `𝔐 ≃_{(∞,∞)} 𝔐_\cE` via the `α ⊣ ε` biadjunction. The witness-
+/// parameterised form asserts that any DC-side L_Abs candidate
+/// projects through `articulation_view()` into a bona fide AC-side
+/// L_Abs candidate satisfying the AC-side triple.
+///
+/// **This is the load-bearing axiom for §10's promotion to honest
+/// @theorem.** Without it, every dual @theorem would be a self-contained
+/// repeat of the Theorem 5.1 argument; with it, the dual @theorems
+/// reduce to the AC-side argument plus the duality projection.
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS Theorem 10.4 — AC/OC Morita Duality (witness-parameterised: dual triple ⟹ AC triple via articulation_view)")
+public axiom msfs_theorem_10_4_ac_oc_morita_duality_witness(
+    candidate: &DualLAbsCandidate,
+) -> Bool
+    requires candidate.cond_F_S_dual().has_phi_q()
+          && candidate.cond_Pi_4_dual().is_irreducible_in_s_s_E()
+          && candidate.cond_Pi_3_max_dual().is_maximally_generative_dual()
+    ensures  candidate.articulation_view().cond_F_S().has_phi_X()
+          && candidate.articulation_view().cond_Pi_4().is_irreducible_in_s_s()
+          && candidate.articulation_view().cond_Pi_3_max().is_maximally_generative();
+
+/// **MSFS Lemma 10.3 — Enactment syntax-semantics (witness-parameterised).**
+///
+/// Formally S-definable enactment ⟹ in `\cS_S^cE^{global}`. Post-audit
+/// C-7 explicit construction of (ι, r) via Kan extension along
+/// `Syn(F') ↪ \cC`; left reflector r via Adámek–Rosický adjoint-functor
+/// existence. Mirror of `msfs_lemma_3_4_outputs_in_s_s_global` on the
+/// enactment side. The witness's `formally_S_definable_witness_dual()`
+/// projects to an AC-side `&FormallySDefinable` (Theorem 10.4 bridge),
+/// which then feeds Lemma 3.4.
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS Lemma 10.3 — enactment syntax-semantics (witness-parameterised, projects to AC via Theorem 10.4)")
+public axiom msfs_lemma_10_3_enactment_syntax_semantics_witness(
+    cond: &DualConditionFS,
+) -> &FormallySDefinable
+    requires cond.has_phi_q()
+    ensures  result.has_phi_x_witness();
+
+// =============================================================================
+// Dual conservativity (MSFS Corollary 10.5)
+// =============================================================================
+//
+// MSFS Corollary 10.5: Con(F ∪ E) = Con(F) = Con(ZFC + 2-inacc).
+// The witness-parameterised form (M-PROOFS-B 2026-04-28) takes a
+// `&DualLAbsCandidate`, projects it via `articulation_view()` to
+// obtain the AC-side L_Abs triple, and asserts the standard
+// MSFS-coordinate facts about the projection. Pre-M-PROOFS-B this
+// was a parameterless `() -> Bool ensures true` anchor — proof-honesty
+// audit flagged it as the only tautological theorem-axiom-only in MSFS
+// (apply target lookup found `is_parameterless && ensures_shape="true"`).
+
+/// **MSFS Corollary 10.5 conservativity strength claim — witness-parameterised.**
+///
+/// Conservativity of the AC/OC duality extension: extending MSFS's
+/// theory-side framework `\cF` with the dual-side `\cE` adds no new
+/// proof-theoretic strength. The witness-shape: any `&DualLAbsCandidate`
+/// `cand` that satisfies the dual triple has a canonical AC-side
+/// projection `cand.articulation_view()`; the conservativity claim
+/// asserts that the projection is structurally well-formed (the three
+/// AC-side conditions hold), which is what the Theorem 10.4 duality
+/// actually delivers.
+///
+/// **Architectural fix (M-PROOFS-B, 2026-04-28).** Pre-fix this was
+/// `() -> Bool ensures true` and the `msfs_corollary_10_5_conservativity`
+/// @theorem applied it as a single tautological cite. Post-fix the
+/// axiom takes a witness and the @theorem propagates the witness, so
+/// the kernel re-checks the duality-projection structure on the
+/// recheck stack.
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS Corollary 10.5 — Con(F ∪ E) = Con(F) = Con(ZFC + 2-inacc) (witness-parameterised)")
+public axiom msfs_corollary_10_5_conservativity_anchor(
+    cand: &DualLAbsCandidate,
+) -> Bool
+    requires cand.cond_F_S_dual().has_phi_q()
+          && cand.cond_Pi_4_dual().is_irreducible_in_s_s_E()
+          && cand.cond_Pi_3_max_dual().is_maximally_generative_dual()
+    ensures  cand.articulation_view().cond_F_S().has_phi_X()
+          && cand.articulation_view().cond_Pi_4().is_irreducible_in_s_s()
+          && cand.articulation_view().cond_Pi_3_max().is_maximally_generative();

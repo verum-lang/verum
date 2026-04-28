@@ -37,14 +37,26 @@ nested-generic structure (each level embeds two of the previous). The
 structurally-equal-types deduplication in the kernel's normalize step
 prevents exponential blow-up; compilation = monomorphization runs.
 
-### 1.2 Refinement predicates with exponential SMT cost
+### 1.2 Refinement predicates with exponential SMT cost — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — depends on round-1 vector 5.1 (Z3 timeout policy).
+**Status:** DEFENSE CONFIRMED — closed by round-1 §5.1 (Z3 timeout
+fail-closed) closure on 2026-04-28. Timeout policy: every consumer of
+`SatResult::Unknown` either returns `Err(VerificationError::Timeout/
+Unknown)` or returns a sound-conservative answer that keeps runtime
+checks active. Pathological predicates with exponential SMT cost hit
+the 30s default timeout and are REJECTED, never silent-accepted.
 
-Deep nested ANDs over many free variables. Z3 nominally handles QF_LIA in
-PSPACE but pathological predicates can hit timeout. Verify the timeout
-policy is fail-closed (round 1) AND that timeout itself doesn't leak
-attacker-controllable wall-clock.
+**Wall-clock leak concern:** the default timeout is configured at
+`verum_smt/src/z3_backend.rs:76` as `global_timeout_ms: Maybe::Some(30000)`.
+This is a fixed budget, NOT a function of input — attackers cannot
+extend wall-clock observability beyond the configured budget by crafting
+pathological inputs.
+
+**Audit trail:**
+- `vcs/red-team/round-1-architecture.md §5.1` — 9-site audit table
+- `vcs/specs/L0-critical/verification/z3_timeout_fail_closed.vr` — surface guardrail
+- `crates/verum_smt/tests/timeout_fail_closed_invariant.rs` — Rust-level invariant tests
+- `vcs/specs/L1-core/refinement/smt/proof_timeout.vr` — broader L1 surface
 
 ### 1.3 Module dependency graph fan-out / fan-in — PARTIAL DEFENSE 2026-04-28
 
@@ -226,7 +238,7 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | Vector | Status | Follow-up |
 | --- | --- | --- |
 | 1.1 Deep generic | **PARTIAL** | 32-level guardrail (2026-04-28); 1024-level fuzz pending |
-| 1.2 SMT exponential | PENDING | depends on 5.1 |
+| 1.2 SMT exponential | **DEFENSE CONFIRMED** | closed via round-1 §5.1 (2026-04-28) |
 | 1.3 Module fan-out | **PARTIAL** | 16-leaf+hub guardrail (2026-04-28); 1000-module pending |
 | 2.1 Alloc pressure | PARTIAL | wire-frame done |
 | 2.2 Refinement caching | PENDING | hot-loop test |
@@ -240,12 +252,12 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 5.1 1000-module load | PENDING | synthetic gen |
 | 5.2 Deep cfg | **PARTIAL** | 12-cfg guardrail (2026-04-28); 1024+ fuzz pending |
 
-**2 vectors confirmed defended (channel backlog, 10^6 tasks), 5 partial
-defences (alloc pressure, deep-generic compilation, module fan-out,
-deep-cfg, plus ~170+ wire-frame sites swept), 7 pending** post 2026-04-28
-RT-3.1.1 / RT-3.1.3 / RT-3.5.2 / RT-3.2.4 / RT-3.2.3 closures. Sections
-A-C above document performance-class invariants already upheld through
-the closed audit.
+**3 vectors confirmed defended (channel backlog, 10^6 tasks, SMT exponential),
+5 partial defences (alloc pressure, deep-generic compilation, module
+fan-out, deep-cfg, plus ~170+ wire-frame sites swept), 6 pending** post
+2026-04-28 RT-3.1.1 / RT-3.1.3 / RT-3.5.2 / RT-3.2.4 / RT-3.2.3 / RT-3.1.2
+closures. Sections A-C above document performance-class invariants already
+upheld through the closed audit.
 
 The wire-frame and crypto hot paths now have allocation-free bulk-copy
 primitives in place; further work is in the synthetic-input adversarial
