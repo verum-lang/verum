@@ -1977,10 +1977,38 @@ fn emit_filter(
 // clear `unsupported` at codegen entry so we don't silently drop it.
 // -----------------------------------------------------------------------------
 
+/// Evaluate a constant integer expression at compile time.  Recognises
+/// integer literals, unary `+` / `-` / `~`, and the four common
+/// arithmetic operators on integer-folded sub-expressions.  Used by
+/// LIMIT / OFFSET lowering — real SQL pagination commonly writes
+/// `LIMIT -1`, `LIMIT 50 + 50`, `OFFSET (page-1) * page_size` with
+/// constant folds.  Anything that requires a parameter binding or a
+/// column reference returns `None` so the caller can route to a
+/// dynamic-evaluation path.
 fn eval_int_const(e: &Expr) -> Maybe<Int> {
     match e {
         ELit(ref lit) => match lit {
             LInt(i) => Some(i as Int),
+            _ => None,
+        },
+        EUnary(op, ref inner) => match eval_int_const(inner) {
+            Some(v) => match op {
+                UNeg    => Some(0 - v),
+                UPlus   => Some(v),
+                UBitNot => Some(!v),
+                UNot    => None,        // logical negation is bool, not int
+            },
+            None => None,
+        },
+        EBinary(op, ref a, ref b) => match (eval_int_const(a), eval_int_const(b)) {
+            (Some(x), Some(y)) => match op {
+                BAdd => Some(x + y),
+                BSub => Some(x - y),
+                BMul => Some(x * y),
+                BDiv => if y == 0 { None } else { Some(x / y) },
+                BMod => if y == 0 { None } else { Some(x % y) },
+                _    => None,
+            },
             _ => None,
         },
         _ => None,
@@ -2004,10 +2032,23 @@ fn emit_limit(
         }
         None => 0,
     };
-    if lim_val <= 0 {
-        // LIMIT 0 — the scan body emits nothing.
+    // SQLite convention: LIMIT 0 emits no rows; LIMIT < 0 means unlimited
+    // (used by e.g. `LIMIT -1 OFFSET N` to skip rows but not cap).
+    if lim_val == 0 {
         return Ok(());
     }
+    // For LIMIT < 0 (unlimited) without OFFSET, skip the limit machinery
+    // entirely.  With OFFSET, use a sentinel limit large enough that the
+    // count register will never reach it within a single statement
+    // (2^62 ~= 4.6 × 10^18 rows).
+    let lim_eff: Int = if lim_val < 0 {
+        if off_val == 0 {
+            return emit_plan(st, child);
+        }
+        4611686018427387904   // 1 << 62
+    } else {
+        lim_val
+    };
 
     // Preamble: allocate regs + seed them.
     let count_reg = st.regs.alloc();
@@ -2015,7 +2056,7 @@ fn emit_limit(
     let limit_reg = st.regs.alloc();
     let _ = st.program.emit(Integer(0, count_reg));
     let _ = st.program.emit(Integer(1, one_reg));
-    let _ = st.program.emit(Integer(lim_val, limit_reg));
+    let _ = st.program.emit(Integer(lim_eff, limit_reg));
     let mut offset_reg: Int = -1;
     let mut skip_reg: Int = -1;
     if off_val > 0 {
