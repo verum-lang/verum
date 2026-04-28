@@ -1162,6 +1162,18 @@ impl VbcCodegen {
                 );
             }
         }
+        // #201 diagnostic — env-var-gated trace that fires WITHOUT
+        // RUST_LOG=trace (which not every run-interpreter invocation
+        // sets). Reports per-module net function count so a silent
+        // skip of `core.base.memory` is immediately visible.
+        if std::env::var("VERUM_TRACE_DECL").is_ok() {
+            let net = funcs_after.saturating_sub(funcs_before);
+            let status = if result.is_ok() { "ok" } else { "ERR" };
+            eprintln!(
+                "[decl-collect] {} {}: +{} funcs (total {})",
+                module_name, status, net, funcs_after
+            );
+        }
         self.ctx.current_source_module = prev;
         result
     }
@@ -4555,6 +4567,32 @@ impl VbcCodegen {
             return_type_name,
             return_type_inner: None,
         };
+
+        // #201 diagnostic — env-var-gated trace of every register_function
+        // call. Set `VERUM_TRACE_REGISTER=1` (or `=try_alloc` for a
+        // substring-filtered trace) to surface registration attempts on the
+        // run-interpreter path without flooding normal runs.
+        //
+        // The substring filter is helpful for the original #201 reproduction
+        // ("ZERO entries match try_alloc") — running with
+        //   VERUM_TRACE_REGISTER=try_alloc verum run --interp file.vr
+        // shows whether `try_alloc` reaches register_function at all, and
+        // under what `effective_module`.
+        if let Ok(filter) = std::env::var("VERUM_TRACE_REGISTER") {
+            let pass = filter == "1" || filter.is_empty()
+                || base_name.contains(filter.as_str())
+                || name.contains(filter.as_str());
+            if pass {
+                let eff_mod = self.ctx.current_source_module
+                    .as_deref()
+                    .unwrap_or(&self.config.module_name);
+                eprintln!(
+                    "[register-fn] module={} base={} mangled={} arity={} prefer_existing={}",
+                    eff_mod, base_name, name, info.param_count,
+                    self.ctx.prefer_existing_functions
+                );
+            }
+        }
 
         self.ctx.register_function(name.clone(), info.clone());
 
