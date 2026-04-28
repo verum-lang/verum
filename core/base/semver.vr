@@ -79,6 +79,40 @@ public type SemVerError is
     | InvalidIdentifier(Text)
     | Overflow(Text);
 
+implement Display for SemVerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)         => f.write_str(f"semver: malformed ({reason})".as_str()),
+            LeadingZero(field)        => f.write_str(f"semver: leading zero on {field}".as_str()),
+            InvalidIdentifier(field)  => f.write_str(f"semver: invalid identifier ({field})".as_str()),
+            Overflow(field)           => f.write_str(f"semver: numeric overflow ({field})".as_str()),
+        }
+    }
+}
+
+implement Debug for SemVerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)         => f.write_str(f"Malformed({reason})".as_str()),
+            LeadingZero(field)        => f.write_str(f"LeadingZero({field})".as_str()),
+            InvalidIdentifier(field)  => f.write_str(f"InvalidIdentifier({field})".as_str()),
+            Overflow(field)           => f.write_str(f"Overflow({field})".as_str()),
+        }
+    }
+}
+
+implement Eq for SemVerError {
+    fn eq(&self, other: &SemVerError) -> Bool {
+        match (self, other) {
+            (Malformed(a),         Malformed(b))         => a == b,
+            (LeadingZero(a),       LeadingZero(b))       => a == b,
+            (InvalidIdentifier(a), InvalidIdentifier(b)) => a == b,
+            (Overflow(a),          Overflow(b))          => a == b,
+            _ => false,
+        }
+    }
+}
+
 // UInt64.MAX = 18_446_744_073_709_551_615 — exactly 20 decimal digits.
 // Any decimal string longer than 20 digits cannot fit; reject pre-loop.
 const MAX_NUMERIC_DIGITS: Int = 20;

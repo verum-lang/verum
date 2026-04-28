@@ -57,6 +57,39 @@ public type GlobError is
     | EmptyClass
     | TrailingEscape;
 
+implement Display for GlobError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            UnclosedClass    => "glob: unclosed character class",
+            EmptyClass       => "glob: empty character class",
+            TrailingEscape   => "glob: trailing backslash",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for GlobError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            UnclosedClass    => "UnclosedClass",
+            EmptyClass       => "EmptyClass",
+            TrailingEscape   => "TrailingEscape",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for GlobError {
+    fn eq(&self, other: &GlobError) -> Bool {
+        match (self, other) {
+            (UnclosedClass,  UnclosedClass)  => true,
+            (EmptyClass,     EmptyClass)     => true,
+            (TrailingEscape, TrailingEscape) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Compiled pattern
 // =============================================================================

@@ -722,6 +722,35 @@ implement SegmentError {
     }
 }
 
+implement Display for SegmentError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for SegmentError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MmapFailed { code }    => f.write_str(f"MmapFailed {{ code: {code} }}".as_str()),
+            MunmapFailed { code }  => f.write_str(f"MunmapFailed {{ code: {code} }}".as_str()),
+            OutOfMemory            => f.write_str("OutOfMemory"),
+            UnsupportedOs { op }   => f.write_str(f"UnsupportedOs {{ op: {op} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for SegmentError {
+    fn eq(&self, other: &SegmentError) -> Bool {
+        match (self, other) {
+            (MmapFailed { code: a },    MmapFailed { code: b })    => a == b,
+            (MunmapFailed { code: a },  MunmapFailed { code: b })  => a == b,
+            (OutOfMemory,               OutOfMemory)               => true,
+            (UnsupportedOs { op: a },   UnsupportedOs { op: b })   => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // OS Operations
 // =============================================================================

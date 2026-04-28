@@ -264,15 +264,18 @@ impl Repl {
         // 2b. Script-mode top-level statements: let-bindings, defer,
         // expression-statements, sequences thereof. Parses through
         // the same `parse_module_script_str` that drives `verum
-        // hello.vr`, so what works at the REPL prompt also works in
-        // a script file. The synthesised `__verum_script_main`
-        // wrapper signals that real statements were present (a
-        // pure-decl input would have been caught by branch 2 above).
-        // The input is wrapped in a fresh REPL function and
-        // executed; captured stdout is returned. State persistence
-        // across snippets (so `let x = 1` in one prompt visible to
-        // the next) is REPL-state infrastructure — landed
-        // separately.
+        // hello.vr`.
+        //
+        // Inline-let extraction (SCRIPT-12b): inputs of the shape
+        // `let NAME = EXPR; <residual>` get the binding lifted into
+        // a session-level `const` before the residual is wrapped
+        // and executed. This means `let x = 1; print(x);` typed at
+        // the prompt makes `x` visible to subsequent prompts, not
+        // just to the wrapper body. Multi-let and complex
+        // accumulation across the residual (e.g.,
+        // `let x = 1; let y = x + 1; print(y);` lifting both `x`
+        // AND `y`) is recursive: extract leading let, recurse on
+        // the residual until no more leading lets remain.
         let lexer = Lexer::new(trimmed, file_id);
         let _ = lexer; // re-create below; the previous lexer was consumed
         if let Ok(module) = parser.parse_module_script_str(trimmed, file_id) {
@@ -284,6 +287,20 @@ impl Repl {
                 }
             });
             if has_wrapper {
+                if let Some((leading_let, residual)) = split_leading_let(trimmed) {
+                    // Persist the leading `let NAME = EXPR;` as a
+                    // session-level binding. Strip the trailing
+                    // `;` so the recursive `evaluate` call hits
+                    // branch 1's `parse_repl_let` (which expects
+                    // the bare let-form without terminator),
+                    // not this branch again.
+                    let bare = leading_let.trim_end_matches(';');
+                    let _ = self.evaluate(bare)?;
+                    if residual.trim().is_empty() {
+                        return Ok("".into());
+                    }
+                    return self.evaluate(&residual);
+                }
                 self.eval_counter += 1;
                 let func_name = format!("__repl_script_{}", self.eval_counter);
                 let wrapper = format!(
@@ -401,6 +418,70 @@ fn is_simple_ident(s: &str) -> bool {
         _ => return false,
     }
     chars.all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Split an input of the shape `let NAME [: TYPE] = EXPR; <residual>`
+/// into the leading `let` statement string and the residual.
+/// Returns `None` if the input doesn't START with `let` or doesn't
+/// have a top-level `;` terminating the binding.
+///
+/// "Top-level `;`" means a semicolon outside any matched `()`,
+/// `[]`, `{}`, or string literal — so `let m = Map { a: 1, b: 2 };`
+/// (containing `;`-bearing nested blocks) splits at the OUTER
+/// terminator. Leading whitespace is allowed before `let`.
+///
+/// Used by the REPL's script-mode wrapper to lift a leading
+/// binding into a session-level const before executing the
+/// residual, so subsequent prompts see the binding.
+fn split_leading_let(input: &str) -> Option<(String, String)> {
+    let trimmed = input.trim_start();
+    if !trimmed.starts_with("let ") && !trimmed.starts_with("let\t") {
+        return None;
+    }
+    // Find the matching top-level `;` that terminates the binding.
+    let bytes = trimmed.as_bytes();
+    let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
+    let mut depth_brack = 0i32;
+    let mut in_string: Option<u8> = None; // active quote byte
+    let mut prev_byte = 0u8;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = in_string {
+            // String literal: walk until the matching close quote.
+            // Simple escape: backslash skips the next byte.
+            if b == b'\\' {
+                i = i.saturating_add(2);
+                prev_byte = 0;
+                continue;
+            }
+            if b == q {
+                in_string = None;
+            }
+        } else {
+            match b {
+                b'"' | b'\'' => in_string = Some(b),
+                b'(' => depth_paren += 1,
+                b')' => depth_paren -= 1,
+                b'{' => depth_brace += 1,
+                b'}' => depth_brace -= 1,
+                b'[' => depth_brack += 1,
+                b']' => depth_brack -= 1,
+                b';' if depth_paren == 0 && depth_brace == 0 && depth_brack == 0 => {
+                    // Found the binding terminator.
+                    let _ = prev_byte;
+                    let leading = trimmed[..=i].to_string();
+                    let residual = trimmed[i + 1..].to_string();
+                    return Some((leading, residual));
+                }
+                _ => {}
+            }
+        }
+        prev_byte = b;
+        i += 1;
+    }
+    None
 }
 
 fn is_top_level_item(item: &verum_ast::Item) -> bool {

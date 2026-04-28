@@ -69,6 +69,37 @@ public type SnowflakeError is
     | ClockRegressed(UInt64)    // last_ts - now_ms (how far back)
     | ClockBeforeEpoch(UInt64); // epoch_ms - now_ms (how far before the configured epoch)
 
+implement Display for SnowflakeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WorkerIdOutOfRange(id) => f.write_str(f"Snowflake: worker id {id} out of range".as_str()),
+            ClockRegressed(ms)     => f.write_str(f"Snowflake: clock regressed by {ms}ms".as_str()),
+            ClockBeforeEpoch(ms)   => f.write_str(f"Snowflake: clock {ms}ms before configured epoch".as_str()),
+        }
+    }
+}
+
+implement Debug for SnowflakeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WorkerIdOutOfRange(id) => f.write_str(f"WorkerIdOutOfRange({id})".as_str()),
+            ClockRegressed(ms)     => f.write_str(f"ClockRegressed({ms})".as_str()),
+            ClockBeforeEpoch(ms)   => f.write_str(f"ClockBeforeEpoch({ms})".as_str()),
+        }
+    }
+}
+
+implement Eq for SnowflakeError {
+    fn eq(&self, other: &SnowflakeError) -> Bool {
+        match (self, other) {
+            (WorkerIdOutOfRange(a), WorkerIdOutOfRange(b)) => a == b,
+            (ClockRegressed(a),     ClockRegressed(b))     => a == b,
+            (ClockBeforeEpoch(a),   ClockBeforeEpoch(b))   => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Generator
 // =============================================================================

@@ -192,6 +192,38 @@ implement ArenaError {
     }
 }
 
+implement Display for ArenaError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for ArenaError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OutOfMemory { requested, available }   => f.write_str(f"OutOfMemory {{ requested: {requested}, available: {available} }}".as_str()),
+            ExceedsMaxCapacity { requested, max }  => f.write_str(f"ExceedsMaxCapacity {{ requested: {requested}, max: {max} }}".as_str()),
+            InvalidAlignment { alignment }         => f.write_str(f"InvalidAlignment {{ alignment: {alignment} }}".as_str()),
+            AlreadyDestroyed                       => f.write_str("AlreadyDestroyed"),
+        }
+    }
+}
+
+implement Eq for ArenaError {
+    fn eq(&self, other: &ArenaError) -> Bool {
+        match (self, other) {
+            (OutOfMemory { requested: ra, available: aa },
+             OutOfMemory { requested: rb, available: ab })   => ra == rb && aa == ab,
+            (ExceedsMaxCapacity { requested: ra, max: ma },
+             ExceedsMaxCapacity { requested: rb, max: mb })  => ra == rb && ma == mb,
+            (InvalidAlignment { alignment: a },
+             InvalidAlignment { alignment: b })              => a == b,
+            (AlreadyDestroyed, AlreadyDestroyed)             => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Generational Arena
 // =============================================================================

@@ -26,4 +26,56 @@ public type ProtobufError is
     /// Deprecated start-group / end-group wire types encountered.
     | UnsupportedGroup;
 
+implement Display for ProtobufError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnexpectedEof                    => f.write_str("protobuf: unexpected EOF"),
+            VarintOverflow                   => f.write_str("protobuf: varint exceeded 10 bytes"),
+            InvalidWireType(b)               => f.write_str(f"protobuf: invalid wire-type tag {b}".as_str()),
+            InvalidLength { declared, available } =>
+                f.write_str(f"protobuf: declared length {declared} exceeds available {available}".as_str()),
+            LengthTooLarge { declared, limit } =>
+                f.write_str(f"protobuf: declared length {declared} exceeds safety limit {limit}".as_str()),
+            InvalidUtf8                      => f.write_str("protobuf: invalid UTF-8 in string field"),
+            InvalidFieldNumber(n)            => f.write_str(f"protobuf: invalid field number {n}".as_str()),
+            UnsupportedGroup                 => f.write_str("protobuf: deprecated group wire type"),
+        }
+    }
+}
+
+implement Debug for ProtobufError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnexpectedEof                    => f.write_str("UnexpectedEof"),
+            VarintOverflow                   => f.write_str("VarintOverflow"),
+            InvalidWireType(b)               => f.write_str(f"InvalidWireType({b})".as_str()),
+            InvalidLength { declared, available } =>
+                f.write_str(f"InvalidLength {{ declared: {declared}, available: {available} }}".as_str()),
+            LengthTooLarge { declared, limit } =>
+                f.write_str(f"LengthTooLarge {{ declared: {declared}, limit: {limit} }}".as_str()),
+            InvalidUtf8                      => f.write_str("InvalidUtf8"),
+            InvalidFieldNumber(n)            => f.write_str(f"InvalidFieldNumber({n})".as_str()),
+            UnsupportedGroup                 => f.write_str("UnsupportedGroup"),
+        }
+    }
+}
+
+implement Eq for ProtobufError {
+    fn eq(&self, other: &ProtobufError) -> Bool {
+        match (self, other) {
+            (UnexpectedEof,                  UnexpectedEof)                  => true,
+            (VarintOverflow,                 VarintOverflow)                 => true,
+            (InvalidWireType(a),             InvalidWireType(b))             => a == b,
+            (InvalidLength { declared: da, available: aa },
+             InvalidLength { declared: db, available: ab }) => da == db && aa == ab,
+            (LengthTooLarge { declared: da, limit: la },
+             LengthTooLarge { declared: db, limit: lb })   => da == db && la == lb,
+            (InvalidUtf8,                    InvalidUtf8)                    => true,
+            (InvalidFieldNumber(a),          InvalidFieldNumber(b))          => a == b,
+            (UnsupportedGroup,               UnsupportedGroup)               => true,
+            _ => false,
+        }
+    }
+}
+
 public type DecodeResult<T> is Result<T, ProtobufError>;
