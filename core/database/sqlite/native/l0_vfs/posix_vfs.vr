@@ -31,7 +31,7 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount sys.common.{
     FileDesc, OSError,
-    pread, pwrite, full_fsync,
+    pread, pread_raw, pwrite, full_fsync,
     file_size as sys_file_size,
     truncate as sys_truncate,
     access as sys_access,
@@ -225,9 +225,16 @@ implement SqliteFile for PosixFile {
         if self.closed {
             return Err(VfsError { kind: Closed, message: "read on closed file" });
         }
-        match pread(self.fd, buf, offset) {
-            Ok(n) => {
-                if n < buf.len() {
+        // Same RUNTIME-3-DEEPER sidestep as PosixVfs.open / .delete:
+        // hand a raw pointer + count rather than a `&mut [Byte]` slice
+        // so the Tier-0 interpreter doesn't recurse on slice-arg coerce.
+        // pread writes through the &unsafe Byte; the underlying
+        // List<Byte> storage is already heap-allocated and writable
+        // even from a `&mut` reference held inside a `&self` body.
+        let n = buf.len();
+        match pread_raw(self.fd, buf.as_ptr() as &unsafe Byte, n, offset) {
+            Ok(read_n) => {
+                if read_n < n {
                     Err(VfsError { kind: ShortRead, message: "pread returned short" })
                 } else {
                     Ok(())
