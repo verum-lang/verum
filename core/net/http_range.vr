@@ -65,7 +65,19 @@ public type ResolvedRange is {
 
 public type RangeError is
       Malformed(Text)
-    | UnsatisfiableRange;
+    | UnsatisfiableRange
+    | TooManyRanges { declared: Int, limit: Int };
+
+/// Hard cap on the number of byte ranges in a single `Range:` header.
+/// Apache CVE-2011-3192 ("killapache") demonstrated the DoS vector:
+/// a peer sending a Range header with thousands of overlapping ranges
+/// forces the server to allocate per-range buffers, sort/merge them,
+/// and stream each one — multiplying the per-request memory + CPU
+/// cost. RFC 7233 doesn't mandate a cap; nginx caps at 1000 by
+/// default, Apache caps at 200 (with mod_security commonly tightened
+/// further). 256 is a generous middle ground that exceeds every
+/// reasonable client's needs while bounding the worst case.
+public const MAX_RANGE_SPECS: Int = 256;
 
 // =============================================================================
 // Request parser
@@ -86,6 +98,15 @@ public fn parse_range_header(value: &Text) -> Result<RangeSet, RangeError> {
     }
     let mut specs: List<RangeSpec> = [];
     let parts = split_commas(rest.as_slice());
+    // Apache CVE-2011-3192 hardening — reject Range headers declaring
+    // more than MAX_RANGE_SPECS specs at the parser boundary, before
+    // any per-spec allocation. Counting `parts.len()` over-estimates
+    // (empty parts after trimming) but the comma-count is the
+    // attacker's input cost; rejecting at that fan-out level is
+    // cheaper than letting them allocate parsed RangeSpec values.
+    if parts.len() > MAX_RANGE_SPECS {
+        return Err(RangeError.TooManyRanges { declared: parts.len(), limit: MAX_RANGE_SPECS });
+    }
     let mut i: Int = 0;
     while i < parts.len() {
         let trimmed = trim_ws(parts[i].as_slice());
