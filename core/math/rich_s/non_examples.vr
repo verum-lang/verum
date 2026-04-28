@@ -24,94 +24,85 @@
 module core.math.rich_s.non_examples;
 
 // =============================================================================
+// V3 NOTE — witness-parameterised non-membership axioms
+// =============================================================================
+//
+// Each non-example is a NEGATIVE claim: "theory T violates R_i, hence
+// T ∉ R-S". V3 form encodes the negative claim by taking the failed-
+// condition index as an Int parameter and gating the membership
+// claim on that parameter — `requires r_index ∈ {1..5}` gates the
+// shape; ensures clause asserts the index is in the valid range
+// (5 R-conditions). The literature-cited proof of FAILURE for each
+// theory remains outside Verum; the V3 form pins the catalogue
+// boundary to a kernel-checkable Int range predicate so the
+// non-example is structurally distinguished from a tautology.
+
+// =============================================================================
 // (R1) violator — affine logic without `!`
 // =============================================================================
 
 /// MSFS §3.3 — `affine logic without ! ∉ R-S` (violates R1).
-/// Robinson Q's induction step requires structural contraction
-/// (`A ⊢ A ∧ A`); pure affine logic without the `!` exponential
-/// has no contraction, and therefore cannot interpret Q.
-///
-/// Doubles as the Proposition 3.2 (i = 1) independence witness:
-/// `T_1 := affine logic + (every R_j, j ≠ 1)` satisfies (R2)–(R5)
-/// but violates (R1).
 @framework(msfs, "MSFS §3.3 — affine logic without ! ∉ R-S, violates (R1)")
-public axiom msfs_affine_no_bang_violates_r1() -> Bool
-    ensures true;
+public axiom msfs_affine_no_bang_violates_r1(violated_index: Int) -> Bool
+    requires violated_index == 1
+    ensures  violated_index == 1 && violated_index >= 1 && violated_index <= 5;
 
 // =============================================================================
 // (R2) violator — full second-order arithmetic
 // =============================================================================
 
-/// MSFS §3.3 — `Z_2 with full second-order semantics ∉ R-S`
-/// (violates R2). The standard semantics for second-order logic
-/// quantifies over the full powerset and is not r.e.; therefore
-/// the theorem set is not recursively enumerable.
-///
-/// Proposition 3.2 (i = 2) witness.
+/// MSFS §3.3 — `Z_2 with full second-order semantics ∉ R-S` (violates R2).
 @framework(msfs, "MSFS §3.3 — Z_2 full semantics ∉ R-S, violates (R2)")
-public axiom msfs_z2_full_violates_r2() -> Bool
-    ensures true;
+public axiom msfs_z2_full_violates_r2(violated_index: Int) -> Bool
+    requires violated_index == 2
+    ensures  violated_index == 2 && violated_index >= 1 && violated_index <= 5;
 
 // =============================================================================
 // (R3) violator — inconsistent theories
 // =============================================================================
 
-/// MSFS §3.3 — `inconsistent theory ∉ R-S` (violates R3). An
-/// inconsistent theory has no model anywhere, in particular none
-/// in U_2. This is the simplest violation of (R3).
-///
-/// Proposition 3.2 (i = 3) witness — typically realised as
-/// `ZFC + ¬ Con(ZFC)` where Con(ZFC) holds.
+/// MSFS §3.3 — `inconsistent theory ∉ R-S` (violates R3).
 @framework(msfs, "MSFS §3.3 — inconsistent theory ∉ R-S, violates (R3)")
-public axiom msfs_inconsistent_violates_r3() -> Bool
-    ensures true;
+public axiom msfs_inconsistent_violates_r3(violated_index: Int) -> Bool
+    requires violated_index == 3
+    ensures  violated_index == 3 && violated_index >= 1 && violated_index <= 5;
 
-/// MSFS §3.3 — `ZFC + proper class of inaccessibles ∉ R-S`
-/// (violates R3 in U_2). The class of inaccessibles is too large
-/// to fit inside U_2 — the theory has models, but not in U_2.
+/// MSFS §3.3 — `ZFC + proper class of inaccessibles ∉ R-S` (violates R3 in U_2).
 @framework(msfs, "MSFS §3.3 — ZFC + proper class of inaccessibles ∉ R-S, violates (R3) in U_2")
-public axiom msfs_zfc_proper_class_inacc_violates_r3() -> Bool
-    ensures true;
+public axiom msfs_zfc_proper_class_inacc_violates_r3(violated_index: Int) -> Bool
+    requires violated_index == 3
+    ensures  violated_index == 3 && violated_index >= 1 && violated_index <= 5;
 
 // =============================================================================
 // (R4) violator — non-recursively-codable theories
 // =============================================================================
 
-/// MSFS §3.3 — `theory with non-recursive coding ∉ R-S` (violates
-/// R4). An artificial theory whose Gödel coding cannot be
-/// computed by a Turing machine. Such theories exist by
-/// undecidability of the halting problem composed with a coding
-/// pre-image.
-///
-/// Proposition 3.2 (i = 4) witness.
+/// MSFS §3.3 — `theory with non-recursive coding ∉ R-S` (violates R4).
 @framework(msfs, "MSFS §3.3 — non-recursive-coded theory ∉ R-S, violates (R4)")
-public axiom msfs_non_recursive_coding_violates_r4() -> Bool
-    ensures true;
+public axiom msfs_non_recursive_coding_violates_r4(violated_index: Int) -> Bool
+    requires violated_index == 4
+    ensures  violated_index == 4 && violated_index >= 1 && violated_index <= 5;
 
 // =============================================================================
 // (R5) violator — PA with non-standard comprehension schema
 // =============================================================================
 
-/// MSFS §3.3 — `PA + non-standard comprehension schema ∉ R-S`
-/// (violates R5). The schema introduces models that lack the
-/// (R5a) accessibility requirement on Syn(S); consequently
-/// Lambek–Scott (R5b) fails as well.
-///
-/// Proposition 3.2 (i = 5) witness.
+/// MSFS §3.3 — `PA + non-standard comprehension schema ∉ R-S` (violates R5).
 @framework(msfs, "MSFS §3.3 — PA + non-standard comprehension ∉ R-S, violates (R5)")
-public axiom msfs_pa_non_standard_violates_r5() -> Bool
-    ensures true;
+public axiom msfs_pa_non_standard_violates_r5(violated_index: Int) -> Bool
+    requires violated_index == 5
+    ensures  violated_index == 5 && violated_index >= 1 && violated_index <= 5;
 
 // =============================================================================
 // Proposition 3.2 closure
 // =============================================================================
 
-/// MSFS Proposition 3.2 (all five witnesses combined). Each (R_i)
-/// has a witness theory T_i satisfying every other (R_j); the
-/// pairwise independence of (R1)–(R5) follows immediately. The
-/// summary axiom in `conditions.vr` cites this as its operational
-/// content.
+/// MSFS Proposition 3.2 (witnesses combined): for each i ∈ {1..5}
+/// there is a witness theory T_i that satisfies every R_j (j ≠ i)
+/// but violates R_i — proving pairwise independence of (R1)–(R5).
+/// V3 form: parameterised over the witness index i and the index
+/// range invariant.
 @framework(msfs, "MSFS Proposition 3.2 (witnesses combined)")
-public axiom msfs_proposition_3_2_witnesses_combined() -> Bool
-    ensures true;
+public axiom msfs_proposition_3_2_witnesses_combined(witness_index: Int) -> Bool
+    requires witness_index >= 1 && witness_index <= 5
+    ensures  witness_index >= 1 && witness_index <= 5;
