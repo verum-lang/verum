@@ -180,8 +180,7 @@ implement QpackSession {
         let mut out: List<Byte> = List.with_capacity(16 + body.len());
         int_encode(&mut out, 8, 0_u8, 0_u64);
         int_encode(&mut out, 7, 0_u8, 0_u64);
-        let mut j: Int = 0;
-        while j < body.len() { out.push(body[j]); j = j + 1; }
+        out.extend_from_slice(body.as_slice());
         Ok(out)
     }
 
@@ -331,8 +330,7 @@ implement QpackSession {
     public fn drain_encoder_out(&mut self) -> List<Byte> {
         // Output is exactly self.encoder_out.len() bytes.
         let mut out: List<Byte> = List.with_capacity(self.encoder_out.len());
-        let mut i: Int = 0;
-        while i < self.encoder_out.len() { out.push(self.encoder_out[i]); i = i + 1; }
+        out.extend_from_slice(self.encoder_out.as_slice());
         self.encoder_out = [];
         out
     }
@@ -340,8 +338,7 @@ implement QpackSession {
     public fn drain_decoder_out(&mut self) -> List<Byte> {
         // Output is exactly self.decoder_out.len() bytes.
         let mut out: List<Byte> = List.with_capacity(self.decoder_out.len());
-        let mut i: Int = 0;
-        while i < self.decoder_out.len() { out.push(self.decoder_out[i]); i = i + 1; }
+        out.extend_from_slice(self.decoder_out.as_slice());
         self.decoder_out = [];
         out
     }
@@ -397,8 +394,7 @@ fn encode_string(out: &mut List<Byte>, s: &[Byte]) {
         huff.encode(s, out);
     } else {
         int_encode(out, 7, 0x00_u8, s.len() as UInt64);
-        let mut i: Int = 0;
-        while i < s.len() { out.push(s[i]); i = i + 1; }
+        out.extend_from_slice(s);
     }
 }
 
@@ -409,8 +405,7 @@ fn encode_literal_name(out: &mut List<Byte>, s: &[Byte]) {
         huff.encode(s, out);
     } else {
         int_encode(out, 3, 0x20_u8, s.len() as UInt64);
-        let mut i: Int = 0;
-        while i < s.len() { out.push(s[i]); i = i + 1; }
+        out.extend_from_slice(s);
     }
 }
 
@@ -427,8 +422,7 @@ fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError>
     }
     // Bytes copy is exactly end - p1 bytes.
     let mut bytes: List<Byte> = List.with_capacity(end - p1);
-    let mut i: Int = p1;
-    while i < end { bytes.push(buf[i]); i = i + 1; }
+    bytes.extend_from_slice(&buf[p1..end]);
     let plain: List<Byte> = if huffman {
         huff.decode(bytes.as_slice())
             .map_err(|_| QpackSessionError.HuffmanError)?
@@ -449,8 +443,7 @@ fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSession
     }
     // Bytes copy is exactly end - p1 bytes.
     let mut bytes: List<Byte> = List.with_capacity(end - p1);
-    let mut i: Int = p1;
-    while i < end { bytes.push(buf[i]); i = i + 1; }
+    bytes.extend_from_slice(&buf[p1..end]);
     let plain: List<Byte> = if huffman {
         huff.decode(bytes.as_slice())
             .map_err(|_| QpackSessionError.HuffmanError)?
