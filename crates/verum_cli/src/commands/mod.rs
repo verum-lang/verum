@@ -35,6 +35,7 @@ pub mod smt_info;
 pub mod smt_stats;
 pub mod property;
 pub mod test;
+pub mod vbc_version;
 pub mod verify;
 pub mod version;
 pub mod watch;

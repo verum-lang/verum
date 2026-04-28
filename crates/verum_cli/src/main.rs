@@ -652,6 +652,18 @@ enum Commands {
         verbose: bool,
     },
 
+    /// Inspect a VBC archive header (magic, version, sections, hashes).
+    /// Tracks #175.
+    #[clap(name = "vbc-version")]
+    VbcVersion {
+        /// Path to the .vbc archive.
+        #[clap(value_name = "ARCHIVE")]
+        archive: std::path::PathBuf,
+        /// Emit a single-line key=value form for scripting.
+        #[clap(long)]
+        raw: bool,
+    },
+
     /// Cog management
     #[clap(subcommand)]
     Package(PackageCommands),
@@ -1000,6 +1012,46 @@ enum Commands {
         /// is stable so CI dashboards can pre-wire it.
         #[clap(long)]
         coherent: bool,
+
+        /// Coord-consistency audit (M4.B): walks every public
+        /// theorem / axiom and validates the (Fw, ν, τ) supremum
+        /// invariant — every theorem's inferred coordinate must
+        /// be ≥ max(cited frameworks' coordinates). Flags
+        /// `missing-framework` violations (theorem has `@verify(...)`
+        /// but no `@framework(...)` citation). Mirrors V8.1 #232's
+        /// kernel-side `check_coord_cite` at corpus-audit time.
+        /// Schema_v=1 JSON to `audit-reports/coord-consistency.json`;
+        /// non-zero exit on any missing-framework violation.
+        #[clap(long)]
+        coord_consistency: bool,
+
+        /// Framework-soundness audit (M4.A): walks every
+        /// `public axiom` in the project and classifies its
+        /// proposition (the parser's requires-AND-ensures
+        /// conjunction) as `sound` (has propositional content) or
+        /// `trivial-placeholder` (just `true` literal).
+        ///
+        /// Mirrors the kernel-side K-FwAx
+        /// `SubsingletonRegime::ClosedPropositionOnly` gate at
+        /// corpus-audit time. Emits to
+        /// `audit-reports/framework-soundness.json` (schema_v=1) +
+        /// non-zero exit if any axiom is misclassified.
+        #[clap(long)]
+        framework_soundness: bool,
+
+        /// Proof-honesty audit (M0.G): walk every public theorem /
+        /// axiom in the project and classify each by proof-body shape
+        /// — `axiom-placeholder` / `theorem-no-proof-body` /
+        /// `theorem-trivial-true` / `theorem-axiom-only` /
+        /// `theorem-multi-step`. Emits per-row classification + by-
+        /// lineage totals (msfs / diakrisis subpath partition) to
+        /// `audit-reports/proof-honesty.json` (schema_version=1).
+        ///
+        /// Mirrors the stand-alone Python walker
+        /// `verum-msfs-corpus/tools/proof_honesty_audit.py` (M0.E),
+        /// now first-class via the verum CLI.
+        #[clap(long)]
+        proof_honesty: bool,
 
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
@@ -1959,6 +2011,9 @@ fn run_command(cli: Cli) -> Result<()> {
             }
         }
         Commands::Version { verbose } => commands::version::execute(verbose),
+        Commands::VbcVersion { archive, raw } => {
+            commands::vbc_version::execute(&archive, raw)
+        }
         Commands::Package(pkg_cmd) => match pkg_cmd {
             PackageCommands::Publish {
                 dry_run,
@@ -2312,6 +2367,9 @@ fn run_command(cli: Cli) -> Result<()> {
             accessibility,
             round_trip,
             coherent,
+            proof_honesty,
+            framework_soundness,
+            coord_consistency,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2349,6 +2407,12 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_round_trip_with_format(output_format)
             } else if coherent {
                 commands::audit::audit_coherent_with_format(output_format)
+            } else if proof_honesty {
+                commands::audit::audit_proof_honesty_with_format(output_format)
+            } else if framework_soundness {
+                commands::audit::audit_framework_soundness_with_format(output_format)
+            } else if coord_consistency {
+                commands::audit::audit_coord_consistency_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
