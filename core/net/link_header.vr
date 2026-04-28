@@ -56,6 +56,51 @@ public type LinkHeaderError is
       Malformed(Text)
     | TooManyEntries { declared: Int, limit: Int };
 
+// Display + Debug + Eq for LinkHeaderError — adds the
+// standard stdlib protocol impls so callers can log,
+// format, and compare these errors directly without
+// rolling per-call-site match blocks.
+
+implement Display for LinkHeaderError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LinkHeaderError.Malformed(msg) => {
+                f.write_str("malformed Link header: ")?;
+                f.write_str(msg.as_str())
+            },
+            LinkHeaderError.TooManyEntries { declared, limit } =>
+                f.write_str(f"Link header has too many entries: declared={declared} limit={limit}".as_str()),
+        }
+    }
+}
+
+implement Debug for LinkHeaderError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LinkHeaderError.Malformed(msg) => {
+                f.write_str("Malformed(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            LinkHeaderError.TooManyEntries { declared, limit } =>
+                f.write_str(f"TooManyEntries {{ declared: {declared}, limit: {limit} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for LinkHeaderError {
+    fn eq(&self, other: &LinkHeaderError) -> Bool {
+        match (self, other) {
+            (LinkHeaderError.Malformed(a), LinkHeaderError.Malformed(b)) => a == b,
+            (
+                LinkHeaderError.TooManyEntries { declared: da, limit: la },
+                LinkHeaderError.TooManyEntries { declared: db, limit: lb },
+            ) => da == db && la == lb,
+            _ => false,
+        }
+    }
+}
+
 /// Hard cap on the number of `<uri>; param=...` entries in a single
 /// `Link:` header. CVE-2011-3192-class fan-out — a peer sending
 /// thousands of comma-separated entries forces per-entry URI +

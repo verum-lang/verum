@@ -58,6 +58,48 @@ public type UriTemplateError is
       Malformed(Text)
     | UnbalancedBraces;
 
+// Display + Debug + Eq for UriTemplateError — adds the
+// standard stdlib protocol impls so callers can log,
+// format, and compare these errors directly via
+// `f"{err}"` / `assert_eq` without rolling per-call-site
+// match blocks.
+
+implement Display for UriTemplateError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UriTemplateError.Malformed(msg) => {
+                f.write_str("malformed URI template: ")?;
+                f.write_str(msg.as_str())
+            },
+            UriTemplateError.UnbalancedBraces =>
+                f.write_str("unbalanced braces in URI template"),
+        }
+    }
+}
+
+implement Debug for UriTemplateError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UriTemplateError.Malformed(msg) => {
+                f.write_str("Malformed(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            UriTemplateError.UnbalancedBraces => f.write_str("UnbalancedBraces"),
+        }
+    }
+}
+
+implement Eq for UriTemplateError {
+    fn eq(&self, other: &UriTemplateError) -> Bool {
+        match (self, other) {
+            (UriTemplateError.Malformed(a), UriTemplateError.Malformed(b)) => a == b,
+            (UriTemplateError.UnbalancedBraces, UriTemplateError.UnbalancedBraces) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parsed template
 // =============================================================================
