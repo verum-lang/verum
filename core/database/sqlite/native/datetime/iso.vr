@@ -124,13 +124,19 @@ fn parse_time_only(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
 }
 
 fn parse_int_at(bs: &List<Byte>, off: Int, width: Int) -> base.Maybe<Int> {
+    // Defence-in-depth — same as datetime_fns.parse_uint: callers
+    // pass small `width` for ISO date fields, but reject any width
+    // that could wrap `acc * 10 + d` past Int.MAX.
+    if width > 19 { return base.None; }
     let mut acc: Int = 0;
     let mut i: Int = 0;
     while i < width {
         if off + i >= bs.len() { return base.None; }
         let b = bs[off + i];
         if !is_digit(b) { return base.None; }
+        if acc > 922_337_203_685_477_580 { return base.None; }
         acc = acc * 10 + ((b - (48 as Byte)) as Int);
+        if acc < 0 { return base.None; }
         i = i + 1;
     }
     base.Some(acc)
