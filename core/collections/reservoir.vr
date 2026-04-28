@@ -60,7 +60,7 @@ module core.collections.reservoir;
 
 mount core.*;
 mount core.collections.List;
-mount core.base.random;
+mount core.sys.common.random_bytes as sys_random_bytes;
 
 // =============================================================================
 // Reservoir
@@ -120,7 +120,18 @@ implement<T> Reservoir<T> {
 
 fn random_u64() -> UInt64 {
     let mut buf: [Byte; 8] = [0_u8; 8];
-    random.fill(&mut buf);
+    // The historical `core.base.random.fill` import resolved to
+    // nothing, so reservoir sampling silently degraded to "always
+    // replace slot 0" (since `0 % seen == 0`). For non-CSPRNG
+    // adversarial-input use cases this just biased the sample;
+    // for security-critical sampling (trace IDs, request IDs)
+    // it broke the uniformity guarantee outright. Wire to the
+    // canonical platform CSPRNG; panic on failure since silent
+    // bias is the worse outcome.
+    match sys_random_bytes(&mut buf) {
+        Ok(_)  => {},
+        Err(_) => panic("Reservoir: kernel CSPRNG unavailable — sampling cannot proceed"),
+    }
     let mut r: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < 8 { r = (r << 8_u64) | (buf[i] as UInt64); i = i + 1; }

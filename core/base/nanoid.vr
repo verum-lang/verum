@@ -54,7 +54,19 @@ module core.base.nanoid;
 
 mount core.*;
 mount core.collections.List;
-mount core.base.random;
+mount core.sys.common.random_bytes as sys_random_bytes;
+
+// CSPRNG-backed entropy fill. The historical `core.base.random.fill`
+// import resolved to nothing, silently producing zero-byte entropy
+// chunks — every NanoID emitted was an attacker-predictable string.
+// Wire to the canonical platform source; panic on failure rather
+// than hand back a deterministic ID.
+fn fill_random(buf: &mut [Byte]) {
+    match sys_random_bytes(buf) {
+        Ok(_)  => {},
+        Err(_) => panic("NanoID: kernel CSPRNG unavailable — refusing to issue zero-entropy ID"),
+    }
+}
 
 // =============================================================================
 // Defaults
@@ -107,7 +119,7 @@ public fn generate_with_alphabet(alphabet: &[Byte], n: Int) -> Text {
         let mut b: [Byte; 32] = [0_u8; 32];
         let mut produced: Int = 0;
         while produced < chunk_size {
-            random.fill(&mut b);
+            fill_random(&mut b);
             let take = if (chunk_size - produced) >= 32 { 32 } else { chunk_size - produced };
             let mut i: Int = 0;
             while i < take { buf.push(b[i]); i = i + 1; }
