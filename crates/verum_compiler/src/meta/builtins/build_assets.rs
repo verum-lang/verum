@@ -890,10 +890,13 @@ mod tests {
             .get(&Text::from("load_toml"))
             .expect("load_toml must be registered");
         assert_eq!(load.signature, "(Text) -> Map<Text, Any>");
+        // `codegen` carries the two-arg overload signature so call-site
+        // diagnostics surface both forms; `load_toml` keeps the bare
+        // single-arg signature because it is purely a TOML loader.
         let codegen = map
             .get(&Text::from("codegen"))
             .expect("@codegen alias must be registered for the macro form");
-        assert_eq!(codegen.signature, "(Text) -> Map<Text, Any>");
+        assert_eq!(codegen.signature, "(Text [, Text]) -> Any");
     }
 
     #[test]
