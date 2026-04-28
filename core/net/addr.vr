@@ -12,6 +12,7 @@
 module core.net.addr;
 mount core.*;
 mount net.dns.{resolve as dns_resolve};
+mount core.io.protocols.{IoErrorKind};
 
 // =============================================================================
 // IPv4 Address
@@ -867,16 +868,28 @@ implement ToSocketAddrs for (&Text, Int) {
         if let Ok(ip) = Ipv6Addr.parse(host) {
             return Ok(List.of(SocketAddr.new_v6(ip, port)));
         }
-        // DNS resolution for hostnames
+        // DNS resolution for hostnames.  Failures map to
+        // `IoErrorKind.NotFound` (the host isn't in DNS) so
+        // downstream `match err.kind` handles the case
+        // identically to a missing-file path-not-found.
+        // The Err-arm preserves the typed DNS error in the
+        // message so callers that *do* want the detail can
+        // still inspect it.
         match dns_resolve(host, port) {
             Ok(addrs) => {
                 if addrs.is_empty() {
-                    Err(IoError.Other(f"Cannot resolve: {host}"))
+                    Err(IoError {
+                        kind: IoErrorKind.NotFound,
+                        message: Some(f"Cannot resolve: {host}"),
+                    })
                 } else {
                     Ok(addrs)
                 }
             }
-            Err(_) => Err(IoError.Other(f"Cannot resolve: {host}")),
+            Err(e) => Err(IoError {
+                kind: IoErrorKind.NotFound,
+                message: Some(f"Cannot resolve {host}: {e}"),
+            }),
         }
     }
 }
@@ -908,12 +921,18 @@ implement ToSocketAddrs for Text {
                 match dns_resolve(&host, port) {
                     Ok(addrs) => {
                         if addrs.is_empty() {
-                            Err(IoError.Other(f"Cannot resolve: {host}"))
+                            Err(IoError {
+                                kind: IoErrorKind.NotFound,
+                                message: Some(f"Cannot resolve: {host}"),
+                            })
                         } else {
                             Ok(addrs)
                         }
                     }
-                    Err(_) => Err(IoError.Other(f"Cannot resolve: {host}")),
+                    Err(e) => Err(IoError {
+                        kind: IoErrorKind.NotFound,
+                        message: Some(f"Cannot resolve {host}: {e}"),
+                    }),
                 }
             }
             None => Err(IoError.InvalidInput {
