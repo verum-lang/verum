@@ -314,6 +314,48 @@ pub fn run_with_tier(
             } else {
                 VerifyMode::Auto
             };
+
+            // Script-shaped sources go through frontmatter validation
+            // (compiler-version pin, declared-deps audit) before LLVM
+            // compilation so an unbuildable script fails fast with a
+            // clear diagnostic instead of a confusing native-link
+            // error half a megabyte deeper. Permission enforcement
+            // doesn't yet apply to the AOT path — the runtime
+            // `PermissionRouter` lives in the interpreter only;
+            // wiring it into the LLVM lowering of `PermissionAssert`
+            // is a follow-on step.
+            if is_script_shaped(&input) {
+                use crate::script::context::{ScriptContext, ScriptContextOptions};
+                use crate::script::permission_flags::PermissionFlags;
+                let ctx = ScriptContext::from_path(
+                    &input,
+                    &ScriptContextOptions {
+                        flags: PermissionFlags::default(),
+                        compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+                        extra_cache_flags: Vec::new(),
+                    },
+                )
+                .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
+                if let Some(fm) = ctx.frontmatter.as_ref() {
+                    check_frontmatter_version(fm)?;
+                    if !fm.dependencies.is_empty() {
+                        ui::warn(
+                            "script frontmatter declares dependencies — \
+                             registry resolution lands separately; for \
+                             now they are ignored",
+                        );
+                    }
+                    if !fm.permissions.is_empty() {
+                        ui::warn(
+                            "script frontmatter declares permissions — \
+                             AOT permission enforcement lands separately; \
+                             use `verum run` (interpreter) for sandboxed \
+                             execution today",
+                        );
+                    }
+                }
+            }
+
             let options = CompilerOptions {
                 input: input.clone(),
                 verify_mode,
