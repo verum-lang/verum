@@ -125,9 +125,8 @@ fn parse_uint(bs: &List<Byte>, start: Int, len: Int) -> Maybe<Int> {
 
 public fn parse_iso(s: &Text) -> Maybe<Calendar> {
     let bs_t = s.as_bytes();
-    let mut bs: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < bs_t.len() { bs.push(bs_t[i]); i = i + 1; }
+    let mut bs: List<Byte> = List.with_capacity(bs_t.len());
+    bs.extend_from_slice(bs_t);
     if bs.len() < 10 { return None; }
     let y = parse_uint(&bs, 0, 4);
     let m = parse_uint(&bs, 5, 2);
@@ -431,10 +430,7 @@ public fn format_time(c: &Calendar) -> Text {
 public fn format_datetime(c: &Calendar) -> Text {
     let mut out = format_date(c);
     out.push_byte(32 as Byte);
-    let t = format_time(c);
-    let tb = t.as_bytes();
-    let mut i: Int = 0;
-    while i < tb.len() { out.push_byte(tb[i]); i = i + 1; }
+    out.push_str(&format_time(c));
     out
 }
 
@@ -481,9 +477,8 @@ fn clone_register(r: &Register) -> Register {
         RReal(x)  => RReal(x),
         RText(s)  => RText(s.clone()),
         RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(b.len());
+            out.extend_from_slice(b.as_slice());
             RBlob(out)
         }
         RRowId(x) => RRowId(x),
@@ -511,7 +506,7 @@ fn text_eq(a: &Text, b: &Text) -> Bool { a == b }
 fn text_eq_lower(a: &Text, b: &Text) -> Bool { lower_text(a) == lower_text(b) }
 
 fn bytes_to_text(bs: &List<Byte>, off: Int) -> Text {
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(bs.len() - off);
     let mut i: Int = off;
     while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
     out

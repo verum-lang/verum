@@ -146,8 +146,7 @@ implement SenderContext {
         let mut ct: List<Byte> = List.with_capacity(pt.len() + 16);
         let mut tag: [Byte; 16] = [0_u8; 16];
         aead.encrypt(&nonce, aad, pt, &mut ct, &mut tag);
-        let mut i: Int = 0;
-        while i < 16 { ct.push(tag[i]); i = i + 1; }
+        ct.extend_from_slice(&tag[..]);
         self.seq = self.seq + 1_u64;
         Ok(ct)
     }
@@ -265,10 +264,8 @@ fn kem_extract_and_expand(
 
     // KEM context = pk_e || pk_r — exact size known.
     let mut kem_context: List<Byte> = List.with_capacity(pk_e.len() + pk_r.len());
-    let mut i: Int = 0;
-    while i < pk_e.len() { kem_context.push(pk_e[i]); i = i + 1; }
-    let mut j: Int = 0;
-    while j < pk_r.len() { kem_context.push(pk_r[j]); j = j + 1; }
+    kem_context.extend_from_slice(pk_e);
+    kem_context.extend_from_slice(pk_r);
 
     labeled_expand(
         eae_prk.as_slice(), b"shared_secret", kem_context.as_slice(),
@@ -293,10 +290,8 @@ fn key_schedule_base(
     // KeySchedule ctx = mode_byte (1) || psk_id_hash || info_hash.
     let mut ks_ctx: List<Byte> = List.with_capacity(1 + psk_id_hash.len() + info_hash.len());
     ks_ctx.push(HPKE_MODE_BASE);
-    let mut i: Int = 0;
-    while i < psk_id_hash.len() { ks_ctx.push(psk_id_hash[i]); i = i + 1; }
-    let mut j: Int = 0;
-    while j < info_hash.len()   { ks_ctx.push(info_hash[j]);   j = j + 1; }
+    ks_ctx.extend_from_slice(psk_id_hash.as_slice());
+    ks_ctx.extend_from_slice(info_hash.as_slice());
 
     // secret = LabeledExtract(shared_secret, "secret", default_psk="")
     let secret = labeled_extract(shared, b"secret", &[], hpke_suite.as_slice())?;
@@ -440,8 +435,7 @@ fn hpke_suite_id() -> List<Byte> {
 // =============================================================================
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 /// Compute AEAD nonce = base_nonce XOR I2OSP(seq, 12), right-aligned.
