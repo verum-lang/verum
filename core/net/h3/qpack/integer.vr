@@ -32,6 +32,36 @@ public type IntError is
       Truncated
     | Overflow;
 
+implement Display for IntError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated => "QPACK integer: truncated continuation",
+            Overflow  => "QPACK integer: value overflow",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for IntError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated => "Truncated",
+            Overflow  => "Overflow",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for IntError {
+    fn eq(&self, other: &IntError) -> Bool {
+        match (self, other) {
+            (Truncated, Truncated) => true,
+            (Overflow,  Overflow)  => true,
+            _ => false,
+        }
+    }
+}
+
 /// Encode `value` with an N-bit prefix, already-set high bits in
 /// `first_byte_opcode`. Appends to `out`.
 public fn encode(out: &mut List<Byte>, prefix_bits: Int, first_byte_opcode: Byte, value: UInt64) {

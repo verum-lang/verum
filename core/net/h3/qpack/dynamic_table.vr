@@ -290,6 +290,51 @@ public type DynamicTableError is
     | EntryEvicted
     | RefUnderflow;
 
+implement Display for DynamicTableError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            CapacityExceedsSettings => "QPACK dynamic table: capacity exceeds peer SETTINGS",
+            EntryTooLarge           => "QPACK dynamic table: entry larger than capacity",
+            EvictionBlocked         => "QPACK dynamic table: eviction blocked by unacked section",
+            InvalidAbsIndex         => "QPACK dynamic table: invalid absolute index",
+            InvalidNameRef          => "QPACK dynamic table: invalid name reference",
+            EntryEvicted            => "QPACK dynamic table: entry already evicted",
+            RefUnderflow            => "QPACK dynamic table: reference count underflow",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for DynamicTableError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            CapacityExceedsSettings => "CapacityExceedsSettings",
+            EntryTooLarge           => "EntryTooLarge",
+            EvictionBlocked         => "EvictionBlocked",
+            InvalidAbsIndex         => "InvalidAbsIndex",
+            InvalidNameRef          => "InvalidNameRef",
+            EntryEvicted            => "EntryEvicted",
+            RefUnderflow            => "RefUnderflow",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for DynamicTableError {
+    fn eq(&self, other: &DynamicTableError) -> Bool {
+        match (self, other) {
+            (CapacityExceedsSettings, CapacityExceedsSettings) => true,
+            (EntryTooLarge,           EntryTooLarge)           => true,
+            (EvictionBlocked,         EvictionBlocked)         => true,
+            (InvalidAbsIndex,         InvalidAbsIndex)         => true,
+            (InvalidNameRef,          InvalidNameRef)          => true,
+            (EntryEvicted,            EntryEvicted)            => true,
+            (RefUnderflow,            RefUnderflow)            => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================

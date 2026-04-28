@@ -64,3 +64,101 @@ public type H3Error is
     /// Streaming-body error — connection-level outbound buffer
     /// exceeded its bound. Caller should slow producer.
     | SendBufferFull;
+
+implement Display for H3ErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"0x{self.code:x}".as_str())
+    }
+}
+
+implement Debug for H3ErrorCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"H3ErrorCode(0x{self.code:x})".as_str())
+    }
+}
+
+implement Eq for H3ErrorCode {
+    fn eq(&self, other: &H3ErrorCode) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Display for H3Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionError { code, reason } =>
+                f.write_str(f"HTTP/3 connection error {code}: {reason}".as_str()),
+            StreamError { stream_id, code } =>
+                f.write_str(f"HTTP/3 stream {stream_id} error {code}".as_str()),
+            FrameDecode(msg) =>
+                f.write_str(f"HTTP/3 frame decode error: {msg}".as_str()),
+            StreamTypeDecode =>
+                f.write_str("HTTP/3 stream type decode error"),
+            UnexpectedFrame { on_stream_kind, frame_type } =>
+                f.write_str(f"HTTP/3 unexpected frame type 0x{frame_type:x} on {on_stream_kind} stream".as_str()),
+            MissingSettings =>
+                f.write_str("HTTP/3 missing SETTINGS frame"),
+            SettingsRepeat =>
+                f.write_str("HTTP/3 SETTINGS frame repeated"),
+            ConnectionClosed =>
+                f.write_str("HTTP/3 connection closed"),
+            StreamCancelled =>
+                f.write_str("HTTP/3 stream cancelled (STOP_SENDING / nursery cancellation)"),
+            WriteAfterFinish =>
+                f.write_str("HTTP/3 write after finish"),
+            SendBufferFull =>
+                f.write_str("HTTP/3 outbound buffer full"),
+        }
+    }
+}
+
+implement Debug for H3Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionError { code, reason } =>
+                f.write_str(f"ConnectionError {{ code: {code:?}, reason: {reason} }}".as_str()),
+            StreamError { stream_id, code } =>
+                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code:?} }}".as_str()),
+            FrameDecode(msg) =>
+                f.write_str(f"FrameDecode({msg})".as_str()),
+            StreamTypeDecode =>
+                f.write_str("StreamTypeDecode"),
+            UnexpectedFrame { on_stream_kind, frame_type } =>
+                f.write_str(f"UnexpectedFrame {{ on_stream_kind: {on_stream_kind}, frame_type: 0x{frame_type:x} }}".as_str()),
+            MissingSettings =>
+                f.write_str("MissingSettings"),
+            SettingsRepeat =>
+                f.write_str("SettingsRepeat"),
+            ConnectionClosed =>
+                f.write_str("ConnectionClosed"),
+            StreamCancelled =>
+                f.write_str("StreamCancelled"),
+            WriteAfterFinish =>
+                f.write_str("WriteAfterFinish"),
+            SendBufferFull =>
+                f.write_str("SendBufferFull"),
+        }
+    }
+}
+
+implement Eq for H3Error {
+    fn eq(&self, other: &H3Error) -> Bool {
+        match (self, other) {
+            (ConnectionError { code: ca, reason: ra },
+             ConnectionError { code: cb, reason: rb }) => ca == cb && ra == rb,
+            (StreamError { stream_id: sa, code: ca },
+             StreamError { stream_id: sb, code: cb }) => sa == sb && ca == cb,
+            (FrameDecode(a),       FrameDecode(b))       => a == b,
+            (StreamTypeDecode,     StreamTypeDecode)     => true,
+            (UnexpectedFrame { on_stream_kind: ka, frame_type: ta },
+             UnexpectedFrame { on_stream_kind: kb, frame_type: tb }) => ka == kb && ta == tb,
+            (MissingSettings,      MissingSettings)      => true,
+            (SettingsRepeat,       SettingsRepeat)       => true,
+            (ConnectionClosed,     ConnectionClosed)     => true,
+            (StreamCancelled,      StreamCancelled)      => true,
+            (WriteAfterFinish,     WriteAfterFinish)     => true,
+            (SendBufferFull,       SendBufferFull)       => true,
+            _ => false,
+        }
+    }
+}

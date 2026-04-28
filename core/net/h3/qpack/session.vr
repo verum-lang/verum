@@ -61,6 +61,49 @@ public type QpackSessionError is
     | HuffmanError
     | InvalidState;
 
+implement Display for QpackSessionError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EncoderInstrError(e)   => f.write_str(f"QPACK encoder stream error: {e}".as_str()),
+            DecoderInstrError(e)   => f.write_str(f"QPACK decoder stream error: {e}".as_str()),
+            DynamicTable(e)        => f.write_str(f"QPACK session: {e}".as_str()),
+            FieldDecode(e)         => f.write_str(f"QPACK session: {e}".as_str()),
+            IntegerError           => f.write_str("QPACK session: integer decode failure"),
+            HuffmanError           => f.write_str("QPACK session: Huffman decode failure"),
+            InvalidState           => f.write_str("QPACK session: invalid state"),
+        }
+    }
+}
+
+implement Debug for QpackSessionError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EncoderInstrError(e)   => f.write_str(f"EncoderInstrError({e:?})".as_str()),
+            DecoderInstrError(e)   => f.write_str(f"DecoderInstrError({e:?})".as_str()),
+            DynamicTable(e)        => f.write_str(f"DynamicTable({e:?})".as_str()),
+            FieldDecode(e)         => f.write_str(f"FieldDecode({e:?})".as_str()),
+            IntegerError           => f.write_str("IntegerError"),
+            HuffmanError           => f.write_str("HuffmanError"),
+            InvalidState           => f.write_str("InvalidState"),
+        }
+    }
+}
+
+implement Eq for QpackSessionError {
+    fn eq(&self, other: &QpackSessionError) -> Bool {
+        match (self, other) {
+            (EncoderInstrError(a), EncoderInstrError(b)) => a == b,
+            (DecoderInstrError(a), DecoderInstrError(b)) => a == b,
+            (DynamicTable(a),      DynamicTable(b))      => a == b,
+            (FieldDecode(a),       FieldDecode(b))       => a == b,
+            (IntegerError,         IntegerError)         => true,
+            (HuffmanError,         HuffmanError)         => true,
+            (InvalidState,         InvalidState)         => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // QpackSession — connection-scoped state
 // =============================================================================

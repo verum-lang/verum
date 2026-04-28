@@ -42,6 +42,42 @@ public type InstrError is
     | IntegerError
     | UnknownOpcode;
 
+implement Display for InstrError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated      => "QPACK instruction: truncated",
+            HuffmanError   => "QPACK instruction: Huffman decode failure",
+            IntegerError   => "QPACK instruction: integer decode failure",
+            UnknownOpcode  => "QPACK instruction: unknown opcode",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for InstrError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated      => "Truncated",
+            HuffmanError   => "HuffmanError",
+            IntegerError   => "IntegerError",
+            UnknownOpcode  => "UnknownOpcode",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for InstrError {
+    fn eq(&self, other: &InstrError) -> Bool {
+        match (self, other) {
+            (Truncated,     Truncated)     => true,
+            (HuffmanError,  HuffmanError)  => true,
+            (IntegerError,  IntegerError)  => true,
+            (UnknownOpcode, UnknownOpcode) => true,
+            _ => false,
+        }
+    }
+}
+
 fn iferr<T>(_: core.net.h3.qpack.integer.IntError) -> Result<T, InstrError> {
     Err(InstrError.IntegerError)
 }
