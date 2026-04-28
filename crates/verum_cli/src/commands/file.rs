@@ -397,6 +397,66 @@ pub fn run_with_tier(
     Ok(())
 }
 
+/// Owned tempfile that auto-removes its path on drop. The script
+/// runner threads the path through the on-disk script pipeline so
+/// inline `-e` and stdin invocations get the same parser, permission
+/// model, and exit-code semantics as a real script file. Drop must
+/// fire AFTER the runner returns; callers hold the value across the
+/// run and let it drop at the natural scope boundary.
+pub struct ScriptTempFile {
+    path: std::path::PathBuf,
+}
+
+impl ScriptTempFile {
+    /// Path to the temporary `.vr` file. Lives until `Drop`.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for ScriptTempFile {
+    fn drop(&mut self) {
+        // Best-effort cleanup. A leftover temp on a panicking exit
+        // is harmless — the OS will reclaim it on next reboot, and
+        // the unique filename prevents collisions.
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Materialise a script source string as a temporary `.vr` file
+/// rooted in `$TMPDIR`. The file always carries a shebang line at
+/// byte 0 so the script-mode parser engages — callers don't need
+/// to hand-shebang their inline expressions or stdin payloads.
+///
+/// `kind` is a short descriptor (`"eval"` / `"stdin"`) embedded in
+/// the filename for diagnostic clarity. PID + nanosecond suffix
+/// disambiguates concurrent invocations.
+pub fn synthesize_script_temp(
+    body: &str,
+    kind: &str,
+) -> std::io::Result<ScriptTempFile> {
+    use std::io::Write;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!(
+        "verum-{kind}-{}-{}.vr",
+        std::process::id(),
+        nanos
+    ));
+    let mut f = std::fs::File::create(&path)?;
+    if !body.starts_with("#!") {
+        writeln!(f, "#!/usr/bin/env verum")?;
+    }
+    f.write_all(body.as_bytes())?;
+    if !body.ends_with('\n') {
+        writeln!(f)?;
+    }
+    drop(f);
+    Ok(ScriptTempFile { path })
+}
+
 /// Quick content sniff: does the file at `path` look like a Verum
 /// script? A script either starts with a `#!` shebang at byte 0
 /// (BOM-tolerant) OR carries an inline `// /// script` frontmatter
