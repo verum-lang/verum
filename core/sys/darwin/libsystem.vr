@@ -104,19 +104,23 @@ extern {
     /// with errno on failure (EACCES means "no access").
     fn access(path: &Byte, amode: Int) -> Int;
 
-    /// Scatter read
-    fn readv(fd: Int, iov: &IOVec, iovcnt: Int) -> Int;
+    /// Scatter read. C: `ssize_t readv(int fd, const struct iovec *iov, int iovcnt)`.
+    /// fd / iovcnt are POSIX `int` (32-bit); ssize_t is i64.
+    fn readv(fd: Int32, iov: &IOVec, iovcnt: Int32) -> Int;
 
-    /// Gather write
-    fn writev(fd: Int, iov: &IOVec, iovcnt: Int) -> Int;
+    /// Gather write. C: `ssize_t writev(int fd, const struct iovec *iov, int iovcnt)`.
+    fn writev(fd: Int32, iov: &IOVec, iovcnt: Int32) -> Int;
 
     // =========================================================================
     // Memory Management
     // =========================================================================
 
-    /// Map memory
+    /// Map memory. C: `void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)`.
+    /// `prot`/`flags`/`fd` are POSIX `int` (Int32); `length` is size_t and
+    /// `offset` is off_t — both 64-bit on POSIX 64-bit (kept as Int per the
+    /// libsystem.vr convention for size_t/ssize_t).
     @ffi_name("mmap")
-    public fn mmap_ffi(addr: Int, len: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int;
+    public fn mmap_ffi(addr: Int, len: Int, prot: Int32, flags: Int32, fd: Int32, offset: Int) -> Int;
 
     /// Unmap memory
     public fn munmap(addr: Int, len: Int) -> Int;
@@ -351,48 +355,59 @@ extern {
     /// Connect socket. socklen_t is uint32_t on macOS / Linux. T0.4 fix.
     fn connect(sockfd: Int32, addr: &unsafe Byte, addrlen: UInt32) -> Int32;
 
-    /// Send data
-    fn send(sockfd: Int, buf: &Byte, len: Int, flags: Int) -> Int;
+    /// Send data. C: `ssize_t send(int sockfd, const void *buf, size_t len, int flags)`.
+    /// sockfd / flags are POSIX `int` (Int32); len is size_t (kept Int per file convention).
+    fn send(sockfd: Int32, buf: &Byte, len: Int, flags: Int32) -> Int;
 
-    /// Receive data
-    fn recv(sockfd: Int, buf: &unsafe Byte, len: Int, flags: Int) -> Int;
+    /// Receive data. C: `ssize_t recv(int sockfd, void *buf, size_t len, int flags)`.
+    fn recv(sockfd: Int32, buf: &unsafe Byte, len: Int, flags: Int32) -> Int;
 
-    /// Send to address
+    /// Send to address. C: `ssize_t sendto(int sockfd, const void *buf,
+    /// size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen)`.
+    /// `addrlen` is socklen_t (UInt32).
     fn sendto(
-        sockfd: Int,
+        sockfd: Int32,
         buf: &Byte,
         len: Int,
-        flags: Int,
+        flags: Int32,
         dest_addr: &unsafe Byte,
-        addrlen: Int,
+        addrlen: UInt32,
     ) -> Int;
 
-    /// Receive from address
+    /// Receive from address. C: `ssize_t recvfrom(int sockfd, void *buf,
+    /// size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)`.
+    /// `addrlen` is `socklen_t *` (`&mut UInt32`); the kernel writes 4 bytes,
+    /// so an `i64*` here would only have its low 4 bytes touched.
     @ffi_name("recvfrom")
     fn recvfrom_ffi(
-        sockfd: Int,
+        sockfd: Int32,
         buf: &unsafe Byte,
         len: Int,
-        flags: Int,
+        flags: Int32,
         src_addr: &unsafe Byte,
-        addrlen: &mut Int,
+        addrlen: &mut UInt32,
     ) -> Int;
 
-    /// Get socket option
-    fn getsockopt(sockfd: Int, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int32;
+    /// Get socket option. C: `int getsockopt(int sockfd, int level, int optname,
+    /// void *optval, socklen_t *optlen)`. `optlen` is `socklen_t *` (`&mut UInt32`).
+    fn getsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: &unsafe Byte, optlen: &mut UInt32) -> Int32;
 
     /// Set socket option. C: `int setsockopt(int, int, int, const void *, socklen_t)`.
     /// All four `int`-typed params + socklen_t (uint32_t). T0.4 fix.
     fn setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: &Byte, optlen: UInt32) -> Int32;
 
-    /// Shutdown socket
-    fn shutdown(sockfd: Int, how: Int) -> Int32;
+    /// Shutdown socket. C: `int shutdown(int sockfd, int how)`.
+    fn shutdown(sockfd: Int32, how: Int32) -> Int32;
 
-    /// Get socket name (local address)
-    fn getsockname(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int32;
+    /// Get socket name (local address). C: `int getsockname(int sockfd,
+    /// struct sockaddr *addr, socklen_t *addrlen)`. `addrlen` is `socklen_t *`
+    /// (uint32_t*) — the kernel writes 4 bytes, so an i64* here would leave
+    /// the high 4 bytes unwritten / uninitialized.
+    fn getsockname(sockfd: Int32, addr: &unsafe Byte, addrlen: &mut UInt32) -> Int32;
 
-    /// Get peer name (remote address)
-    fn getpeername(sockfd: Int, addr: &unsafe Byte, addrlen: &mut Int) -> Int32;
+    /// Get peer name (remote address). Same socklen_t* invariant as
+    /// `getsockname` — `addrlen` must be `&mut UInt32`.
+    fn getpeername(sockfd: Int32, addr: &unsafe Byte, addrlen: &mut UInt32) -> Int32;
 
     // =========================================================================
     // Directory Operations
