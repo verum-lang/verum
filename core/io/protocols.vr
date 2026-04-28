@@ -139,7 +139,7 @@ implement StreamError {
 // (ENOENT=2, EACCES=13, EEXIST=17, EPIPE=32, EINTR=4, EINVAL=22,
 // ENOMEM=12) appear in both tables with identical mappings.
 @cfg(target_os = "linux")
-fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
+public fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
     match code {
         2 => NotFound,             // ENOENT
         13 => PermissionDenied,    // EACCES
@@ -161,7 +161,7 @@ fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
 }
 
 @cfg(target_os = "macos")
-fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
+public fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
     match code {
         2 => NotFound,             // ENOENT
         13 => PermissionDenied,    // EACCES
@@ -183,7 +183,7 @@ fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
 }
 
 @cfg(target_os = "windows")
-fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
+public fn io_error_kind_from_os_code(code: Int) -> IoErrorKind {
     // Windows uses GetLastError values rather than POSIX errno; the
     // primary winsock-side mapping lives in core/sys/windows/io.vr.
     // This handles the small set of errno-style codes that surface
