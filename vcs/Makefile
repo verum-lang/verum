@@ -171,7 +171,7 @@ endef
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
 .PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team
-.PHONY: production-readiness gate-diagnostic gate-soundness
+.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation
 
 # =============================================================================
 # Default Target
@@ -1010,11 +1010,16 @@ gate-soundness:
 	$(call PROGRESS,Running soundness-obligation gate (#198 gate 7)...)
 	@bash $(VCS_ROOT)/gates/soundness.sh
 
+# Run gate 5 — documentation (every public surface in core/ has /// doc).
+gate-documentation:
+	$(call PROGRESS,Running documentation gate (#198 gate 5)...)
+	@bash $(VCS_ROOT)/gates/documentation.sh
+
 # Aggregator — runs every shipped gate. Future gates wire here too.
 # Currently green → all 7 gates pass; red → at least one gate failed
 # (printed above). Per #198 spec, the aggregator returns non-zero on
 # any red gate so CI can block the merge.
-production-readiness: gate-diagnostic gate-soundness diff-red-team
+production-readiness: gate-diagnostic gate-soundness gate-documentation diff-red-team
 	$(call SUCCESS,Production-readiness gates: all shipped gates passed)
 
 diff-red-team: build
