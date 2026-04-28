@@ -10,6 +10,7 @@ or marked as a partial defense needing a guardrail.
 |---|---|
 | `hash_iter_determinism.vr` | Vector 7.2 — hash-table iteration determinism |
 | `text_eq_ignore_case_ascii_fast_path.vr` | Section C — Text.eq_ignore_case ASCII fast-path behavioural contract |
+| `set_iter_determinism.vr` | Vector 7.2 (extension to Set<T>) — Set iteration determinism + idempotency + member-only-yield |
 
 ## Pending vectors needing harness infrastructure
 
