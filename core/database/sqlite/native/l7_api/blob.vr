@@ -422,21 +422,13 @@ fn slice_bytes_from_text(s: &Text, offset: Int, length: Int) -> List<Byte> {
 
 fn clone_bytes(b: &List<Byte>) -> List<Byte> {
     let mut out: List<Byte> = List.with_capacity(b.len());
-    let mut i: Int = 0;
-    while i < b.len() {
-        out.push(b[i]);
-        i = i + 1;
-    }
+    out.extend_from_slice(b.as_slice());
     out
 }
 
 fn text_to_bytes(s: &Text) -> List<Byte> {
     let raw = s.as_bytes();
     let mut out: List<Byte> = List.with_capacity(raw.len());
-    let mut i: Int = 0;
-    while i < raw.len() {
-        out.push(raw[i]);
-        i = i + 1;
-    }
+    out.extend_from_slice(raw);
     out
 }

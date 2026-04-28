@@ -157,8 +157,7 @@ public fn expand(sql: &Text, bindings: &List<BoundValue>) -> Text {
 }
 
 fn bytes_to_list(bytes: &List<u8>) -> List<u8> {
-    let mut out: List<u8> = List.new();
-    let mut i: Int = 0;
-    while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+    let mut out: List<u8> = List.with_capacity(bytes.len());
+    out.extend_from_slice(bytes.as_slice());
     out
 }
