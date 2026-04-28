@@ -71,7 +71,17 @@ public const BASE58_ALPHABET: [Byte; 58] = [
 public type Base58Error is
       InvalidCharacter(Byte)
     | ChecksumMismatch
-    | TruncatedChecksum;
+    | TruncatedChecksum
+    | InputTooLong { len: Int, limit: Int };
+
+/// Hard cap on `decode` input length. Base58 decode is O(N²) — every
+/// character requires an inner loop scaling with the accumulated big-
+/// integer width. 64 KiB input is well above any realistic identifier
+/// (Bitcoin addresses ~ 35 chars; IPFS v0 CIDs ~ 46 chars; Solana
+/// public keys ~ 44 chars) while keeping the worst-case decode cost
+/// at ~4×10⁹ operations — bounded enough for a single-message DoS but
+/// still leagues above any honest caller's needs.
+public const MAX_BASE58_INPUT_BYTES: Int = 64 * 1024;
 
 // =============================================================================
 // Encode
@@ -127,6 +137,10 @@ public fn encode(input: &[Byte]) -> List<Byte> {
 
 public fn decode(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
     if input.len() == 0 { return Ok([]); }
+    // O(N²) decoder — refuse hostile-sized inputs at the bridge.
+    if input.len() > MAX_BASE58_INPUT_BYTES {
+        return Err(Base58Error.InputTooLong { len: input.len(), limit: MAX_BASE58_INPUT_BYTES });
+    }
 
     // Count leading '1's → leading zero bytes in output.
     let mut ones: Int = 0;
