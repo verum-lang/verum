@@ -72,6 +72,10 @@ public type PageCache is {
     hits: Int,
     misses: Int,
     evictions: Int,
+    /// Peak frame count — survives `reset_stats` until cleared via
+    /// `clear`.  Used by capacity-tuning helpers in PRAGMA
+    /// cache_size auto-adjust experiments.
+    peak_size: Int,
 };
 
 /// Construct a fresh cache that tolerates up to `max_frames` entries.
@@ -85,6 +89,7 @@ public fn page_cache_new(max_frames: Int) -> PageCache {
         hits: 0,
         misses: 0,
         evictions: 0,
+        peak_size: 0,
     }
 }
 
@@ -112,6 +117,11 @@ implement PageCache {
     /// current generation. Misses — either "not present" or "present
     /// but stale" — both return `None` so the caller can fetch from
     /// the backing store. `Some`-return increments the hit counter.
+    ///
+    /// HOT PATH.  `Map.get` returns `V` by value (a copy), so the
+    /// owned `existing` we read here can be moved into the
+    /// re-insert without an explicit `.data.clone()` — saves one
+    /// page-sized List<Byte> copy per cache hit (4KB-32KB / hit).
     public fn get(&mut self, page_no: Int) -> Maybe<CachedFrame> {
         if !self.frames.contains_key(page_no) {
             self.misses = self.misses + 1;
@@ -124,16 +134,19 @@ implement PageCache {
             self.misses = self.misses + 1;
             return None;
         }
-        // Refresh access-tick so the LRU view stays accurate.
+        // Refresh access-tick.  `existing` is already an owned copy
+        // so we move its `data` into the new frame instead of
+        // cloning — the old map slot will be overwritten by insert.
+        let tick = self.next_tick;
+        self.next_tick = self.next_tick + 1;
         let updated = CachedFrame {
             page_no: existing.page_no,
-            data: existing.data.clone(),
+            data: existing.data,
             dirty: existing.dirty,
             generation: existing.generation,
             pin_count: existing.pin_count,
-            last_access: self.next_tick,
+            last_access: tick,
         };
-        self.next_tick = self.next_tick + 1;
         let _ = self.frames.insert(page_no, updated);
         self.hits = self.hits + 1;
         Some(self.frames.get(page_no))
@@ -164,20 +177,24 @@ implement PageCache {
         f.last_access = self.next_tick;
         self.next_tick = self.next_tick + 1;
         let _ = self.frames.insert(f.page_no, f);
+
+        let n = self.frames.len();
+        if n > self.peak_size { self.peak_size = n; }
     }
 
     // =========================================================================
     // Pinning
     // =========================================================================
 
-    /// Pin a frame so LRU eviction skips it. Returns false if not
-    /// present.
+    /// Pin a frame so LRU eviction skips it.  Returns false if not
+    /// present.  HOT PATH — moves `existing.data` rather than
+    /// cloning (the old map slot is overwritten by insert).
     public fn pin(&mut self, page_no: Int) -> Bool {
         if !self.frames.contains_key(page_no) { return false; }
         let existing = self.frames.get(page_no);
         let updated = CachedFrame {
             page_no: existing.page_no,
-            data: existing.data.clone(),
+            data: existing.data,
             dirty: existing.dirty,
             generation: existing.generation,
             pin_count: existing.pin_count + 1,
@@ -187,7 +204,7 @@ implement PageCache {
         true
     }
 
-    /// Release one pin reference. Returns false if not present or
+    /// Release one pin reference.  Returns false if not present or
     /// already at zero (caller bug).
     public fn unpin(&mut self, page_no: Int) -> Bool {
         if !self.frames.contains_key(page_no) { return false; }
@@ -195,7 +212,7 @@ implement PageCache {
         if existing.pin_count <= 0 { return false; }
         let updated = CachedFrame {
             page_no: existing.page_no,
-            data: existing.data.clone(),
+            data: existing.data,
             dirty: existing.dirty,
             generation: existing.generation,
             pin_count: existing.pin_count - 1,
@@ -212,7 +229,7 @@ implement PageCache {
         let existing = self.frames.get(page_no);
         let updated = CachedFrame {
             page_no: existing.page_no,
-            data: existing.data.clone(),
+            data: existing.data,
             dirty: true,
             generation: existing.generation,
             pin_count: existing.pin_count,
@@ -220,6 +237,21 @@ implement PageCache {
         };
         let _ = self.frames.insert(page_no, updated);
         true
+    }
+
+    /// Probe the dirty flag without bumping the LRU tick.  Used by
+    /// the checkpointer to filter clean pages out of its writeback
+    /// loop.  O(1).
+    public fn is_dirty(&self, page_no: Int) -> Bool {
+        if !self.frames.contains_key(page_no) { return false; }
+        self.frames.get(page_no).dirty
+    }
+
+    /// Probe the pin count without bumping the LRU tick.  Used by
+    /// tests + assertion paths.  O(1).
+    public fn pin_count_of(&self, page_no: Int) -> Int {
+        if !self.frames.contains_key(page_no) { return 0; }
+        self.frames.get(page_no).pin_count
     }
 
     // =========================================================================
@@ -277,4 +309,61 @@ implement PageCache {
     public fn hit_count(&self) -> Int { self.hits }
     public fn miss_count(&self) -> Int { self.misses }
     public fn eviction_count(&self) -> Int { self.evictions }
+    public fn peak_occupancy(&self) -> Int { self.peak_size }
+
+    /// Cache hit rate in basis points (0..10000).  Avoids floating
+    /// point on the hot stats path; PRAGMA cache_stats divides by
+    /// 100 for percent.  Returns 0 if no probes have happened yet.
+    public fn hit_rate_bps(&self) -> Int {
+        let total = self.hits + self.misses;
+        if total <= 0 { return 0; }
+        (self.hits * 10000) / total
+    }
+
+    /// Reset hit / miss / eviction counters — typically called after
+    /// a checkpoint to distinguish per-segment cache behaviour from
+    /// the cumulative running total.  Peak occupancy resets to the
+    /// current frame count rather than zero (it's a high-water mark
+    /// for tuning, and the live working set should remain visible).
+    public fn reset_stats(&mut self) {
+        self.hits = 0;
+        self.misses = 0;
+        self.evictions = 0;
+        self.peak_size = self.frames.len();
+    }
+
+    /// Enumerate every dirty frame at the current generation.  Used
+    /// by the checkpointer to drain pending writes before bumping
+    /// the generation.  Returns owned page numbers so the caller
+    /// can iterate without holding a borrow on the map.
+    public fn dirty_pages(&self) -> List<Int> {
+        let keys = self.frames.keys_list();
+        let mut out: List<Int> = List.new();
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let k = keys[i];
+            let f = self.frames.get(k);
+            if f.dirty && f.generation == self.current_gen {
+                out.push(k);
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Total bytes held across all cached frames.  Diagnostic only —
+    /// the cap is per-frame-count, not bytes.  O(N) walk; intended
+    /// for `PRAGMA cache_stats` reporting and tuning UIs.
+    public fn total_bytes(&self) -> Int {
+        let keys = self.frames.keys_list();
+        let mut total: Int = 0;
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let k = keys[i];
+            let f = self.frames.get(k);
+            total = total + f.data.len();
+            i = i + 1;
+        }
+        total
+    }
 }
