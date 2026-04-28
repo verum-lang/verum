@@ -217,10 +217,9 @@ fn permutations(items: &List<Int>) -> List<List<Int>> {
         let sub = permutations(&rest);
         let mut j: Int = 0;
         while j < sub.len() {
-            let mut perm: List<Int> = List.new();
+            let mut perm: List<Int> = List.with_capacity(sub[j].len() + 1);
             perm.push(pivot);
-            let mut m: Int = 0;
-            while m < sub[j].len() { perm.push(sub[j][m]); m = m + 1; }
+            perm.extend_from_slice(sub[j].as_slice());
             out.push(perm);
             j = j + 1;
         }
@@ -230,9 +229,8 @@ fn permutations(items: &List<Int>) -> List<List<Int>> {
 }
 
 fn clone_order(o: &List<Int>) -> List<Int> {
-    let mut out: List<Int> = List.new();
-    let mut i: Int = 0;
-    while i < o.len() { out.push(o[i]); i = i + 1; }
+    let mut out: List<Int> = List.with_capacity(o.len());
+    out.extend_from_slice(o.as_slice());
     out
 }
 
