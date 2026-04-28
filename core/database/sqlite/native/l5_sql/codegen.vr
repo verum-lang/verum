@@ -1228,7 +1228,41 @@ fn emit_having_expr(
                     st.program.replace(goto_idx, Goto(after));
                     Ok(())
                 }
-                _ => Err(unsupported("HAVING binop: BConcat / BIs / BIsNot pending".clone())),
+                BConcat => {
+                    // SQL `||` string concat — codegen emits ScalarFn id 12
+                    // taking 2 args at consecutive registers.  Same shape
+                    // as the regular emit_binary BConcat path.
+                    let _ = st.program.emit(ScalarFn(12, 2, ra, dst));
+                    Ok(())
+                }
+                BIs | BIsNot => {
+                    // NULL-safe equality — same shape as the general
+                    // emit_binary BIs/BIsNot path: 0/1 result, BIsNot
+                    // negates via dst = 1 - dst.
+                    let _ = st.program.emit(Integer(0, dst));
+                    let a_null_jmp = st.program.emit(IfNull(ra, 0));
+                    let b_null_short = st.program.emit(IfNull(rb, 0));
+                    let eq_jmp = st.program.emit(Eq(ra, rb, 0));
+                    let goto_after_eq = st.program.emit(Goto(0));
+                    let a_null_target = st.program.instruction_count();
+                    let b_both_null = st.program.emit(IfNull(rb, 0));
+                    let goto_after_anull = st.program.emit(Goto(0));
+                    let set_true_target = st.program.instruction_count();
+                    let _ = st.program.emit(Integer(1, dst));
+                    let after_target = st.program.instruction_count();
+                    st.program.replace(a_null_jmp,    IfNull(ra, a_null_target));
+                    st.program.replace(b_null_short,  IfNull(rb, after_target));
+                    st.program.replace(eq_jmp,        Eq(ra, rb, set_true_target));
+                    st.program.replace(goto_after_eq, Goto(after_target));
+                    st.program.replace(b_both_null,   IfNull(rb, set_true_target));
+                    st.program.replace(goto_after_anull, Goto(after_target));
+                    if op == BIsNot {
+                        let one_reg = st.regs.alloc();
+                        let _ = st.program.emit(Integer(1, one_reg));
+                        let _ = st.program.emit(Subtract(one_reg, dst, dst));
+                    }
+                    Ok(())
+                }
             }
         }
         EColumnRef(_cid, _idx) => {
