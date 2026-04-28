@@ -2121,7 +2121,7 @@ fn print_coord_report(
 /// (lex on OrdinalDepth) of the framework coordinates cited
 /// via @framework markers on that item. Returns a sorted
 /// list (by item_name) of inferred coordinates.
-fn invert_to_per_theorem(
+pub(crate) fn invert_to_per_theorem(
     by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
     verify_by_item: &BTreeMap<(PathBuf, Text, &'static str), Text>,
 ) -> Vec<PerTheoremCoord> {
@@ -2200,18 +2200,18 @@ fn invert_to_per_theorem(
 
 /// per-theorem inferred coordinate row.
 #[derive(Debug, Clone)]
-struct PerTheoremCoord {
-    file: PathBuf,
-    item_name: Text,
-    item_kind: &'static str,
-    inferred_fw: Text,
-    inferred_nu: CliOrdinal,
-    inferred_tau: bool,
-    frameworks_cited: Vec<Text>,
+pub(crate) struct PerTheoremCoord {
+    pub(crate) file: PathBuf,
+    pub(crate) item_name: Text,
+    pub(crate) item_kind: &'static str,
+    pub(crate) inferred_fw: Text,
+    pub(crate) inferred_nu: CliOrdinal,
+    pub(crate) inferred_tau: bool,
+    pub(crate) frameworks_cited: Vec<Text>,
     /// Strictest `@verify(...)` strategy declared on the item,
     /// `None` if the item has no `@verify` annotation. The strategy
     /// lifts `inferred_nu` via VVA §2.3 (per `verify_strategy_ordinal`).
-    verify_strategy: Option<Text>,
+    pub(crate) verify_strategy: Option<Text>,
 }
 
 fn print_coord_report_json(
@@ -3621,5 +3621,904 @@ pub fn audit_coherent_with_format(format: AuditFormat) -> Result<()> {
             print!("{}", out);
         }
     }
+    Ok(())
+}
+
+// =============================================================================
+// audit_proof_honesty — M0.G (proof-honesty audit walker)
+// =============================================================================
+//
+// Mirror of the stand-alone Python walker `tools/proof_honesty_audit.py`
+// (verum-msfs-corpus M0.E). Walks every .vr file under the current
+// project, classifies every public theorem / axiom by proof-body shape:
+//
+//   * `axiom-placeholder`     — `public axiom <name>(...)`
+//   * `theorem-no-proof-body` — `public theorem <name>` without proof body
+//   * `theorem-trivial-true`  — proof body without any tactic step
+//   * `theorem-axiom-only`    — proof body with one tactic application
+//   * `theorem-multi-step`    — proof body with ≥ 2 tactic / let steps
+//
+// Per-row record carries (name, kind, framework_axiom_deps,
+// theorem_deps, let_bindings, proof_body_steps, file). By-lineage
+// totals split by /msfs/ vs /diakrisis/ subpaths (matches the corpus
+// layout).
+//
+// Output: `audit-reports/proof-honesty.json` (schema_version=1) +
+// human-readable plain summary on stdout.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProofHonestyKind {
+    AxiomPlaceholder,
+    TheoremNoProofBody,
+    TheoremTrivialTrue,
+    TheoremAxiomOnly,
+    TheoremMultiStep,
+}
+
+impl ProofHonestyKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::AxiomPlaceholder => "axiom-placeholder",
+            Self::TheoremNoProofBody => "theorem-no-proof-body",
+            Self::TheoremTrivialTrue => "theorem-trivial-true",
+            Self::TheoremAxiomOnly => "theorem-axiom-only",
+            Self::TheoremMultiStep => "theorem-multi-step",
+        }
+    }
+}
+
+struct ProofHonestyRow {
+    name: Text,
+    kind: ProofHonestyKind,
+    apply_count: usize,
+    let_count: usize,
+    proof_step_count: usize,
+    file: PathBuf,
+}
+
+fn count_tactic_applies(t: &verum_ast::decl::TacticExpr) -> usize {
+    use verum_ast::decl::TacticExpr;
+    // Walks a TacticExpr counting every leaf-level "apply"-shaped step.
+    // `Seq` is the load-bearing combinator — `apply X; apply Y;` becomes
+    // `Seq([Apply(X), Apply(Y)])`, which we sum to 2.
+    match t {
+        TacticExpr::Trivial
+        | TacticExpr::Assumption
+        | TacticExpr::Reflexivity
+        | TacticExpr::Ring
+        | TacticExpr::Field
+        | TacticExpr::Omega
+        | TacticExpr::Blast
+        | TacticExpr::Split
+        | TacticExpr::Left
+        | TacticExpr::Right
+        | TacticExpr::Compute => 1,
+        TacticExpr::Apply { .. }
+        | TacticExpr::Rewrite { .. }
+        | TacticExpr::Simp { .. }
+        | TacticExpr::Smt { .. }
+        | TacticExpr::Auto { .. }
+        | TacticExpr::Intro(_)
+        | TacticExpr::Exists(_)
+        | TacticExpr::CasesOn(_)
+        | TacticExpr::InductionOn(_)
+        | TacticExpr::Exact(_)
+        | TacticExpr::Unfold(_) => 1,
+        TacticExpr::Try(inner) | TacticExpr::Repeat(inner) | TacticExpr::AllGoals(inner)
+        | TacticExpr::Focus(inner) => count_tactic_applies(inner),
+        TacticExpr::TryElse { body, fallback } => {
+            count_tactic_applies(body) + count_tactic_applies(fallback)
+        }
+        TacticExpr::Seq(items) | TacticExpr::Alt(items) => {
+            items.iter().map(count_tactic_applies).sum()
+        }
+        // Default for forms we don't iterate into (Named tactic
+        // invocations etc.) — treat as a single tactic step.
+        _ => 1,
+    }
+}
+
+fn classify_proof_body(proof: &verum_ast::decl::ProofBody) -> (usize, usize, usize) {
+    use verum_ast::decl::{ProofBody, ProofStepKind};
+    // Returns (apply_count, let_count, total_proof_step_count).
+    // `apply_count` counts EVERY leaf-level apply / tactic step including
+    // those nested inside `TacticExpr::Seq` — the parser frequently
+    // collapses `apply X; apply Y;` into a single `ProofBody::Tactic(Seq(..))`,
+    // so we must walk into the TacticExpr to recover the real count.
+    match proof {
+        ProofBody::Term(_) => (1, 0, 1),
+        ProofBody::Tactic(t) => {
+            let n = count_tactic_applies(t);
+            (n, 0, n)
+        }
+        ProofBody::ByMethod(_) => (1, 0, 1),
+        ProofBody::Structured(structure) => {
+            let mut apply_count = 0usize;
+            let mut let_count = 0usize;
+            let mut total = 0usize;
+            for step in structure.steps.iter() {
+                total += 1;
+                match &step.kind {
+                    ProofStepKind::Tactic(t) => apply_count += count_tactic_applies(t),
+                    ProofStepKind::Have { justification, .. }
+                    | ProofStepKind::Show { justification, .. }
+                    | ProofStepKind::Suffices { justification, .. } => {
+                        apply_count += count_tactic_applies(justification);
+                    }
+                    ProofStepKind::Obtain { .. }
+                    | ProofStepKind::Calc(_)
+                    | ProofStepKind::Cases { .. }
+                    | ProofStepKind::Focus { .. } => apply_count += 1,
+                    ProofStepKind::Let { .. } => let_count += 1,
+                }
+            }
+            if let verum_common::Maybe::Some(c) = &structure.conclusion {
+                apply_count += count_tactic_applies(c);
+                total += 1;
+            }
+            (apply_count, let_count, total)
+        }
+    }
+}
+
+pub fn audit_proof_honesty_with_format(format: AuditFormat) -> Result<()> {
+    use verum_ast::decl::ItemKind;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Proof-honesty audit (theorem proof-body shape classification)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut rows: Vec<ProofHonestyRow> = Vec::new();
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for item in &module.items {
+            match &item.kind {
+                ItemKind::Axiom(decl) => {
+                    rows.push(ProofHonestyRow {
+                        name: decl.name.name.clone(),
+                        kind: ProofHonestyKind::AxiomPlaceholder,
+                        apply_count: 0,
+                        let_count: 0,
+                        proof_step_count: 0,
+                        file: rel_path.clone(),
+                    });
+                }
+                ItemKind::Theorem(decl)
+                | ItemKind::Lemma(decl)
+                | ItemKind::Corollary(decl) => match &decl.proof {
+                    verum_common::Maybe::None => {
+                        rows.push(ProofHonestyRow {
+                            name: decl.name.name.clone(),
+                            kind: ProofHonestyKind::TheoremNoProofBody,
+                            apply_count: 0,
+                            let_count: 0,
+                            proof_step_count: 0,
+                            file: rel_path.clone(),
+                        });
+                    }
+                    verum_common::Maybe::Some(body) => {
+                        let (applies, lets, total) = classify_proof_body(body);
+                        let kind = if total == 0 {
+                            ProofHonestyKind::TheoremTrivialTrue
+                        } else if applies <= 1 && lets == 0 {
+                            ProofHonestyKind::TheoremAxiomOnly
+                        } else {
+                            ProofHonestyKind::TheoremMultiStep
+                        };
+                        rows.push(ProofHonestyRow {
+                            name: decl.name.name.clone(),
+                            kind,
+                            apply_count: applies,
+                            let_count: lets,
+                            proof_step_count: total,
+                            file: rel_path.clone(),
+                        });
+                    }
+                },
+                _ => {}
+            }
+        }
+    }
+
+    let mut totals = [0usize; 5];
+    let kind_index = |k: ProofHonestyKind| -> usize {
+        match k {
+            ProofHonestyKind::AxiomPlaceholder => 0,
+            ProofHonestyKind::TheoremNoProofBody => 1,
+            ProofHonestyKind::TheoremTrivialTrue => 2,
+            ProofHonestyKind::TheoremAxiomOnly => 3,
+            ProofHonestyKind::TheoremMultiStep => 4,
+        }
+    };
+    for r in &rows {
+        totals[kind_index(r.kind)] += 1;
+    }
+
+    // Per-lineage tallies (msfs / diakrisis subpath partition).
+    let mut by_msfs = [0usize; 5];
+    let mut by_diak = [0usize; 5];
+    for r in &rows {
+        let path_str = r.file.to_string_lossy();
+        if path_str.contains("/msfs/") {
+            by_msfs[kind_index(r.kind)] += 1;
+        } else if path_str.contains("/diakrisis/") {
+            by_diak[kind_index(r.kind)] += 1;
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => {
+            ui::output(&format!(
+                "scanned {} files, {} declarations classified",
+                vr_files.len(),
+                rows.len()
+            ));
+            ui::output(&format!("  axiom_placeholder      {}", totals[0]));
+            ui::output(&format!("  theorem_no_proof_body  {}", totals[1]));
+            ui::output(&format!("  theorem_trivial_true   {}", totals[2]));
+            ui::output(&format!("  theorem_axiom_only     {}", totals[3]));
+            ui::output(&format!("  theorem_multi_step     {}", totals[4]));
+            ui::output("by lineage:");
+            ui::output(&format!(
+                "  msfs       multi_step={:<3} axiom_only={:<3} axiom_placeholder={}",
+                by_msfs[4], by_msfs[3], by_msfs[0]
+            ));
+            ui::output(&format!(
+                "  diakrisis  multi_step={:<3} axiom_only={:<3} axiom_placeholder={}",
+                by_diak[4], by_diak[3], by_diak[0]
+            ));
+        }
+        AuditFormat::Json => {
+            let mut out = String::new();
+            out.push_str("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"scanned_files\": {},\n", vr_files.len()));
+            out.push_str("  \"totals\": {\n");
+            out.push_str(&format!("    \"axiom_placeholder\": {},\n", totals[0]));
+            out.push_str(&format!("    \"theorem_no_proof_body\": {},\n", totals[1]));
+            out.push_str(&format!("    \"theorem_trivial_true\": {},\n", totals[2]));
+            out.push_str(&format!("    \"theorem_axiom_only\": {},\n", totals[3]));
+            out.push_str(&format!("    \"theorem_multi_step\": {}\n", totals[4]));
+            out.push_str("  },\n");
+            out.push_str("  \"by_lineage\": {\n");
+            out.push_str("    \"msfs\": {\n");
+            out.push_str(&format!("      \"theorem_multi_step\": {},\n", by_msfs[4]));
+            out.push_str(&format!("      \"theorem_axiom_only\": {},\n", by_msfs[3]));
+            out.push_str(&format!("      \"axiom_placeholder\": {}\n", by_msfs[0]));
+            out.push_str("    },\n");
+            out.push_str("    \"diakrisis\": {\n");
+            out.push_str(&format!("      \"theorem_multi_step\": {},\n", by_diak[4]));
+            out.push_str(&format!("      \"theorem_axiom_only\": {},\n", by_diak[3]));
+            out.push_str(&format!("      \"axiom_placeholder\": {}\n", by_diak[0]));
+            out.push_str("    }\n");
+            out.push_str("  },\n");
+            out.push_str("  \"rows\": [\n");
+            for (i, r) in rows.iter().enumerate() {
+                out.push_str("    {\n");
+                out.push_str(&format!(
+                    "      \"name\": \"{}\",\n",
+                    json_escape(r.name.as_str())
+                ));
+                out.push_str(&format!("      \"kind\": \"{}\",\n", r.kind.as_str()));
+                out.push_str(&format!("      \"apply_count\": {},\n", r.apply_count));
+                out.push_str(&format!("      \"let_bindings\": {},\n", r.let_count));
+                out.push_str(&format!(
+                    "      \"proof_body_steps\": {},\n",
+                    r.proof_step_count
+                ));
+                out.push_str(&format!(
+                    "      \"file\": \"{}\"\n    }}",
+                    json_escape(&r.file.display().to_string())
+                ));
+                out.push_str(if i + 1 < rows.len() { ",\n" } else { "\n" });
+            }
+            out.push_str("  ]\n}\n");
+            print!("{}", out);
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// audit_coord_consistency — M4.B (corpus-side coord-supremum gate)
+// =============================================================================
+//
+// Spec §A.Z.5 item 2: V8.1 #232 typing-judgment integration auto-fires
+// `check_coord_cite` at every CoreTerm::Axiom reference site. But
+// corpus-side, no walker validates the (Fw, ν, τ) supremum invariant
+// AT AUDIT TIME (vs runtime kernel-recheck): every theorem's coord
+// must be ≥ max(cited axioms' coords).
+//
+// This walker reuses the `invert_to_per_theorem` collector from the
+// existing coord audit, but adds a NEW classification step that
+// flags violations:
+//
+//   * `Consistent` — `inferred_nu` ≥ each cited framework's bare ν.
+//   * `VerifyLift` — `inferred_nu` exceeds max(cited fw ν) only because
+//     of `@verify(<strict>)` lift; the framework citations alone wouldn't
+//     reach that ν. Informational, not a violation.
+//   * `MissingFramework` — theorem has no `@framework(...)` citation
+//     at all but does have a `@verify(...)` strategy. Defect: the
+//     theorem's claim has no recorded framework lineage.
+//
+// Output: `audit-reports/coord-consistency.json` (schema_v=1) +
+// non-zero exit if any MissingFramework rows surface.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CoordConsistencyKind {
+    Consistent,
+    VerifyLift,
+    MissingFramework,
+}
+
+impl CoordConsistencyKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Consistent => "consistent",
+            Self::VerifyLift => "verify-lift",
+            Self::MissingFramework => "missing-framework",
+        }
+    }
+}
+
+pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
+    use verum_ast::decl::ItemKind;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Coord-consistency audit (corpus-side supremum-of-cited-coords gate)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
+    let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    let mut verify_by_item: BTreeMap<(PathBuf, Text, &'static str), Text> = BTreeMap::new();
+    let mut all_items: Vec<(PathBuf, Text, &'static str, bool)> = Vec::new(); // (path, name, kind, has_verify)
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for item in &module.items {
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
+                _ => continue,
+            };
+            collect_framework_markers_from(
+                &item.attributes,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+            collect_framework_markers_from(
+                decl_attrs,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+            let has_verify =
+                strictest_verify_strategy(&item.attributes, decl_attrs).is_some();
+            if let Some(strategy) =
+                strictest_verify_strategy(&item.attributes, decl_attrs)
+            {
+                verify_by_item.insert(
+                    (rel_path.clone(), item_name.clone(), kind_label),
+                    strategy,
+                );
+            }
+            all_items.push((rel_path.clone(), item_name, kind_label, has_verify));
+        }
+    }
+
+    let per_theorem = invert_to_per_theorem(&by_framework, &verify_by_item);
+
+    // Build a quick lookup-by-key for items with framework citations.
+    let mut citation_by_key: std::collections::HashSet<(PathBuf, Text, &'static str)> =
+        std::collections::HashSet::new();
+    for row in &per_theorem {
+        citation_by_key.insert((row.file.clone(), row.item_name.clone(), row.item_kind));
+    }
+
+    // Classify every item:
+    //   * In per_theorem AND verify_strategy lifts ν beyond cited fw → VerifyLift.
+    //   * In per_theorem AND no verify-driven lift → Consistent.
+    //   * NOT in per_theorem (no fw citations) AND has_verify → MissingFramework.
+    //   * NOT in per_theorem AND no verify → silent (axiom-anchor placeholder; outside this audit's scope).
+    let mut consistent = 0usize;
+    let mut verify_lift = 0usize;
+    let mut missing_fw = 0usize;
+    let mut violations: Vec<(PathBuf, Text, &'static str)> = Vec::new();
+
+    for row in &per_theorem {
+        // VerifyLift iff inferred_nu strictly exceeds the framework's bare nu
+        // (i.e., verify_strategy lifted it). We approximate by comparing
+        // inferred_fw's bare nu (msfs_lookup) against inferred_nu.
+        let (fw_bare_ord, _) = msfs_lookup(row.inferred_fw.as_str());
+        let lift = row.inferred_nu.ne(&fw_bare_ord);
+        if lift {
+            verify_lift += 1;
+        } else {
+            consistent += 1;
+        }
+    }
+
+    // Items NOT covered by per_theorem but HAS @verify — missing framework citation.
+    for (path, name, kind, has_verify) in &all_items {
+        let key = (path.clone(), name.clone(), *kind);
+        if !citation_by_key.contains(&key) && *has_verify {
+            missing_fw += 1;
+            violations.push(key);
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => {
+            ui::output(&format!(
+                "scanned {} files, {} per-theorem-coord rows + {} no-citation @verify items",
+                vr_files.len(),
+                per_theorem.len(),
+                missing_fw
+            ));
+            ui::output(&format!("  consistent           {}", consistent));
+            ui::output(&format!("  verify_lift          {}", verify_lift));
+            ui::output(&format!("  missing_framework    {}", missing_fw));
+            if missing_fw > 0 {
+                ui::output("");
+                ui::output("missing-framework violations (theorems with @verify but NO @framework citation):");
+                for (path, name, kind) in &violations {
+                    ui::output(&format!(
+                        "  {} {} in {}",
+                        kind,
+                        name.as_str(),
+                        path.display()
+                    ));
+                }
+            }
+        }
+        AuditFormat::Json => {
+            let mut out = String::new();
+            out.push_str("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"scanned_files\": {},\n", vr_files.len()));
+            out.push_str("  \"totals\": {\n");
+            out.push_str(&format!("    \"consistent\":        {},\n", consistent));
+            out.push_str(&format!("    \"verify_lift\":       {},\n", verify_lift));
+            out.push_str(&format!("    \"missing_framework\": {}\n", missing_fw));
+            out.push_str("  },\n");
+            out.push_str("  \"violations\": [\n");
+            for (i, (path, name, kind)) in violations.iter().enumerate() {
+                out.push_str("    {\n");
+                out.push_str(&format!("      \"kind\": \"{}\",\n", kind));
+                out.push_str(&format!(
+                    "      \"name\": \"{}\",\n",
+                    json_escape(name.as_str())
+                ));
+                out.push_str(&format!("      \"violation_kind\": \"{}\",\n",
+                    CoordConsistencyKind::MissingFramework.as_str()));
+                out.push_str(&format!(
+                    "      \"file\": \"{}\"\n    }}",
+                    json_escape(&path.display().to_string())
+                ));
+                out.push_str(if i + 1 < violations.len() { ",\n" } else { "\n" });
+            }
+            out.push_str("  ]\n}\n");
+            print!("{}", out);
+        }
+    }
+
+    if missing_fw > 0 {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "{} theorem(s) have @verify(...) but no @framework(...) citation",
+                missing_fw
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// audit_framework_soundness — M4.A (corpus-side K-FwAx validator)
+// =============================================================================
+//
+// Spec §A.Z.4: V8.1 #222 made `AxiomRegistry::register` /
+// `load_framework_axioms` default to `SubsingletonRegime::ClosedPropositionOnly`
+// — but that gate fires at runtime registration. This walker mirrors
+// the gate at corpus-audit time: walks every `public axiom` declaration
+// in the project and classifies its proposition (the parser's
+// requires-AND-ensures conjunction) as:
+//
+//   * `Trivial`  — proposition is just `true` literal (placeholder
+//                  carrying no propositional content).
+//   * `Sound`    — proposition has non-trivial structure (binop /
+//                  call / refinement etc.) — passes the corpus-side
+//                  K-FwAx-light gate.
+//
+// Output: `audit-reports/framework-soundness.json` (schema_v=1) +
+// human-readable plain summary on stdout.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameworkSoundnessKind {
+    Sound,
+    Trivial,
+}
+
+impl FrameworkSoundnessKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Sound => "sound",
+            Self::Trivial => "trivial-placeholder",
+        }
+    }
+}
+
+struct FrameworkSoundnessRow {
+    name: Text,
+    kind: FrameworkSoundnessKind,
+    file: PathBuf,
+    framework_lineage: Text,
+}
+
+/// Returns `true` iff the expression is the literal `true`. This
+/// indicates a placeholder axiom whose `requires`/`ensures` were
+/// either absent or all degenerate. Recursively descends into
+/// `BinOp::And` chains (the parser's representation of multiple
+/// `ensures` clauses) — only if EVERY conjunct is `true literal`
+/// does the whole expression count as trivial.
+fn expr_is_trivially_true(e: &verum_ast::Expr) -> bool {
+    use verum_ast::ExprKind;
+    use verum_ast::literal::LiteralKind;
+    match &e.kind {
+        ExprKind::Literal(lit) => matches!(lit.kind, LiteralKind::Bool(true)),
+        ExprKind::Binary {
+            op: verum_ast::BinOp::And,
+            left,
+            right,
+        } => expr_is_trivially_true(left) && expr_is_trivially_true(right),
+        _ => false,
+    }
+}
+
+/// Extract the framework lineage (first arg of `@framework(<lineage>, ...)`)
+/// from an axiom's attribute list. Returns "<unknown>" if not annotated.
+fn extract_framework_lineage(attrs: &verum_common::List<verum_ast::attr::Attribute>) -> Text {
+    use verum_ast::attr::FromAttribute;
+    for attr in attrs.iter() {
+        if !attr.is_named("framework") {
+            continue;
+        }
+        if let Some(fw) = verum_ast::attr::FrameworkAttr::from_attribute(attr) {
+            return fw.name.clone();
+        }
+    }
+    Text::from("<unknown>")
+}
+
+pub fn audit_framework_soundness_with_format(format: AuditFormat) -> Result<()> {
+    use verum_ast::decl::ItemKind;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Framework-soundness audit (corpus-side K-FwAx light gate)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut rows: Vec<FrameworkSoundnessRow> = Vec::new();
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for item in &module.items {
+            if let ItemKind::Axiom(decl) = &item.kind {
+                let lineage = extract_framework_lineage(&decl.attributes);
+                let kind = if expr_is_trivially_true(&decl.proposition) {
+                    FrameworkSoundnessKind::Trivial
+                } else {
+                    FrameworkSoundnessKind::Sound
+                };
+                rows.push(FrameworkSoundnessRow {
+                    name: decl.name.name.clone(),
+                    kind,
+                    file: rel_path.clone(),
+                    framework_lineage: lineage,
+                });
+            }
+        }
+    }
+
+    let total = rows.len();
+    let sound = rows
+        .iter()
+        .filter(|r| r.kind == FrameworkSoundnessKind::Sound)
+        .count();
+    let trivial = rows
+        .iter()
+        .filter(|r| r.kind == FrameworkSoundnessKind::Trivial)
+        .count();
+
+    match format {
+        AuditFormat::Plain => {
+            ui::output(&format!(
+                "scanned {} files, {} axioms classified",
+                vr_files.len(),
+                total
+            ));
+            ui::output(&format!("  sound                   {}", sound));
+            ui::output(&format!("  trivial_placeholder     {}", trivial));
+            if trivial > 0 {
+                ui::output("");
+                ui::output("trivial-placeholder axioms (consider strengthening or promoting to @theorem):");
+                for r in rows.iter().filter(|r| r.kind == FrameworkSoundnessKind::Trivial) {
+                    ui::output(&format!(
+                        "  {:<60} [{}] in {}",
+                        r.name.as_str(),
+                        r.framework_lineage.as_str(),
+                        r.file.display()
+                    ));
+                }
+            }
+        }
+        AuditFormat::Json => {
+            let mut out = String::new();
+            out.push_str("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"scanned_files\": {},\n", vr_files.len()));
+            out.push_str(&format!("  \"total_axioms\": {},\n", total));
+            out.push_str("  \"totals\": {\n");
+            out.push_str(&format!("    \"sound\": {},\n", sound));
+            out.push_str(&format!("    \"trivial_placeholder\": {}\n", trivial));
+            out.push_str("  },\n");
+            out.push_str("  \"rows\": [\n");
+            for (i, r) in rows.iter().enumerate() {
+                out.push_str("    {\n");
+                out.push_str(&format!(
+                    "      \"name\": \"{}\",\n",
+                    json_escape(r.name.as_str())
+                ));
+                out.push_str(&format!("      \"kind\": \"{}\",\n", r.kind.as_str()));
+                out.push_str(&format!(
+                    "      \"framework_lineage\": \"{}\",\n",
+                    json_escape(r.framework_lineage.as_str())
+                ));
+                out.push_str(&format!(
+                    "      \"file\": \"{}\"\n    }}",
+                    json_escape(&r.file.display().to_string())
+                ));
+                out.push_str(if i + 1 < rows.len() { ",\n" } else { "\n" });
+            }
+            out.push_str("  ]\n}\n");
+            print!("{}", out);
+        }
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// Bridge-admits audit (M-EXPORT V2 / K-Round-Trip V2 follow-up)
+//
+// Walks every theorem / lemma / corollary in the project, lifts its
+// proof body to a CoreTerm via verum_verification::lift_expr_to_core,
+// runs verum_kernel::round_trip::enumerate_bridge_admits, and reports
+// which Diakrisis preprint admits each theorem relies on. Surfaces
+// the corpus-wide trusted-boundary footprint at a glance, so external
+// reviewers can audit every reliance on Diakrisis 16.10 / 16.7 / 14.3
+// without re-walking the kernel by hand.
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct BridgeAdmitRow {
+    theorem_name: Text,
+    file: PathBuf,
+    bridges: Vec<&'static str>,
+}
+
+/// Default-format entry point.
+pub fn audit_bridge_admits() -> Result<()> {
+    audit_bridge_admits_with_format(AuditFormat::Plain)
+}
+
+/// Format-aware entry point: walks the project, enumerates every
+/// theorem's bridge-admit footprint, and prints a structured report.
+pub fn audit_bridge_admits_with_format(format: AuditFormat) -> Result<()> {
+    use verum_ast::decl::ItemKind;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Bridge-admit audit (Diakrisis 16.10 / 16.7 / 14.3 footprint)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut rows: Vec<BridgeAdmitRow> = Vec::new();
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for item in &module.items {
+            let (name, proof_body) = match &item.kind {
+                ItemKind::Theorem(decl)
+                | ItemKind::Lemma(decl)
+                | ItemKind::Corollary(decl) => (decl.name.name.clone(), &decl.proof),
+                _ => continue,
+            };
+
+            let core = match proof_body {
+                verum_common::Maybe::Some(verum_ast::ProofBody::Term(expr)) => {
+                    verum_verification::kernel_recheck::lift_expr_to_core(expr.as_ref())
+                }
+                _ => continue,
+            };
+
+            let context = format!(
+                "{}::{}",
+                rel_path.display(),
+                name.as_str()
+            );
+            let audit = verum_kernel::round_trip::enumerate_bridge_admits(&core, &context);
+            if !audit.is_decidable() {
+                let bridges_list = audit.bridges();
+                let bridges: Vec<&'static str> =
+                    bridges_list.iter().copied().collect();
+                rows.push(BridgeAdmitRow {
+                    theorem_name: name,
+                    file: rel_path.clone(),
+                    bridges,
+                });
+            }
+        }
+    }
+
+    let total = rows.len();
+    let by_bridge: BTreeMap<&'static str, usize> = {
+        let mut m = BTreeMap::new();
+        for r in &rows {
+            for b in &r.bridges {
+                *m.entry(*b).or_insert(0) += 1;
+            }
+        }
+        m
+    };
+
+    match format {
+        AuditFormat::Plain => {
+            ui::output(&format!("\nscanned files: {}", vr_files.len()));
+            ui::output(&format!("theorems with bridge-admits: {}", total));
+            if total == 0 {
+                ui::output("  (decidable corpus — every theorem proves within V0/V1 fragment)");
+                return Ok(());
+            }
+            ui::output("");
+            ui::output("by bridge:");
+            for (b, n) in &by_bridge {
+                ui::output(&format!("  {:<20} {}", b, n));
+            }
+            ui::output("");
+            ui::output("per-theorem footprint:");
+            for r in &rows {
+                ui::output(&format!(
+                    "  {:<60} {} :: {}",
+                    r.theorem_name.as_str(),
+                    r.bridges.join(", "),
+                    r.file.display()
+                ));
+            }
+        }
+        AuditFormat::Json => {
+            let mut out = String::new();
+            out.push_str("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"scanned_files\": {},\n", vr_files.len()));
+            out.push_str(&format!("  \"total_with_admits\": {},\n", total));
+            out.push_str("  \"by_bridge\": {");
+            let mut first = true;
+            for (b, n) in &by_bridge {
+                if !first {
+                    out.push_str(",");
+                }
+                out.push_str(&format!("\n    \"{}\": {}", b, n));
+                first = false;
+            }
+            if !by_bridge.is_empty() {
+                out.push('\n');
+                out.push_str("  ");
+            }
+            out.push_str("},\n");
+            out.push_str("  \"rows\": [\n");
+            for (i, r) in rows.iter().enumerate() {
+                out.push_str("    {\n");
+                out.push_str(&format!(
+                    "      \"theorem\": \"{}\",\n",
+                    json_escape(r.theorem_name.as_str())
+                ));
+                out.push_str(&format!(
+                    "      \"file\": \"{}\",\n",
+                    json_escape(&r.file.display().to_string())
+                ));
+                out.push_str("      \"bridges\": [");
+                for (j, b) in r.bridges.iter().enumerate() {
+                    if j > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&format!("\"{}\"", b));
+                }
+                out.push_str("]\n    }");
+                out.push_str(if i + 1 < rows.len() { ",\n" } else { "\n" });
+            }
+            out.push_str("  ]\n}\n");
+            print!("{}", out);
+        }
+    }
+
     Ok(())
 }

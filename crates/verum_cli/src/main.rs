@@ -259,9 +259,14 @@ enum Commands {
 
     /// Run a Verum program (interpreter by default, --aot for native)
     Run {
-        /// .vr file to run (or project directory)
+        /// .vr file to run, project directory, or `-` to read from stdin.
         #[clap(value_name = "FILE")]
         file: Option<Text>,
+        /// Evaluate an inline expression. The expression is wrapped in
+        /// a `print(...)` so its value is shown; pass `-` instead for
+        /// raw stdin without auto-print.
+        #[clap(long, short = 'e', value_name = "EXPR", conflicts_with = "file")]
+        eval: Option<String>,
         /// Run via interpreter (default, can be omitted)
         #[clap(long, conflicts_with = "aot")]
         interp: bool,
@@ -1053,6 +1058,21 @@ enum Commands {
         #[clap(long)]
         proof_honesty: bool,
 
+        /// Bridge-admit footprint audit (M-EXPORT V2 / K-Round-Trip V2):
+        /// walk every public theorem / lemma / corollary, lift the
+        /// proof body to a CoreTerm, run
+        /// `verum_kernel::round_trip::enumerate_bridge_admits`, and
+        /// emit a per-theorem footprint of which Diakrisis preprint
+        /// admits the proof relies on (16.10 confluence, 16.7
+        /// quotient canonical-rep, 14.3 cohesive-adjunction unit/counit).
+        ///
+        /// Empty footprint = decidable corpus. Non-empty = trusted-
+        /// boundary surface: external reviewers see every reliance
+        /// on a preprint-blocked result without re-walking the
+        /// kernel by hand. Schema_v=1 JSON when --format json.
+        #[clap(long)]
+        bridge_admits: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -1393,6 +1413,11 @@ fn main_inner() {
     // crate::script for the full rationale and invariants. The rewrite is
     // a no-op for any normal subcommand invocation.
     let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // Productivity advisory: catch the `verum file.vr` (no `run`) form
+    // when `file.vr` lacks the mandatory shebang and surface a precise,
+    // actionable error before clap's generic "unknown subcommand" fires.
+    // The Verum execution-mode contract reserves the no-`run` shorthand
+    // for shebang scripts; non-script `.vr` files must use `verum run`.
     if let Some(msg) = script::missing_shebang_advisory(&argv) {
         eprintln!("error: {}", msg);
         process::exit(2);
@@ -1628,6 +1653,7 @@ fn run_command(cli: Cli) -> Result<()> {
         }
         Commands::Run {
             file,
+            eval,
             interp,
             aot,
             release,
@@ -1673,6 +1699,49 @@ fn run_command(cli: Cli) -> Result<()> {
 
             verum_error::crash::set_command("run");
             verum_error::crash::set_tier(tier_label);
+
+            // Inline-eval and stdin sources synthesise a temporary
+            // script file with a shebang prefix so they flow through
+            // the same script-mode pipeline as on-disk scripts —
+            // identical parser, identical permission model, identical
+            // exit-code semantics. The temp file is removed on drop.
+            if let Some(expr) = eval {
+                let tmp = commands::file::synthesize_script_temp(
+                    &format!("print({});\n", expr),
+                    "eval",
+                )
+                .map_err(|e| CliError::Custom(format!("synthesize -e: {e}")))?;
+                ui::status("Running", &format!("-e ({})", tier_label));
+                let result = commands::file::run_with_tier(
+                    tmp.path().to_str().expect("temp path is utf-8"),
+                    args_list,
+                    false,
+                    tier_num,
+                    timings,
+                );
+                drop(tmp);
+                return result;
+            }
+            if file.as_ref().map(|f| f.as_str()) == Some("-") {
+                let mut buf = String::new();
+                use std::io::Read;
+                std::io::stdin()
+                    .read_to_string(&mut buf)
+                    .map_err(|e| CliError::Custom(format!("read stdin: {e}")))?;
+                let tmp = commands::file::synthesize_script_temp(&buf, "stdin")
+                    .map_err(|e| CliError::Custom(format!("synthesize stdin: {e}")))?;
+                ui::status("Running", &format!("- ({})", tier_label));
+                let result = commands::file::run_with_tier(
+                    tmp.path().to_str().expect("temp path is utf-8"),
+                    args_list,
+                    false,
+                    tier_num,
+                    timings,
+                );
+                drop(tmp);
+                return result;
+            }
+
             match resolve_path(file.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
                     verum_error::crash::set_input_file(file_path.as_str());
@@ -2372,6 +2441,7 @@ fn run_command(cli: Cli) -> Result<()> {
             round_trip,
             coherent,
             proof_honesty,
+            bridge_admits,
             framework_soundness,
             coord_consistency,
             format,
@@ -2413,6 +2483,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_coherent_with_format(output_format)
             } else if proof_honesty {
                 commands::audit::audit_proof_honesty_with_format(output_format)
+            } else if bridge_admits {
+                commands::audit::audit_bridge_admits_with_format(output_format)
             } else if framework_soundness {
                 commands::audit::audit_framework_soundness_with_format(output_format)
             } else if coord_consistency {
