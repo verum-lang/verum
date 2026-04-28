@@ -122,65 +122,74 @@ public type WindowsSockaddrIn6 is {
 // Raw Winsock2 FFI Declarations
 // =============================================================================
 
-@extern("ws2_32.dll")
-fn WSAStartup(version_requested: UInt16, wsa_data: &unsafe Byte) -> Int;
+// Winsock2 FFI signatures use the Win32 ABI:
+//   * `int` parameters / returns → `Int32` (POSIX-style 32-bit signed,
+//     identical width on Win64)
+//   * `SOCKET` → `UInt64` (Win64 pointer-width opaque handle, kept as-is)
+//   * `int *` socklen-shaped out-pointers (addrlen, namelen, fromlen,
+//     optlen) → `&mut Int32` — the kernel writes 4 bytes; `&mut Int`
+//     (i64*) would leave the high 4 bytes uninitialized.
+// T0.4.2 Phase 3 sweep — same FFI ABI hazard class as macOS libsystem.vr.
 
 @extern("ws2_32.dll")
-fn WSACleanup() -> Int;
+fn WSAStartup(version_requested: UInt16, wsa_data: &unsafe Byte) -> Int32;
 
 @extern("ws2_32.dll")
-fn WSAGetLastError() -> Int;
+fn WSACleanup() -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_socket(af: Int, sock_type: Int, protocol: Int) -> UInt64;
+fn WSAGetLastError() -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_connect(s: UInt64, name: &unsafe Byte, namelen: Int) -> Int;
+fn ws2_socket(af: Int32, sock_type: Int32, protocol: Int32) -> UInt64;
 
 @extern("ws2_32.dll")
-fn ws2_bind(s: UInt64, name: &unsafe Byte, namelen: Int) -> Int;
+fn ws2_connect(s: UInt64, name: &unsafe Byte, namelen: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_listen(s: UInt64, backlog: Int) -> Int;
+fn ws2_bind(s: UInt64, name: &unsafe Byte, namelen: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_accept(s: UInt64, addr: &unsafe Byte, addrlen: &mut Int) -> UInt64;
+fn ws2_listen(s: UInt64, backlog: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_send(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int) -> Int;
+fn ws2_accept(s: UInt64, addr: &unsafe Byte, addrlen: &mut Int32) -> UInt64;
 
 @extern("ws2_32.dll")
-fn ws2_recv(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int) -> Int;
+fn ws2_send(s: UInt64, buf: &unsafe Byte, len: Int32, flags: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_sendto(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int, to: &unsafe Byte, tolen: Int) -> Int;
+fn ws2_recv(s: UInt64, buf: &unsafe Byte, len: Int32, flags: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_recvfrom(s: UInt64, buf: &unsafe Byte, len: Int, flags: Int, from: &unsafe Byte, fromlen: &mut Int) -> Int;
+fn ws2_sendto(s: UInt64, buf: &unsafe Byte, len: Int32, flags: Int32, to: &unsafe Byte, tolen: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_shutdown(s: UInt64, how: Int) -> Int;
+fn ws2_recvfrom(s: UInt64, buf: &unsafe Byte, len: Int32, flags: Int32, from: &unsafe Byte, fromlen: &mut Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_closesocket(s: UInt64) -> Int;
+fn ws2_shutdown(s: UInt64, how: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_setsockopt(s: UInt64, level: Int, optname: Int, optval: &unsafe Byte, optlen: Int) -> Int;
+fn ws2_closesocket(s: UInt64) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_getsockopt(s: UInt64, level: Int, optname: Int, optval: &unsafe Byte, optlen: &mut Int) -> Int;
+fn ws2_setsockopt(s: UInt64, level: Int32, optname: Int32, optval: &unsafe Byte, optlen: Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_getsockname(s: UInt64, name: &unsafe Byte, namelen: &mut Int) -> Int;
+fn ws2_getsockopt(s: UInt64, level: Int32, optname: Int32, optval: &unsafe Byte, optlen: &mut Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_getpeername(s: UInt64, name: &unsafe Byte, namelen: &mut Int) -> Int;
+fn ws2_getsockname(s: UInt64, name: &unsafe Byte, namelen: &mut Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_ioctlsocket(s: UInt64, cmd: UInt32, argp: &mut UInt32) -> Int;
+fn ws2_getpeername(s: UInt64, name: &unsafe Byte, namelen: &mut Int32) -> Int32;
 
 @extern("ws2_32.dll")
-fn ws2_select(nfds: Int, readfds: &unsafe Byte, writefds: &unsafe Byte, exceptfds: &unsafe Byte, timeout: &unsafe Byte) -> Int;
+fn ws2_ioctlsocket(s: UInt64, cmd: UInt32, argp: &mut UInt32) -> Int32;
+
+@extern("ws2_32.dll")
+fn ws2_select(nfds: Int32, readfds: &unsafe Byte, writefds: &unsafe Byte, exceptfds: &unsafe Byte, timeout: &unsafe Byte) -> Int32;
 
 // =============================================================================
 // WSA Initialization (WindowsOnce-guarded)
