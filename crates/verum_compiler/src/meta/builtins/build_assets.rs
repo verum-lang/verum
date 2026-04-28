@@ -132,11 +132,15 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     map.insert(
         Text::from("codegen"),
         BuiltinInfo::build_assets(
-            meta_load_toml,
+            meta_codegen,
             "@codegen(\"spec.toml\") — load a TOML codegen spec at compile \
-             time. Alias for `load_toml`; returns the parsed document as a \
-             Map<Text, ConstValue> for downstream meta-fn consumption.",
-            "(Text) -> Map<Text, Any>",
+             time, returning Map<Text, Any>.  Two-arg form \
+             `codegen(\"spec.toml\", \"build_fn\")` additionally invokes \
+             the user-defined meta fn `build_fn` with the parsed map and \
+             returns whatever it produces (typically a List<Item> spliced \
+             into the surrounding module).  Sandbox-restricted to project \
+             root.",
+            "(Text [, Text]) -> Any",
         ),
     );
 
@@ -262,6 +266,114 @@ fn meta_load_toml(
             found: args[0].type_name(),
         }),
     }
+}
+
+/// `@codegen(path)` — single-arg form delegates to
+/// `load_toml`, returning the parsed Map<Text, MetaValue>
+/// for further composition by user code.
+///
+/// `@codegen(path, fn_name)` — two-arg form is the
+/// architectural completion of #20 P7 / @codegen:
+/// after loading the spec, invokes the user-defined meta
+/// fn `fn_name` with the parsed map as its single
+/// argument and returns whatever the meta fn produces.
+/// The typical user pattern is for the meta fn to return
+/// a `MetaValue::Items(...)` that the surrounding macro
+/// expansion splices into the module:
+///
+/// ```verum
+/// public meta fn build_users(spec: Map<Text, Any>) -> List<Item>
+///     using [BuildAssets, AstAccess]
+/// {
+///     // Construct AST items from the parsed spec...
+/// }
+///
+/// // Module-level invocation:
+/// @codegen("schemas/users.toml", "build_users");
+/// ```
+///
+/// Sandbox + cycle protection: file load goes through the
+/// same `BuildAssetsInfo::load_toml` path (project-root
+/// canonicalize precheck); the user meta-fn invocation
+/// goes through `execute_user_meta_fn` which enforces the
+/// recursion limit.
+fn meta_codegen(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
+    if args.len() != 1 && args.len() != 2 {
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
+    }
+    let path_text = match &args[0] {
+        ConstValue::Text(t) => t.clone(),
+        _ => {
+            return Err(MetaError::TypeMismatch {
+                expected: Text::from("Text"),
+                found: args[0].type_name(),
+            });
+        }
+    };
+    // Load the TOML spec — same path the single-arg form uses.
+    let spec = ctx.build_assets.load_toml(path_text.as_str())?;
+
+    if args.len() == 1 {
+        return Ok(spec);
+    }
+
+    // Two-arg form: invoke the named user meta fn.
+    let fn_name = match &args[1] {
+        ConstValue::Text(t) => t.clone(),
+        _ => {
+            return Err(MetaError::TypeMismatch {
+                expected: Text::from("Text"),
+                found: args[1].type_name(),
+            });
+        }
+    };
+
+    // Look up the user-defined meta fn in the registry.
+    // The lookup uses the current module as the search
+    // origin so users can reference fns defined in their
+    // own module without a qualified path.
+    let registry_arc = ctx.registry.as_ref().cloned().ok_or_else(|| {
+        MetaError::Other(Text::from(
+            "@codegen: meta registry not wired into context — \
+             this build path doesn't support user meta fn dispatch",
+        ))
+    })?;
+    let user_fn = match registry_arc.get_user_meta_fn(&ctx.current_module, &fn_name) {
+        verum_common::Maybe::Some(f) => f,
+        verum_common::Maybe::None => {
+            return Err(MetaError::Other(Text::from(format!(
+                "@codegen({}, {}): user meta fn `{}` not found in registry",
+                path_text, fn_name, fn_name
+            ))));
+        }
+    };
+
+    // Validate arity — the user meta fn must accept exactly
+    // one argument (the parsed spec map).  This is a clear
+    // diagnostic instead of letting `execute_user_meta_fn`
+    // surface a generic ArityMismatch with no context.
+    if user_fn.params.len() != 1 {
+        return Err(MetaError::Other(Text::from(format!(
+            "@codegen({}, {}): user meta fn `{}` must accept exactly 1 argument \
+             (the parsed spec Map<Text, Any>); got {} parameters",
+            path_text,
+            fn_name,
+            fn_name,
+            user_fn.params.len()
+        ))));
+    }
+
+    // Invoke the user meta fn with the parsed spec.  The
+    // result is whatever the fn returns — typically
+    // MetaValue::Items for code-generation patterns, but
+    // could be any ConstValue (e.g. derived constants).
+    ctx.execute_user_meta_fn(&user_fn, vec![spec])
 }
 
 // ============================================================================
@@ -957,5 +1069,105 @@ mod tests {
         let (mut ctx, _temp_dir) = create_test_context();
         let result = meta_load_toml(&mut ctx, List::new());
         assert!(matches!(result, Err(MetaError::ArityMismatch { .. })));
+    }
+
+    // =====================================================================
+    // #20 P7 — @codegen full attribute-form (single-arg + two-arg)
+    // =====================================================================
+
+    #[test]
+    fn test_codegen_single_arg_delegates_to_load_toml() {
+        // Single-arg `codegen("path")` must produce identical
+        // output to `load_toml("path")` — the two-arg form is a
+        // strict superset.
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("spec.toml");
+        std::fs::write(&path, "name = \"verum\"\nversion = 1\n").unwrap();
+
+        let direct = meta_load_toml(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("spec.toml"))]),
+        )
+        .expect("single-arg load_toml");
+        let via_codegen = meta_codegen(
+            &mut ctx,
+            List::from(vec![ConstValue::Text(Text::from("spec.toml"))]),
+        )
+        .expect("single-arg codegen");
+        assert_eq!(direct, via_codegen);
+    }
+
+    #[test]
+    fn test_codegen_arity_zero_args() {
+        let (mut ctx, _t) = create_test_context();
+        let r = meta_codegen(&mut ctx, List::new());
+        assert!(matches!(r, Err(MetaError::ArityMismatch { .. })));
+    }
+
+    #[test]
+    fn test_codegen_arity_three_args() {
+        let (mut ctx, _t) = create_test_context();
+        let r = meta_codegen(
+            &mut ctx,
+            List::from(vec![
+                ConstValue::Text(Text::from("a")),
+                ConstValue::Text(Text::from("b")),
+                ConstValue::Text(Text::from("c")),
+            ]),
+        );
+        assert!(matches!(r, Err(MetaError::ArityMismatch { .. })));
+    }
+
+    #[test]
+    fn test_codegen_first_arg_must_be_text() {
+        let (mut ctx, _t) = create_test_context();
+        let r = meta_codegen(
+            &mut ctx,
+            List::from(vec![ConstValue::Int(42)]),
+        );
+        assert!(matches!(r, Err(MetaError::TypeMismatch { .. })));
+    }
+
+    #[test]
+    fn test_codegen_second_arg_must_be_text() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("spec.toml");
+        std::fs::write(&path, "k = 1\n").unwrap();
+        let r = meta_codegen(
+            &mut ctx,
+            List::from(vec![
+                ConstValue::Text(Text::from("spec.toml")),
+                ConstValue::Int(42),
+            ]),
+        );
+        assert!(matches!(r, Err(MetaError::TypeMismatch { .. })));
+    }
+
+    #[test]
+    fn test_codegen_two_arg_form_requires_registry() {
+        // No registry wired → @codegen("path", "fn") errors with
+        // a clear diagnostic instead of a generic NotFound.
+        let (mut ctx, temp_dir) = create_test_context();
+        let path = temp_dir.path().join("spec.toml");
+        std::fs::write(&path, "k = 1\n").unwrap();
+        // create_test_context doesn't wire a registry; verify
+        // the typed error mentions the missing wiring.
+        let r = meta_codegen(
+            &mut ctx,
+            List::from(vec![
+                ConstValue::Text(Text::from("spec.toml")),
+                ConstValue::Text(Text::from("build_users")),
+            ]),
+        );
+        match r {
+            Err(MetaError::Other(msg)) => {
+                assert!(
+                    msg.as_str().contains("registry not wired"),
+                    "expected registry-not-wired diagnostic, got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected Other registry-not-wired error, got {:?}", other),
+        }
     }
 }
