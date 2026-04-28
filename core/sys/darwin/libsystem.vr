@@ -39,8 +39,10 @@ extern {
     /// Write to file descriptor. Same shape as `read`. T0.4 fix.
     public fn write(fd: Int32, buf: &Byte, nbyte: Int) -> Int;
 
-    /// Open file
-    public fn open(path: &Byte, oflag: Int, mode: Int) -> Int;
+    /// Open file. C: `int open(const char *path, int oflag, mode_t mode);`.
+    /// `oflag` is `int` (Int32); `mode_t` is `uint32_t` on modern Darwin.
+    /// Return is the new file descriptor (`int`, Int32).
+    public fn open(path: &Byte, oflag: Int32, mode: UInt32) -> Int32;
 
     /// Close file descriptor.
     ///
@@ -123,36 +125,41 @@ extern {
     @ffi_name("mmap")
     public fn mmap_ffi(addr: Int, len: Int, prot: Int32, flags: Int32, fd: Int32, offset: Int) -> Int;
 
-    /// Unmap memory
-    public fn munmap(addr: Int, len: Int) -> Int;
+    /// Unmap memory. C: `int munmap(void *addr, size_t length);`.
+    /// `addr` is a void* (kept Int as raw-pointer integer per file convention),
+    /// `length` is size_t (Int), return is `int` (Int32).
+    public fn munmap(addr: Int, len: Int) -> Int32;
 
-    /// Change memory protection
-    public fn mprotect(addr: Int, len: Int, prot: Int) -> Int;
+    /// Change memory protection. C: `int mprotect(void *addr, size_t len,
+    /// int prot);`. `prot` is `int` (Int32), return is `int` (Int32).
+    public fn mprotect(addr: Int, len: Int, prot: Int32) -> Int32;
 
-    /// Memory advise
-    public fn madvise(addr: Int, len: Int, advice: Int) -> Int;
+    /// Memory advise. C: `int madvise(void *addr, size_t len, int advice);`.
+    /// `advice` is `int` (Int32), return is `int` (Int32).
+    public fn madvise(addr: Int, len: Int, advice: Int32) -> Int32;
 
-    /// Lock memory
-    fn mlock(addr: Int, len: Int) -> Int;
+    /// Lock memory. C: `int mlock(const void *addr, size_t len);`.
+    fn mlock(addr: Int, len: Int) -> Int32;
 
-    /// Unlock memory
-    fn munlock(addr: Int, len: Int) -> Int;
+    /// Unlock memory. C: `int munlock(const void *addr, size_t len);`.
+    fn munlock(addr: Int, len: Int) -> Int32;
 
-    /// Synchronize memory to storage
-    fn msync(addr: Int, len: Int, flags: Int) -> Int;
+    /// Synchronize memory to storage. C: `int msync(void *addr, size_t len,
+    /// int flags);`. `flags` is `int` (Int32), return is `int` (Int32).
+    fn msync(addr: Int, len: Int, flags: Int32) -> Int32;
 
-    /// Get page size
-    fn getpagesize() -> Int;
+    /// Get page size. C: `int getpagesize(void);`.
+    fn getpagesize() -> Int32;
 
     // =========================================================================
     // Process Control
     // =========================================================================
 
-    /// Get process ID
-    fn getpid() -> Int;
+    /// Get process ID. C: `pid_t getpid(void);` (`pid_t = int32_t`).
+    fn getpid() -> Int32;
 
-    /// Get parent process ID
-    fn getppid() -> Int;
+    /// Get parent process ID. C: `pid_t getppid(void);`.
+    fn getppid() -> Int32;
 
     /// Get user ID. C: `uid_t getuid(void);` (`uid_t = uint32_t`).
     fn getuid() -> UInt32;
@@ -512,26 +519,30 @@ extern {
     // Signals
     // =========================================================================
 
-    /// Set signal handler
-    fn signal(signum: Int, handler: fn(Int)) -> fn(Int);
+    /// Set signal handler. C: `sig_t signal(int sig, sig_t func);`
+    /// (`sig_t = void (*)(int)`). All `int`-typed slots → Int32.
+    fn signal(signum: Int32, handler: fn(Int32)) -> fn(Int32);
 
-    /// Signal action
-    fn sigaction(signum: Int, act: &Sigaction, oldact: &mut Sigaction) -> Int;
+    /// Signal action. C: `int sigaction(int signum, const struct sigaction
+    /// *act, struct sigaction *oldact);`.
+    fn sigaction(signum: Int32, act: &Sigaction, oldact: &mut Sigaction) -> Int32;
 
-    /// Signal mask
-    fn sigprocmask(how: Int, set: &Sigset, oldset: &mut Sigset) -> Int;
+    /// Signal mask. C: `int sigprocmask(int how, const sigset_t *set,
+    /// sigset_t *oldset);`.
+    fn sigprocmask(how: Int32, set: &Sigset, oldset: &mut Sigset) -> Int32;
 
     // =========================================================================
     // Random
     // =========================================================================
 
-    /// Get entropy (macOS 10.12+)
-    fn getentropy(buffer: &unsafe Byte, length: Int) -> Int;
+    /// Get entropy (macOS 10.12+). C: `int getentropy(void *buffer,
+    /// size_t length);`. `length` is size_t (kept Int), return is `int`.
+    fn getentropy(buffer: &unsafe Byte, length: Int) -> Int32;
 
     /// arc4random (BSD)
     fn arc4random() -> UInt32;
 
-    /// arc4random_buf (BSD)
+    /// arc4random_buf (BSD). C: `void arc4random_buf(void *buf, size_t nbytes);`.
     fn arc4random_buf(buf: &unsafe Byte, nbytes: Int);
 
     // =========================================================================
