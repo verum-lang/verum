@@ -1418,7 +1418,6 @@ implement Text {
             return Err(ParseError.new("empty string"));
         }
 
-        let mut result: Int = 0;
         let mut negative = false;
         let mut start = 0;
         let the_bytes = self.as_bytes();
@@ -1435,6 +1434,16 @@ implement Text {
             return Err(ParseError.new("no digits"));
         }
 
+        // Accumulate magnitude in UInt64. The historical signed-Int
+        // accumulator with post-loop `0 - result` could not represent
+        // Int.MIN (= -9223372036854775808): the unsigned magnitude
+        // 9223372036854775808 is one greater than Int.MAX so the
+        // multiply-add overflowed before the negation, and "Int.MIN"
+        // could never round-trip through `from_int` ⇄ `parse_int`.
+        // UInt64 covers magnitudes up to 2^64 - 1, with explicit
+        // bounds checks on the negate / cast at the end.
+        let mut mag: UInt64 = 0_u64;
+        let radix_u: UInt64 = radix as UInt64;
         for i in range(start, the_bytes.len()) {
             let b = the_bytes[i] as Int;
             let digit: Int = if b >= 48 && b <= 57 {
@@ -1454,13 +1463,39 @@ implement Text {
                 return Err(ParseError.new("digit out of range for radix"));
             }
 
-            result = result * radix + digit;
+            // Per-step overflow guard against UInt64.MAX.
+            // mag * radix + digit must fit in UInt64.
+            let max_div: UInt64 = 18_446_744_073_709_551_615_u64 / radix_u;
+            if mag > max_div {
+                return Err(ParseError.new("integer overflow"));
+            }
+            let next = mag * radix_u + (digit as UInt64);
+            if next < mag {
+                return Err(ParseError.new("integer overflow"));
+            }
+            mag = next;
         }
 
+        // Range-check before signed cast.
         if negative {
-            result = 0 - result;
+            // Int.MIN's magnitude is 2^63 = 9223372036854775808.
+            if mag > 9_223_372_036_854_775_808_u64 {
+                return Err(ParseError.new("integer underflow"));
+            }
+            // Special-case Int.MIN: its magnitude doesn't fit in
+            // positive Int range. Reconstruct via two's complement.
+            if mag == 9_223_372_036_854_775_808_u64 {
+                Ok(-9_223_372_036_854_775_808)
+            } else {
+                Ok(0 - (mag as Int))
+            }
+        } else {
+            // Int.MAX = 2^63 - 1 = 9223372036854775807.
+            if mag > 9_223_372_036_854_775_807_u64 {
+                return Err(ParseError.new("integer overflow"));
+            }
+            Ok(mag as Int)
         }
-        Ok(result)
     }
 
     /// Parse to Float.
@@ -1529,19 +1564,29 @@ implement Text {
     // =========================================================================
 
     /// Convert Int to Text (pure Verum, no C runtime).
+    ///
+    /// Int.MIN-safe: the historical `0 - n` for the negative branch
+    /// wrapped back to Int.MIN for `n == Int.MIN`, leaving `val < 0`,
+    /// the `while val > 0` digit loop never entered, and the result
+    /// rendered as "-" with no magnitude. Accumulate magnitude in
+    /// UInt64 so every Int including Int.MIN round-trips exactly.
     public fn from_int(n: Int) -> Text {
         if n == 0 {
             return "0";
         }
         let negative = n < 0;
-        let mut val = if negative { 0 - n } else { n };
+        let mut mag: UInt64 = if negative {
+            (((!n) as UInt64) + 1_u64)
+        } else {
+            n as UInt64
+        };
 
         // Push digits in reverse order (least significant first)
         let mut buf = Text.new();
-        while val > 0 {
-            let digit = (val % 10) as Byte;
+        while mag > 0_u64 {
+            let digit = (mag % 10_u64) as Byte;
             buf.push_byte(digit + 48);  // '0' = 48
-            val = val / 10;
+            mag = mag / 10_u64;
         }
         if negative {
             buf.push_byte(45);  // '-' = 45
