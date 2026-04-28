@@ -251,3 +251,79 @@ fn long_basic_block_chain_roundtrips() {
         encoded.len()
     );
 }
+
+// -----------------------------------------------------------------------------
+// Round 1 §3.1 — End-to-end load-time defense via deserialize_module_validated
+// -----------------------------------------------------------------------------
+// The validator's per-instruction cross-reference checks live in
+// `verum_vbc::validate` and are wired into `deserialize_module_validated`.
+// Pin the end-to-end path: serialize a hand-crafted invalid module,
+// then load it through the validating entry point — must reject.
+
+#[test]
+fn deserialize_validated_rejects_call_with_oor_function_id() {
+    use verum_vbc::deserialize::{deserialize_module, deserialize_module_validated};
+    use verum_vbc::error::VbcError;
+    use verum_vbc::instruction::RegRange;
+    use verum_vbc::serialize::serialize_module;
+
+    // Hand-craft a module with a single function whose body calls
+    // FunctionId(99) — far past the function table's only entry.
+    let mut module = VbcModule::new("rt_3_1_e2e".to_string());
+    let mut f = FunctionDescriptor::new(StringId::EMPTY);
+    f.id = FunctionId(0);
+    f.bytecode_offset = 0;
+    f.register_count = 4;
+
+    let mut bc = Vec::new();
+    bytecode::encode_instruction(
+        &Instruction::Call {
+            dst: Reg(0),
+            func_id: 99,
+            args: RegRange { start: Reg(0), count: 0 },
+        },
+        &mut bc,
+    );
+    bytecode::encode_instruction(&Instruction::Ret { value: Reg(0) }, &mut bc);
+    f.bytecode_length = bc.len() as u32;
+    module.functions.push(f);
+    module.bytecode = bc;
+    module.header.function_table_count = 1;
+
+    // Serialize then deserialize-without-validation: must succeed.
+    // The defect only surfaces under the validating entry point.
+    let bytes = serialize_module(&module).expect("serialize");
+    let _trusted = deserialize_module(&bytes).expect("trusted load");
+
+    // Validating entry point must reject.  The exact error variant
+    // can be either the bare `InvalidFunctionId(99)` or a
+    // `MultipleErrors(..)` wrapping it; both are well-formed
+    // surface-level rejections of the load.
+    let err = deserialize_module_validated(&bytes)
+        .expect_err("validated load must reject hand-crafted invalid module");
+    let has_err = matches!(&err, VbcError::InvalidFunctionId(99))
+        || matches!(&err, VbcError::MultipleErrors(errs)
+            if errs.iter().any(|e| matches!(e, VbcError::InvalidFunctionId(99))));
+    assert!(
+        has_err,
+        "expected InvalidFunctionId(99), got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn deserialize_validated_accepts_well_formed_module() {
+    use verum_vbc::deserialize::deserialize_module_validated;
+    use verum_vbc::serialize::serialize_module;
+
+    // Sanity baseline: a well-formed minimum-viable module must
+    // round-trip cleanly through the validating entry point.
+    let module = build_minimal_module();
+
+    // Update header counts so validate_header passes.
+    let mut owned: VbcModule = (*module).clone();
+    owned.header.function_table_count = owned.functions.len() as u32;
+    let bytes = serialize_module(&owned).expect("serialize");
+    deserialize_module_validated(&bytes)
+        .expect("well-formed module must validate cleanly");
+}
