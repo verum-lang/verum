@@ -155,9 +155,13 @@ fn emit_object(m: &Map<Text, JsonValue>, out: &mut List<Byte>) -> Result<(), Jcs
 // =============================================================================
 
 fn emit_int(out: &mut List<Byte>, n: Int) {
+    // Int.MIN-safe magnitude: `-n` for n == Int.MIN overflows
+    // (two's-complement -Int.MIN == Int.MIN). Compute |n| as UInt64
+    // via `!n + 1` reinterpretation — produces 0x8000_0000_0000_0000
+    // (= 2^63 = |Int.MIN|) without a checked-arithmetic panic.
     if n < 0 {
         out.push('-' as Byte);
-        emit_u64(out, (-n) as UInt64);
+        emit_u64(out, ((!n) as UInt64) + 1_u64);
     } else {
         emit_u64(out, n as UInt64);
     }
