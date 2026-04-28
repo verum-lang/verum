@@ -331,6 +331,15 @@ impl IntrinsicLowering {
             CodegenStrategy::GpuExtendedOpcode(sub_op) => {
                 self.lower_gpu_extended_opcode(intrinsic, *sub_op, operands)
             }
+            CodegenStrategy::ExtendedSubOp(_sub_op) => {
+                // CPU-only divergent primitives (e.g., process_exit).
+                // MLIR is GPU-targeted in this codebase; routing
+                // termination through MLIR is undefined. The VBC
+                // expression codegen handles the CPU lowering, and
+                // the LLVM lowering path emits the noreturn call for
+                // AOT. No SSA value to return — divergent.
+                None
+            }
         };
 
         LoweringResult {

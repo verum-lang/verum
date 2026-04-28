@@ -42,8 +42,9 @@ use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::ty::{PathSegment, RefinementPredicate as AstRefinementPredicate, Type as AstType, TypeKind};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::{
-    CoreTerm, KernelError, UniverseTier, check_eps_mu_coherence, check_refine_omega,
-    check_round_trip, check_universe_ascent,
+    BridgeAudit, CoreTerm, KernelError, UniverseTier, canonical_form,
+    check_eps_mu_coherence, check_eps_mu_coherence_v3_final, check_refine_omega,
+    check_round_trip, check_round_trip_v2, check_universe_ascent,
 };
 use verum_types::refinement::{RefinementBinding, RefinementPredicate as TypesRefinementPredicate};
 use verum_types::ty::Type as TypesType;
@@ -213,6 +214,80 @@ impl KernelRecheck {
                 source: err,
             }
         })
+    }
+
+    /// V2 universal-canonicalize K-Round-Trip recheck.
+    ///
+    /// Strictly stronger than [`Self::round_trip`]: every pair the
+    /// V0/V1 algorithm admits is also admitted by V2 with an EMPTY
+    /// audit trail. Pairs that V2 admits but V0/V1 reject (modal-
+    /// idempotent / cohesive-idempotent / refine-fold pairs) produce
+    /// a non-empty [`BridgeAudit`] surfacing every Diakrisis admit
+    /// invoked.
+    ///
+    /// External auditors enumerate the audit trail to see WHICH
+    /// preprint-blocked claims (16.10 / 16.7 / 14.3) the proof
+    /// relies on. An empty audit means the proof is fully
+    /// decidable in V2.
+    pub fn round_trip_v2(
+        lhs: &CoreTerm,
+        rhs: &CoreTerm,
+        context: &str,
+    ) -> Result<BridgeAudit, KernelRecheckError> {
+        check_round_trip_v2(lhs, rhs, context).map_err(|err| {
+            KernelRecheckError::RoundTrip {
+                context: Text::from(context),
+                source: err,
+            }
+        })
+    }
+
+    /// V3-final K-Eps-Mu recheck with explicit Diakrisis A-3
+    /// τ-witness audit trail.
+    ///
+    /// Strictly stronger than [`Self::eps_mu_coherence`]: every pair
+    /// V3-incremental admits is also admitted by V3-final, with the
+    /// audit trail recording the σ_α / π_α witness construction
+    /// reliance for non-identity canonical naturality squares.
+    /// Identity sub-cases (structural / β-equiv) produce an empty
+    /// audit.
+    pub fn eps_mu_v3_final(
+        lhs: &CoreTerm,
+        rhs: &CoreTerm,
+        context: &str,
+    ) -> Result<BridgeAudit, KernelRecheckError> {
+        check_eps_mu_coherence_v3_final(lhs, rhs, context).map_err(|err| {
+            KernelRecheckError::EpsMu {
+                context: Text::from(context),
+                source: err,
+            }
+        })
+    }
+
+    /// Universal canonicalize entry point — exposes V2 normalize-
+    /// to-fixed-point with audit trail. Verification phases that
+    /// want to compute normal forms outside the round-trip pair
+    /// API (e.g. for caching / diagnostic emission) call here.
+    pub fn canonicalize(term: &CoreTerm, context: &str) -> (CoreTerm, BridgeAudit) {
+        let mut audit = BridgeAudit::new();
+        let canon = canonical_form(term, &mut audit, context);
+        (canon, audit)
+    }
+
+    /// Aggregate two [`BridgeAudit`] trails into one. Used by
+    /// multi-rule recheck call sites that want to surface the
+    /// complete bridge footprint of a composite proof. Insertion
+    /// order is preserved; per-bridge dedup is honoured because
+    /// [`BridgeAudit::record`] is idempotent on (bridge, context)
+    /// pairs.
+    pub fn merge_audits(lhs: BridgeAudit, mut rhs: BridgeAudit) -> BridgeAudit {
+        let mut out = lhs;
+        for admit in rhs.admits().to_vec().drain(..) {
+            out.record(admit.bridge, admit.context);
+        }
+        // rhs is consumed via the to_vec() copy above; explicitly drop.
+        let _ = rhs;
+        out
     }
 
     /// V1 convenience — directly recheck a refinement type
@@ -1761,5 +1836,105 @@ mod tests {
             }
             other => panic!("expected RefineOmega, got {:?}", other),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // V2/V3 façade integration tests (#33)
+    // -------------------------------------------------------------------------
+
+    fn core_var(n: &str) -> CoreTerm {
+        CoreTerm::Var(Text::from(n))
+    }
+
+    #[test]
+    fn round_trip_v2_admits_v0_pairs_with_empty_audit() {
+        // Identity pair → V2 admits with empty audit (decidable).
+        let f = core_var("F");
+        let audit = KernelRecheck::round_trip_v2(&f, &f, "test").unwrap();
+        assert!(audit.is_decidable(),
+            "V0/V1-decidable pair must produce empty V2 audit");
+    }
+
+    #[test]
+    fn round_trip_v2_admits_modal_idempotent_pair() {
+        // ModalBox(ModalBox(F)) ≡ ModalBox(F) via V2 canonicalize.
+        // V0/V1 reject this; V2 admits decidably (modal-idem rewrite).
+        let f = core_var("F");
+        let bbf = CoreTerm::ModalBox(verum_common::Heap::new(
+            CoreTerm::ModalBox(verum_common::Heap::new(f.clone()))));
+        let bf = CoreTerm::ModalBox(verum_common::Heap::new(f));
+        let audit = KernelRecheck::round_trip_v2(&bbf, &bf, "Modal-Idem").unwrap();
+        assert!(audit.is_decidable(),
+            "Modal-Idem must be decidable in V2 (no bridge admit)");
+    }
+
+    #[test]
+    fn round_trip_v2_rejects_distinct_atoms() {
+        let err = KernelRecheck::round_trip_v2(
+            &core_var("a"), &core_var("b"), "distinct"
+        ).unwrap_err();
+        match err {
+            KernelRecheckError::RoundTrip { .. } => {} // expected
+            other => panic!("expected RoundTrip error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn eps_mu_v3_final_admits_identity_with_empty_audit() {
+        let f = core_var("F");
+        let lhs = CoreTerm::EpsilonOf(verum_common::Heap::new(f.clone()));
+        let rhs = CoreTerm::AlphaOf(verum_common::Heap::new(
+            CoreTerm::EpsilonOf(verum_common::Heap::new(f))));
+        let audit = KernelRecheck::eps_mu_v3_final(&lhs, &rhs, "id-case").unwrap();
+        assert!(audit.is_decidable());
+    }
+
+    #[test]
+    fn eps_mu_v3_final_records_a_3_for_non_identity() {
+        // (App(F, x), App(x, F)) — same depth, same fvs, distinct shape.
+        let m_alpha = CoreTerm::App(
+            verum_common::Heap::new(core_var("F")),
+            verum_common::Heap::new(core_var("x")));
+        let alpha_rhs = CoreTerm::App(
+            verum_common::Heap::new(core_var("x")),
+            verum_common::Heap::new(core_var("F")));
+        let lhs = CoreTerm::EpsilonOf(verum_common::Heap::new(m_alpha));
+        let rhs = CoreTerm::AlphaOf(verum_common::Heap::new(
+            CoreTerm::EpsilonOf(verum_common::Heap::new(alpha_rhs))));
+        let audit = KernelRecheck::eps_mu_v3_final(&lhs, &rhs, "non-id").unwrap();
+        assert!(!audit.is_decidable(),
+            "non-identity case must record an A-3 admit");
+        assert_eq!(audit.admits().len(), 1);
+    }
+
+    #[test]
+    fn canonicalize_returns_normal_form_with_audit() {
+        // canonical_form(AlphaOf(EpsilonOf(F))) → F.
+        let f = core_var("F");
+        let aef = CoreTerm::AlphaOf(verum_common::Heap::new(
+            CoreTerm::EpsilonOf(verum_common::Heap::new(f.clone()))));
+        let (canon, audit) = KernelRecheck::canonicalize(&aef, "K-Adj-Unit");
+        assert_eq!(canon, f, "K-Adj-Unit collapse must produce F");
+        assert!(audit.is_decidable());
+    }
+
+    #[test]
+    fn merge_audits_concatenates_distinct_records() {
+        let mut a = BridgeAudit::new();
+        a.record(verum_kernel::BridgeId::ConfluenceOfModalRewrite, "ctx-A");
+        let mut b = BridgeAudit::new();
+        b.record(verum_kernel::BridgeId::EpsMuTauWitness, "ctx-B");
+        let merged = KernelRecheck::merge_audits(a, b);
+        assert_eq!(merged.admits().len(), 2);
+    }
+
+    #[test]
+    fn merge_audits_dedups_same_bridge_same_context() {
+        let mut a = BridgeAudit::new();
+        a.record(verum_kernel::BridgeId::ConfluenceOfModalRewrite, "ctx-shared");
+        let mut b = BridgeAudit::new();
+        b.record(verum_kernel::BridgeId::ConfluenceOfModalRewrite, "ctx-shared");
+        let merged = KernelRecheck::merge_audits(a, b);
+        assert_eq!(merged.admits().len(), 1, "dup must collapse");
     }
 }

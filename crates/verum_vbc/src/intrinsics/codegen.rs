@@ -116,6 +116,16 @@ impl<'a> IntrinsicCodegen<'a> {
             CodegenStrategy::MathExtendedOpcode(sub_op) => {
                 self.emit_math_extended_opcode(*sub_op, args)
             }
+            CodegenStrategy::ExtendedSubOp(_sub_op) => {
+                // First-class extended primitives (e.g., process_exit)
+                // are lowered by the VBC expression codegen in
+                // `expressions.rs::emit_intrinsic_instructions`. This
+                // MLIR-side intrinsic codegen (used by the GPU lowering
+                // path) never receives them — divergent control-flow
+                // primitives are a CPU-only concern. Returning None
+                // matches the convention of every other CPU-only arm.
+                None
+            }
         };
 
         IntrinsicCodegenResult {
