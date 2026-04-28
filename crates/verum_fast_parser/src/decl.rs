@@ -5619,7 +5619,7 @@ impl<'a> RecursiveParser<'a> {
         // for the source-file location) lives in the loader,
         // which has filesystem context.
         let mut path = String::new();
-        let mut last_was_separator = false;
+        let mut last_was_separator: bool;
         let mut segment_buf = String::new();
         // Net depth of the body relative to the directory
         // anchored by the prefix.  Starts at 0; each non-

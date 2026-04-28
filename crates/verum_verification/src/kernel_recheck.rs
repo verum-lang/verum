@@ -281,7 +281,7 @@ impl KernelRecheck {
     /// order is preserved; per-bridge dedup is honoured because
     /// [`BridgeAudit::record`] is idempotent on (bridge, context)
     /// pairs.
-    pub fn merge_audits(lhs: BridgeAudit, mut rhs: BridgeAudit) -> BridgeAudit {
+    pub fn merge_audits(lhs: BridgeAudit, rhs: BridgeAudit) -> BridgeAudit {
         let mut out = lhs;
         for admit in rhs.admits().to_vec().drain(..) {
             out.record(admit.bridge, admit.context);
