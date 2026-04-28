@@ -446,7 +446,10 @@ public fn powi(x: Float, n: Int64) -> Float {
     if n == 0 { return 1.0; }
 
     let negative = n < 0;
-    let mut exp: UInt64 = if negative { (-n) as UInt64 } else { n as UInt64 };
+    // Int64.MIN-safe magnitude: `-n` overflows when n == Int64.MIN
+    // (two's-complement -Int64.MIN == Int64.MIN). Bit-flip-plus-one
+    // produces 2^63 cleanly without a checked-arithmetic panic.
+    let mut exp: UInt64 = if negative { ((!n) as UInt64) + 1_u64 } else { n as UInt64 };
 
     let mut result = 1.0;
     let mut base = x;
