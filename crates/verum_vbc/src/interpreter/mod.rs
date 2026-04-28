@@ -56,6 +56,7 @@ mod dispatch_table;
 mod heap;
 mod cbgr_heap;
 mod error;
+pub mod permission;
 pub mod tensor;
 pub mod autodiff;
 pub mod kernel;
@@ -78,6 +79,11 @@ pub use state::{
 pub use dispatch_table::{dispatch_loop_table, dispatch_loop_table_with_entry_depth, DispatchResult};
 pub use heap::{Heap, Object, ObjectHeader, ObjectFlags, HeapStats, OBJECT_HEADER_SIZE};
 pub use cbgr_heap::{CbgrHeap, CbgrObject, CbgrHeapStats, CbgrObjectFlags, CbgrObjectRef};
+// Permission router for intrinsic gating (#12 / P3.2).
+pub use permission::{
+    PermissionDecision, PermissionRouter, PermissionRouterStats, PermissionScope,
+    PermissionTargetId,
+};
 
 /// Executes a function using table-based dispatch.
 ///
