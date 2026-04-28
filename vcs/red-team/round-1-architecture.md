@@ -92,13 +92,64 @@ Audit pass 2026-04-28 confirmed no early-exit branches in the check.
 
 ## Vector 3 — VBC bytecode trust boundary
 
-### 3.1 Hand-crafted bytecode violating type-table invariants
+### 3.1 Hand-crafted bytecode violating type-table invariants — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs hand-crafted-bytecode injection harness.
+**Status:** DEFENSE CONFIRMED — `crates/verum_vbc/src/validate.rs` now
+runs a **per-instruction bytecode validator** at module load time
+that walks every function's bytecode and verifies cross-references
+against the module's tables.
 
-The AOT path assumes the compiler-emitted type table is consistent with the
-instruction stream. Direct bytecode authoring (no compiler) could violate this.
-A bytecode validator pass before AOT lowering would close this; tracked.
+**What the validator catches at load time** (before any code runs):
+
+  * Out-of-range `FunctionId` in `Call` / `TailCall` / `CallG` —
+    surfaces as `VbcError::InvalidFunctionId(N)`.
+  * Out-of-range register references — surfaces as
+    `VbcError::RegisterOutOfBounds { reg, max, context }` where
+    `max = function.register_count` and `context` includes the
+    function and bytecode offset.
+  * Branch offsets (`Jmp` / `JmpIf` / `JmpNot` / `JmpCmp`) that fall
+    outside the function's bytecode region OR land mid-instruction
+    (in another instruction's operand stream) — surfaces as
+    `VbcError::JumpOutOfBounds { target, max, offset }`.  The
+    instruction-boundary check uses a `BTreeSet<u32>` of
+    decoded-instruction-start offsets built during the walk; a
+    crafted jump landing on a non-start offset is rejected even if
+    the byte target is technically inside the function.
+  * Out-of-range `ConstId` in `LoadK` — surfaces as
+    `VbcError::InvalidConstId(N)`.
+  * Out-of-range `StringId` (used as `method_id` in `CallM`) —
+    surfaces as `VbcError::InvalidStringId(N)`.
+  * Decoder failures mid-stream — surfaces as
+    `VbcError::InvalidInstructionEncoding { offset, reason }` (e.g.
+    a truncated function whose bytecode-byte count is too small for
+    the encoded instructions).
+
+**Implementation:** linear walk over each function's bytecode region
+via `decode_instruction`; per-instruction validation via a
+`match instr` that pattern-matches on the high-value variants
+(Call/TailCall/CallG/CallC/CallM/CallV/CallR/CallClosure/LoadK/Jmp/
+JmpIf/JmpNot/JmpCmp).  Cost is O(N) in total instruction count.
+Skip via `ValidationOptions::skip_bytecode_validation = true` for
+trusted-source loads (e.g. self-emitted bytecode in the same
+process).
+
+**Guardrail tests** (`crates/verum_vbc/src/validate.rs::tests`):
+  * `validator_rejects_call_with_oor_function_id` — `Call` to
+    `FunctionId(99)` in a 1-function module.
+  * `validator_rejects_call_with_oob_register` — Call writes to r10
+    in a function with `register_count = 4`.
+  * `validator_rejects_jmp_target_past_function_end` — Jmp with
+    `offset = 0x7FFF_FFFF`.
+  * `validator_rejects_loadk_with_oor_const_id` — LoadK referencing
+    `const_id = 5` against an empty constant pool.
+  * `validator_accepts_well_formed_module` — sanity baseline.
+  * `validator_skip_bytecode_validation_skips_per_instruction_check`
+    — the trusted-source escape hatch works.
+
+**Cross-reference:** R2-§3.1 (Assign to read-only register) and
+R2-§3.2 (Mismatched arity calls) both relied on the absence of this
+validator; their PARTIAL/PENDING status is now upgradeable since the
+validator's register-bounds + reg-range checks cover those vectors.
 
 ### 3.2 MakeVariant tag overflow
 
@@ -399,7 +450,7 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 2.1 unsafe→checked aliasing | PENDING | aliasing analysis |
 | 2.2 Generation rollover | **DEFENSE CONFIRMED** | 9 guardrail tests across 2 files (2026-04-28) |
 | 2.3 Epoch advance | DEFENSE | — |
-| 3.1 Bytecode type-table | PENDING | bytecode validator |
+| 3.1 Bytecode type-table | **DEFENSE CONFIRMED** | per-instruction bytecode validator + 6 guardrails (2026-04-28) |
 | 3.2 MakeVariant overflow | DEFECT | #167 |
 | 3.3 Lenient SKIP | PARTIAL | #176 |
 | 4.1 Same-name @cfg types | DEFENSE | — |
@@ -412,9 +463,9 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 7.1 Tier-0 vs Tier-1 | **DEFENSE CONFIRMED** | #196 + RT-1.7.2 + RT-2.2.2/2.3.3 cross-coverage (2026-04-28) |
 | 7.2 Hash determinism | **DEFENSE CONFIRMED** | full audit + 7 L0 guardrails (2026-04-28) |
 
-**14 vectors confirmed defended (was 13), 4 pending** (post 2026-04-28
+**15 vectors confirmed defended (was 14), 3 pending** (post 2026-04-28
 RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 + RT-1.6.2 + RT-1.6.1 + RT-1.7.1
-+ RT-1.4.2 closures). Round 1 success condition: every PENDING entry has either a
++ RT-1.4.2 + RT-1.3.1 closures). Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.

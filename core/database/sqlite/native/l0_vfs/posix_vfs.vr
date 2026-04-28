@@ -161,11 +161,10 @@ fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
 
 /// Raw &Byte entry — bypasses the Tier-0 interpreter's `&[Byte]`
 /// parameter-coerce recursion.  Caller supplies a NUL-terminated
-/// buffer and casts its pointer.  Mirrors libsystem.safe_open_raw
-/// on Darwin and routes to a TODO equivalent on Linux (the linux
-/// path still goes through &[Byte] until a Linux-side raw entry
-/// lands; if you hit RUNTIME-3-DEEPER on Linux, add `safe_open_raw`
-/// to `core/sys/linux/syscall.vr` and switch the linux arm here).
+/// buffer and casts its pointer.  Both platforms route through
+/// raw-pointer entries: Darwin via `libsystem.safe_open_raw`,
+/// Linux via `syscall.open_raw` (both bypass &[Byte] coercion to
+/// avoid RUNTIME-3-DEEPER recursion in the interpreter).
 @cfg(target_os = "linux")
 fn sys_open_raw(path: &Byte, oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
     platform_syscall.open_raw(path, oflag, mode)

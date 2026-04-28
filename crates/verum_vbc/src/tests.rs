@@ -926,31 +926,46 @@ fn test_function_id_assignment() {
 
 #[test]
 fn test_bytecode_bounds_checking() {
+    use crate::bytecode::encode_instruction;
+    use crate::instruction::Instruction;
+
     let mut module = VbcModule::new("bytecode".to_string());
 
-    // Add function with specific bytecode range
+    // Build a real, decodable bytecode body: three `Mov r0, r0` + a
+    // `Ret r0` terminator.  `vec![0; 10]` (the original test's
+    // approach) was opaque bytes that the per-instruction validator
+    // cannot decode — for the bounds-checking invariant the test
+    // intends to pin, the body must be well-formed.
+    let mut bc = Vec::new();
+    encode_instruction(&Instruction::Mov { dst: Reg(0), src: Reg(0) }, &mut bc);
+    encode_instruction(&Instruction::Mov { dst: Reg(0), src: Reg(0) }, &mut bc);
+    encode_instruction(&Instruction::Mov { dst: Reg(0), src: Reg(0) }, &mut bc);
+    encode_instruction(&Instruction::Ret { value: Reg(0) }, &mut bc);
+    let real_len = bc.len() as u32;
+
     let name = module.intern_string("main");
     module.functions.push(FunctionDescriptor {
         id: FunctionId(0),
         name,
         bytecode_offset: 0,
-        bytecode_length: 10,
+        bytecode_length: real_len,
         return_type: TypeRef::Concrete(TypeId::UNIT),
+        register_count: 4,
         ..Default::default()
     });
 
-    // Add matching bytecode
-    module.bytecode = vec![0; 10];
+    module.bytecode = bc.clone();
     module.header.function_table_count = 1;
-    module.header.bytecode_size = 10;
+    module.header.bytecode_size = real_len;
 
-    // This should pass validation
+    // Well-formed bytecode + matching length: must pass validation.
     assert!(validate_module(&module).is_ok());
 
-    // Now make bytecode too short
-    module.bytecode = vec![0; 5];
-
-    // This should fail validation
+    // Truncate the bytecode buffer below the function descriptor's
+    // declared length: the bounds-checking invariant must reject
+    // (function references past end-of-buffer).
+    module.bytecode = bc[..real_len as usize - 1].to_vec();
+    module.header.bytecode_size = real_len - 1;
     assert!(validate_module(&module).is_err());
 }
 
