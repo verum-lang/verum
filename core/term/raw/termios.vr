@@ -25,25 +25,38 @@ mount super.escape.{EscapeWriter, ClearMode};
 // FFI: POSIX termios and ioctl
 // =============================================================================
 
+// FFI signatures use C-ABI integer widths (T0.4.2 Phase 2 sweep):
+//   * `int fildes / fd` → `Int32`  (POSIX `int`, 32-bit signed)
+//   * `int actions`     → `Int32`
+//   * `unsigned long request` → `UInt64`  (POSIX `unsigned long`, 64-bit on
+//     macOS / Linux LP64; Verum doesn't target ILP32 POSIX)
+//   * `size_t count` / `ssize_t` return → `Int` (i64 covers ssize_t signed
+//     range and size_t below 2^63 — same convention used by
+//     `core/sys/darwin/libsystem.vr` `read`/`write` declarations)
+//
+// Bare `Int` (i64) at the FFI boundary makes LLVM emit
+// `call i32 @tcgetattr(i64 %fd, ...)` which the verifier rejects in
+// strict mode and which silently reads garbage from the high bits of
+// the register the C ABI returned in lenient mode.
 @ffi("libc")
 extern {
     /// Get terminal attributes
-    fn tcgetattr(fd: Int, termios: &mut [Byte; 60]) -> Int;
+    fn tcgetattr(fd: Int32, termios: &mut [Byte; 60]) -> Int32;
 
     /// Set terminal attributes
-    fn tcsetattr(fd: Int, actions: Int, termios: &[Byte; 60]) -> Int;
+    fn tcsetattr(fd: Int32, actions: Int32, termios: &[Byte; 60]) -> Int32;
 
     /// Check if fd is a terminal
-    fn isatty(fd: Int) -> Int;
+    fn isatty(fd: Int32) -> Int32;
 
     /// IO control
-    fn ioctl(fd: Int, request: UInt64, arg: &unsafe Byte) -> Int;
+    fn ioctl(fd: Int32, request: UInt64, arg: &unsafe Byte) -> Int32;
 
     /// Write to file descriptor (low-level)
-    fn write(fd: Int, buf: &Byte, count: Int) -> Int;
+    fn write(fd: Int32, buf: &Byte, count: Int) -> Int;
 
     /// Read from file descriptor (low-level)
-    fn read(fd: Int, buf: &unsafe mut Byte, count: Int) -> Int;
+    fn read(fd: Int32, buf: &unsafe mut Byte, count: Int) -> Int;
 }
 
 
@@ -52,11 +65,11 @@ extern {
 // =============================================================================
 
 /// Apply changes immediately
-const TCSANOW: Int = 0;
+const TCSANOW: Int32 = 0;
 /// Apply after all output is transmitted
-const TCSADRAIN: Int = 1;
+const TCSADRAIN: Int32 = 1;
 /// Apply after output transmitted, flush pending input
-const TCSAFLUSH: Int = 2;
+const TCSAFLUSH: Int32 = 2;
 
 // Ioctl request code for terminal window size
 @cfg(target_os = "linux")
