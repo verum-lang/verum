@@ -100,9 +100,26 @@ impl EntryDetectionPhase {
     pub fn detect_entry_point(&self, modules: &[Module]) -> Result<MainConfig, List<Diagnostic>> {
         let _start = Instant::now();
 
-        // Find main function
+        // Verum execution-mode contract — strict separation:
+        //
+        //   • **Application** = no shebang, declares `fn main()`. Runs
+        //     via interpreter or AOT. `main` is THE entry point.
+        //
+        //   • **Script** = shebang at byte 0, no `fn main()`. Top-level
+        //     statements are folded into a synthesised
+        //     `__verum_script_main` wrapper which is THE entry point.
+        //     A `fn main` declared inside a script-tagged module is a
+        //     regular function — callable but **not** treated as the
+        //     program entry.
+        //
+        // The two roles do not overlap: `main` only ever drives
+        // application modules, `__verum_script_main` only ever drives
+        // script modules.
+
+        // Application path: find `fn main` in any non-script module.
         let main_fn = modules
             .iter()
+            .filter(|m| !m.is_script())
             .flat_map(|m| &m.items)
             .filter_map(|item| {
                 if let ItemKind::Function(func) = &item.kind {
@@ -117,13 +134,12 @@ impl EntryDetectionPhase {
             })
             .next();
 
-        // P1.3: script-mode fallback. When no `main` exists but at
-        // least one module is a script (`@![__verum_kind("script")]`
-        // or shebang), the parser will have synthesised
-        // `__verum_script_main` from the top-level statements. Use
-        // it as the entry point. The compile is "wrong-but-honest"
-        // for non-script sources that genuinely lack `main` — those
-        // still see the original "No main function found" error.
+        // Script path: the parser synthesises `__verum_script_main`
+        // from top-level statements in script-tagged modules. Used
+        // when no application `fn main` resolved above. A `fn main`
+        // in a script module is intentionally ignored here so the
+        // boundary between application and script entry semantics
+        // stays unambiguous.
         let script_entry = if main_fn.is_none() {
             modules
                 .iter()
