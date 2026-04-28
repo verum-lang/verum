@@ -153,15 +153,27 @@ fn arith_mul(a: &Register, b: &Register) -> Register {
 
 fn arith_div(a: &Register, b: &Register) -> Register {
     // SQLite divides as REAL for REAL operands, INT otherwise with 0
-    // protection (0 / 0 = NULL).
+    // protection (0 / 0 = NULL). Two integer-overflow edge cases:
+    //   * `bi == 0`        — return NULL per SQLite spec.
+    //   * `Int64.MIN / -1` — quotient 2^63 unrepresentable in Int64;
+    //     x86 raises #DE, aarch64 wraps to Int64.MIN. Promote to
+    //     REAL (`9.223372036854776e+18`) matching SQLite's
+    //     OP_Divide overflow-promotion behaviour.
     match (a, b) {
         (RReal(_), _) | (_, RReal(_)) => {
             let bx = to_real(b);
             if bx == 0.0 { RNull } else { RReal(to_real(a) / bx) }
         }
         _ => {
+            let ai = to_int64(a);
             let bi = to_int64(b);
-            if bi == 0_i64 { RNull } else { RInt(to_int64(a) / bi) }
+            if bi == 0_i64 {
+                RNull
+            } else if ai == -9_223_372_036_854_775_808_i64 && bi == -1_i64 {
+                RReal(9.223372036854776e+18)
+            } else {
+                RInt(ai / bi)
+            }
         }
     }
 }
