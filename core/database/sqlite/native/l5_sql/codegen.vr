@@ -1973,8 +1973,11 @@ fn emit_filter(
 // last ResultRow) so that the cursor is still closed cleanly on early
 // exit.
 //
-// OFFSET: deferred to v1.1 — an OFFSET expression is rejected with a
-// clear `unsupported` at codegen entry so we don't silently drop it.
+// OFFSET: handled inline alongside LIMIT.  Constant integer expressions
+// (literals + unary +/-/~ + the four arithmetic ops) fold at compile
+// time via eval_int_const; parameter-bound OFFSET (`OFFSET ?`) still
+// requires the EVar / EPositional codegen path which depends on the
+// Variable VDBE opcode.
 // -----------------------------------------------------------------------------
 
 /// Evaluate a constant integer expression at compile time.  Recognises
