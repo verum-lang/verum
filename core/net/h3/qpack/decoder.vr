@@ -50,6 +50,43 @@ public type QpackDecodeError is
     | HuffmanError
     | IntegerError;
 
+implement Display for QpackDecodeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                  => f.write_str("QPACK decode: truncated input"),
+            InvalidIndex(i)            => f.write_str(f"QPACK decode: invalid index {i}".as_str()),
+            DynamicTableNotSupported   => f.write_str("QPACK decode: dynamic table not supported by this decoder"),
+            HuffmanError               => f.write_str("QPACK decode: Huffman decode failure"),
+            IntegerError               => f.write_str("QPACK decode: integer decode failure"),
+        }
+    }
+}
+
+implement Debug for QpackDecodeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                  => f.write_str("Truncated"),
+            InvalidIndex(i)            => f.write_str(f"InvalidIndex({i})".as_str()),
+            DynamicTableNotSupported   => f.write_str("DynamicTableNotSupported"),
+            HuffmanError               => f.write_str("HuffmanError"),
+            IntegerError               => f.write_str("IntegerError"),
+        }
+    }
+}
+
+implement Eq for QpackDecodeError {
+    fn eq(&self, other: &QpackDecodeError) -> Bool {
+        match (self, other) {
+            (Truncated,                Truncated)                => true,
+            (InvalidIndex(a),          InvalidIndex(b))          => a == b,
+            (DynamicTableNotSupported, DynamicTableNotSupported) => true,
+            (HuffmanError,             HuffmanError)             => true,
+            (IntegerError,             IntegerError)             => true,
+            _ => false,
+        }
+    }
+}
+
 public type QpackHeaderField is {
     name:  Text,
     value: Text,

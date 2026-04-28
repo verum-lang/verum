@@ -58,6 +58,39 @@ public type HuffError is
     | EosInString
     | Truncated;
 
+implement Display for HuffError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            InvalidPadding => "QPACK Huffman: invalid padding (not EOS prefix)",
+            EosInString    => "QPACK Huffman: EOS in middle of string",
+            Truncated      => "QPACK Huffman: truncated input",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for HuffError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            InvalidPadding => "InvalidPadding",
+            EosInString    => "EosInString",
+            Truncated      => "Truncated",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for HuffError {
+    fn eq(&self, other: &HuffError) -> Bool {
+        match (self, other) {
+            (InvalidPadding, InvalidPadding) => true,
+            (EosInString,    EosInString)    => true,
+            (Truncated,      Truncated)      => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Encoded length (RFC 7541 §5.2) — used by encoder to decide whether
 // to emit Huffman or literal form (whichever is shorter).
