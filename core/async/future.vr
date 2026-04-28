@@ -198,7 +198,28 @@ public type FutureExt is protocol extends Future {
         }
     }
 
-    // Run this future to completion synchronously.
+    /// Run this future to completion synchronously.
+    ///
+    /// **LIMITATION:** uses `noop_waker()` — a future that depends
+    /// on real wake events (timer expiry, IO completion, channel
+    /// receive, condvar signal) will NEVER transition to Ready
+    /// because nothing calls `wake()` on the noop waker. Calling
+    /// `block()` on such a future loops indefinitely. Only futures
+    /// that complete without requiring a wake (e.g. `ready(v)`,
+    /// constant-folding combinators, futures that drive their own
+    /// progress through nested polling) work safely.
+    ///
+    /// For genuine async work — anything involving timers, IO, or
+    /// inter-task coordination — use the runtime executor
+    /// (`verum_runtime::block_on`) which builds a thread-park waker
+    /// so the thread suspends on Pending and unparks on wake. The
+    /// stdlib does not yet ship a thread-aware waker primitive, so
+    /// this method intentionally stays minimal.
+    ///
+    /// On Pending we call `thread::yield_now()` so the OS scheduler
+    /// gets a chance to run other threads — keeps the CPU from
+    /// pinning at 100% in the (already-incorrect) async-future
+    /// case while a synchronous-completion future converges.
     fn block(mut self) -> Self.Output {
         let waker = noop_waker();
         let mut cx = Context.from_waker(&waker);
@@ -207,8 +228,12 @@ public type FutureExt is protocol extends Future {
             match self.poll(&mut cx) {
                 Poll.Ready(v) => return v,
                 Poll.Pending => {
-                    // In a real implementation, this would yield/park
-                    continue;
+                    // No real waker-driven resume here; yield to
+                    // the OS scheduler so we don't pin a core.
+                    // Synchronous-completion futures resolve on
+                    // the next iteration; genuine async futures
+                    // hang here, which is the documented limit.
+                    super.super.runtime.thread.yield_now();
                 }
             }
         }
