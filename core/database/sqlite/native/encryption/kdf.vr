@@ -46,14 +46,18 @@ public type KdfParams is {
 }
 
 public fn params_default() -> KdfParams {
-    let mut salt: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < 16 { salt.push(0 as Byte); i = i + 1; }
     KdfParams {
-        salt: salt,
+        salt: zero_bytes(16),
         cost: 256000,        // SQLCipher v4 default
         key_len: 32,
     }
+}
+
+fn zero_bytes(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n { out.push(0 as Byte); i = i + 1; }
+    out
 }
 
 implement KdfParams {
@@ -97,9 +101,8 @@ implement KeyDerivation for RawKey {
         if secret.len() != params.key_len {
             return Err(KeBadParams("raw key length mismatch".clone()));
         }
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = 0;
-        while i < secret.len() { out.push(secret[i]); i = i + 1; }
+        let mut out: List<Byte> = List.with_capacity(secret.len());
+        out.extend_from_slice(secret.as_slice());
         Ok(out)
     }
 }
