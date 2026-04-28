@@ -309,9 +309,8 @@ fn decode_crypto(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameError>
     let (len, p2) = quic_decode(buf, p1).or_else(vfail)?;
     let end = p2 + (len as Int);
     if end > buf.len() { return Err(FrameError.Truncated); }
-    let mut data: List<Byte> = [];
-    let mut i: Int = p2;
-    while i < end { data.push(buf[i]); i = i + 1; }
+    let mut data: List<Byte> = List.with_capacity(end - p2);
+    data.extend_from_slice(&buf[p2..end]);
     Ok((QuicFrame.CryptoFrame { offset: off, data: data }, end))
 }
 
@@ -321,9 +320,8 @@ fn decode_new_token(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), FrameErr
     let (len, p1) = quic_decode(buf, pos).or_else(vfail)?;
     let end = p1 + (len as Int);
     if end > buf.len() { return Err(FrameError.Truncated); }
-    let mut token: List<Byte> = [];
-    let mut i: Int = p1;
-    while i < end { token.push(buf[i]); i = i + 1; }
+    let mut token: List<Byte> = List.with_capacity(end - p1);
+    token.extend_from_slice(&buf[p1..end]);
     Ok((QuicFrame.NewToken(token), end))
 }
 
@@ -351,9 +349,8 @@ fn decode_stream(buf: &[Byte], pos: Int, flag_bits: UInt8) -> Result<(QuicFrame,
         None    => buf.len(),      // LEN=0 → frame extends to end of packet
     };
     if end > buf.len() { return Err(FrameError.Truncated); }
-    let mut data: List<Byte> = [];
-    let mut i: Int = p3;
-    while i < end { data.push(buf[i]); i = i + 1; }
+    let mut data: List<Byte> = List.with_capacity(end - p3);
+    data.extend_from_slice(&buf[p3..end]);
     Ok((QuicFrame.StreamFrame { stream_id: sid, offset: offset, data: data, fin: fin }, end))
 }
 
@@ -406,9 +403,8 @@ fn decode_new_connection_id(buf: &[Byte], pos: Int) -> Result<(QuicFrame, Int), 
     let cid_end = p2 + 1 + cid_len;
     let tok_end = cid_end + 16;
     if tok_end > buf.len() { return Err(FrameError.Truncated); }
-    let mut cid: List<Byte> = [];
-    let mut i: Int = p2 + 1;
-    while i < cid_end { cid.push(buf[i]); i = i + 1; }
+    let mut cid: List<Byte> = List.with_capacity(cid_len);
+    cid.extend_from_slice(&buf[p2 + 1..cid_end]);
     let mut tok: [Byte; 16] = [0_u8; 16];
     let mut j: Int = 0;
     while j < 16 { tok[j] = buf[cid_end + j]; j = j + 1; }
@@ -451,9 +447,8 @@ fn decode_connection_close_transport(buf: &[Byte], pos: Int) -> Result<(QuicFram
     let (rlen, p3)  = quic_decode(buf, p2).or_else(vfail)?;
     let end = p3 + (rlen as Int);
     if end > buf.len() { return Err(FrameError.Truncated); }
-    let mut reason: List<Byte> = [];
-    let mut i: Int = p3;
-    while i < end { reason.push(buf[i]); i = i + 1; }
+    let mut reason: List<Byte> = List.with_capacity(end - p3);
+    reason.extend_from_slice(&buf[p3..end]);
     Ok((QuicFrame.ConnectionCloseTransport {
         error_code: code,
         frame_type: ftype,
@@ -466,9 +461,8 @@ fn decode_connection_close_application(buf: &[Byte], pos: Int) -> Result<(QuicFr
     let (rlen, p2)  = quic_decode(buf, p1).or_else(vfail)?;
     let end = p2 + (rlen as Int);
     if end > buf.len() { return Err(FrameError.Truncated); }
-    let mut reason: List<Byte> = [];
-    let mut i: Int = p2;
-    while i < end { reason.push(buf[i]); i = i + 1; }
+    let mut reason: List<Byte> = List.with_capacity(end - p2);
+    reason.extend_from_slice(&buf[p2..end]);
     Ok((QuicFrame.ConnectionCloseApplication { error_code: code, reason: reason }, end))
 }
 
@@ -479,15 +473,13 @@ fn decode_datagram(buf: &[Byte], pos: Int, with_length: Bool) -> Result<(QuicFra
         let (len, p1) = quic_decode(buf, pos).or_else(vfail)?;
         let e = p1 + (len as Int);
         if e > buf.len() { return Err(FrameError.Truncated); }
-        let mut d: List<Byte> = [];
-        let mut i: Int = p1;
-        while i < e { d.push(buf[i]); i = i + 1; }
+        let mut d: List<Byte> = List.with_capacity(e - p1);
+        d.extend_from_slice(&buf[p1..e]);
         (d, e)
     } else {
         // LEN-less form: datagram extends to end of packet payload.
-        let mut d: List<Byte> = [];
-        let mut i: Int = pos;
-        while i < buf.len() { d.push(buf[i]); i = i + 1; }
+        let mut d: List<Byte> = List.with_capacity(buf.len() - pos);
+        d.extend_from_slice(&buf[pos..]);
         (d, buf.len())
     };
     Ok((QuicFrame.Datagram { data: data, with_length: with_length }, end))
@@ -589,8 +581,7 @@ public fn encode_frame(frame: &QuicFrame, out: &mut List<Byte>) -> Int {
             let _ = quic_encode_into(out, *retire_prior_to);
             out.push(connection_id.len() as Byte);
             append_bytes(connection_id, out);
-            let mut i: Int = 0;
-            while i < 16 { out.push(stateless_reset_token[i]); i = i + 1; }
+            out.extend_from_slice(&stateless_reset_token[..]);
         },
         QuicFrame.RetireConnectionId(seq) => {
             let _ = quic_encode_into(out, 25_u64);
@@ -598,13 +589,11 @@ public fn encode_frame(frame: &QuicFrame, out: &mut List<Byte>) -> Int {
         },
         QuicFrame.PathChallenge(data) => {
             let _ = quic_encode_into(out, 26_u64);
-            let mut i: Int = 0;
-            while i < 8 { out.push(data[i]); i = i + 1; }
+            out.extend_from_slice(&data[..]);
         },
         QuicFrame.PathResponse(data) => {
             let _ = quic_encode_into(out, 27_u64);
-            let mut i: Int = 0;
-            while i < 8 { out.push(data[i]); i = i + 1; }
+            out.extend_from_slice(&data[..]);
         },
         QuicFrame.ConnectionCloseTransport { error_code, frame_type, reason } => {
             let _ = quic_encode_into(out, 28_u64);
@@ -676,11 +665,7 @@ fn encode_ack_body(
 }
 
 fn append_bytes(src: &List<Byte>, out: &mut List<Byte>) {
-    let mut i: Int = 0;
-    while i < src.len() {
-        out.push(src[i]);
-        i = i + 1;
-    }
+    out.extend_from_slice(src.as_slice());
 }
 
 // =============================================================================
