@@ -66,12 +66,28 @@ public fn fold_text_ascii(s: &Text) -> Text {
 /// `compare_ascii_nocase(a, b)` — lex-compare two texts after ASCII
 /// lowercasing. Used directly as the comparator for SQLite's NOCASE
 /// collation. Matches C `strcasecmp` semantics on the ASCII subset.
+///
+/// Byte-by-byte comparison with on-the-fly folding — zero
+/// allocation. The previous implementation called
+/// `to_ascii_lowercase()` on both inputs before comparing, paying
+/// O(|a| + |b|) heap traffic per call. NOCASE runs at every
+/// WHERE-clause comparison; the allocator pressure was the kind of
+/// cost the SQL hot path can least afford.
 public fn compare_ascii_nocase(a: &Text, b: &Text) -> Ordering {
-    let a_folded = a.to_ascii_lowercase();
-    let b_folded = b.to_ascii_lowercase();
-    if a_folded < b_folded {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let n = if ab.len() < bb.len() { ab.len() } else { bb.len() };
+    let mut i: Int = 0;
+    while i < n {
+        let af = fold_byte_ascii(ab[i]);
+        let bf = fold_byte_ascii(bb[i]);
+        if af < bf { return Less; }
+        if af > bf { return Greater; }
+        i = i + 1;
+    }
+    if ab.len() < bb.len() {
         Less
-    } else if a_folded > b_folded {
+    } else if ab.len() > bb.len() {
         Greater
     } else {
         Equal
@@ -79,7 +95,19 @@ public fn compare_ascii_nocase(a: &Text, b: &Text) -> Ordering {
 }
 
 /// ASCII case-insensitive equality check — the single most common use
-/// site for NOCASE in WHERE clauses.
+/// site for NOCASE in WHERE clauses. Length-mismatched inputs short-
+/// circuit before the byte loop runs; matched-length inputs pay
+/// O(min(|a|, |b|)) work with zero allocation.
 public fn equal_ascii_nocase(a: &Text, b: &Text) -> Bool {
-    a.to_ascii_lowercase() == b.to_ascii_lowercase()
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        if fold_byte_ascii(ab[i]) != fold_byte_ascii(bb[i]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
 }
