@@ -15,6 +15,7 @@ JSON for the dashboard. `make production-readiness` (defined in
 | 5 | **Documentation** | `vcs/gates/documentation.sh` | **shipped** — every `public fn/type/axiom/theorem` has `///` doc; currently GREEN |
 | 6 | **Diagnostic (#197)** | `vcs/gates/diagnostic.sh` | **shipped** — grep panic-without-context; currently RED |
 | 7 | **Soundness obligation** | `vcs/gates/soundness.sh` | **shipped** — grep unsafe-without-SAFETY; currently RED |
+| #176 | **AOT lenient-skip ratchet** | `vcs/gates/aot_lenient_skip.sh` | **shipped** — snapshot-vs-baseline comparator; needs CI snapshot pipeline |
 
 ## Running individual gates
 
