@@ -121,4 +121,176 @@ impl ProjectInfoData {
         self.project_root = root.into();
         self
     }
+
+    /// Set the captured git revision (#20 / P7).
+    /// Pass `None` for reproducible builds or when the driver
+    /// could not resolve a revision.
+    #[inline]
+    pub fn with_git_revision(mut self, revision: Option<Text>) -> Self {
+        self.git_revision = revision;
+        self
+    }
+
+    /// Set the captured build-time millisecond stamp (#20 / P7).
+    #[inline]
+    pub fn with_build_time_unix_ms(mut self, build_time_unix_ms: Option<u64>) -> Self {
+        self.build_time_unix_ms = build_time_unix_ms;
+        self
+    }
+
+    /// Populate `git_revision` + `build_time_unix_ms` from the
+    /// surrounding environment (#20 / P7). Idempotent — safe to
+    /// call multiple times. Either capture step that fails (no
+    /// git tree, `git` binary missing, system clock pre-epoch)
+    /// leaves the corresponding field as `None` so the
+    /// `@version_stamp` meta builtin substitutes its
+    /// deterministic fallback.
+    ///
+    /// This is the canonical pipeline-driver hook: invoke once
+    /// at the start of compilation, then `set_project_info` the
+    /// resulting [`ProjectInfoData`] onto the [`BuildConfig`]
+    /// before any `meta fn` runs.
+    pub fn capture_version_stamp_in_place(&mut self) {
+        self.git_revision = capture_git_revision(self.project_root.as_str());
+        self.build_time_unix_ms = capture_build_time_unix_ms();
+    }
+
+    /// Builder-form of [`Self::capture_version_stamp_in_place`].
+    pub fn with_captured_version_stamp(mut self) -> Self {
+        self.capture_version_stamp_in_place();
+        self
+    }
+}
+
+// ============================================================================
+// Version-stamp capture helpers (#20 / P7)
+// ============================================================================
+
+/// Resolve `git rev-parse HEAD` in `project_root`. Returns `None`
+/// when the directory isn't a git work-tree, when `git` isn't on
+/// `$PATH`, or when the command exits with a non-zero status —
+/// every failure mode collapses to "stamp unavailable" so the
+/// surrounding pipeline never aborts on a missing `.git/`.
+pub fn capture_git_revision(project_root: &str) -> Option<Text> {
+    if project_root.is_empty() {
+        return None;
+    }
+    let output = std::process::Command::new("git")
+        .arg("rev-parse")
+        .arg("HEAD")
+        .current_dir(project_root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(Text::from(trimmed))
+    }
+}
+
+/// Capture the current wall-clock time as a Unix-millisecond
+/// stamp. Returns `None` when the system clock is pre-epoch
+/// (impossible on any sane platform but the saturating fallback
+/// keeps the API total).
+pub fn capture_build_time_unix_ms() -> Option<u64> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as u64)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_build_time_is_recent() {
+        let captured = capture_build_time_unix_ms()
+            .expect("capture should succeed on any platform with a sane clock");
+        // Sanity: clock is not absurdly low (> 2025-01-01 unix ms).
+        assert!(
+            captured > 1_735_689_600_000,
+            "captured build time {} suspiciously low",
+            captured
+        );
+    }
+
+    #[test]
+    fn capture_git_revision_in_repo_returns_some_or_none_gracefully() {
+        // The verum-lang repo is a git tree, so this should
+        // typically return Some. But the test also passes when
+        // run outside a git tree (e.g. cargo-publish unpack) —
+        // None is the "unavailable" fallback, never an Err.
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let captured = capture_git_revision(&cwd);
+        if let Some(rev) = captured {
+            // SHA-1 is 40 hex chars; SHA-256 (future git) is 64.
+            assert!(
+                rev.as_str().len() == 40 || rev.as_str().len() == 64,
+                "git revision shape unexpected: {:?} (len {})",
+                rev,
+                rev.as_str().len()
+            );
+            for c in rev.as_str().chars() {
+                assert!(
+                    c.is_ascii_hexdigit(),
+                    "git revision must be hex: {:?}",
+                    rev
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn capture_git_revision_empty_root_returns_none() {
+        // Empty project_root → don't even spawn `git`; return None
+        // so the @version_stamp fallback kicks in.
+        assert_eq!(capture_git_revision(""), None);
+    }
+
+    #[test]
+    fn capture_git_revision_nonexistent_root_returns_none() {
+        assert_eq!(capture_git_revision("/nonexistent/path/zzz"), None);
+    }
+
+    #[test]
+    fn with_captured_version_stamp_is_idempotent() {
+        let pi = ProjectInfoData::new()
+            .with_project_root("/nonexistent/path/zzz")
+            .with_captured_version_stamp();
+        // Capturing twice produces the same shape (no panics, no
+        // accumulation of state).
+        let pi2 = pi.clone().with_captured_version_stamp();
+        assert_eq!(pi.git_revision, pi2.git_revision);
+        // build_time_unix_ms may differ by milliseconds across
+        // calls — only check both are Some-or-both-None.
+        assert_eq!(
+            pi.build_time_unix_ms.is_some(),
+            pi2.build_time_unix_ms.is_some()
+        );
+    }
+
+    #[test]
+    fn with_git_revision_and_with_build_time_round_trip() {
+        let pi = ProjectInfoData::new()
+            .with_git_revision(Some(Text::from("deadbeefcafe")))
+            .with_build_time_unix_ms(Some(1_700_000_000_000));
+        match &pi.git_revision {
+            Some(rev) => assert_eq!(rev.as_str(), "deadbeefcafe"),
+            None => panic!("git_revision builder must round-trip"),
+        }
+        assert_eq!(pi.build_time_unix_ms, Some(1_700_000_000_000));
+    }
 }
