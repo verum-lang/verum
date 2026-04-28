@@ -107,6 +107,71 @@ public fn is_smtlib_simple_symbol(s: &Text) -> Bool {
     true
 }
 
+/// Maximum length of a sort expression accepted at the construction
+/// site. Sorts in real proof corpora are tiny — `Int`, `Bool`,
+/// `(_ BitVec 32)`, `(Array Int Int)`. 256 bytes is generous-by-50x;
+/// anything longer is structural junk or injected payload.
+const MAX_SMT_SORT_LEN: Int = 256;
+
+/// Conservative validator for SMT-LIB sort expressions. Sorts are
+/// S-expressions (`Int`, `(_ BitVec 32)`, `(Array Int Int)`, …) so
+/// the simple-symbol grammar is too restrictive. Instead enforce:
+///
+///   * balanced `(` / `)` (depth never goes negative, ends at 0)
+///   * no `;` (SMT-LIB line comment — terminates the rest of the
+///     clause and lets the next axiom be smuggled in)
+///   * no `|` (quoted-symbol delimiter — closes any caller-supplied
+///     quoted symbol prematurely and reopens injection surface)
+///   * no `"` or `\` (string-literal delimiters / escapes — not
+///     used in sort syntax, accepting them re-opens injection)
+///   * no C0 control bytes (`< 0x20`) other than space / tab; no DEL
+///   * length capped at MAX_SMT_SORT_LEN
+///
+/// This whitelist accepts every sort form Z3 / CVC5 emit in
+/// practice while rejecting every byte sequence that has been used
+/// historically to escape SMT-LIB rendering. Same defensive class
+/// as the simple-symbol check; sorts unvalidated would re-open the
+/// injection surface that #90 closed for names and parameters.
+public fn is_smtlib_sort_safe(s: &Text) -> Bool {
+    let bytes = s.as_bytes();
+    if bytes.len() == 0 || bytes.len() > MAX_SMT_SORT_LEN {
+        return false;
+    }
+    let mut depth: Int = 0;
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as Int;
+        // Forbidden characters — explicit reject list.
+        if c == 0x3B {                         // `;`
+            return false;
+        }
+        if c == 0x7C {                         // `|`
+            return false;
+        }
+        if c == 0x22 {                         // `"`
+            return false;
+        }
+        if c == 0x5C {                         // `\`
+            return false;
+        }
+        // C0 control bytes — only space (0x20) and tab (0x09) are
+        // allowed inter-token whitespace; everything else is junk.
+        if c < 0x20 && c != 0x09 {
+            return false;
+        }
+        if c == 0x7F { return false; }         // DEL
+        // Paren-balance tracking.
+        if c == 0x28 {                         // `(`
+            depth = depth + 1;
+        } else if c == 0x29 {                  // `)`
+            depth = depth - 1;
+            if depth < 0 { return false; }
+        }
+        i = i + 1;
+    }
+    depth == 0
+}
+
 // =============================================================================
 // 1. A reflected function definition
 // =============================================================================
@@ -151,6 +216,17 @@ public fn reflected_fn(
         }
         idx = idx + 1;
     }
+    if !is_smtlib_sort_safe(&return_sort) {
+        panic(f"reflected_fn(`{name}`): return_sort `{return_sort}` fails sort-safety check; rejecting to prevent SMT injection into proof axioms");
+    }
+    let mut sidx: Int = 0;
+    while sidx < parameter_sorts.len() {
+        let s = &parameter_sorts[sidx];
+        if !is_smtlib_sort_safe(s) {
+            panic(f"reflected_fn(`{name}`): parameter_sorts[{sidx}]=`{s}` fails sort-safety check; rejecting to prevent SMT injection");
+        }
+        sidx = sidx + 1;
+    }
     ReflectedFunction {
         name,
         parameters,
@@ -184,6 +260,16 @@ public fn try_reflected_fn(
             return None;
         }
         idx = idx + 1;
+    }
+    if !is_smtlib_sort_safe(&return_sort) {
+        return None;
+    }
+    let mut sidx: Int = 0;
+    while sidx < parameter_sorts.len() {
+        if !is_smtlib_sort_safe(&parameter_sorts[sidx]) {
+            return None;
+        }
+        sidx = sidx + 1;
     }
     Some(ReflectedFunction {
         name,
