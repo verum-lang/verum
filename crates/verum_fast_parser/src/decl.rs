@@ -5409,6 +5409,16 @@ impl<'a> RecursiveParser<'a> {
     fn parse_mount_tree_inner(&mut self) -> ParseResult<MountTree> {
         let start_pos = self.stream.position();
 
+        // #5 / P1.5 — detect file-relative mount before
+        // falling into module-path parsing.  `./foo.vr` and
+        // `../shared/util.vr` start with `Dot Slash` or
+        // `Dot Dot Slash`, neither of which can begin a
+        // module path (module-path's leading dot is followed
+        // by an identifier, not `/`).
+        if self.is_file_mount_lookahead() {
+            return self.parse_file_mount_tree(start_pos);
+        }
+
         // Parse the prefix path (at least one segment)
         let mut segments = Vec::new();
 
@@ -5525,6 +5535,222 @@ impl<'a> RecursiveParser<'a> {
         let path = Path::new(segments.into_iter().collect(), span);
         Ok(MountTree {
             kind: MountTreeKind::Path(path),
+            alias: Maybe::None,
+            span,
+        })
+    }
+
+    /// `true` when the upcoming tokens form a file-relative
+    /// mount (`./...` or `../...`).  Disambiguators:
+    ///
+    ///   * `Dot Slash`     → `./...`     (one-character dot
+    ///                                     followed by `/`)
+    ///   * `DotDot Slash`  → `../...`    (lexer emits `..` as
+    ///                                     a single `DotDot`
+    ///                                     token used elsewhere
+    ///                                     for range syntax)
+    ///
+    /// A normal relative module mount is `Dot Ident`, never
+    /// `Dot Slash` / `DotDot Slash`, so the lookahead does
+    /// not collide with the existing `mount .config.X;` form.
+    fn is_file_mount_lookahead(&self) -> bool {
+        let kind0 = self.stream.peek_nth(0).map(|t| &t.kind);
+        let kind1 = self.stream.peek_nth(1).map(|t| &t.kind);
+        match (kind0, kind1) {
+            (Some(TokenKind::Dot), Some(TokenKind::Slash)) => true,
+            (Some(TokenKind::DotDot), Some(TokenKind::Slash)) => true,
+            _ => false,
+        }
+    }
+
+    /// Parse a file-relative mount path (`./foo.vr`, `../bar/baz.vr`)
+    /// into a `MountTree { kind: File, .. }`.  The path is
+    /// reassembled from individual tokens — the lexer doesn't
+    /// emit a single string token for these — and validated
+    /// against the constraints documented on
+    /// `MountTreeKind::File`:
+    ///
+    ///   * starts with `./` or `../`
+    ///   * ends with `.vr`
+    ///   * contains no `\\0` / `\\n` / `\\r`
+    ///   * does NOT escape the cog root via excessive `..`
+    ///
+    /// Path-traversal validation happens here (parser layer)
+    /// rather than in the loader so a malformed mount becomes
+    /// a parse error with a span that points at the literal
+    /// path, not a deeper "module not found" diagnostic.
+    fn parse_file_mount_tree(
+        &mut self,
+        start_pos: usize,
+    ) -> ParseResult<MountTree> {
+        // Parser-time escape check: after the leading `./` /
+        // `../` prefix, we track per-segment net depth in the
+        // *body*.  `..` segments inside the body that would
+        // push depth below zero are rejected (`./a/../../X`
+        // collapses to `../X`, which the body parser refuses
+        // to emit as the prefix is fixed).  Cog-root-wide
+        // escape detection (e.g. starting with too many `../`
+        // for the source-file location) lives in the loader,
+        // which has filesystem context.
+        let mut path = String::new();
+        let mut last_was_separator = false;
+        let mut segment_buf = String::new();
+        // Net depth of the body relative to the directory
+        // anchored by the prefix.  Starts at 0; each non-
+        // `..` non-`.` segment += 1, each `..` segment -= 1.
+        let mut body_depth: i64 = 0;
+
+        // Consume the leading `./` or `../` prefix(es).
+        // The lexer emits `..` as a single `DotDot` token
+        // (used elsewhere for range syntax) and `.` as `Dot`,
+        // so the prefix has exactly one `Dot Slash` (single
+        // `./`) or one-or-more `DotDot Slash` chains.
+        loop {
+            let kind0 = self.stream.peek_nth(0).map(|t| &t.kind);
+            let kind1 = self.stream.peek_nth(1).map(|t| &t.kind);
+            match (kind0, kind1) {
+                (Some(TokenKind::Dot), Some(TokenKind::Slash)) => {
+                    self.stream.advance(); // .
+                    self.stream.advance(); // /
+                    path.push_str("./");
+                    last_was_separator = true;
+                    break; // `./` is followed by the body
+                }
+                (Some(TokenKind::DotDot), Some(TokenKind::Slash)) => {
+                    self.stream.advance(); // ..
+                    self.stream.advance(); // /
+                    path.push_str("../");
+                    last_was_separator = true;
+                    // Allow `../../...` chains — only keep
+                    // looping while the next pair is *also*
+                    // `DotDot Slash`.  Anything else
+                    // (Ident, Dot, …) is the start of the
+                    // body, so break out.
+                    let next0 = self.stream.peek_nth(0).map(|t| &t.kind);
+                    let next1 = self.stream.peek_nth(1).map(|t| &t.kind);
+                    if matches!(
+                        (next0, next1),
+                        (Some(TokenKind::DotDot), Some(TokenKind::Slash))
+                    ) {
+                        continue;
+                    }
+                    break;
+                }
+                _ => {
+                    return Err(ParseError::invalid_mount_syntax(
+                        "expected `./` or `../` to start a file-relative mount",
+                        self.stream.current_span(),
+                    ));
+                }
+            }
+        }
+
+        // Body: collect tokens until a terminator.  Each
+        // path component is `Ident` separated by `Slash` or
+        // `Dot` (for the file extension).  We rebuild the
+        // textual form so the AST node stores the literal
+        // spelling for diagnostics.
+        loop {
+            let kind = self.stream.peek_kind().cloned();
+            match kind {
+                Some(TokenKind::Ident(name)) => {
+                    self.stream.advance();
+                    let s = name.as_str();
+                    // Reject tokens carrying control characters
+                    // (defensive — the lexer rules already
+                    // forbid them in identifiers, but the path
+                    // form is permissive enough that an
+                    // explicit guard is cheap insurance).
+                    if s.contains('\0') || s.contains('\n') || s.contains('\r') {
+                        return Err(ParseError::invalid_mount_syntax(
+                            "file-relative mount path contains a control character",
+                            self.stream.current_span(),
+                        ));
+                    }
+                    path.push_str(s);
+                    segment_buf.push_str(s);
+                    last_was_separator = false;
+                }
+                Some(TokenKind::Slash) => {
+                    self.stream.advance();
+                    if last_was_separator {
+                        return Err(ParseError::invalid_mount_syntax(
+                            "double `/` in file-relative mount path",
+                            self.stream.current_span(),
+                        ));
+                    }
+                    // Update body depth based on the segment
+                    // we just closed.  `..` decrements (and
+                    // must not push us below zero — that's
+                    // syntactic escape that the parser
+                    // rejects); `.` is identity; anything
+                    // else is a real directory step.
+                    if segment_buf == ".." {
+                        body_depth -= 1;
+                        if body_depth < 0 {
+                            return Err(ParseError::invalid_mount_syntax(
+                                "file-relative mount path escapes the source directory \
+                                 (too many `..` segments after the leading prefix)",
+                                self.stream.current_span(),
+                            ));
+                        }
+                    } else if !segment_buf.is_empty() && segment_buf != "." {
+                        body_depth += 1;
+                    }
+                    segment_buf.clear();
+                    path.push('/');
+                    last_was_separator = true;
+                }
+                Some(TokenKind::Dot) => {
+                    self.stream.advance();
+                    path.push('.');
+                    segment_buf.push('.');
+                    last_was_separator = false;
+                }
+                Some(TokenKind::DotDot) => {
+                    self.stream.advance();
+                    path.push_str("..");
+                    segment_buf.push_str("..");
+                    last_was_separator = false;
+                }
+                // Terminators — `as`, `;`, `,`, `}` end the
+                // path and surface back to the surrounding
+                // parser.
+                Some(TokenKind::As)
+                | Some(TokenKind::Semicolon)
+                | Some(TokenKind::Comma)
+                | Some(TokenKind::RBrace)
+                | None => break,
+                _ => {
+                    return Err(ParseError::invalid_mount_syntax(
+                        "unexpected token in file-relative mount path",
+                        self.stream.current_span(),
+                    ));
+                }
+            }
+        }
+
+        // Final validation.
+        if !path.ends_with(".vr") {
+            return Err(ParseError::invalid_mount_syntax(
+                "file-relative mount path must end with `.vr`",
+                self.stream.current_span(),
+            ));
+        }
+        // The terminal segment must not itself be `..` or `.`.
+        if segment_buf == ".." || segment_buf == "." {
+            return Err(ParseError::invalid_mount_syntax(
+                "file-relative mount path must terminate at a `.vr` file, not a directory marker",
+                self.stream.current_span(),
+            ));
+        }
+
+        let span = self.stream.make_span(start_pos);
+        Ok(MountTree {
+            kind: MountTreeKind::File {
+                path: verum_common::Text::from(path),
+                span,
+            },
             alias: Maybe::None,
             span,
         })
