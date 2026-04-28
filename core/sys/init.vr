@@ -474,13 +474,26 @@ fn cleanup_thread_allocator() {
 // Platform-Specific Entry Points
 // =============================================================================
 
+// Entry-point declarations use the C ABI for `int main(int argc, char **argv)`:
+//   * argc is `int` (Int32) — the kernel / dyld places it in EDI's low 32
+//     bits with the high 32 bits *undefined* per System V AMD64 ABI.
+//     Declaring `argc: Int` (i64) made LLVM emit `define i32 @main(i64
+//     %argc, ptr %argv)` and the prologue read RDI as 64-bit, picking
+//     up whatever the calling convention left in the high half — usually
+//     a stale pointer value masquerading as an enormous argc.
+//   * The return type is `int` (Int32) — process exit codes are 32-bit.
+//   * argv stays `&&Byte` (pointer-width on every supported platform).
+// T0.4.3 — surface aligned with the C ABI. init_process_args takes the
+// Verum-side `Int` (i64) — the Int32→Int widening at the boundary is
+// absorbed by the typechecker.
+
 @cfg(target_os = "linux")
 module linux_entry {
     mount super.{verum_shutdown};
 
-    // External user main function
+    // External user main function. C: `int main(int argc, char **argv);`.
     extern {
-        fn verum_main(argc: Int, argv: &&Byte) -> Int;
+        fn verum_main(argc: Int32, argv: &&Byte) -> Int32;
     }
 
     /// Linux x86_64 entry point.
@@ -499,14 +512,17 @@ module linux_entry {
         linux_x86_64_start();
     }
 
-    /// Verum entry point called from _start.
+    /// Verum entry point called from _start. argc is `int` (Int32) per the
+    /// System V AMD64 ABI — the kernel pushes the i32 argc into the low 32
+    /// bits of an 8-byte stack slot at [rsp]; the linux_x86_64_start asm
+    /// reads it into EDI and calls into here.
     @no_mangle
-    public fn verum_entry(argc: Int, argv: &&Byte) -> Int {
+    public fn verum_entry(argc: Int32, argv: &&Byte) -> Int32 {
         // Initialize auxiliary vector access (must be first - no libc)
         init_auxv(argv);
 
         // Store process arguments for env module
-        init_process_args(argc, argv);
+        init_process_args(argc as Int, argv);
 
         // Initialize runtime
         match super.verum_init() {
@@ -532,16 +548,17 @@ module linux_entry {
 module darwin_entry {
     mount super.{verum_shutdown};
 
-    // External user main function
+    // External user main function. C: `int main(int argc, char **argv);`.
     extern {
-        fn verum_main(argc: Int, argv: &&Byte) -> Int;
+        fn verum_main(argc: Int32, argv: &&Byte) -> Int32;
     }
 
-    /// macOS entry point via dyld.
+    /// macOS entry point via dyld. argc is `int` (Int32) per dyld's
+    /// invocation contract — the i32 argc arrives in EDI's low 32 bits.
     @no_mangle
-    public fn main(argc: Int, argv: &&Byte) -> Int {
+    public fn main(argc: Int32, argv: &&Byte) -> Int32 {
         // Store process arguments for env module
-        init_process_args(argc, argv);
+        init_process_args(argc as Int, argv);
 
         // Initialize runtime
         match super.verum_init() {
@@ -566,9 +583,10 @@ module darwin_entry {
 module windows_entry {
     mount super.{verum_shutdown};
 
-    // External user main function (Windows uses command line string)
+    // External user main function (Windows uses command line string).
+    // C return is `int` — process exit codes are 32-bit on Win32.
     extern {
-        fn verum_main(cmdline: &Byte) -> Int;
+        fn verum_main(cmdline: &Byte) -> Int32;
     }
 
     /// Windows entry point.
