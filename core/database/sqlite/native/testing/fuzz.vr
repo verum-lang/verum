@@ -95,9 +95,8 @@ implement Mutator for FormatFuzzer {
     }
 
     fn mutate(&mut self, base: &List<Byte>) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = 0;
-        while i < base.len() { out.push(base[i]); i = i + 1; }
+        let mut out: List<Byte> = List.with_capacity(base.len());
+        out.extend_from_slice(base.as_slice());
         if out.len() == 0 { return out; }
         let mut k: Int = 0;
         while k < self.flips_per_round {
@@ -113,16 +112,16 @@ implement Mutator for FormatFuzzer {
         let mut out: List<List<Byte>> = List.new();
         // Halve the image (one candidate)
         if base.len() > 1 {
-            let mut half: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < base.len() / 2 { half.push(base[i]); i = i + 1; }
+            let half_len = base.len() / 2;
+            let mut half: List<Byte> = List.with_capacity(half_len);
+            half.extend_from_slice(&base.as_slice()[..half_len]);
             out.push(half);
         }
         // Drop the last byte (one candidate)
         if base.len() > 0 {
-            let mut shorter: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i + 1 < base.len() { shorter.push(base[i]); i = i + 1; }
+            let shorter_len = base.len() - 1;
+            let mut shorter: List<Byte> = List.with_capacity(shorter_len);
+            shorter.extend_from_slice(&base.as_slice()[..shorter_len]);
             out.push(shorter);
         }
         out
@@ -249,18 +248,13 @@ implement Mutator for GrammarFuzzer {
     fn mutate(&mut self, base: &Text) -> Text {
         // Append a no-op clause.
         let mut out = base.clone();
-        let suffix = " ".clone();
-        let sb = suffix.as_bytes();
-        let mut i: Int = 0;
-        while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+        out.push_str(&" ".clone());
         let extra = if self.rng.next_in(0, 2) == 0 {
             ";".clone()
         } else {
             " /* fuzz */".clone()
         };
-        let eb = extra.as_bytes();
-        let mut k: Int = 0;
-        while k < eb.len() { out.push_byte(eb[k]); k = k + 1; }
+        out.push_str(&extra);
         out
     }
 

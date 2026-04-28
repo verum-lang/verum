@@ -155,8 +155,7 @@ fn epoch_skew(input: &List<WalFrameBlob>, s: &mut DstSeed) -> WalMutationResult 
 }
 
 fn clone_blob(b: &WalFrameBlob) -> WalFrameBlob {
-    let mut bytes: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < b.bytes.len() { bytes.push(b.bytes[i]); i = i + 1; }
+    let mut bytes: List<Byte> = List.with_capacity(b.bytes.len());
+    bytes.extend_from_slice(b.bytes.as_slice());
     WalFrameBlob { bytes: bytes, is_commit: b.is_commit }
 }
