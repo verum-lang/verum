@@ -980,13 +980,11 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         match a {
                             RText(ref as_s) => match b {
                                 RText(ref bs_s) => {
-                                    let mut out = Text.new();
-                                    let abytes = as_s.as_bytes();
-                                    let bbytes = bs_s.as_bytes();
-                                    let mut i: Int = 0;
-                                    while i < abytes.len() { out.push_byte(abytes[i]); i = i + 1; }
-                                    i = 0;
-                                    while i < bbytes.len() { out.push_byte(bbytes[i]); i = i + 1; }
+                                    let mut out = Text.with_capacity(
+                                        as_s.as_bytes().len() + bs_s.as_bytes().len()
+                                    );
+                                    out.push_str(as_s);
+                                    out.push_str(bs_s);
                                     RText(out)
                                 }
                                 RNull => RNull,
@@ -1477,7 +1475,7 @@ fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
     if right {
         while j > i && is_ws(bs[j - 1]) { j = j - 1; }
     }
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(j - i);
     let mut k: Int = i;
     while k < j { out.push_byte(bs[k]); k = k + 1; }
     out
@@ -1507,7 +1505,7 @@ fn trim_with_chars(s: &Text, chars: &Text, left: Bool, right: Bool) -> Text {
     if right {
         while j > i && byte_in_set(bs[j - 1], cb) { j = j - 1; }
     }
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(j - i);
     let mut k: Int = i;
     while k < j { out.push_byte(bs[k]); k = k + 1; }
     out
@@ -1538,18 +1536,15 @@ fn bytes_equal_at(h: &List<Byte>, at: Int, n: &List<Byte>) -> Bool {
 fn replace_all_bytes(s: &Text, find: &Text, repl: &Text) -> Text {
     let sb = s.as_bytes();
     let fb = find.as_bytes();
-    let rb = repl.as_bytes();
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(sb.len());
     if fb.len() == 0 {
-        let mut i: Int = 0;
-        while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+        out.push_str(s);
         return out;
     }
     let mut i: Int = 0;
     while i < sb.len() {
         if i + fb.len() <= sb.len() && bytes_equal_at(sb, i, fb) {
-            let mut k: Int = 0;
-            while k < rb.len() { out.push_byte(rb[k]); k = k + 1; }
+            out.push_str(repl);
             i = i + fb.len();
         } else {
             out.push_byte(sb[i]);
