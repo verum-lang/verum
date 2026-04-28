@@ -411,21 +411,20 @@ fn gs2_header(cb: &ChannelBinding) -> Text {
 
 fn channel_binding_base64(cb: &ChannelBinding) -> Text {
     let header = gs2_header(cb);
-    let mut bytes: List<Byte> = List.new();
     let hb = header.as_bytes();
-    let mut i = 0;
-    while i < hb.len() {
-        bytes.push(hb[i]);
-        i = i + 1;
-    }
+    // Pre-size to avoid the doubling-realloc cascade. Worst case for
+    // tls-server-end-point is the 24-byte SHA-256 digest header plus
+    // the cert_hash itself; the bare CbNone path is just 3 bytes
+    // ("n,,"). Either way `extend_from_slice` runs as one bulk copy.
+    let extra = match cb {
+        CbTlsServerEndPoint(ref cert_hash) => cert_hash.len() as Int,
+        CbNone => 0,
+    };
+    let mut bytes: List<Byte> = List.with_capacity(hb.len() + extra);
+    bytes.extend_from_slice(hb);
     match cb {
         CbTlsServerEndPoint(ref cert_hash) => {
-            // Append the server-end-point hash bytes.
-            let mut k = 0;
-            while k < cert_hash.len() as Int {
-                bytes.push(cert_hash[k]);
-                k = k + 1;
-            }
+            bytes.extend_from_slice(cert_hash);
         }
         CbNone => {}
     }
@@ -538,27 +537,18 @@ fn take_after_eq(s: &Text) -> Text {
 }
 
 fn arr32_to_list(arr: &[Byte; 32]) -> List<Byte> {
-    let mut out: List<Byte> = List.new();
-    let mut i = 0;
-    while i < 32 {
-        out.push(arr[i]);
-        i = i + 1;
-    }
+    let mut out: List<Byte> = List.with_capacity(32);
+    out.extend_from_slice(&arr[..]);
     out
 }
 
 fn push_text(buf: &mut List<Byte>, s: &Text) {
-    let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        buf.push(b[i]);
-        i = i + 1;
-    }
+    buf.extend_from_slice(s.as_bytes());
 }
 
 fn xor_bytes(a: &List<Byte>, b: &List<Byte>) -> List<Byte> {
     let n = if (a.len() as Int) < (b.len() as Int) { a.len() as Int } else { b.len() as Int };
-    let mut out: List<Byte> = List.new();
+    let mut out: List<Byte> = List.with_capacity(n);
     let mut i = 0;
     while i < n {
         out.push(((a[i] as Int) ^ (b[i] as Int)) as Byte);
@@ -583,11 +573,7 @@ fn ct_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
 }
 
 fn bytes_to_list(buf: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = List.new();
-    let mut i = 0;
-    while i < buf.len() {
-        out.push(buf[i]);
-        i = i + 1;
-    }
+    let mut out: List<Byte> = List.with_capacity(buf.len());
+    out.extend_from_slice(buf);
     out
 }
