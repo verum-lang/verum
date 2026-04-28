@@ -1,0 +1,13 @@
+#!/usr/bin/env verum
+//
+// hello.vr — minimal Verum script.
+//
+// Demonstrates: shebang invocation, top-level statement (no fn main),
+// implicit exit code 0 from a void-tail expression.
+//
+// Run:
+//   chmod +x hello.vr && ./hello.vr
+//   verum hello.vr
+//   verum run hello.vr
+
+print("hello from Verum");

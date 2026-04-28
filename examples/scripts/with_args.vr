@@ -1,0 +1,21 @@
+#!/usr/bin/env verum
+//
+// with_args.vr — command-line argument handling.
+//
+// Demonstrates: explicit `fn main(args: List<Text>) -> Int` alongside
+// script mode, structured exit codes, basic argv inspection.
+//
+// Run:
+//   verum run with_args.vr -- Alice
+//   verum run with_args.vr           # missing arg -> exit 2
+
+fn main(args: List<Text>) -> Int {
+    if args.len() < 2 {
+        print("usage: with_args.vr <name>");
+        return 2;
+    }
+    let name = args[1];
+    print("hello, ");
+    print(name);
+    0
+}

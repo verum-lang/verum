@@ -1,0 +1,22 @@
+#!/usr/bin/env verum
+//
+// decl_and_stmts.vr — mixing declarations with top-level statements.
+//
+// Demonstrates: a `fn` declared at the top of the script is callable
+// from top-level statements that follow it; source order is
+// preserved end-to-end through the synthesised wrapper.
+//
+// Run:
+//   verum decl_and_stmts.vr
+
+fn double(n: Int) -> Int {
+    return n * 2;
+}
+
+fn shout(s: Text) -> Text {
+    s.to_uppercase()
+}
+
+let result = double(21);
+print(f"double(21) = {result}");
+print(shout("done"));
