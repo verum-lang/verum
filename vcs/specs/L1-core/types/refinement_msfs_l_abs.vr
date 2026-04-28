@@ -1,0 +1,91 @@
+// =============================================================================
+// VCS spec — refinement-typed L_Abs witnesses (M0.B regression)
+// =============================================================================
+//
+// Test that the refinement-typed surface added to
+// `core/math/absolute_layer.vr` compiles and that K-Refine's
+// depth-stratification check accepts the construction-time invariants:
+//
+//   * `CategoricalLevel = Int{>= -1}` (inline refinement form).
+//   * `FSWitness / Pi4Witness / Pi3MaxWitness` records carry
+//     `level: CategoricalLevel` — refinement on field type.
+//   * `RefinedLAbsWitness` joint witness wraps the three.
+//
+// Per VVA §4.4: `dp(predicate) < dp(Int) + 1` ⇒ K-Refine accepts.
+// =============================================================================
+//
+// @test:check
+// @level: L1
+// @tags: types, refinement, msfs, k-refine
+// @expect: pass
+
+mount core.math.absolute_layer.{
+    CategoricalLevel,
+    FSWitness,
+    Pi4Witness,
+    Pi3MaxWitness,
+    RefinedLAbsWitness,
+    fs_witness_predicate,
+    pi_4_witness_predicate,
+    pi_3_max_witness_predicate,
+    refined_l_abs_predicate,
+};
+
+/// A (well-formed) refinement-typed candidate at level n=1. The
+/// `level: CategoricalLevel` constructor checks `1 >= -1` at the
+/// point of construction; K-Refine accepts because `dp(>= -1) = 0 <
+/// dp(Int) + 1 = 1`.
+fn build_well_formed_candidate() -> RefinedLAbsWitness {
+    RefinedLAbsWitness {
+        fs_witness: FSWitness {
+            level: 1,
+            has_iota_F: true,
+            has_iota_F_star: true,
+            has_phi_X: true,
+        },
+        pi_4_witness: Pi4Witness {
+            level: 1,
+            is_irreducible_in_s_s: true,
+        },
+        pi_3_max_witness: Pi3MaxWitness {
+            level: 1,
+            is_maximally_generative: true,
+        },
+    }
+}
+
+/// The joint predicate evaluated on a well-formed candidate is `true`
+/// — the contradiction lies in the *existence* of such a candidate
+/// over the consistent (S, n), not in the predicate's formal value
+/// (cf. MSFS Theorem 5.1).
+fn well_formed_candidate_satisfies_predicate() -> Bool {
+    let w = build_well_formed_candidate();
+    refined_l_abs_predicate(&w)
+}
+
+/// Smoke check: a level=0 (Set-stratum) candidate also K-Refine-passes.
+fn build_set_stratum_candidate() -> RefinedLAbsWitness {
+    RefinedLAbsWitness {
+        fs_witness: FSWitness {
+            level: 0,
+            has_iota_F: true,
+            has_iota_F_star: true,
+            has_phi_X: true,
+        },
+        pi_4_witness: Pi4Witness {
+            level: 0,
+            is_irreducible_in_s_s: true,
+        },
+        pi_3_max_witness: Pi3MaxWitness {
+            level: 0,
+            is_maximally_generative: true,
+        },
+    }
+}
+
+fn main() -> Int {
+    let _wf = build_well_formed_candidate();
+    let _ss = build_set_stratum_candidate();
+    let _flag = well_formed_candidate_satisfies_predicate();
+    0
+}
