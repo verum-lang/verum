@@ -354,9 +354,20 @@ fn near(a: &Fts5SegmentPostingList, b: &Fts5SegmentPostingList, dist: Int) -> Ft
         let mut j: Int = 0;
         while j < bi.len() {
             if ai[i].rowid == bi[j].rowid {
+                // Int.MIN-safe magnitude. Token positions are
+                // typically small but the subtraction `ai - bi`
+                // could in principle hit Int.MIN if a corrupted
+                // index supplied positions at the type boundary;
+                // `-diff` would wrap and `abs_d <= dist` would
+                // trivially succeed, polluting the result set.
                 let diff: Int = ai[i].position - bi[j].position;
-                let abs_d: Int = if diff < 0 { -diff } else { diff };
-                if abs_d <= dist {
+                let abs_d_u: UInt64 = if diff < 0 {
+                    (((!diff) as UInt64) + 1_u64)
+                } else {
+                    diff as UInt64
+                };
+                let dist_u: UInt64 = if dist < 0 { 0_u64 } else { dist as UInt64 };
+                if abs_d_u <= dist_u {
                     out.add(Fts5SegmentPosting {
                         rowid: ai[i].rowid,
                         column: ai[i].column,

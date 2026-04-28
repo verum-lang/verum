@@ -85,9 +85,13 @@ public fn div_euclidean(a: Int, b: Int{!= 0}) -> Int {
 // Result satisfies: 0 <= result < |b|
 @inline(always)
 public fn mod_euclidean(a: Int, b: Int{!= 0}) -> Int{>= 0} {
+    // Int.MIN-safe |b|. Naive `-b` for `b == Int.MIN` wraps, leaving
+    // the offset negative and `r + (-Int.MIN)` overflowing. The
+    // `Int{!= 0}` refinement doesn't exclude Int.MIN; route through
+    // safe_abs_or_panic to share the documented panic surface.
     let r = a % b;
     if r < 0 {
-        r + (if b < 0 { -b } else { b })
+        r + safe_abs_or_panic(b, "mod_euclidean")
     } else {
         r
     }
@@ -426,8 +430,16 @@ public fn isqrt(n: Int{>= 0}) -> Int{>= 0} {
 }
 
 // Integer cube root (floor of cbrt)
+//
+// Panics on `Int.MIN` since its absolute value (2^63) is
+// unrepresentable in signed Int. The cube root of Int.MIN would be
+// floor(-2097152) but the abs-then-Newton path can't reach that
+// without UInt64-magnitude refactoring.
 public fn icbrt(n: Int) -> Int {
     if n == 0 { return 0; }
+    if n == Int.MIN {
+        panic("icbrt: |Int.MIN| (= 2^63) is unrepresentable in Int64; use a UInt64-magnitude variant or pre-clamp the input");
+    }
 
     let sign = if n < 0 { -1 } else { 1 };
     let n_abs = if n < 0 { -n } else { n };
