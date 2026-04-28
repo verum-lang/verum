@@ -824,6 +824,21 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*target_id, output);
         }
 
+        // #101 — read a single PermissionRouterStats field.
+        Instruction::PermissionStatsRead { dst, selector } => {
+            output.push(Opcode::TensorExtended.to_byte());
+            output.push(TensorExtSubOpcode::PermissionStatsRead.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*selector, output);
+        }
+
+        // #101 — clear all PermissionRouter stats.
+        Instruction::PermissionStatsClear { dst } => {
+            output.push(Opcode::TensorExtended.to_byte());
+            output.push(TensorExtSubOpcode::PermissionStatsClear.to_byte());
+            encode_reg(*dst, output);
+        }
+
         // ====================================================================
         // GPU - Fast Path (single-byte opcodes for common operations)
         // ====================================================================
@@ -4106,6 +4121,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                                 scope_tag,
                                 target_id,
                             })
+                        }
+                        // #101 — read PermissionRouterStats field.
+                        Some(TensorExtSubOpcode::PermissionStatsRead) => {
+                            let dst = decode_reg(data, offset)?;
+                            let selector = decode_reg(data, offset)?;
+                            Ok(Instruction::PermissionStatsRead { dst, selector })
+                        }
+                        // #101 — clear all PermissionRouter stats.
+                        Some(TensorExtSubOpcode::PermissionStatsClear) => {
+                            let dst = decode_reg(data, offset)?;
+                            Ok(Instruction::PermissionStatsClear { dst })
                         }
                         None => Err(VbcError::InvalidOpcode(sub_opcode_byte)),
                     }

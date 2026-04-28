@@ -270,6 +270,101 @@ public fn is_permitted(scope: PermissionScope, target_id: UInt64) -> Bool {
 }
 
 // =============================================================================
+// 5. Observability — runtime stats surface (#101 / #12 P3.2 follow-up).
+// =============================================================================
+//
+// Production deployments wire a host policy via the Rust-side
+// `set_permission_policy`; user code can verify the policy is
+// being exercised by reading the router's stats counters.
+// `permission_stats()` returns a typed snapshot;
+// `permission_clear_stats()` resets the counters between
+// scenarios while preserving the per-(scope, target) cache
+// itself — useful in test harnesses that exercise the same
+// policy across multiple distinct invocation patterns.
+
+/// Snapshot of `PermissionRouter` activity counters.  Field
+/// order matches the Rust-side `PermissionRouterStats` so
+/// diagnostics line up across the FFI boundary.
+public type PermissionStats is {
+    /// Total checks routed (cache hits + misses).
+    total: UInt64,
+    /// One-entry warm-path cache hits — the cheap path
+    /// (≤2ns under the architectural budget).
+    last_entry_hits: UInt64,
+    /// Backing-map cache hits (warm but not most-recent).
+    map_hits: UInt64,
+    /// Cache misses — host policy callback invoked.
+    policy_invocations: UInt64,
+    /// Decisions denied (across all paths).
+    denials: UInt64,
+};
+
+implement PermissionStats {
+    /// Total cache hits across both warm paths.
+    public fn cache_hits(self) -> UInt64 {
+        self.last_entry_hits + self.map_hits
+    }
+
+    /// Cache hit rate as basis points (0..=10000), or 0 when
+    /// `total == 0`.  Caller divides by 10000 for the
+    /// fractional form; basis-points avoid floating-point at
+    /// this layer.
+    public fn cache_hit_rate_bps(self) -> UInt64 {
+        if self.total == 0_u64 {
+            0_u64
+        } else {
+            (self.cache_hits() * 10_000_u64) / self.total
+        }
+    }
+
+    /// `true` when the embedder has installed a non-trivial
+    /// policy (i.e. the router was consulted at least once
+    /// AND issued at least one denial OR ran the policy
+    /// callback).  An always-allow router with no denials
+    /// looks identical to the default allow-all policy from
+    /// the stats angle.
+    public fn observed_active_policy(self) -> Bool {
+        self.policy_invocations > 0_u64 || self.denials > 0_u64
+    }
+}
+
+/// Internal wire-level intrinsic.  Selector encoding mirrors
+/// `PermissionRouterStats` field order: 0=total,
+/// 1=last_entry_hits, 2=map_hits, 3=policy_invocations,
+/// 4=denials.  Out-of-range selectors return 0 so version
+/// skew between caller and runtime fails open instead of
+/// crashing.
+@intrinsic("permission_stats_read")
+public fn permission_stats_read_wire(selector: UInt32) -> UInt64;
+
+/// Internal wire-level intrinsic.  Resets all stats counters
+/// to zero; the per-(scope, target) cache itself is
+/// preserved (use `permission_clear_cache` for that).
+@intrinsic("permission_stats_clear")
+public fn permission_stats_clear_wire();
+
+/// Read the current `PermissionRouter` stats as a typed
+/// snapshot.  Cheap — five wire-level reads with no
+/// allocation.
+public fn permission_stats() -> PermissionStats {
+    PermissionStats {
+        total:             permission_stats_read_wire(0_u32),
+        last_entry_hits:   permission_stats_read_wire(1_u32),
+        map_hits:          permission_stats_read_wire(2_u32),
+        policy_invocations: permission_stats_read_wire(3_u32),
+        denials:           permission_stats_read_wire(4_u32),
+    }
+}
+
+/// Reset all stats counters.  The per-(scope, target) cache
+/// is preserved — repeated identical checks after this call
+/// still hit the warm path.  Use this between independent
+/// test scenarios within a single interpreter session.
+public fn permission_clear_stats() {
+    permission_stats_clear_wire();
+}
+
+// =============================================================================
 // 4. Stable target identifiers.
 // =============================================================================
 //

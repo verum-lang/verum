@@ -2933,6 +2933,36 @@ pub enum TensorExtSubOpcode {
     /// Byte 0x1D, picked one past `PermissionCheckWire` for
     /// locality.
     PermissionAssert = 0x1D,
+
+    /// Read a single field of the runtime
+    /// `PermissionRouterStats` struct (#101).
+    ///
+    /// Format: `dst:reg, selector:reg`
+    /// Selector encoding (matches the field order in
+    /// `verum_vbc::interpreter::permission::PermissionRouterStats`):
+    ///   * 0 → total
+    ///   * 1 → last_entry_hits
+    ///   * 2 → map_hits
+    ///   * 3 → policy_invocations
+    ///   * 4 → denials
+    ///
+    /// Out-of-range selectors return 0 — the dispatch handler
+    /// treats unknown selectors as "no such stat" rather than
+    /// raising, so version-skew between callers and runtime
+    /// fails open instead of crashing.  Stdlib's typed
+    /// `permission_stats()` wrapper sources its 5 fields by
+    /// calling this intrinsic five times.
+    PermissionStatsRead = 0x1E,
+
+    /// Clear the runtime `PermissionRouter` stats (#101).
+    ///
+    /// Format: `dst:reg`
+    /// Resets total / hits / misses / denials to zero;
+    /// preserves the cache itself (use the dedicated
+    /// `clear_permission_cache` API for that).  The `dst`
+    /// receives Unit so the opcode round-trips through the
+    /// register-allocator like every other intrinsic call.
+    PermissionStatsClear = 0x1F,
 }
 
 impl TensorExtSubOpcode {
@@ -2954,6 +2984,8 @@ impl TensorExtSubOpcode {
             0x0C => Some(Self::RegexCaptures),
             0x1C => Some(Self::PermissionCheckWire),
             0x1D => Some(Self::PermissionAssert),
+            0x1E => Some(Self::PermissionStatsRead),
+            0x1F => Some(Self::PermissionStatsClear),
             _ => None,
         }
     }
@@ -2981,6 +3013,8 @@ impl TensorExtSubOpcode {
             Self::RegexCaptures => "REGEX_CAPTURES",
             Self::PermissionCheckWire => "PERMISSION_CHECK_WIRE",
             Self::PermissionAssert => "PERMISSION_ASSERT",
+            Self::PermissionStatsRead => "PERMISSION_STATS_READ",
+            Self::PermissionStatsClear => "PERMISSION_STATS_CLEAR",
         }
     }
 }
@@ -9748,6 +9782,24 @@ pub enum Instruction {
         scope_tag: u8,
         /// Register holding the target id (u64).
         target_id: Reg,
+    },
+
+    /// Read a single field of `PermissionRouterStats` (#101).
+    /// `selector` selects: 0=total, 1=last_entry_hits,
+    /// 2=map_hits, 3=policy_invocations, 4=denials.
+    /// Out-of-range selectors return 0.
+    PermissionStatsRead {
+        /// Destination register receiving the u64 stat.
+        dst: Reg,
+        /// Register holding the field selector (UInt32).
+        selector: Reg,
+    },
+
+    /// Reset `PermissionRouter` stats to zero (#101).
+    /// Cache itself is preserved.
+    PermissionStatsClear {
+        /// Destination register receiving Unit.
+        dst: Reg,
     },
 
     // ========================================================================

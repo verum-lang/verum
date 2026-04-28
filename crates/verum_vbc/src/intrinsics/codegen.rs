@@ -900,6 +900,12 @@ impl<'a> IntrinsicCodegen<'a> {
             // holds the routing logic so warm-path latency stays
             // identical between Tier 0 and Tier 1.
             InlineSequenceId::PermissionCheckWire => None,
+            // Same routing strategy as PermissionCheckWire — the
+            // permission stats read/clear surfaces are runtime-helper
+            // backed, not inline opcode sequences. The MLIR codegen
+            // path defers to the runtime extern call.
+            InlineSequenceId::PermissionStatsRead => None,
+            InlineSequenceId::PermissionStatsClear => None,
         }
     }
 

@@ -3175,6 +3175,39 @@ impl IntrinsicLowering {
                 })
             }
 
+            // Permission-stats observability surfaces. Routing matches
+            // PermissionCheckWire — thin extern calls into the Rust-side
+            // helper which holds the actual stats counters, so Tier 0
+            // (interpreter) and Tier 1 (AOT) read identical numbers.
+            InlineSequenceId::PermissionStatsRead => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![MlirAttr {
+                        name: "callee".to_string(),
+                        value: MlirAttrValue::String(
+                            "__verum_permission_stats_read".to_string(),
+                        ),
+                    }],
+                    result_types: vec![MlirType::I64],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+            InlineSequenceId::PermissionStatsClear => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![MlirAttr {
+                        name: "callee".to_string(),
+                        value: MlirAttrValue::String(
+                            "__verum_permission_stats_clear".to_string(),
+                        ),
+                    }],
+                    result_types: vec![],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+
             // =====================================================================
             // Type Introspection Operations
             // =====================================================================
@@ -4497,6 +4530,8 @@ impl IntrinsicLowering {
             TensorExtSubOpcode::RegexCaptures => "verum.regex.captures",
             TensorExtSubOpcode::PermissionCheckWire => "verum.permission.check_wire",
             TensorExtSubOpcode::PermissionAssert => "verum.permission.assert",
+            TensorExtSubOpcode::PermissionStatsRead => "verum.permission.stats_read",
+            TensorExtSubOpcode::PermissionStatsClear => "verum.permission.stats_clear",
         };
 
         self.emit(MlirOp {
