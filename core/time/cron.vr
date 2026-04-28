@@ -88,6 +88,37 @@ public type CronError is
     | InvalidField(Text)
     | ValueOutOfRange(Text);
 
+implement Display for CronError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WrongFieldCount(n)  => f.write_str(f"cron: wrong field count {n} (expected 5)".as_str()),
+            InvalidField(msg)   => f.write_str(f"cron: invalid field ({msg})".as_str()),
+            ValueOutOfRange(msg)=> f.write_str(f"cron: value out of range ({msg})".as_str()),
+        }
+    }
+}
+
+implement Debug for CronError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WrongFieldCount(n)  => f.write_str(f"WrongFieldCount({n})".as_str()),
+            InvalidField(msg)   => f.write_str(f"InvalidField({msg})".as_str()),
+            ValueOutOfRange(msg)=> f.write_str(f"ValueOutOfRange({msg})".as_str()),
+        }
+    }
+}
+
+implement Eq for CronError {
+    fn eq(&self, other: &CronError) -> Bool {
+        match (self, other) {
+            (WrongFieldCount(a), WrongFieldCount(b)) => a == b,
+            (InvalidField(a),    InvalidField(b))    => a == b,
+            (ValueOutOfRange(a), ValueOutOfRange(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parser
 // =============================================================================

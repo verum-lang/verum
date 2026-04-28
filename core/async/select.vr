@@ -145,6 +145,30 @@ public type SelectError is
     /// synchronously (no Pending hang, no panic).
     | EmptyInput;
 
+implement Display for SelectError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EmptyInput => f.write_str("select: empty input list"),
+        }
+    }
+}
+
+implement Debug for SelectError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EmptyInput => f.write_str("EmptyInput"),
+        }
+    }
+}
+
+implement Eq for SelectError {
+    fn eq(&self, other: &SelectError) -> Bool {
+        match (self, other) {
+            (EmptyInput, EmptyInput) => true,
+        }
+    }
+}
+
 /// Result of select_all operation.
 public type SelectAllResult<T> is {
     /// The completed value
@@ -502,6 +526,22 @@ implement<T, F: Future<Output>> Future for JoinAll<T, F> {
 
 /// Error returned when a timeout expires.
 public type SelectTimeoutError is ();
+
+implement Display for SelectTimeoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("select: timeout")
+    }
+}
+
+implement Debug for SelectTimeoutError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("SelectTimeoutError")
+    }
+}
+
+implement Eq for SelectTimeoutError {
+    fn eq(&self, _other: &SelectTimeoutError) -> Bool { true }
+}
 
 /// Add a timeout to a future.
 ///

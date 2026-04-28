@@ -830,6 +830,52 @@ implement SupervisorError {
     }
 }
 
+implement Display for SupervisorError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.description().as_str())
+    }
+}
+
+implement Debug for SupervisorError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TooManyRestarts { count, window_secs } =>
+                f.write_str(f"TooManyRestarts {{ count: {count}, window_secs: {window_secs} }}".as_str()),
+            ChildNotFound(id) =>
+                f.write_str(f"ChildNotFound({id.raw()})".as_str()),
+            ShuttingDown =>
+                f.write_str("ShuttingDown"),
+            SpawnFailed(msg) =>
+                f.write_str(f"SpawnFailed({msg})".as_str()),
+            ChannelClosed =>
+                f.write_str("ChannelClosed"),
+            InvalidSpec(msg) =>
+                f.write_str(f"InvalidSpec({msg})".as_str()),
+            NoParentSupervisor =>
+                f.write_str("NoParentSupervisor"),
+            Other(msg) =>
+                f.write_str(f"Other({msg})".as_str()),
+        }
+    }
+}
+
+implement Eq for SupervisorError {
+    fn eq(&self, other: &SupervisorError) -> Bool {
+        match (self, other) {
+            (TooManyRestarts { count: ca, window_secs: wa },
+             TooManyRestarts { count: cb, window_secs: wb }) => ca == cb && wa == wb,
+            (ChildNotFound(a),    ChildNotFound(b))    => a.raw() == b.raw(),
+            (ShuttingDown,        ShuttingDown)        => true,
+            (SpawnFailed(a),      SpawnFailed(b))      => a == b,
+            (ChannelClosed,       ChannelClosed)       => true,
+            (InvalidSpec(a),      InvalidSpec(b))      => a == b,
+            (NoParentSupervisor,  NoParentSupervisor)  => true,
+            (Other(a),            Other(b))            => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Supervisor Protocol
 // =============================================================================

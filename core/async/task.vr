@@ -178,6 +178,26 @@ implement Debug for JoinError {
     }
 }
 
+implement Display for JoinError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Cancelled => "task cancelled",
+            Panicked  => "task panicked",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for JoinError {
+    fn eq(&self, other: &JoinError) -> Bool {
+        match (self, other) {
+            (Cancelled, Cancelled) => true,
+            (Panicked,  Panicked)  => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Spawn Functions
 // =============================================================================

@@ -44,6 +44,24 @@ public type AsyncRecoveryError is {
     message: Text,
 };
 
+implement Display for AsyncRecoveryError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message.as_str())
+    }
+}
+
+implement Debug for AsyncRecoveryError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"AsyncRecoveryError {{ message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for AsyncRecoveryError {
+    fn eq(&self, other: &AsyncRecoveryError) -> Bool {
+        self.message == other.message
+    }
+}
+
 /// Spawn a task with an execution environment.
 @intrinsic("verum.runtime.spawn_with_env")
 public fn spawn_with_env(env: ExecutionEnvOpaque, f: fn() -> ()) -> JoinHandleOpaque;
