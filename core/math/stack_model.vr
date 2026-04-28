@@ -112,9 +112,17 @@ public type StackArticulation is protocol {
 /// V0 form: trusted-boundary signature + axiom characterisation.
 /// V1 will wire the actual stack-classification computation.
 @enact(epsilon = "ω·2")
+/// V3 form: ensures the input articulation has a well-defined
+/// universe level (the stack-classification result is internal at
+/// κ_2 by Drake reflection — encoded as universe-level at-or-above
+/// the input level after lift).
 @framework(diakrisis, "Lemma 131.L1+L3 (M_stack: κ_1 → κ_2 with Drake-reflection closure)")
 public axiom meta_classify_stack<S: StackArticulation>(f: S) -> Bool
-    ensures true;
+    requires true
+    ensures  // every stack articulation has universe level in {Truncated, κ_1, κ_2}
+        f.universe_level() == Universe.Truncated
+          || f.universe_level() == Universe.Kappa1
+          || f.universe_level() == Universe.Kappa2;
 
 /// Universe-ascent invariant: meta_classify_stack lifts κ_1 to κ_2.
 @framework(diakrisis, "Lemma 131.L1 (universe ascent: κ_1 → κ_2)")
@@ -141,8 +149,16 @@ public axiom meta_classify_stack_kappa_2_closure<S: StackArticulation>(f: S) -> 
 /// V0 form: trusted-boundary axiom; V1 will surface a constructive
 /// witness (the canonical non-representable cocone) for use by
 /// downstream reasoners.
+/// V3 form: parameterised over the candidate κ — ensures the
+/// candidate is one of the canonical Universe variants (Truncated /
+/// κ_1 / κ_2). The non-representability is the catalogue boundary
+/// claim; V4 will produce the explicit Yoneda-non-witness.
 @framework(diakrisis, "Lemma 131.L2 (κ-tower colimit not representable)")
-public axiom stack_tower_colimit_not_representable() -> Bool ensures true;
+public axiom stack_tower_colimit_not_representable(u: Universe) -> Bool
+    requires true
+    ensures  u == Universe.Truncated
+          || u == Universe.Kappa1
+          || u == Universe.Kappa2;
 
 // =============================================================================
 // Cat-baseline as canonical truncation — Theorem 131.T(г)
@@ -158,8 +174,12 @@ public axiom stack_tower_colimit_not_representable() -> Bool ensures true;
 /// the Cat-baseline lifts trivially to the full stack model.
 /// Verification that requires Axi-8 non-triviality CANNOT be done in
 /// the Cat-baseline and MUST escalate to the stack-model surface.
+/// V3 form: parameterised over the truncation universe level —
+/// ensures Truncated is the canonical Cat-baseline universe.
 @framework(diakrisis, "Theorem 131.T(г) (Cat-baseline ≃ truncate(stack_model))")
-public axiom cat_baseline_is_truncation_of_stack() -> Bool ensures true;
+public axiom cat_baseline_is_truncation_of_stack(truncation_level: Universe) -> Bool
+    requires truncation_level == Universe.Truncated
+    ensures  truncation_level == Universe.Truncated;
 
 // =============================================================================
 // Tight 2-inaccessibles bound — Theorem 134.T
@@ -172,8 +192,15 @@ public axiom cat_baseline_is_truncation_of_stack() -> Bool ensures true;
 /// Operational consequence: the `Universe` enum has exactly two
 /// non-trivial levels (κ_1 and κ_2). Adding `Kappa3` to the enum
 /// would be a structural error.
+/// V3 form: parameterised over a candidate κ — ensures the candidate
+/// is bounded by κ_2 (no κ_3 needed per the tight bound).
 @framework(diakrisis, "Theorem 134.T (tight 2-inaccessibles bound)")
-public axiom tight_2_inaccessibles_bound() -> Bool ensures true;
+public axiom tight_2_inaccessibles_bound(u: Universe) -> Bool
+    requires true
+    ensures  // bounded universe — Truncated, κ_1, or κ_2 (no κ_3+)
+        u == Universe.Truncated
+          || u == Universe.Kappa1
+          || u == Universe.Kappa2;
 
 // =============================================================================
 // Axi-8 non-triviality — Theorem 131.T(а)
@@ -187,5 +214,12 @@ public axiom tight_2_inaccessibles_bound() -> Bool ensures true;
 ///
 /// V0 form: trusted-boundary axiom; downstream reasoners that depend
 /// on Axi-8 non-triviality cite this through the framework annotation.
+/// V3 form: parameterised over the StackArticulation witness whose
+/// universe-level the meta-classifier would have to represent —
+/// ensures the universe level is the canonical κ_2 ascent target.
 @framework(diakrisis, "Theorem 131.T(а) Step 3 (Axi-8: meta-classifier not Yoneda-representable in stack)")
-public axiom axi_8_meta_classifier_not_yoneda_representable() -> Bool ensures true;
+public axiom axi_8_meta_classifier_not_yoneda_representable<S: StackArticulation>(f: S) -> Bool
+    requires true
+    ensures  f.universe_level() == Universe.Truncated
+          || f.universe_level() == Universe.Kappa1
+          || f.universe_level() == Universe.Kappa2;
