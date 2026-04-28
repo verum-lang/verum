@@ -3908,6 +3908,57 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     Ok(DispatchResult::Continue)
                 }
 
+                // #12 / P3.2 — wire-level bridge to PermissionRouter.
+                // Read scope_tag (u32 packed into Int) and target_id
+                // (u64 packed into Int), route through
+                // `state.check_permission`, write back 0 (Allow) or
+                // 1 (Deny). The router itself holds the warm-path
+                // cache so repeats hit ≤2ns regardless of scope.
+                Some(TensorExtSubOpcode::PermissionCheckWire) => {
+                    use crate::interpreter::permission::{
+                        PermissionDecision, PermissionScope,
+                    };
+                    let dst = read_reg(state)?;
+                    let scope_reg = read_reg(state)?;
+                    let target_reg = read_reg(state)?;
+                    let scope_val = state.get_reg(scope_reg);
+                    let target_val = state.get_reg(target_reg);
+
+                    // Decode scope tag — values outside the known
+                    // enum collapse to Syscall (the most-restricted
+                    // namespace) so a malformed callsite errs on
+                    // the side of stronger gating rather than
+                    // weaker.
+                    let scope_tag = if scope_val.is_int() {
+                        scope_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let scope = match scope_tag {
+                        0 => PermissionScope::Syscall,
+                        1 => PermissionScope::FileSystem,
+                        2 => PermissionScope::Network,
+                        3 => PermissionScope::Process,
+                        4 => PermissionScope::Memory,
+                        5 => PermissionScope::Cryptography,
+                        6 => PermissionScope::Time,
+                        _ => PermissionScope::Syscall,
+                    };
+                    let target_id = if target_val.is_int() {
+                        target_val.as_i64() as u64
+                    } else {
+                        0
+                    };
+
+                    let decision = state.check_permission(scope, target_id);
+                    let tag: i64 = match decision {
+                        PermissionDecision::Allow => 0,
+                        PermissionDecision::Deny => 1,
+                    };
+                    state.set_reg(dst, Value::from_i64(tag));
+                    Ok(DispatchResult::Continue)
+                }
+
                 None => {
                     Err(InterpreterError::NotImplemented {
                         feature: "tensor sub-opcode",

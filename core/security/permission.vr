@@ -1,0 +1,337 @@
+// =============================================================================
+// permission.vr — Capability gating surface (#12 / P3.2)
+// =============================================================================
+//
+// Layer: Standard Library / Security
+//
+// Stdlib-side surface for the runtime permission router that lives
+// in `verum_vbc::interpreter::permission::PermissionRouter`. Every
+// `Syscall`-category intrinsic — and any other intrinsic the
+// compiler tags with `IntrinsicHint::RequiresPermission` — routes
+// through `check_permission` before its handler executes. A
+// `Deny` short-circuits the gated operation into a structured
+// `PermissionDenied` error instead of running the underlying
+// syscall.
+//
+// ## How this fits
+//
+// The compile-time SMT verifier handles the *statically* provable
+// capability obligations: a function annotated `using
+// [Filesystem]` that escapes the obligation produces a verifier
+// diagnostic at build time. This module is the *defence-in-depth
+// backstop* for the residual cases the verifier can't discharge:
+// dynamic targets resolved at runtime, libraries compiled against
+// wider-than-actual capability profiles, and (in debug builds)
+// every gated call regardless of static-discharge status.
+//
+// ## Performance budget
+//
+// `check_permission` is sub-2ns on the warm path (one-entry
+// runtime cache). Production policies that hit the cold path pay
+// only their own lookup cost; the router caches the decision
+// before returning so the surrounding loop amortises it.
+//
+// ## Example
+//
+// ```verum
+// fn read_secret_file(path: Text) -> Result<Text, IoError> {
+//     // Gate the open() call on a stable path-hash target id.
+//     let target = stable_path_id(&path);
+//     check_permission(PermissionScope.FileSystem, target)?;
+//
+//     // Allowed — proceed with the actual filesystem call.
+//     core.io.fs.read_to_string(path)
+// }
+// ```
+//
+// =============================================================================
+
+module core.security.permission;
+
+// =============================================================================
+// 1. Capability scope — coarse-grained namespace.
+// =============================================================================
+
+/// Coarse-grained namespace for permission checks. Mirrors the
+/// `IntrinsicCategory` family that can be tagged with
+/// `RequiresPermission`, plus broader stdlib-level scopes that
+/// desugar to the same router under the hood.
+///
+/// **Why explicit scopes**: scope disambiguates targets across
+/// otherwise-colliding identifier spaces. A
+/// `(Syscall, 99) = Deny` decision must not be bypassable by a
+/// `(FileSystem, 99) = Allow` decision; the cache is keyed on
+/// `(scope, target)` precisely so that one denial in one
+/// namespace cannot poison another.
+public type PermissionScope is
+    /// Raw `syscallN` intrinsics. `target_id` is the syscall
+    /// number on Linux/macOS or the platform-equivalent.
+    | Syscall
+    /// File-system access — `open`, `unlink`, `mkdir`, etc.
+    /// `target_id` is a stable hash of the resolved path.
+    | FileSystem
+    /// Network operations — `bind`, `connect`, `listen`.
+    /// `target_id` is a stable hash of the address tuple.
+    | Network
+    /// Process / thread management — `fork`, `exec`, signal
+    /// dispatch. `target_id` is the operation kind.
+    | Process
+    /// Direct memory operations bypassing CBGR — `mmap`,
+    /// `munmap`, raw `alloc`. `target_id` is the requested
+    /// region kind / size class.
+    | Memory
+    /// Cryptographic primitives that touch host RNG / HSM.
+    /// `target_id` is the algorithm tag.
+    | Cryptography
+    /// Wall-clock / monotonic time. `target_id` is the clock id.
+    /// Most observational time intrinsics are **not** gated;
+    /// this scope exists for the rare privileged clock
+    /// (`clock_settime`).
+    | Time;
+
+implement PermissionScope {
+    /// Stable display name. Matches the Rust-side enum so
+    /// diagnostics are coherent across the FFI boundary.
+    public fn name(self) -> Text {
+        match self {
+            PermissionScope.Syscall      => "Syscall",
+            PermissionScope.FileSystem   => "FileSystem",
+            PermissionScope.Network      => "Network",
+            PermissionScope.Process      => "Process",
+            PermissionScope.Memory       => "Memory",
+            PermissionScope.Cryptography => "Cryptography",
+            PermissionScope.Time         => "Time",
+        }
+    }
+
+    /// Stable u32 wire tag used to bridge the Rust-side router.
+    /// The ordering matches `verum_vbc::interpreter::permission::PermissionScope`
+    /// so the value passed across the @intrinsic boundary
+    /// transcribes directly.
+    public fn to_wire_tag(self) -> UInt32 {
+        match self {
+            PermissionScope.Syscall      => 0_u32,
+            PermissionScope.FileSystem   => 1_u32,
+            PermissionScope.Network      => 2_u32,
+            PermissionScope.Process      => 3_u32,
+            PermissionScope.Memory       => 4_u32,
+            PermissionScope.Cryptography => 5_u32,
+            PermissionScope.Time         => 6_u32,
+        }
+    }
+
+    /// Inverse of `to_wire_tag`. Returns `None` for any tag the
+    /// router did not produce.
+    public fn from_wire_tag(tag: UInt32) -> Maybe<PermissionScope> {
+        match tag {
+            0_u32 => Some(PermissionScope.Syscall),
+            1_u32 => Some(PermissionScope.FileSystem),
+            2_u32 => Some(PermissionScope.Network),
+            3_u32 => Some(PermissionScope.Process),
+            4_u32 => Some(PermissionScope.Memory),
+            5_u32 => Some(PermissionScope.Cryptography),
+            6_u32 => Some(PermissionScope.Time),
+            _     => None,
+        }
+    }
+}
+
+// =============================================================================
+// 2. Decision and error types.
+// =============================================================================
+
+/// Resolved router decision for a single check.
+public type PermissionDecision is
+    /// Caller is permitted to invoke the gated operation.
+    | Allow
+    /// Caller is denied. Codegen lowers this into a
+    /// `PermissionDenied` error at the call site.
+    | Deny;
+
+implement PermissionDecision {
+    /// `true` when the decision permits the gated operation.
+    public fn is_allow(self) -> Bool {
+        match self {
+            PermissionDecision.Allow => true,
+            PermissionDecision.Deny  => false,
+        }
+    }
+
+    /// `true` when the decision short-circuits the gated
+    /// operation.
+    public fn is_deny(self) -> Bool {
+        match self {
+            PermissionDecision.Allow => false,
+            PermissionDecision.Deny  => true,
+        }
+    }
+}
+
+/// Error produced when the runtime router denies a check.
+///
+/// Carries enough structured context for diagnostics, audit
+/// logging, and policy rule attribution. The `policy` field is
+/// `None` when the default allow-all router is in force (which
+/// in turn means a `Deny` can only originate from explicit
+/// embedder configuration).
+public type PermissionDenied is {
+    /// Scope of the denied check.
+    scope: PermissionScope,
+    /// Target identifier within the scope.
+    target_id: UInt64,
+    /// Human-readable rule attribution from the policy callback,
+    /// when available.
+    policy: Maybe<Text>,
+};
+
+implement PermissionDenied {
+    /// Construct a denial from a (scope, target) pair without a
+    /// policy attribution. Used by the canonical router on
+    /// embedder-configured deny-all paths.
+    public fn new(scope: PermissionScope, target_id: UInt64) -> PermissionDenied {
+        PermissionDenied { scope, target_id, policy: None }
+    }
+
+    /// Construct a denial that attributes the decision to a
+    /// named policy rule. Used by capability tables that want
+    /// to surface "rule fs.allow_read denied this" in audit
+    /// logs.
+    public fn with_policy(
+        scope: PermissionScope,
+        target_id: UInt64,
+        policy: Text,
+    ) -> PermissionDenied {
+        PermissionDenied { scope, target_id, policy: Some(policy) }
+    }
+
+    /// Format as a single-line diagnostic.
+    public fn message(self) -> Text {
+        match self.policy {
+            Some(rule) => f"permission denied: {self.scope.name()}({self.target_id}) — rule `{rule}`",
+            None       => f"permission denied: {self.scope.name()}({self.target_id})",
+        }
+    }
+}
+
+// =============================================================================
+// 3. Runtime router bridge.
+// =============================================================================
+//
+// The Rust-side `PermissionRouter` lives on `InterpreterState`.
+// These intrinsics are the wire-level bridge: callers pass the
+// (scope, target) pair via wire tags and receive a 0/1 decision
+// back. The cache lookup happens entirely Rust-side so a warm-
+// path call has the same ≤2ns budget regardless of which side
+// initiated the check.
+
+/// Internal wire-level intrinsic. Returns `0` for Allow and `1`
+/// for Deny. Most callers should prefer `check_permission` /
+/// `is_permitted`, which present the typed surface.
+@intrinsic("permission_check_wire")
+public fn permission_check_wire(scope_tag: UInt32, target_id: UInt64) -> UInt32;
+
+/// Route a single permission check.
+///
+/// Returns `Ok(())` when the router permits the gated operation
+/// and `Err(PermissionDenied)` when it does not. Designed to
+/// chain with the `?` operator at gated call sites.
+public fn check_permission(
+    scope: PermissionScope,
+    target_id: UInt64,
+) -> Result<(), PermissionDenied> {
+    let decision_tag = permission_check_wire(scope.to_wire_tag(), target_id);
+    if decision_tag == 0_u32 {
+        Ok(())
+    } else {
+        Err(PermissionDenied.new(scope, target_id))
+    }
+}
+
+/// Predicate variant of `check_permission`. Returns the typed
+/// `PermissionDecision` rather than a `Result`, useful for code
+/// that wants to branch on Allow / Deny without the surrounding
+/// `Result` ceremony.
+public fn permission_decision(
+    scope: PermissionScope,
+    target_id: UInt64,
+) -> PermissionDecision {
+    let decision_tag = permission_check_wire(scope.to_wire_tag(), target_id);
+    if decision_tag == 0_u32 {
+        PermissionDecision.Allow
+    } else {
+        PermissionDecision.Deny
+    }
+}
+
+/// Boolean variant — returns `true` iff the check is permitted.
+/// The cheapest call site when no error context is needed.
+public fn is_permitted(scope: PermissionScope, target_id: UInt64) -> Bool {
+    permission_check_wire(scope.to_wire_tag(), target_id) == 0_u32
+}
+
+// =============================================================================
+// 4. Stable target identifiers.
+// =============================================================================
+//
+// Targets that vary at runtime (paths, addresses, algorithm
+// names) must hash to the same `UInt64` on every check so the
+// one-entry warm-path cache hits on repeats. These helpers
+// produce stable hashes that match the Rust-side conventions.
+
+/// Hash a path into a stable `target_id` for `PermissionScope.FileSystem`.
+/// The hash is deterministic across runs of the same binary on
+/// the same platform; it is **not** cryptographic.
+public fn stable_path_id(path: &Text) -> UInt64 {
+    fnv1a_64(path.as_bytes())
+}
+
+/// Hash a network address (host + port, encoded as
+/// `"host:port"`) into a stable `target_id` for
+/// `PermissionScope.Network`.
+public fn stable_address_id(host: &Text, port: UInt16) -> UInt64 {
+    let mut buf: List<Byte> = List.with_capacity(host.byte_len() + 7);
+    buf.extend_from_slice(host.as_bytes());
+    buf.push(58_u8); // ':'
+    buf.extend_from_slice(format_u16_decimal(port).as_bytes());
+    fnv1a_64(buf.as_slice())
+}
+
+/// FNV-1a 64-bit. Inlined here to avoid pulling in
+/// `core.security.hash.fnv` from the gating hot path — that
+/// module is part of the layer-2 crypto stack and would
+/// circular-import.
+fn fnv1a_64(bytes: &[Byte]) -> UInt64 {
+    let mut hash: UInt64 = 14_695_981_039_346_656_037_u64;
+    let prime: UInt64 = 1_099_511_628_211_u64;
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        hash = hash ^ (bytes[i] as UInt64);
+        hash = hash *% prime; // wrapping mul
+        i = i + 1;
+    }
+    hash
+}
+
+/// Render a `UInt16` as decimal text. Used by
+/// `stable_address_id`; lives here so the hot path doesn't pull
+/// in `core.text.format`.
+fn format_u16_decimal(n: UInt16) -> Text {
+    if n == 0_u16 {
+        return "0".to_text();
+    }
+    let mut digits: [Byte; 5] = [0_u8, 0_u8, 0_u8, 0_u8, 0_u8];
+    let mut len: Int = 0;
+    let mut v: UInt16 = n;
+    while v > 0_u16 {
+        digits[len] = ((v % 10_u16) as Byte) + 48_u8; // '0'
+        v = v / 10_u16;
+        len = len + 1;
+    }
+    let mut out: List<Byte> = List.with_capacity(len);
+    let mut i: Int = len - 1;
+    while i >= 0 {
+        out.push(digits[i]);
+        i = i - 1;
+    }
+    Text.from_utf8_lossy(out.as_slice())
+}

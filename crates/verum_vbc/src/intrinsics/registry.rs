@@ -812,6 +812,17 @@ pub enum InlineSequenceId {
     RegexCaptures,
 
     // =========================================================================
+    // Permission Gating (#12 / P3.2)
+    // =========================================================================
+    /// permission_check_wire: route a (scope_tag, target_id) pair
+    /// through the runtime PermissionRouter. Returns 0 for Allow
+    /// and 1 for Deny. The wire-level form lets stdlib code
+    /// (`core/security/permission.vr`) bridge typed Verum scopes
+    /// to the Rust-side router without a per-scope intrinsic
+    /// explosion.
+    PermissionCheckWire,
+
+    // =========================================================================
     // Type Introspection Operations
     // =========================================================================
     /// size_of: get size of type in bytes
@@ -9656,6 +9667,24 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexCaptures),
         mlir_op: Some("verum.regex_captures"),
         doc: "Run a capturing regex; return ordered group captures of the first match",
+    },
+    // =========================================================================
+    // Permission Gating (#12 / P3.2)
+    // =========================================================================
+    Intrinsic {
+        // Wire-level bridge to `InterpreterState::permission_router`.
+        // Stdlib `core.security.permission.check_permission` routes
+        // through here; `0` = Allow, `1` = Deny. NOT itself
+        // `RequiresPermission` — gating the gating intrinsic
+        // would create infinite recursion in the dispatch path.
+        name: "permission_check_wire",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Hot],
+        param_count: 2, // scope_tag (UInt32), target_id (UInt64)
+        return_count: 1, // decision tag (UInt32)
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PermissionCheckWire),
+        mlir_op: Some("verum.permission_check_wire"),
+        doc: "Route a (scope, target) pair through the PermissionRouter",
     },
     // =========================================================================
     // Time Operations

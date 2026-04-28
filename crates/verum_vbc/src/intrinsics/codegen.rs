@@ -886,6 +886,20 @@ impl<'a> IntrinsicCodegen<'a> {
                 self.emit(IntrinsicInstruction::Deref { dst, ptr: args[0] });
                 Some(dst)
             }
+            // Regex* variants — added in #456 but no codegen handler yet.
+            // Tracked under follow-up; treated as opaque library calls
+            // (return None — no inline opcode sequence emitted).
+            InlineSequenceId::RegexFind
+            | InlineSequenceId::RegexReplace
+            | InlineSequenceId::RegexCaptures => None,
+            // #12 / P3.2 — permission_check_wire is dispatched via
+            // expressions.rs / lowering.rs (interpreter dispatch
+            // and AOT extern call respectively). The MLIR codegen
+            // path here treats it as a library call surface — no
+            // inline opcode sequence to emit, the runtime helper
+            // holds the routing logic so warm-path latency stays
+            // identical between Tier 0 and Tier 1.
+            InlineSequenceId::PermissionCheckWire => None,
         }
     }
 
