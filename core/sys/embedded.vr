@@ -1,5 +1,7 @@
 module sys.embedded;
 
+mount sys.mmio.{volatile_load, volatile_store};
+
 // =============================================================================
 // sys/embedded.vr - Minimal runtime for embedded/bare-metal targets
 // =============================================================================
@@ -149,27 +151,40 @@ implement RingBuffer {
     }
 
     /// Push a byte into the ring buffer. Returns false if full.
+    ///
+    /// Writes via `volatile_store` to defeat load/store elimination —
+    /// MMIO peripherals on embedded targets require every byte to hit
+    /// the bus, not be coalesced or reordered by the optimiser.
+    /// The earlier impl was a `placeholder` that incremented `tail`
+    /// without ever writing the byte; pushed values silently
+    /// disappeared and `pop` returned ring positions instead of data.
     public fn push(&mut self, value: Int) -> Bool {
         if self.count >= self.capacity {
             return false;
         }
-        // Store byte at tail position
-        // In real embedded code this would be a volatile store
+        let pos = self.tail;
+        let slot = (self.buffer_ptr + pos) as *volatile mut Byte;
+        unsafe { volatile_store(slot, (value & 0xFF) as Byte); }
         self.tail = (self.tail + 1) % self.capacity;
         self.count = self.count + 1;
         true
     }
 
     /// Pop a byte from the ring buffer. Returns -1 if empty.
+    ///
+    /// Reads via `volatile_load` for the same MMIO discipline as
+    /// `push`. Returns the byte (0..=255) on success, -1 on empty —
+    /// the negative sentinel doesn't collide with any valid byte.
     public fn pop(&mut self) -> Int {
         if self.count == 0 {
             return -1;
         }
         let pos = self.head;
+        let slot = (self.buffer_ptr + pos) as *volatile Byte;
+        let byte = unsafe { volatile_load(slot) };
         self.head = (self.head + 1) % self.capacity;
         self.count = self.count - 1;
-        // In real embedded code this would be a volatile load
-        pos  // placeholder — actual byte read would happen via MMIO
+        byte as Int
     }
 
     /// Returns true if the buffer is empty.
