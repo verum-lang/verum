@@ -73,6 +73,55 @@ public type AeadError is
     /// keystream — keystream-reuse catastrophe.
     | InputTooLarge { limit_bytes: Int };
 
+// Display + Debug + Eq for AeadError.  TagMismatch
+// Display avoids field-level detail per RFC 7539 / NIST
+// AEAD semantics — leaking which field failed
+// verification opens timing/oracle side channels.
+
+implement Display for AeadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            AeadError.TagMismatch =>
+                f.write_str("ChaCha20-Poly1305 tag verification failed"),
+            AeadError.InvalidInput { reason } => {
+                f.write_str("ChaCha20-Poly1305 invalid input: ")?;
+                f.write_str(reason.as_str())
+            },
+            AeadError.InputTooLarge { limit_bytes } =>
+                f.write_str(f"ChaCha20-Poly1305 input exceeds RFC 7539 limit ({limit_bytes} bytes)".as_str()),
+        }
+    }
+}
+
+implement Debug for AeadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            AeadError.TagMismatch => f.write_str("TagMismatch"),
+            AeadError.InvalidInput { reason } => {
+                f.write_str("InvalidInput { reason: ")?;
+                f.write_str(reason.as_str())?;
+                f.write_str(" }")
+            },
+            AeadError.InputTooLarge { limit_bytes } =>
+                f.write_str(f"InputTooLarge {{ limit_bytes: {limit_bytes} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for AeadError {
+    fn eq(&self, other: &AeadError) -> Bool {
+        match (self, other) {
+            (AeadError.TagMismatch, AeadError.TagMismatch) => true,
+            (AeadError.InvalidInput { reason: a }, AeadError.InvalidInput { reason: b }) => a == b,
+            (
+                AeadError.InputTooLarge { limit_bytes: a },
+                AeadError.InputTooLarge { limit_bytes: b },
+            ) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// RFC 7539 §2.8 absolute upper bound on plaintext per (key, nonce):
 ///
 ///     max_blocks = 2^32
