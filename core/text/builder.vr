@@ -6,8 +6,11 @@
 // =============================================================================
 //
 // TextBuilder provides an efficient way to construct Text values incrementally.
-// Instead of repeated string concatenation (which copies on each append),
-// TextBuilder collects chunks and joins them in a single allocation.
+// Backs a single growing `Text` buffer — push_str / push_byte / push_char all
+// append in place. The previous chunk-list design cloned every input Text on
+// push and allocated a fresh single-char Text on every push_char; the single-
+// buffer design is strictly faster (amortised O(N) appends, log-N
+// reallocations) and zero overhead beyond the final Text itself.
 //
 // # Usage
 //
@@ -36,9 +39,10 @@ mount core.result.{Result, Ok, Err};
 
 /// An efficient builder for constructing Text values incrementally.
 ///
-/// TextBuilder collects text chunks and tracks the total length, then
-/// produces the final Text in a single operation. This avoids the O(n^2)
-/// cost of repeated string concatenation.
+/// Backed by a single growing Text buffer — every `push_*` operation
+/// appends in place, and `build()` returns the buffer. There is no
+/// chunk-list intermediate, no per-push Text clone, and no
+/// per-char Text allocation.
 ///
 /// # Examples
 ///
@@ -51,120 +55,114 @@ mount core.result.{Result, Ok, Err};
 /// ```
 ///
 /// ```verum
-/// let mut b = TextBuilder.with_capacity(1024);
+/// let mut b = TextBuilder.with_capacity(1024);   // 1024 bytes
 /// for item in items {
 ///     b.push_line(&item.to_string());
 /// }
 /// let output = b.build();
 /// ```
 public type TextBuilder is {
-    /// The collected text chunks.
-    chunks: List<Text>,
-    /// The total length in bytes of all chunks.
-    total_len: Int,
+    /// Single growing buffer. `Text.push_str` / `Text.push_byte`
+    /// reallocate by doubling, so amortised append is O(1) per byte.
+    buf: Text,
 };
 
 implement TextBuilder {
     /// Create a new empty TextBuilder.
     public fn new() -> TextBuilder {
-        TextBuilder {
-            chunks: List.new(),
-            total_len: 0,
-        }
+        TextBuilder { buf: Text.new() }
     }
 
-    /// Create a new TextBuilder with a capacity hint.
-    ///
-    /// The capacity is a hint for the number of chunks expected.
-    /// This does not limit the builder's capacity.
+    /// Create a new TextBuilder pre-sized for `cap` bytes. The hint is
+    /// a byte count (matching Rust's `String::with_capacity` and the
+    /// underlying `Text.with_capacity`); the previous chunk-list
+    /// implementation interpreted this as a chunk count, but the
+    /// single-buffer redesign collapses that to the byte size that
+    /// callers actually need.
     public fn with_capacity(cap: Int) -> TextBuilder {
-        TextBuilder {
-            chunks: List.with_capacity(cap),
-            total_len: 0,
-        }
+        TextBuilder { buf: Text.with_capacity(cap) }
     }
 
     /// Append a text string to the builder.
     public fn push(&mut self, text: &Text) {
-        if !text.is_empty() {
-            self.total_len = self.total_len + text.len();
-            self.chunks.push(text.clone());
-        }
+        self.buf.push_str(text);
     }
 
-    /// Append a single character to the builder.
+    /// Append a single character to the builder. Encodes the char to
+    /// UTF-8 once into a stack buffer and pushes the bytes — no
+    /// per-char Text allocation (the previous impl built a fresh
+    /// `Text.from_char(ch)` and pushed it onto a chunk list, paying
+    /// an allocation per character).
     public fn push_char(&mut self, ch: Char) {
-        let s = Text.from_char(ch);
-        self.total_len = self.total_len + s.len();
-        self.chunks.push(s);
+        let mut tmp: [Byte; 4] = [0_u8; 4];
+        let n = ch.encode_utf8(&mut tmp);
+        let mut i: Int = 0;
+        while i < n {
+            self.buf.push_byte(tmp[i]);
+            i = i + 1;
+        }
     }
 
     /// Append a text string followed by a newline.
     public fn push_line(&mut self, text: &Text) {
-        self.push(text);
-        self.push("\n");
+        self.buf.push_str(text);
+        self.buf.push_byte(0x0A as Byte);   // '\n'
     }
 
-    /// Build the final Text value from all appended chunks.
+    /// Build the final Text value.
     ///
-    /// Joins all chunks into a single contiguous Text allocation.
+    /// Returns a clone of the internal buffer so subsequent push
+    /// operations don't mutate the returned Text. The clone is
+    /// O(|buf|) but unavoidable when the builder remains in scope —
+    /// callers that want to consume the buffer should use
+    /// `into_text` instead.
     public fn build(&self) -> Text {
-        if self.chunks.is_empty() {
-            return Text.new();
-        }
-        if self.chunks.len() == 1 {
-            return self.chunks[0].clone();
-        }
-        // Join all chunks
-        let mut result = Text.with_capacity(self.total_len);
-        for chunk in &self.chunks {
-            result.push_str(chunk);
-        }
-        result
+        self.buf.clone()
+    }
+
+    /// Consume the builder and return the underlying buffer
+    /// without cloning. Use when the builder is about to drop and
+    /// the caller wants the bytes-out-of-the-builder semantics
+    /// without paying for the final clone.
+    public fn into_text(self) -> Text {
+        self.buf
     }
 
     /// Returns the total length in bytes of all appended text.
     public fn len(&self) -> Int {
-        self.total_len
+        self.buf.len()
     }
 
     /// Returns true if nothing has been appended.
     public fn is_empty(&self) -> Bool {
-        self.total_len == 0
+        self.buf.is_empty()
     }
 
-    /// Clear the builder, removing all appended text.
+    /// Clear the builder, removing all appended text. Retains the
+    /// underlying capacity so subsequent pushes don't reallocate
+    /// from scratch.
     public fn clear(&mut self) {
-        self.chunks.clear();
-        self.total_len = 0;
+        self.buf.clear();
     }
 }
 
 implement Debug for TextBuilder {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("TextBuilder { len: ")?;
-        self.total_len.fmt_debug(f)?;
-        f.write_str(", chunks: ")?;
-        self.chunks.len().fmt_debug(f)?;
+        self.buf.len().fmt_debug(f)?;
         f.write_str(" }")
     }
 }
 
 implement Display for TextBuilder {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        for chunk in &self.chunks {
-            f.write_str(chunk)?;
-        }
-        Ok(())
+        f.write_str(&self.buf)
     }
 }
 
 implement Clone for TextBuilder {
     fn clone(&self) -> TextBuilder {
-        TextBuilder {
-            chunks: self.chunks.clone(),
-            total_len: self.total_len,
-        }
+        TextBuilder { buf: self.buf.clone() }
     }
 }
 
