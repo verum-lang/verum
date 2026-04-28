@@ -613,13 +613,12 @@ fn run_script_interpreted(
     //    doesn't match the running build fails fast with a clear
     //    diagnostic instead of producing a confusing parse error
     //    half a megabyte deeper into the pipeline.
+    let mut script_cog_resolver: Option<verum_modules::cog_resolver::CogResolver> =
+        None;
     if let Some(fm) = ctx.frontmatter.as_ref() {
         check_frontmatter_version(fm)?;
         if !fm.dependencies.is_empty() {
-            ui::warn(
-                "script frontmatter declares dependencies — registry \
-                 resolution lands separately; for now they are ignored",
-            );
+            script_cog_resolver = Some(resolve_script_dependencies(fm, input)?);
         }
     }
 
@@ -658,6 +657,7 @@ fn run_script_interpreted(
                     &entry.vbc,
                     timings,
                     permission_policy,
+                    script_cog_resolver,
                 );
             }
             Ok(None) => { /* miss — fall through */ }
@@ -673,6 +673,9 @@ fn run_script_interpreted(
     let mut session = Session::new(options);
     if let Some(policy) = permission_policy {
         session.set_script_permission_policy(policy);
+    }
+    if let Some(resolver) = script_cog_resolver {
+        session.set_cog_resolver(resolver);
     }
     {
         let mut pipeline = CompilationPipeline::new(&mut session);
@@ -725,6 +728,7 @@ fn execute_cached_vbc(
     vbc_bytes: &[u8],
     timings: bool,
     permission_policy: Option<verum_compiler::session::ScriptPermissionPolicy>,
+    cog_resolver: Option<verum_modules::cog_resolver::CogResolver>,
 ) -> Result<(), CliError> {
     let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes).map_err(|e| {
         CliError::Custom(format!("cached VBC deserialise failed: {e}"))
@@ -733,6 +737,9 @@ fn execute_cached_vbc(
     let mut session = Session::new(options);
     if let Some(policy) = permission_policy {
         session.set_script_permission_policy(policy);
+    }
+    if let Some(resolver) = cog_resolver {
+        session.set_cog_resolver(resolver);
     }
     {
         let mut pipeline = CompilationPipeline::new(&mut session);
@@ -747,6 +754,94 @@ fn execute_cached_vbc(
         std::process::exit(code);
     }
     Ok(())
+}
+
+/// Resolve a script's frontmatter dependencies into a populated
+/// `CogResolver` ready to be installed on the run-time `Session`.
+///
+/// **Path-form dependencies are fully supported.** Declaration:
+///
+/// ```toml
+/// dependencies = [
+///     { name = "foo", path = "./local-cogs/foo" },
+///     { name = "bar", path = "../shared/bar" },
+/// ]
+/// ```
+///
+/// Each path is resolved relative to the script file's directory
+/// (not the current working directory) so a script remains
+/// runnable regardless of where the shell happens to be when the
+/// user invokes it. Once registered, the cog's mounts (`mount
+/// foo.client.Response`) resolve through the same `ModuleLoader`
+/// path that workspace dependencies use; downstream code can't
+/// tell whether a cog came from `verum.toml` or from a script's
+/// frontmatter.
+///
+/// **Registry / git form is not yet wired.** The frontmatter
+/// supports short-form (`"foo@1.2"`) and long-form with `version`
+/// / `git` / `branch`, but resolution requires the registry HTTP
+/// client and the verum-cache layout, neither of which is in
+/// scope for the script-mode work. We surface a clear warning and
+/// continue without registering those entries — the script may
+/// still work if it doesn't actually `mount` the unresolved cog.
+fn resolve_script_dependencies(
+    fm: &crate::script::frontmatter::Frontmatter,
+    script_path: &std::path::Path,
+) -> Result<verum_modules::cog_resolver::CogResolver, CliError> {
+    use crate::script::frontmatter::DepSpec;
+    let mut resolver = verum_modules::cog_resolver::CogResolver::new();
+    let script_dir = script_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let mut path_count = 0usize;
+    let mut deferred_count = 0usize;
+    for dep in &fm.dependencies {
+        match dep {
+            DepSpec::Long(long) if long.path.is_some() => {
+                let raw_path = long.path.as_deref().unwrap();
+                let resolved = if std::path::Path::new(raw_path).is_absolute() {
+                    std::path::PathBuf::from(raw_path)
+                } else {
+                    script_dir.join(raw_path)
+                };
+                let canonical = resolved.canonicalize().map_err(|e| {
+                    CliError::Custom(format!(
+                        "script dependency `{}`: cannot resolve path `{}`: {e}",
+                        long.name,
+                        resolved.display()
+                    ))
+                })?;
+                let version = long.version.clone().unwrap_or_else(|| "0.0.0".to_string());
+                resolver.register_cog(long.name.as_str(), version.as_str(), canonical);
+                path_count += 1;
+            }
+            // Long-form with no path → registry / git resolution
+            // territory. Surface but defer.
+            DepSpec::Long(_) => {
+                deferred_count += 1;
+            }
+            // Short-form (`"json@1"`) is registry-only.
+            DepSpec::Short(_) => {
+                deferred_count += 1;
+            }
+        }
+    }
+
+    if path_count > 0 {
+        ui::detail(
+            "Dependencies",
+            &format!("{path_count} path-cog(s) registered"),
+        );
+    }
+    if deferred_count > 0 {
+        ui::warn(&format!(
+            "{deferred_count} script dependency declaration(s) require registry \
+             resolution (not yet wired) — they will be ignored at runtime"
+        ));
+    }
+    Ok(resolver)
 }
 
 /// Build a permission policy from a script's `ScriptContext`.
