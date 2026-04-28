@@ -579,12 +579,20 @@ fn run_script_interpreted(
                  resolution lands separately; for now they are ignored",
             );
         }
-        if !fm.permissions.is_empty() {
-            ui::detail(
-                "Permissions",
-                &format!("{} declared (enforcement lands separately)", fm.permissions.len()),
-            );
-        }
+    }
+
+    // 3. Permission policy. Built only when the script's frontmatter
+    //    EXPLICITLY declares a `permissions = [...]` field. Plain
+    //    scripts with no permissions block keep the interpreter
+    //    router's default allow-all behaviour — explicit opt-in to
+    //    sandboxing, matching Deno's `--allow-*` philosophy without
+    //    breaking existing untouched scripts.
+    let permission_policy = build_script_permission_policy(&ctx);
+    if permission_policy.is_some() {
+        ui::detail(
+            "Permissions",
+            &format!("{} grants installed", ctx.permissions.len()),
+        );
     }
 
     // 3. Persistent VBC cache. Best-effort: cache-open failures fall
@@ -601,7 +609,14 @@ fn run_script_interpreted(
         match ctx.cache_lookup(c) {
             Ok(Some(entry)) => {
                 ui::status("Running", &format!("{} (cached VBC)", input.display()));
-                return execute_cached_vbc(input, options, args, &entry.vbc, timings);
+                return execute_cached_vbc(
+                    input,
+                    options,
+                    args,
+                    &entry.vbc,
+                    timings,
+                    permission_policy,
+                );
             }
             Ok(None) => { /* miss — fall through */ }
             Err(e) => ui::warn(&format!("script cache lookup failed: {e}")),
@@ -614,6 +629,9 @@ fn run_script_interpreted(
     options.input = input.to_path_buf();
     ui::status("Running", &format!("{} (interpreter)", input.display()));
     let mut session = Session::new(options);
+    if let Some(policy) = permission_policy {
+        session.set_script_permission_policy(policy);
+    }
     {
         let mut pipeline = CompilationPipeline::new(&mut session);
         pipeline
@@ -664,12 +682,16 @@ fn execute_cached_vbc(
     args: List<Text>,
     vbc_bytes: &[u8],
     timings: bool,
+    permission_policy: Option<verum_compiler::session::ScriptPermissionPolicy>,
 ) -> Result<(), CliError> {
     let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes).map_err(|e| {
         CliError::Custom(format!("cached VBC deserialise failed: {e}"))
     })?;
     options.input = input.to_path_buf();
     let mut session = Session::new(options);
+    if let Some(policy) = permission_policy {
+        session.set_script_permission_policy(policy);
+    }
     {
         let mut pipeline = CompilationPipeline::new(&mut session);
         pipeline
@@ -683,6 +705,96 @@ fn execute_cached_vbc(
         std::process::exit(code);
     }
     Ok(())
+}
+
+/// Build a permission policy from a script's `ScriptContext`.
+/// Returns `None` for scripts whose frontmatter does not declare a
+/// `permissions = [...]` field — such scripts run unrestricted (the
+/// router's default), preserving the legacy behaviour for the wide
+/// existing surface that hasn't opted into sandboxing.
+///
+/// When the frontmatter DOES declare permissions, the returned
+/// policy enforces deny-by-default coarse-grained gating: each
+/// runtime check against a `PermissionScope` is granted iff the
+/// script's `PermissionSet` carries at least one grant of the
+/// matching `PermissionKind`. The mapping:
+///
+/// | Scope          | Granted iff PermissionSet has any of                    |
+/// |----------------|---------------------------------------------------------|
+/// | `Syscall`      | `ffi`                                                   |
+/// | `FileSystem`   | `fs:read`, `fs:write`                                   |
+/// | `Network`      | `net`                                                   |
+/// | `Process`      | `run`                                                   |
+/// | `Memory`       | (always allowed — no script-level memory grants exist)  |
+/// | `Cryptography` | (always allowed — covered by language-level audits)     |
+/// | `Time`         | `time`, `random`                                        |
+///
+/// **Coarse-by-construction.** The current `PermissionAssert`
+/// dispatch carries a u64 `target_id` that, for raw syscalls, is
+/// the syscall NUMBER — not the path / host / etc. that a
+/// fine-grained `permissions = ["fs:read=./data"]` grant would
+/// authorise on. Fine-grained per-target enforcement requires
+/// extending the codegen to hash the structured target value
+/// (path bytes, host:port) at the call site; that work is tracked
+/// separately. The current policy gives meaningful protection at
+/// the kind level and is the natural insertion point for the
+/// future per-target check.
+fn build_script_permission_policy(
+    ctx: &crate::script::context::ScriptContext,
+) -> Option<verum_compiler::session::ScriptPermissionPolicy> {
+    use crate::script::permissions::PermissionKind;
+    use verum_compiler::session::ScriptPermissionPolicy;
+    use verum_vbc::interpreter::permission::{PermissionDecision, PermissionScope};
+
+    // Opt-in to sandboxing — only install a policy when the
+    // frontmatter explicitly declared permissions. Plain scripts
+    // (no frontmatter, or a frontmatter without a permissions
+    // field) keep the router's default allow-all so they continue
+    // to work unchanged.
+    let has_explicit_permissions = ctx
+        .frontmatter
+        .as_ref()
+        .map(|fm| !fm.permissions.is_empty())
+        .unwrap_or(false);
+    if !has_explicit_permissions {
+        return None;
+    }
+
+    let perms = ctx.permissions.clone();
+    let policy = move |scope: PermissionScope, _target_id: u64| -> PermissionDecision {
+        let allowed = match scope {
+            PermissionScope::Syscall => {
+                perms.grants_of(PermissionKind::Ffi).next().is_some()
+            }
+            PermissionScope::FileSystem => {
+                perms.grants_of(PermissionKind::FsRead).next().is_some()
+                    || perms.grants_of(PermissionKind::FsWrite).next().is_some()
+            }
+            PermissionScope::Network => {
+                perms.grants_of(PermissionKind::Net).next().is_some()
+            }
+            PermissionScope::Process => {
+                perms.grants_of(PermissionKind::Run).next().is_some()
+            }
+            // Memory operations (mmap, etc.) and cryptography
+            // primitives don't have a script-level grant kind; let
+            // them through. Future work may add `mem` / `crypto`
+            // kinds if the threat model warrants.
+            PermissionScope::Memory => true,
+            PermissionScope::Cryptography => true,
+            PermissionScope::Time => {
+                perms.grants_of(PermissionKind::Time).next().is_some()
+                    || perms.grants_of(PermissionKind::Random).next().is_some()
+            }
+        };
+        if allowed {
+            PermissionDecision::Allow
+        } else {
+            PermissionDecision::Deny
+        }
+    };
+
+    Some(ScriptPermissionPolicy(Box::new(policy)))
 }
 
 /// Stable cache-key contributors derived from CompilerOptions.

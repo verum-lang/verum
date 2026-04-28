@@ -28,6 +28,29 @@ pub struct FunctionId(pub u64);
 
 /// A compilation session that tracks all state during compilation
 ///
+/// Type-erased script-permission policy. Wraps a boxed `Fn` whose
+/// signature exactly matches `PermissionRouter::set_policy`. Has a
+/// `Debug` stub so the surrounding `Session` can keep its derived
+/// `Debug` impl intact — the closure body itself is opaque to
+/// debug printing, only its presence is reported.
+pub struct ScriptPermissionPolicy(
+    pub  Box<
+        dyn Fn(
+                verum_vbc::interpreter::permission::PermissionScope,
+                u64,
+            ) -> verum_vbc::interpreter::permission::PermissionDecision
+            + Send
+            + Sync
+            + 'static,
+    >,
+);
+
+impl std::fmt::Debug for ScriptPermissionPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<script permission policy>")
+    }
+}
+
 /// Module structure: modules organize code into hierarchical namespaces,
 /// with file system mapping (lib.vr=root, foo.vr=module, foo/bar.vr=child).
 #[derive(Debug)]
@@ -114,6 +137,27 @@ pub struct Session {
     last_compiled_vbc:
         Shared<RwLock<Option<std::sync::Arc<verum_vbc::module::VbcModule>>>>,
 
+    /// Script-mode permission policy installed by the CLI runner.
+    ///
+    /// `Some(closure)` when the entry source is a script and the CLI
+    /// has built a policy from the script's resolved `PermissionSet`
+    /// (frontmatter ∪ CLI flags). The policy is a function from
+    /// `(scope, target_id)` → `Allow | Deny`.
+    ///
+    /// The pipeline transfers this into the `VbcInterpreter`'s
+    /// `PermissionRouter` immediately after constructing the
+    /// interpreter, so subsequent intrinsic dispatches (raw syscalls,
+    /// gated FFI calls, opt-in `check_permission` calls in stdlib)
+    /// hit the script's policy on cache miss.
+    ///
+    /// `None` for project-mode runs and any single-file run that
+    /// isn't a script — those keep the router's default allow-all
+    /// behaviour, matching pre-script-mode semantics.
+    ///
+    /// Boxed-closure type chosen to match `PermissionRouter::set_policy`'s
+    /// `F: Fn(...) + Send + Sync + 'static` bound exactly.
+    script_permission_policy: Shared<RwLock<Option<ScriptPermissionPolicy>>>,
+
     /// Process exit code requested by the most recent execution.
     ///
     /// `None` for `()` / `nil` / non-Int returns (CLI exits 0).
@@ -161,6 +205,7 @@ impl Session {
             routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
             last_compiled_vbc: Shared::new(RwLock::new(None)),
             pending_exit_code: Shared::new(RwLock::new(None)),
+            script_permission_policy: Shared::new(RwLock::new(None)),
         }
     }
 
@@ -200,6 +245,28 @@ impl Session {
     /// non-numeric return — the CLI maps those to exit 0.
     pub fn take_exit_code(&self) -> Option<i32> {
         self.pending_exit_code.write().take()
+    }
+
+    /// Install a script-mode permission policy. Called by the CLI
+    /// runner immediately after building the `Session` and before
+    /// the pipeline reaches `phase_interpret_with_args`. The policy
+    /// is transferred into the `VbcInterpreter`'s `PermissionRouter`
+    /// after the interpreter is constructed; subsequent intrinsic
+    /// dispatches consult the script's grants on cache miss.
+    ///
+    /// Replacing an existing policy is supported but rare — the
+    /// expected lifecycle is at-most-once per script run.
+    pub fn set_script_permission_policy(&self, policy: ScriptPermissionPolicy) {
+        *self.script_permission_policy.write() = Some(policy);
+    }
+
+    /// Take the script-mode permission policy, leaving `None` in the
+    /// slot. The pipeline calls this after constructing the
+    /// interpreter so it can transfer the policy into the router.
+    /// Subsequent calls return `None` until a new policy is
+    /// installed — there is no replay.
+    pub fn take_script_permission_policy(&self) -> Option<ScriptPermissionPolicy> {
+        self.script_permission_policy.write().take()
     }
 
     /// Set the cross-cog resolver for external package imports.
@@ -323,6 +390,7 @@ impl Session {
             routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
             last_compiled_vbc: Shared::new(RwLock::new(None)),
             pending_exit_code: Shared::new(RwLock::new(None)),
+            script_permission_policy: Shared::new(RwLock::new(None)),
         }
     }
 
