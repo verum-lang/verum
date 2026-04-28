@@ -1,0 +1,141 @@
+// =============================================================================
+// VCS spec — nine-strategy verification ladder (VVA §2.3) regression
+// =============================================================================
+//
+// Test that core/verify/level.vr's expanded surface — 9 variants per
+// VVA §2.3 — round-trips through `parse_level` / `to_annotation`,
+// projects to monotone ν via `nu_omega_coeff` / `nu_finite_offset`,
+// and respects the strict-vs-lax fallback partition via
+// `allows_runtime_fallback` / `is_stricter_than`.
+// =============================================================================
+//
+// @test:check
+// @level: L1
+// @tags: types, verify, ladder, vva-2-3
+// @expect: pass
+
+mount core.verify.level.{
+    VerificationLevel,
+    parse_level,
+    to_annotation,
+    nu_omega_coeff,
+    nu_finite_offset,
+    nu_render,
+    requires_smt,
+    allows_runtime_fallback,
+    emits_certificate,
+    is_stricter_than,
+};
+
+/// Round-trip: every canonical annotation parses to its variant and
+/// `to_annotation` recovers the same string.
+fn round_trip_strings() -> Bool {
+    let names = [
+        "runtime", "static", "fast",
+        "formal", "proof",
+        "thorough", "reliable", "certified",
+        "synthesize",
+    ];
+    let mut all_ok = true;
+    for name in names {
+        match parse_level(name.into()) {
+            Maybe.Some(level) => {
+                if to_annotation(level) != name.into() {
+                    all_ok = false;
+                }
+            }
+            Maybe.None => {
+                all_ok = false;
+            }
+        }
+    }
+    all_ok
+}
+
+/// Strictness ladder: every level is stricter than every level below
+/// it. Spot-check key adjacencies; the full transitive check is
+/// implied by the ν-ordinal monotonicity.
+fn strictness_ladder() -> Bool {
+    is_stricter_than(VerificationLevel.Static, VerificationLevel.Runtime)
+        && is_stricter_than(VerificationLevel.Fast, VerificationLevel.Static)
+        && is_stricter_than(VerificationLevel.Formal, VerificationLevel.Fast)
+        && is_stricter_than(VerificationLevel.Proof, VerificationLevel.Formal)
+        && is_stricter_than(VerificationLevel.Thorough, VerificationLevel.Proof)
+        && is_stricter_than(VerificationLevel.Reliable, VerificationLevel.Thorough)
+        && is_stricter_than(VerificationLevel.Certified, VerificationLevel.Reliable)
+        && is_stricter_than(VerificationLevel.Synthesize, VerificationLevel.Certified)
+}
+
+/// Lax/strict partition: the first three levels permit runtime
+/// fallback; the remaining six hard-fail on non-Proven outcomes.
+fn fallback_partition() -> Bool {
+    allows_runtime_fallback(VerificationLevel.Runtime)
+        && allows_runtime_fallback(VerificationLevel.Static)
+        && allows_runtime_fallback(VerificationLevel.Fast)
+        && !allows_runtime_fallback(VerificationLevel.Formal)
+        && !allows_runtime_fallback(VerificationLevel.Proof)
+        && !allows_runtime_fallback(VerificationLevel.Thorough)
+        && !allows_runtime_fallback(VerificationLevel.Reliable)
+        && !allows_runtime_fallback(VerificationLevel.Certified)
+        && !allows_runtime_fallback(VerificationLevel.Synthesize)
+}
+
+/// SMT-requirement partition: only `Runtime` skips SMT.
+fn smt_partition() -> Bool {
+    !requires_smt(VerificationLevel.Runtime)
+        && requires_smt(VerificationLevel.Static)
+        && requires_smt(VerificationLevel.Fast)
+        && requires_smt(VerificationLevel.Formal)
+        && requires_smt(VerificationLevel.Proof)
+        && requires_smt(VerificationLevel.Synthesize)
+}
+
+/// Certificate-emit partition: `Proof / Reliable / Certified /
+/// Synthesize` materialise CoreTerm certificates.
+fn certificate_partition() -> Bool {
+    !emits_certificate(VerificationLevel.Runtime)
+        && !emits_certificate(VerificationLevel.Static)
+        && !emits_certificate(VerificationLevel.Fast)
+        && !emits_certificate(VerificationLevel.Formal)
+        && emits_certificate(VerificationLevel.Proof)
+        && !emits_certificate(VerificationLevel.Thorough)
+        && emits_certificate(VerificationLevel.Reliable)
+        && emits_certificate(VerificationLevel.Certified)
+        && emits_certificate(VerificationLevel.Synthesize)
+}
+
+/// ν-ordinal projection: VVA §2.3 table values.
+fn nu_table() -> Bool {
+    nu_omega_coeff(VerificationLevel.Runtime) == 0
+        && nu_finite_offset(VerificationLevel.Runtime) == 0
+        && nu_omega_coeff(VerificationLevel.Static) == 0
+        && nu_finite_offset(VerificationLevel.Static) == 1
+        && nu_omega_coeff(VerificationLevel.Fast) == 0
+        && nu_finite_offset(VerificationLevel.Fast) == 2
+        && nu_omega_coeff(VerificationLevel.Formal) == 1
+        && nu_finite_offset(VerificationLevel.Formal) == 0
+        && nu_omega_coeff(VerificationLevel.Proof) == 1
+        && nu_finite_offset(VerificationLevel.Proof) == 1
+        && nu_omega_coeff(VerificationLevel.Thorough) == 2
+        && nu_finite_offset(VerificationLevel.Thorough) == 0
+        && nu_omega_coeff(VerificationLevel.Reliable) == 2
+        && nu_finite_offset(VerificationLevel.Reliable) == 1
+        && nu_omega_coeff(VerificationLevel.Certified) == 2
+        && nu_finite_offset(VerificationLevel.Certified) == 2
+        && nu_omega_coeff(VerificationLevel.Synthesize) == 3
+        && nu_finite_offset(VerificationLevel.Synthesize) == 1
+}
+
+fn main() -> Int {
+    if round_trip_strings()
+        && strictness_ladder()
+        && fallback_partition()
+        && smt_partition()
+        && certificate_partition()
+        && nu_table()
+    {
+        0
+    } else {
+        1
+    }
+}

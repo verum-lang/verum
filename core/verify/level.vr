@@ -1,68 +1,216 @@
-// core.verify.level — user-facing mirror of
-// `verum_verification.level.VerificationLevel`.
+// =============================================================================
+// core.verify.level — user-facing mirror of the VVA §2.3 nine-strategy ladder
+// =============================================================================
 //
-// Lets user code query / branch on the current verification
-// level. The three levels and their semantics are documented in
-// `docs/verification/gradual-verification.md`:
+// Per VVA §2.3, `@verify(<strategy>)` selects discharge intent across
+// nine strategies that form a strictly-monotone ordinal ν-table:
 //
-//   Runtime — dynamic checks, ~5-15ns per assertion.
-//   Static  — compile-time SMT proof; fallback to runtime on
-//             unprovable goals, with a diagnostic.
-//   Proof   — compile-time SMT proof; hard compile error on
-//             unprovable goals.
+//   | Strategy    | ν       | Cost / Completeness                         |
+//   |-------------|---------|---------------------------------------------|
+//   | runtime     | 0       | dynamic checks; ~5–15ns per assertion       |
+//   | static      | 1       | conservative dataflow / CBGR / const fold   |
+//   | fast        | 2       | bounded SMT (single solver, short timeout) |
+//   | formal      | ω       | full SMT portfolio (Z3+CVC5)                |
+//   | proof       | ω+1     | user-supplied tactic proof; kernel re-check |
+//   | thorough    | ω·2     | formal + invariant/frame/termination obligs |
+//   | reliable    | ω·2+1   | thorough + cross-solver agreement           |
+//   | certified   | ω·2+2   | reliable + certificate re-check + export    |
+//   | synthesize  | ≤ω·3+1  | inverse search across 𝔐; fills holes        |
+//
+// Strategies are *strictly monotone* on `<` over countable ordinals;
+// `evaluate_attempt(level, attempt)` returns a `VerificationOutcome`
+// per the canonical table in `core.verify.attempt`.
+//
+// Pre-V8 versions of this module exposed only three levels (Runtime /
+// Static / Proof). Those names remain as enum variants so existing
+// callers continue to compile; the six new strategies are additive.
+// =============================================================================
 
-// The verification level a function is compiled at.
-type VerificationLevel is
-    | Runtime
-    | Static
-    | Proof;
+module core.verify.level;
 
-// Parse a level annotation from its canonical string form.
-//
-// Accepts `"runtime"` | `"static"` | `"proof"` (+ the aliases
-// `"formal"` for Proof). Returns `None` for unknown names so
-// callers can emit a useful diagnostic on invalid annotations.
-fn parse_level(annotation: Text) -> Maybe<VerificationLevel> {
+mount core.{Maybe, Text};
+
+// =============================================================================
+// Verification level — nine VVA §2.3 strategies
+// =============================================================================
+
+/// The verification level (a.k.a. discharge strategy) at which a
+/// function or theorem is compiled. Variants are listed in
+/// monotone-ν order; `nu_ordinal` projects each to its ν per VVA §2.3.
+public type VerificationLevel is
+    | Runtime         // ν = 0     — dynamic check
+    | Static          // ν = 1     — dataflow / CBGR / const fold
+    | Fast            // ν = 2     — bounded single-solver SMT
+    | Formal          // ν = ω     — full SMT portfolio
+    | Proof           // ν = ω+1   — tactic proof + kernel re-check
+    | Thorough        // ν = ω·2   — formal + invariant obligations
+    | Reliable        // ν = ω·2+1 — thorough + cross-solver agreement
+    | Certified       // ν = ω·2+2 — reliable + certificate export
+    | Synthesize;     // ν ≤ ω·3+1 — inverse search across 𝔐
+
+// =============================================================================
+// String round-trip
+// =============================================================================
+
+/// Parse a verification-level annotation from its canonical string
+/// form. Accepts every VVA §2.3 strategy plus the historical alias
+/// `formal` for `Formal` (kept for backward compat with pre-V8
+/// callers). Returns `Maybe.None` for unknown names so callers can
+/// emit a useful diagnostic on invalid annotations.
+public fn parse_level(annotation: Text) -> Maybe<VerificationLevel> {
     if annotation == "runtime" {
         Maybe.Some(VerificationLevel.Runtime)
     } else if annotation == "static" {
         Maybe.Some(VerificationLevel.Static)
-    } else if annotation == "proof" || annotation == "formal" {
+    } else if annotation == "fast" {
+        Maybe.Some(VerificationLevel.Fast)
+    } else if annotation == "formal" {
+        Maybe.Some(VerificationLevel.Formal)
+    } else if annotation == "proof" {
         Maybe.Some(VerificationLevel.Proof)
+    } else if annotation == "thorough" {
+        Maybe.Some(VerificationLevel.Thorough)
+    } else if annotation == "reliable" {
+        Maybe.Some(VerificationLevel.Reliable)
+    } else if annotation == "certified" {
+        Maybe.Some(VerificationLevel.Certified)
+    } else if annotation == "synthesize" {
+        Maybe.Some(VerificationLevel.Synthesize)
     } else {
         Maybe.None
     }
 }
 
-// Canonical string form.
-fn to_annotation(level: VerificationLevel) -> Text {
+/// Canonical string form per VVA §2.3.
+public fn to_annotation(level: VerificationLevel) -> Text {
     match level {
-        VerificationLevel.Runtime => "runtime",
-        VerificationLevel.Static => "static",
-        VerificationLevel.Proof => "proof",
+        VerificationLevel.Runtime    => "runtime",
+        VerificationLevel.Static     => "static",
+        VerificationLevel.Fast       => "fast",
+        VerificationLevel.Formal     => "formal",
+        VerificationLevel.Proof      => "proof",
+        VerificationLevel.Thorough   => "thorough",
+        VerificationLevel.Reliable   => "reliable",
+        VerificationLevel.Certified  => "certified",
+        VerificationLevel.Synthesize => "synthesize",
     }
 }
 
-// True iff this level requires the SMT backend.
-fn requires_smt(level: VerificationLevel) -> Bool {
+// =============================================================================
+// ν-ordinal projection (VVA §2.3)
+// =============================================================================
+
+/// The ω-coefficient of the level's ordinal. `Runtime / Static / Fast`
+/// live at finite stratum (`omega_coeff = 0`); `Formal / Proof` live at
+/// `omega_coeff = 1`; `Thorough / Reliable / Certified` at 2;
+/// `Synthesize` at 3 (upper bound; a successful synthesis collapses
+/// to the witness-strategy's ν per VVA §2.3 footnote).
+public fn nu_omega_coeff(level: VerificationLevel) -> Int {
+    match level {
+        VerificationLevel.Runtime    => 0,
+        VerificationLevel.Static     => 0,
+        VerificationLevel.Fast       => 0,
+        VerificationLevel.Formal     => 1,
+        VerificationLevel.Proof      => 1,
+        VerificationLevel.Thorough   => 2,
+        VerificationLevel.Reliable   => 2,
+        VerificationLevel.Certified  => 2,
+        VerificationLevel.Synthesize => 3,
+    }
+}
+
+/// The finite offset of the level's ordinal. Combined with
+/// `nu_omega_coeff` reproduces the VVA §2.3 ν exactly.
+public fn nu_finite_offset(level: VerificationLevel) -> Int {
+    match level {
+        VerificationLevel.Runtime    => 0,
+        VerificationLevel.Static     => 1,
+        VerificationLevel.Fast       => 2,
+        VerificationLevel.Formal     => 0,
+        VerificationLevel.Proof      => 1,
+        VerificationLevel.Thorough   => 0,
+        VerificationLevel.Reliable   => 1,
+        VerificationLevel.Certified  => 2,
+        VerificationLevel.Synthesize => 1,
+    }
+}
+
+/// Pretty-print the ν-ordinal in `ω·k+n` form, matching `verum audit
+/// --coord` plain output. `0` for `Runtime`, `2` for `Fast`, `ω` for
+/// `Formal`, `ω·2+1` for `Reliable`, etc.
+public fn nu_render(level: VerificationLevel) -> Text {
+    let omega_coeff = nu_omega_coeff(level);
+    let finite_offset = nu_finite_offset(level);
+    let coeff = if omega_coeff == 0 {
+        Text.from_int(finite_offset)
+    } else if omega_coeff == 1 {
+        Text.from("ω")
+    } else {
+        Text.from("ω·") + Text.from_int(omega_coeff)
+    };
+    if finite_offset == 0 || omega_coeff == 0 {
+        coeff
+    } else {
+        coeff + Text.from("+") + Text.from_int(finite_offset)
+    }
+}
+
+// =============================================================================
+// Capability predicates
+// =============================================================================
+
+/// True iff the level requires the SMT backend. `Runtime` is the only
+/// level that doesn't; every other level either dispatches an SMT
+/// query or piggybacks on one (e.g. `Proof` re-checks SMT-discharged
+/// sub-goals).
+public fn requires_smt(level: VerificationLevel) -> Bool {
     match level {
         VerificationLevel.Runtime => false,
-        VerificationLevel.Static => true,
-        VerificationLevel.Proof => true,
+        _ => true,
     }
 }
 
-// True iff this level permits silent fallback to runtime checks
-// on proof failure.
-//
-// See `verum_verification.level.VerificationLevel::
-// evaluate_attempt` for the fundamental-level enforcement
-// table — `allows_runtime_fallback` is the user-facing mirror
-// of `Static == fallback | Proof == no-fallback`.
-fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
+/// True iff the level permits silent fallback to runtime checks on
+/// proof failure. The lax half of the ladder (`Runtime / Static /
+/// Fast`) falls back; the strict half (`Formal / Proof / Thorough /
+/// Reliable / Certified / Synthesize`) hard-fails on failure.
+public fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
     match level {
         VerificationLevel.Runtime => true,
-        VerificationLevel.Static => true,
-        VerificationLevel.Proof => false,
+        VerificationLevel.Static  => true,
+        VerificationLevel.Fast    => true,
+        _                         => false,
+    }
+}
+
+/// True iff the level emits a CoreTerm certificate that downstream
+/// tooling can re-check. `Proof / Reliable / Certified / Synthesize`
+/// produce certificates; `Formal / Thorough` produce SMT verdicts
+/// without certificate materialisation; `Runtime / Static / Fast`
+/// have no certificate path.
+public fn emits_certificate(level: VerificationLevel) -> Bool {
+    match level {
+        VerificationLevel.Proof      => true,
+        VerificationLevel.Reliable   => true,
+        VerificationLevel.Certified  => true,
+        VerificationLevel.Synthesize => true,
+        _                            => false,
+    }
+}
+
+/// True iff the level is monotonically *stricter* than `other` —
+/// i.e. its ν-ordinal is strictly larger per VVA §2.3. Useful for
+/// the compiler's lift-only direction check (`@verify(proof)` on a
+/// `runtime`-compiled function is always accepted; the reverse
+/// would require re-proving existing dynamic checks).
+public fn is_stricter_than(level: VerificationLevel, other: VerificationLevel) -> Bool {
+    let lhs_omega = nu_omega_coeff(level);
+    let rhs_omega = nu_omega_coeff(other);
+    if lhs_omega > rhs_omega {
+        true
+    } else if lhs_omega < rhs_omega {
+        false
+    } else {
+        nu_finite_offset(level) > nu_finite_offset(other)
     }
 }
