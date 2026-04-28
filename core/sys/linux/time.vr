@@ -185,13 +185,13 @@ implement LinuxInstant {
 /// Get time from a specific clock.
 ///
 /// # Arguments
-/// * `clock_id` - Clock to query (CLOCK_* constant)
+/// * `clock_id` - Clock to query (CLOCK_* constant). C: `clockid_t` (Int32).
 /// * `ts` - Output timespec
-public fn clock_gettime(clock_id: Int, ts: &mut LinuxTimeTimespec) -> Result<(), OSError> {
+public fn clock_gettime(clock_id: Int32, ts: &mut LinuxTimeTimespec) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_CLOCK_GETTIME,
-            clock_id,
+            clock_id as Int,
             ts as Int,
             0, 0, 0, 0
         )
