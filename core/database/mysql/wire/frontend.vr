@@ -18,6 +18,7 @@ mount core.database.mysql.wire.frame.{
 mount core.database.mysql.wire.types.{
     SPINDLE_CLIENT_FLAGS, COM_QUERY, COM_PING, COM_QUIT, COM_INIT_DB,
     COM_RESET_CONNECTION, plugin_caching_sha2_password,
+    COM_STMT_PREPARE, COM_STMT_EXECUTE, COM_STMT_CLOSE, COM_STMT_RESET,
 };
 
 // -----------------------------------------------------------------------------
@@ -108,6 +109,225 @@ public fn com_init_db(db: &Text) -> List<Byte> {
 public fn com_reset_connection() -> List<Byte> {
     let mut out: List<Byte> = List.new();
     put_u8(&mut out, COM_RESET_CONNECTION as Int);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Prepared-statement protocol (database.md §6.3.3)
+// -----------------------------------------------------------------------------
+//
+// Parameterised queries via the binary protocol: 3–5× faster than
+// COM_QUERY on repeated calls, and the only safe surface for user-
+// supplied values (text-protocol concatenation invites SQL injection).
+//
+// COM_STMT_PREPARE / EXECUTE / CLOSE / RESET cover the lifecycle:
+//
+//     prepare → server returns COM_STMT_PREPARE_OK
+//                + N ColumnDefinition41 (param descs) + EOF
+//                + M ColumnDefinition41 (column descs) + EOF
+//     execute → server returns either OK (no result-set) or
+//                ColumnDefinitions + binary-protocol rows + EOF/OK
+//     close   → no response (server frees the statement_id)
+//     reset   → server returns OK (param state cleared)
+
+/// Build a COM_STMT_PREPARE packet body.  `[0x16][sql_bytes]` —
+/// the SQL text is sent unframed (length comes from the surrounding
+/// MySQL packet header).
+public fn com_stmt_prepare(sql: &Text) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_STMT_PREPARE as Int);
+    put_bytes(&mut out, sql.as_bytes());
+    out
+}
+
+/// Build a COM_STMT_CLOSE packet body — `[0x19][statement_id u32 LE]`.
+/// MySQL does not send a response for CLOSE; the statement_id is
+/// invalidated server-side immediately.
+public fn com_stmt_close(statement_id: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_STMT_CLOSE as Int);
+    put_u32_le(&mut out, statement_id);
+    out
+}
+
+/// Build a COM_STMT_RESET packet body — `[0x1A][statement_id u32 LE]`.
+/// Clears any long-data parameters previously sent for this statement;
+/// server replies with OK or ERR.
+public fn com_stmt_reset(statement_id: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_STMT_RESET as Int);
+    put_u32_le(&mut out, statement_id);
+    out
+}
+
+/// Param value for the binary EXECUTE protocol.  Each variant carries
+/// the MySQL field-type byte the server expects and the encoded
+/// payload bytes.  Constructed by `param_*` helpers below; consumed
+/// by `com_stmt_execute`.
+public type StmtParam is
+      SpNull
+    | SpTinyInt(Int)               // i8
+    | SpShort(Int)                 // i16 LE
+    | SpLong(Int)                  // i32 LE
+    | SpLongLong(Int64)            // i64 LE
+    | SpDouble(Float64)            // ieee754 double LE
+    | SpFloat(Float)               // ieee754 single LE
+    | SpString(Text)               // length-encoded UTF-8
+    | SpBlob(List<Byte>);          // length-encoded raw bytes
+
+/// MySQL field-type IDs (a subset; full table in
+/// `dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_binary_resultset.html`).
+public const MY_TYPE_TINY:      Int = 0x01;
+public const MY_TYPE_SHORT:     Int = 0x02;
+public const MY_TYPE_LONG:      Int = 0x03;
+public const MY_TYPE_FLOAT:     Int = 0x04;
+public const MY_TYPE_DOUBLE:    Int = 0x05;
+public const MY_TYPE_NULL:      Int = 0x06;
+public const MY_TYPE_LONGLONG:  Int = 0x08;
+public const MY_TYPE_VARCHAR:   Int = 0x0F;
+public const MY_TYPE_VAR_STRING:Int = 0xFD;
+public const MY_TYPE_STRING:    Int = 0xFE;
+public const MY_TYPE_BLOB:      Int = 0xFC;
+
+/// Convenience param constructors — mirror the StmtParam variants
+/// for chained-call style at the call site.
+public fn param_null() -> StmtParam { SpNull }
+public fn param_int(n: Int64) -> StmtParam { SpLongLong(n) }
+public fn param_text(s: &Text) -> StmtParam { SpString(s.clone()) }
+public fn param_blob(b: &[Byte]) -> StmtParam {
+    let mut out: List<Byte> = List.with_capacity(b.len());
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    SpBlob(out)
+}
+public fn param_double(x: Float64) -> StmtParam { SpDouble(x) }
+
+/// Map a StmtParam to its (field_type_byte, unsigned_flag) tuple used
+/// in the type vector at the start of the parameter section.
+fn param_type_pair(p: &StmtParam) -> (Int, Int) {
+    match p {
+        SpNull           => (MY_TYPE_NULL,     0),
+        SpTinyInt(_)     => (MY_TYPE_TINY,     0),
+        SpShort(_)       => (MY_TYPE_SHORT,    0),
+        SpLong(_)        => (MY_TYPE_LONG,     0),
+        SpLongLong(_)    => (MY_TYPE_LONGLONG, 0),
+        SpDouble(_)      => (MY_TYPE_DOUBLE,   0),
+        SpFloat(_)       => (MY_TYPE_FLOAT,    0),
+        SpString(_)      => (MY_TYPE_VAR_STRING, 0),
+        SpBlob(_)        => (MY_TYPE_BLOB,     0),
+    }
+}
+
+/// Encode a StmtParam's value bytes (NOT including the type byte —
+/// types are written separately in the type vector).  NULLs take
+/// zero bytes (their presence is signalled by the null bitmap).
+fn encode_param_value(out: &mut List<Byte>, p: &StmtParam) {
+    match p {
+        SpNull => {}
+        SpTinyInt(n) => { put_u8(out, n & 0xFF); }
+        SpShort(n)   => { put_u16_le(out, n & 0xFFFF); }
+        SpLong(n)    => { put_u32_le(out, n); }
+        SpLongLong(n) => {
+            let lo: Int = (n as Int) & 0xFFFFFFFF;
+            let hi: Int = ((n as Int) >> 32) & 0xFFFFFFFF;
+            put_u32_le(out, lo);
+            put_u32_le(out, hi);
+        }
+        SpDouble(x)  => {
+            let bits: Int64 = float_to_bits_double(x);
+            let lo: Int = (bits as Int) & 0xFFFFFFFF;
+            let hi: Int = ((bits as Int) >> 32) & 0xFFFFFFFF;
+            put_u32_le(out, lo);
+            put_u32_le(out, hi);
+        }
+        SpFloat(x)   => {
+            let bits: Int = float_to_bits_single(x);
+            put_u32_le(out, bits);
+        }
+        SpString(s)  => {
+            put_lenenc_string(out, s.as_bytes());
+        }
+        SpBlob(b) => {
+            put_lenenc_string(out, b.as_slice());
+        }
+    }
+}
+
+/// IEEE 754 double → 64-bit little-endian.  Implementation defers
+/// to `core.math.float_bits_f64` if available; v1 uses an intrinsic
+/// helper.
+@intrinsic("float_to_bits_f64")
+fn float_to_bits_double(x: Float64) -> Int64;
+
+@intrinsic("float_to_bits_f32")
+fn float_to_bits_single(x: Float) -> Int;
+
+/// Build a COM_STMT_EXECUTE packet body.  Layout per MySQL docs:
+///
+///   [0x17]
+///   [statement_id u32 LE]
+///   [flags u8 = 0]                    // CURSOR_TYPE_NO_CURSOR
+///   [iteration_count u32 LE = 1]
+///   [null_bitmap]                      // ceil(num_params / 8) bytes
+///   [new_params_bound u8 = 1]          // always 1 in v0.1
+///   [for each param: u8 type, u8 unsigned_flag]
+///   [for each non-NULL param: encoded value]
+public fn com_stmt_execute(
+    statement_id: Int,
+    params: &List<StmtParam>,
+) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    put_u8(&mut out, COM_STMT_EXECUTE as Int);
+    put_u32_le(&mut out, statement_id);
+    put_u8(&mut out, 0);                   // flags = CURSOR_TYPE_NO_CURSOR
+    put_u32_le(&mut out, 1);               // iteration_count = 1
+
+    // null_bitmap — bit set per NULL param, packed LSB-first across
+    // ceil(N/8) bytes.  Caller's param order matches statement
+    // placeholder order.
+    let n = params.len();
+    let bitmap_bytes = (n + 7) / 8;
+    let mut bitmap: List<Byte> = List.with_capacity(bitmap_bytes);
+    let mut z: Int = 0;
+    while z < bitmap_bytes { bitmap.push(0 as Byte); z = z + 1; }
+    let mut idx: Int = 0;
+    while idx < n {
+        match &params[idx] {
+            SpNull => {
+                let byte_idx = idx / 8;
+                let bit_idx = idx % 8;
+                bitmap[byte_idx] = bitmap[byte_idx] | ((1 << bit_idx) as Byte);
+            }
+            _ => {}
+        }
+        idx = idx + 1;
+    }
+    let mut bm = 0;
+    while bm < bitmap.len() { put_u8(&mut out, bitmap[bm] as Int); bm = bm + 1; }
+
+    // new_params_bound = 1 — every EXECUTE includes a fresh type
+    // vector.  v0.1 doesn't reuse type vectors across calls; that's
+    // a per-statement-cache optimisation deferred to a follow-up.
+    put_u8(&mut out, 1);
+
+    // Type vector — (type_byte, unsigned_flag) per param.
+    let mut t: Int = 0;
+    while t < n {
+        let (ty, flag) = param_type_pair(&params[t]);
+        put_u8(&mut out, ty);
+        put_u8(&mut out, flag);
+        t = t + 1;
+    }
+
+    // Value vector — every non-NULL param's encoded payload, in order.
+    let mut v: Int = 0;
+    while v < n {
+        match &params[v] {
+            SpNull => {}    // null — no payload, only bitmap entry
+            _      => { encode_param_value(&mut out, &params[v]); }
+        }
+        v = v + 1;
+    }
     out
 }
 

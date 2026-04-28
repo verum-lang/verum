@@ -45,13 +45,18 @@ mount core.database.mysql.wire.frame.{
 mount core.database.mysql.wire.frontend.{
     handshake_response, com_query, com_ping, com_quit,
     default_plugin_name,
+    com_stmt_prepare, com_stmt_execute, com_stmt_close, com_stmt_reset,
+    StmtParam, SpNull, SpTinyInt, SpShort, SpLong, SpLongLong,
+    SpDouble, SpFloat, SpString, SpBlob,
+    param_null, param_int, param_text, param_blob, param_double,
 };
 mount core.database.mysql.wire.backend.{
     InitialHandshake, OkPacket, ErrPacket, AuthSwitch, AuthMore, ColumnDef,
-    ServerPacketKind,
+    ServerPacketKind, StmtPrepareOk,
     SkOk, SkError, SkEof, SkAuthSwitch, SkAuthMore, SkLocalInfile, SkData,
     parse_initial_handshake, parse_ok, parse_err, parse_auth_switch,
     parse_auth_more, parse_column_def, classify,
+    parse_stmt_prepare_ok, parse_binary_row,
 };
 mount core.database.mysql.wire.types.{
     PKT_OK, PKT_EOF, PKT_ERROR, CAP_PROTOCOL_41, CAP_DEPRECATE_EOF,
@@ -91,6 +96,41 @@ public type SimpleQueryResult is {
     affected_rows: Int,           // 0 unless OK packet supplied a count
     last_insert_id: Int,
     info: Text,
+};
+
+// -----------------------------------------------------------------------------
+// MysqlPreparedStatement — handle returned by COM_STMT_PREPARE
+// -----------------------------------------------------------------------------
+
+/// Server-assigned prepared statement.  The `statement_id` is valid
+/// for the lifetime of the connection; `close_prepared` releases it.
+/// Client-side it's a plain handle (not affine) — matches MySQL's
+/// session-local lifecycle and SQLite's prepared-statement shape.
+public type MysqlPreparedStatement is {
+    statement_id: Int,
+    num_params: Int,
+    num_columns: Int,
+    /// MySQL field-type byte per parameter — used by the binary
+    /// protocol type vector.  v0.1 trusts whatever the user supplies
+    /// in `StmtParam` rather than coercing; spec parity with
+    /// caching_sha2_password's "let the wire match" pattern.
+    param_types: List<Int>,
+    /// MySQL field-type byte per result column — needed by the
+    /// binary-row decoder to know each column's wire format.
+    column_types: List<Int>,
+    /// Original SQL — stored for tracing / EXPLAIN replay.
+    sql: Text,
+};
+
+/// Result of executing a prepared statement.  For non-SELECT shapes
+/// `rows` is empty and `affected_rows` / `last_insert_id` are
+/// populated from the OK packet.  For SELECT shapes `rows` holds
+/// every binary-protocol row (columns are positionally indexed
+/// against `stmt.column_types`).
+public type MysqlPreparedResult is {
+    affected_rows: Int,
+    last_insert_id: Int,
+    rows: List<List<Maybe<List<Byte>>>>,
 };
 
 // -----------------------------------------------------------------------------
@@ -313,6 +353,278 @@ implement MysqlConnection {
                 }
             }
             Err(e) => Err(e),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Prepared statements (database.md §6.3.3 — COM_STMT_PREPARE / EXECUTE)
+    // -------------------------------------------------------------------------
+    //
+    // The binary protocol — 3-5× faster than COM_QUERY on repeated
+    // calls and the only safe surface for parameterised values
+    // (text-protocol concatenation invites SQL injection).
+    //
+    // Lifecycle:
+    //   prepare(sql)         → returns MysqlPreparedStatement holding
+    //                           the server-assigned statement_id +
+    //                           param/column metadata.
+    //   execute(stmt, params)→ runs the statement with the given
+    //                           parameter vector; returns rows in
+    //                           binary protocol form.
+    //   close(stmt)          → frees the statement_id server-side
+    //                           (no response — fire-and-forget).
+    //   reset(stmt)          → clears any long-data state; used by
+    //                           streaming workflows.
+
+    /// Prepare `sql` — round-trips COM_STMT_PREPARE, parses the
+    /// COM_STMT_PREPARE_OK + parameter ColumnDefinitions + result-
+    /// column ColumnDefinitions.  Returns the typed handle.
+    public fn prepare(&mut self, sql: &Text) -> Result<MysqlPreparedStatement, DbError> {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "prepare requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.sequence = 0;
+        let payload = com_stmt_prepare(sql);
+        send_packet(self, payload.as_slice())?;
+
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        match classify(body.as_slice(), self.capabilities) {
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("prepare ERR")); }
+                };
+                return Err(dberr_from_mysql(err));
+            }
+            _ => {}
+        }
+        let prep = match parse_stmt_prepare_ok(body.as_slice()) {
+            Ok(p)  => p,
+            Err(_) => { return Err(bad_decode("prepare OK")); }
+        };
+
+        // Drain num_params ColumnDefinitions + EOF (or skip if 0).
+        let mut param_types: List<Int> = List.with_capacity(prep.num_params);
+        let mut i: Int = 0;
+        while i < prep.num_params {
+            let p = recv_packet(self)?;
+            let cb = p.into_payload();
+            let col = match parse_column_def(cb.as_slice()) {
+                Ok(c)  => c,
+                Err(_) => { return Err(bad_decode("prepare param column")); }
+            };
+            param_types.push(col.column_type);
+            i = i + 1;
+        }
+        if prep.num_params > 0 && (self.capabilities & CAP_DEPRECATE_EOF) == 0 {
+            let _eof = recv_packet(self)?;     // intermediate EOF
+        }
+
+        // Drain num_columns ColumnDefinitions + EOF.
+        let mut column_types: List<Int> = List.with_capacity(prep.num_columns);
+        let mut k: Int = 0;
+        while k < prep.num_columns {
+            let p = recv_packet(self)?;
+            let cb = p.into_payload();
+            let col = match parse_column_def(cb.as_slice()) {
+                Ok(c)  => c,
+                Err(_) => { return Err(bad_decode("prepare result column")); }
+            };
+            column_types.push(col.column_type);
+            k = k + 1;
+        }
+        if prep.num_columns > 0 && (self.capabilities & CAP_DEPRECATE_EOF) == 0 {
+            let _eof = recv_packet(self)?;
+        }
+
+        Ok(MysqlPreparedStatement {
+            statement_id: prep.statement_id,
+            num_params: prep.num_params,
+            num_columns: prep.num_columns,
+            param_types: param_types,
+            column_types: column_types,
+            sql: sql.clone(),
+        })
+    }
+
+    /// Execute a prepared statement with the supplied parameter
+    /// vector.  `params.len()` must match `stmt.num_params`.  Returns
+    /// the binary-protocol row payload (each row is a list of
+    /// `Maybe<List<Byte>>` per column, matching MySQL's NULL bitmap).
+    public fn execute_prepared(
+        &mut self,
+        stmt: &MysqlPreparedStatement,
+        params: &List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        if params.len() != stmt.num_params {
+            return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "PARAM_COUNT_MISMATCH".clone(),
+                message: f"execute_prepared: expected {stmt.num_params} params, got {params.len()}".clone(),
+                retryable: false,
+            }));
+        }
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "execute requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.sequence = 0;
+        let payload = com_stmt_execute(stmt.statement_id, params);
+        send_packet(self, payload.as_slice())?;
+
+        let first = recv_packet(self)?;
+        let fb = first.into_payload();
+        match classify(fb.as_slice(), self.capabilities) {
+            SkError => {
+                let err = match parse_err(fb.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("execute ERR")); }
+                };
+                return Err(dberr_from_mysql(err));
+            }
+            SkOk => {
+                // No result-set — single OK packet has affected_rows.
+                let ok = match parse_ok(fb.as_slice(), self.capabilities) {
+                    Ok(o)  => o,
+                    Err(_) => { return Err(bad_decode("execute OK")); }
+                };
+                return Ok(MysqlPreparedResult {
+                    affected_rows: ok.affected_rows,
+                    last_insert_id: ok.last_insert_id,
+                    rows: List.new(),
+                });
+            }
+            _ => {}
+        }
+
+        // Result-set form: column count (lenenc) + N ColumnDef + EOF
+        // + binary rows + EOF/OK.  We already have the column types
+        // from prepare time, so we skip re-decoding ColumnDefs and
+        // just count packets to find the row boundary.
+        let (col_count_opt, _) = match decode_lei(fb.as_slice(), 0) {
+            Ok((n, _, h)) => (Some(n), h),
+            Err(_) => { return Err(bad_decode("execute column-count")); }
+        };
+        let col_count = match col_count_opt {
+            Some(n) => n,
+            None    => 0,
+        };
+
+        // Drain ColumnDefs.
+        let mut c: Int = 0;
+        while c < col_count {
+            let _p = recv_packet(self)?;
+            c = c + 1;
+        }
+        // Intermediate EOF (legacy proto).
+        if (self.capabilities & CAP_DEPRECATE_EOF) == 0 {
+            let _ = recv_packet(self)?;
+        }
+
+        // Rows — binary protocol; terminated by EOF (legacy) or OK
+        // (CAP_DEPRECATE_EOF).
+        let mut rows: List<List<Maybe<List<Byte>>>> = List.new();
+        let mut affected: Int = 0;
+        let mut last_id: Int = 0;
+        loop {
+            let p = recv_packet(self)?;
+            let body = p.into_payload();
+            let kind = classify(body.as_slice(), self.capabilities);
+            match kind {
+                SkEof => { break; }
+                SkOk => {
+                    // CAP_DEPRECATE_EOF terminator
+                    let ok = match parse_ok(body.as_slice(), self.capabilities) {
+                        Ok(o)  => o,
+                        Err(_) => { break; }
+                    };
+                    affected = ok.affected_rows;
+                    last_id = ok.last_insert_id;
+                    break;
+                }
+                SkError => {
+                    let err = match parse_err(body.as_slice(), self.capabilities) {
+                        Ok(e)  => e,
+                        Err(_) => { return Err(bad_decode("execute row ERR")); }
+                    };
+                    return Err(dberr_from_mysql(err));
+                }
+                _ => {
+                    // Binary row packet.
+                    let row = match parse_binary_row(body.as_slice(), &stmt.column_types) {
+                        Ok(r)  => r,
+                        Err(_) => { return Err(bad_decode("execute binary row")); }
+                    };
+                    rows.push(row);
+                }
+            }
+        }
+        Ok(MysqlPreparedResult {
+            affected_rows: affected,
+            last_insert_id: last_id,
+            rows: rows,
+        })
+    }
+
+    /// Free the server-side statement.  No reply is sent on the
+    /// wire — the statement_id is invalidated immediately.  Closing
+    /// twice is a no-op since we don't track a closed flag client-
+    /// side; the server simply ignores unknown statement_ids on
+    /// subsequent EXECUTE.
+    public fn close_prepared(&mut self, stmt: &MysqlPreparedStatement)
+        -> Result<(), DbError>
+    {
+        match self.state {
+            McsReady => {}
+            _ => { return Ok(()); }    // tolerant — close-on-error path
+        }
+        self.sequence = 0;
+        let payload = com_stmt_close(stmt.statement_id);
+        send_packet(self, payload.as_slice())?;
+        Ok(())
+    }
+
+    /// Reset a prepared statement's parameter state.  Server replies
+    /// with OK or ERR.
+    public fn reset_prepared(&mut self, stmt: &MysqlPreparedStatement)
+        -> Result<(), DbError>
+    {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "reset requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.sequence = 0;
+        let payload = com_stmt_reset(stmt.statement_id);
+        send_packet(self, payload.as_slice())?;
+        let pkt = recv_packet(self)?;
+        let body = pkt.into_payload();
+        match classify(body.as_slice(), self.capabilities) {
+            SkOk => Ok(()),
+            SkError => {
+                let err = match parse_err(body.as_slice(), self.capabilities) {
+                    Ok(e)  => e,
+                    Err(_) => { return Err(bad_decode("reset ERR")); }
+                };
+                Err(dberr_from_mysql(err))
+            }
+            _ => Err(bad_decode("reset reply")),
         }
     }
 

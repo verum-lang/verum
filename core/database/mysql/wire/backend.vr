@@ -300,6 +300,166 @@ fn bytes_to_text(o: &Maybe<List<Byte>>) -> Text {
 }
 
 // -----------------------------------------------------------------------------
+// COM_STMT_PREPARE_OK (database.md §6.3.3)
+// -----------------------------------------------------------------------------
+//
+// Layout:
+//     u8   status = 0x00
+//     u32  statement_id
+//     u16  num_columns (in result set; 0 for non-SELECT)
+//     u16  num_params  (placeholder count)
+//     u8   reserved (always 0)
+//     u16  warning_count
+//
+// Followed on the wire by:
+//     num_params  ColumnDefinition41 packets + EOF (or skipped if 0)
+//     num_columns ColumnDefinition41 packets + EOF (or skipped if 0)
+//
+// We parse the fixed-size header here; the trailing column descs are
+// read separately by the connection driver (it already knows how to
+// loop ColumnDefs from the COM_QUERY result-set path).
+
+public type StmtPrepareOk is {
+    statement_id: Int,
+    num_columns: Int,
+    num_params: Int,
+    warning_count: Int,
+};
+
+public fn parse_stmt_prepare_ok(payload: &[Byte])
+    -> Result<StmtPrepareOk, FrameError>
+{
+    let mut off: Int = 0;
+    // Status byte must be 0x00 — caller has already routed via classify().
+    let status = read_u8(payload, off)?; off = off + 1;
+    if status != 0 {
+        return Err(FrameError.PayloadTooShort {
+            wanted: 1, available: 0,
+        });
+    }
+    let stmt_id = read_u32_le(payload, off)?;     off = off + 4;
+    let n_cols  = read_u16_le(payload, off)?;     off = off + 2;
+    let n_params = read_u16_le(payload, off)?;    off = off + 2;
+    let _reserved = read_u8(payload, off)?;       off = off + 1;
+    let warnings = read_u16_le(payload, off)?;    off = off + 2;
+    Ok(StmtPrepareOk {
+        statement_id: stmt_id,
+        num_columns: n_cols,
+        num_params: n_params,
+        warning_count: warnings,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Binary-protocol row decoder
+// -----------------------------------------------------------------------------
+//
+// Binary result-set rows are framed as:
+//     [0x00]              header byte (NOT EOF / OK / ERR)
+//     [null_bitmap]       ceil((n_cols + 2) / 8) bytes — note +2
+//                          offset for backwards-compat with old proto
+//     [for each non-NULL column: type-specific payload]
+//
+// v0.1 returns each row as a List<Maybe<List<Byte>>> — None for NULL,
+// Some(bytes) for the column's type-encoded value.  Higher layers
+// translate to typed columns via `core.database.common.types.WireRow`.
+
+public fn parse_binary_row(
+    payload: &[Byte],
+    column_types: &List<Int>,
+) -> Result<List<Maybe<List<Byte>>>, FrameError> {
+    let n = column_types.len();
+    let mut off: Int = 0;
+    let header = read_u8(payload, off)?; off = off + 1;
+    if header != 0 {
+        return Err(FrameError.PayloadTooShort { wanted: 1, available: 0 });
+    }
+
+    let bitmap_len = (n + 7 + 2) / 8;
+    let mut nulls: List<Bool> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        // Bitmap layout: bit (i + 2) of LE-packed bitmap.
+        let bit = i + 2;
+        let byte_idx = bit / 8;
+        let bit_idx = bit % 8;
+        let b = read_u8(payload, off + byte_idx)?;
+        nulls.push((b & ((1 << bit_idx) as Int)) != 0);
+        i = i + 1;
+    }
+    off = off + bitmap_len;
+
+    let mut row: List<Maybe<List<Byte>>> = List.with_capacity(n);
+    let mut k: Int = 0;
+    while k < n {
+        if nulls[k] {
+            row.push(None);
+        } else {
+            let ty = column_types[k];
+            let (bytes, consumed) = decode_binary_value(payload, off, ty)?;
+            off = off + consumed;
+            row.push(Some(bytes));
+        }
+        k = k + 1;
+    }
+    Ok(row)
+}
+
+/// Decode one column value at `off` in `payload`, returning the raw
+/// payload bytes and the count of bytes consumed.  Type-specific
+/// fixed widths follow the MySQL binary protocol; lenenc-prefixed
+/// variable-length fields share decoding via `read_lenenc_string`.
+fn decode_binary_value(
+    payload: &[Byte],
+    off: Int,
+    column_type: Int,
+) -> Result<(List<Byte>, Int), FrameError> {
+    // Fixed-width integers + floats.
+    if column_type == 0x01 {           // TINY
+        let v = read_u8(payload, off)?;
+        let mut b = List.new(); b.push(v as Byte); return Ok((b, 1));
+    }
+    if column_type == 0x02 {           // SHORT
+        let mut b = List.with_capacity(2);
+        b.push(read_u8(payload, off)? as Byte);
+        b.push(read_u8(payload, off + 1)? as Byte);
+        return Ok((b, 2));
+    }
+    if column_type == 0x03 || column_type == 0x09 {   // LONG / INT24
+        let mut b = List.with_capacity(4);
+        let mut j: Int = 0;
+        while j < 4 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
+        return Ok((b, 4));
+    }
+    if column_type == 0x08 {           // LONGLONG
+        let mut b = List.with_capacity(8);
+        let mut j: Int = 0;
+        while j < 8 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
+        return Ok((b, 8));
+    }
+    if column_type == 0x04 {           // FLOAT
+        let mut b = List.with_capacity(4);
+        let mut j: Int = 0;
+        while j < 4 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
+        return Ok((b, 4));
+    }
+    if column_type == 0x05 {           // DOUBLE
+        let mut b = List.with_capacity(8);
+        let mut j: Int = 0;
+        while j < 8 { b.push(read_u8(payload, off + j)? as Byte); j = j + 1; }
+        return Ok((b, 8));
+    }
+    // VARCHAR / VAR_STRING / STRING / BLOB / DECIMAL / NEWDECIMAL —
+    // length-encoded.
+    let (opt, consumed) = read_lenenc_string(payload, off)?;
+    let bytes = match opt {
+        Some(v) => v,
+        None    => List.new(),
+    };
+    Ok((bytes, consumed))
+}
+
+// -----------------------------------------------------------------------------
 // First-byte dispatcher.
 // -----------------------------------------------------------------------------
 
