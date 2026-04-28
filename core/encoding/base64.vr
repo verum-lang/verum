@@ -118,11 +118,67 @@ fn decode_with(input: &Text, url_safe: Bool) -> Result<List<Byte>, Base64Error> 
     let cap = (n / 4) * 3 + 2;
     let mut out: List<Byte> = List.with_capacity(cap);
     let mut i = 0;
-    // Strip trailing '=' padding — treat it as a length hint only.
+    // Count trailing '=' padding without yet stripping. We need the
+    // count to enforce the standard-base64 padding contract below.
+    let mut pad_chars: Int = 0;
     let mut effective = n;
     while effective > 0 && bytes[effective - 1] == 0x3D_u8 {
         effective = effective - 1;
+        pad_chars = pad_chars + 1;
     }
+    let rem = effective - i - ((effective - i) / 4) * 4;
+
+    // Standard base64 (RFC 4648 §3.2): the encoded output MUST be a
+    // multiple of 4 chars including padding. URL-safe (§5): padding
+    // is OPTIONAL but must still produce a multiple of 4 if present.
+    // A malformed mix (e.g., one '=' instead of two) is rejected
+    // outright — accepting non-canonical encodings is a known
+    // smuggling vector for capability tokens / fingerprints.
+    if !url_safe {
+        if n % 4 != 0 {
+            return Err(Base64Error {
+                kind: InvalidLength,
+                position: n,
+                message: "standard base64 input length must be a multiple of 4",
+            });
+        }
+        // Padding count must be 0, 1, or 2 — exactly what the
+        // input-length-mod-3 of the source bytes would produce.
+        if pad_chars > 2 {
+            return Err(Base64Error {
+                kind: InvalidPadding,
+                position: effective,
+                message: "more than 2 trailing '=' characters",
+            });
+        }
+        // Trailing-group size after stripping padding must match the
+        // padding count: 2 chars + 2 pad, 3 chars + 1 pad, 4 chars + 0 pad.
+        if pad_chars == 1 && rem != 3 {
+            return Err(Base64Error {
+                kind: InvalidPadding,
+                position: effective,
+                message: "single '=' must follow a 3-char group",
+            });
+        }
+        if pad_chars == 2 && rem != 2 {
+            return Err(Base64Error {
+                kind: InvalidPadding,
+                position: effective,
+                message: "double '==' must follow a 2-char group",
+            });
+        }
+    } else {
+        // URL-safe accepts padded or unpadded but rejects malformed
+        // intermediate forms.
+        if pad_chars > 2 {
+            return Err(Base64Error {
+                kind: InvalidPadding,
+                position: effective,
+                message: "more than 2 trailing '=' characters",
+            });
+        }
+    }
+
     // Pull 4 chars → 3 bytes. Last group may be 2 or 3 chars.
     while i + 4 <= effective {
         let c0 = decode_byte(bytes[i], url_safe, i)?;
@@ -134,21 +190,40 @@ fn decode_with(input: &Text, url_safe: Bool) -> Result<List<Byte>, Base64Error> 
         out.push((((c2 & 0x03) << 6) | c3) as Byte);
         i = i + 4;
     }
-    let rem = effective - i;
-    if rem == 1 {
+    let tail = effective - i;
+    if tail == 1 {
         return Err(Base64Error {
             kind: InvalidLength,
             position: i,
             message: "dangling character at end",
         });
-    } else if rem == 2 {
+    } else if tail == 2 {
         let c0 = decode_byte(bytes[i], url_safe, i)?;
         let c1 = decode_byte(bytes[i + 1], url_safe, i + 1)?;
+        // RFC 4648 §3.5 — non-significant bits in the final char must
+        // be zero. For a 2-char tail the low 4 bits of c1 are
+        // non-significant (only the high 2 bits feed the next byte).
+        if (c1 & 0x0F) != 0 {
+            return Err(Base64Error {
+                kind: InvalidPadding,
+                position: i + 1,
+                message: "non-canonical: trailing bits must be zero",
+            });
+        }
         out.push(((c0 << 2) | (c1 >> 4)) as Byte);
-    } else if rem == 3 {
+    } else if tail == 3 {
         let c0 = decode_byte(bytes[i], url_safe, i)?;
         let c1 = decode_byte(bytes[i + 1], url_safe, i + 1)?;
         let c2 = decode_byte(bytes[i + 2], url_safe, i + 2)?;
+        // RFC 4648 §3.5 — for a 3-char tail the low 2 bits of c2 are
+        // non-significant.
+        if (c2 & 0x03) != 0 {
+            return Err(Base64Error {
+                kind: InvalidPadding,
+                position: i + 2,
+                message: "non-canonical: trailing bits must be zero",
+            });
+        }
         out.push(((c0 << 2) | (c1 >> 4)) as Byte);
         out.push((((c1 & 0x0F) << 4) | (c2 >> 2)) as Byte);
     }
