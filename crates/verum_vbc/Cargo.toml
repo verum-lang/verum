@@ -119,6 +119,12 @@ harness = false
 name = "dispatch_microbench"
 harness = false
 
+# #12 / P3.2 — PermissionRouter warm-path microbench. Pins the
+# ≤2ns architectural budget for the gating system's hot path.
+[[bench]]
+name = "permission_router_bench"
+harness = false
+
 # Layout-invariant verifier integration tests need the `codegen` feature
 # because they construct synthetic `TypeDescriptor` values via the
 # codegen surface and call `VbcCodegen::verify_type_layout_invariants`.
