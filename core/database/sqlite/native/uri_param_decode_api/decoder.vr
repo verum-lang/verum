@@ -46,6 +46,10 @@ fn is_digit(b: u8) -> Bool {
 }
 
 // sqlite3_uri_int64 — strict integer parse (digits only after optional sign).
+//
+// Three-layer overflow defense (#70-#74 recipe). URI parameters arrive
+// from connection-string text — a hostile string with a digit-run > 19
+// chars must be rejected at the bridge rather than silently wrap.
 public fn parse_int64(raw: &Text, default_when_invalid: Int64) -> Int64 {
     let bs = raw.as_bytes();
     if bs.len() == 0 { return default_when_invalid; }
@@ -54,12 +58,19 @@ public fn parse_int64(raw: &Text, default_when_invalid: Int64) -> Int64 {
     if bs[0] == (0x2D as u8) { negative = true; i = 1; }
     else if bs[0] == (0x2B as u8) { i = 1; }
     if i >= bs.len() { return default_when_invalid; }
+    // Layer 1: digit-count cap. Int64.MAX is 19 digits; a longer
+    // digit-run necessarily overflows the accumulator.
+    if (bs.len() - i) > 19 { return default_when_invalid; }
     let mut acc: Int64 = 0 as Int64;
     let mut had_digit = false;
     while i < bs.len() {
         if !is_digit(bs[i]) { return default_when_invalid; }
         let d = (bs[i] - (0x30 as u8)) as Int64;
+        // Layer 2: per-step `acc > MAX/10` guard.
+        if acc > 922_337_203_685_477_580_i64 { return default_when_invalid; }
         acc = acc * 10_i64 + d;
+        // Layer 3: post-add wrap-around guard (catches Int.MIN cases).
+        if acc < 0_i64 { return default_when_invalid; }
         had_digit = true;
         i = i + 1;
     }
