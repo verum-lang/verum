@@ -162,12 +162,15 @@ public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError>
 // =============================================================================
 
 fn match_dns_pattern(pattern: &Text, hostname: &Text) -> Bool {
-    // Case-insensitive ASCII compare. DNS hostnames are lowercase in
-    // canonical form; WebPKI SANs SHOULD be lowercase too.
-    let p = pattern.to_lowercase();
-    let h = hostname.to_lowercase();
-    let pb = p.as_bytes();
-    let hb = h.as_bytes();
+    // Case-insensitive ASCII compare. RFC 6125 / WebPKI restricts DNS
+    // names to ASCII; non-ASCII (IDN) names are converted to A-labels
+    // (Punycode, ASCII-only) before reaching this matcher. The ASCII
+    // fast path suffices — fold-and-compare in place, no allocation.
+    // Previous version called `pattern.to_lowercase()` and
+    // `hostname.to_lowercase()` per match attempt — allocator pressure
+    // on every TLS handshake's SAN check.
+    let pb = pattern.as_bytes();
+    let hb = hostname.as_bytes();
 
     // Wildcard rule: the leftmost label of `pattern` may be exactly "*"
     // (e.g. "*.example.com"). Wildcard matches exactly one DNS label,
@@ -181,17 +184,28 @@ fn match_dns_pattern(pattern: &Text, hostname: &Text) -> Bool {
         if i == 0 || i >= hb.len() { return false; }         // empty or no dot
         let host_tail = &hb[(i + 1)..];
         let pat_tail  = &pb[2..];
-        return bytes_eq_i(host_tail, pat_tail);
+        return ascii_eq_ci(host_tail, pat_tail);
     }
 
-    bytes_eq_i(pb, hb)
+    ascii_eq_ci(pb, hb)
 }
 
-fn bytes_eq_i(a: &[Byte], b: &[Byte]) -> Bool {
+/// ASCII-only case-insensitive byte equality. Folds 'A'..'Z' → 'a'..'z'
+/// inline per byte, no allocation. Caller invariant: both inputs are
+/// ASCII (DNS / WebPKI names are pre-converted to A-labels).
+fn ascii_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
     if a.len() != b.len() { return false; }
     let mut i: Int = 0;
     while i < a.len() {
-        if a[i] != b[i] { return false; }
+        let ai = a[i];
+        let bi = b[i];
+        let af = if ai >= (0x41 as Byte) && ai <= (0x5A as Byte) {
+            ai + (0x20 as Byte)
+        } else { ai };
+        let bf = if bi >= (0x41 as Byte) && bi <= (0x5A as Byte) {
+            bi + (0x20 as Byte)
+        } else { bi };
+        if af != bf { return false; }
         i = i + 1;
     }
     true

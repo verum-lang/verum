@@ -201,14 +201,19 @@ fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
 // =============================================================================
 
 fn dns_within_subtree(host: &Text, subtree: &Text) -> Bool {
-    let h = host.to_lowercase();
-    let mut s = subtree.to_lowercase();
-    // Normalise: strip leading "."
-    if s.as_bytes().len() > 0 && s.as_bytes()[0] == ('.' as Byte) {
-        s = Text.from_utf8_lossy(&s.as_bytes()[1..]);
+    // Allocation-free: compare byte slices directly, fold ASCII case
+    // inline. The previous impl built two lowercase Texts per call
+    // (RFC 5280 NameConstraints validation runs once per cert in the
+    // chain — TLS handshake hot path on the verifier side). DNS / SAN
+    // names are ASCII-only in WebPKI (RFC 6125), so the ASCII fast
+    // path is sufficient.
+    let hb = host.as_bytes();
+    let mut sb = subtree.as_bytes();
+    // Normalise: strip leading "." from subtree (RFC 5280 doesn't
+    // recognise it, but common practice treats both forms identically).
+    if sb.len() > 0 && sb[0] == ('.' as Byte) {
+        sb = &sb[1..];
     }
-    let hb = h.as_bytes();
-    let sb = s.as_bytes();
     if sb.len() == 0 { return true; }    // Empty subtree matches everything
     if hb.len() < sb.len() { return false; }
     // Suffix match; additionally require either exact equality or a
@@ -216,9 +221,21 @@ fn dns_within_subtree(host: &Text, subtree: &Text) -> Bool {
     let offset = hb.len() - sb.len();
     let mut i: Int = 0;
     while i < sb.len() {
-        if hb[offset + i] != sb[i] { return false; }
+        if !ascii_byte_eq_ci(hb[offset + i], sb[i]) { return false; }
         i = i + 1;
     }
     if offset == 0 { return true; }
     hb[offset - 1] == ('.' as Byte)
+}
+
+/// ASCII case-insensitive single-byte equality.
+@inline
+fn ascii_byte_eq_ci(a: Byte, b: Byte) -> Bool {
+    let af = if a >= (0x41 as Byte) && a <= (0x5A as Byte) {
+        a + (0x20 as Byte)
+    } else { a };
+    let bf = if b >= (0x41 as Byte) && b <= (0x5A as Byte) {
+        b + (0x20 as Byte)
+    } else { b };
+    af == bf
 }
