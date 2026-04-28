@@ -32,6 +32,42 @@ public type IsoParseError is
     | IpeBadTime
     | IpeOutOfRange;
 
+implement Display for IsoParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            IpeBadFormat   => "ISO datetime: format invalid",
+            IpeBadDate     => "ISO datetime: date component invalid",
+            IpeBadTime     => "ISO datetime: time component invalid",
+            IpeOutOfRange  => "ISO datetime: value out of range",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for IsoParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            IpeBadFormat   => "IpeBadFormat",
+            IpeBadDate     => "IpeBadDate",
+            IpeBadTime     => "IpeBadTime",
+            IpeOutOfRange  => "IpeOutOfRange",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for IsoParseError {
+    fn eq(&self, other: &IsoParseError) -> Bool {
+        match (self, other) {
+            (IpeBadFormat,  IpeBadFormat)  => true,
+            (IpeBadDate,    IpeBadDate)    => true,
+            (IpeBadTime,    IpeBadTime)    => true,
+            (IpeOutOfRange, IpeOutOfRange) => true,
+            _ => false,
+        }
+    }
+}
+
 public fn parse_error_name(e: &IsoParseError) -> Text {
     match e {
         IpeBadFormat   => "bad_format".clone(),

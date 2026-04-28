@@ -37,6 +37,37 @@ public type LoadError is
     | EntryNotFound(Text)
     | EntryFailed(Text);
 
+implement Display for LoadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LoadDisabled       => f.write_str("sqlite extension loading disabled"),
+            EntryNotFound(e)   => f.write_str(f"sqlite extension entry not found: {e}".as_str()),
+            EntryFailed(e)     => f.write_str(f"sqlite extension entry failed: {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for LoadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LoadDisabled       => f.write_str("LoadDisabled"),
+            EntryNotFound(e)   => f.write_str(f"EntryNotFound({e})".as_str()),
+            EntryFailed(e)     => f.write_str(f"EntryFailed({e})".as_str()),
+        }
+    }
+}
+
+implement Eq for LoadError {
+    fn eq(&self, other: &LoadError) -> Bool {
+        match (self, other) {
+            (LoadDisabled,     LoadDisabled)     => true,
+            (EntryNotFound(a), EntryNotFound(b)) => a == b,
+            (EntryFailed(a),   EntryFailed(b))   => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Extension entry record
 // -----------------------------------------------------------------------------

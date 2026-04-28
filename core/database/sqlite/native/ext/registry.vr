@@ -37,6 +37,37 @@ public type RegistryError is
     | NotFound(Text)
     | InvalidArity(Text);
 
+implement Display for RegistryError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            AlreadyRegistered(n) => f.write_str(f"sqlite ext registry: {n} already registered".as_str()),
+            NotFound(n)          => f.write_str(f"sqlite ext registry: {n} not found".as_str()),
+            InvalidArity(n)      => f.write_str(f"sqlite ext registry: {n} invalid arity".as_str()),
+        }
+    }
+}
+
+implement Debug for RegistryError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            AlreadyRegistered(n) => f.write_str(f"AlreadyRegistered({n})".as_str()),
+            NotFound(n)          => f.write_str(f"NotFound({n})".as_str()),
+            InvalidArity(n)      => f.write_str(f"InvalidArity({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for RegistryError {
+    fn eq(&self, other: &RegistryError) -> Bool {
+        match (self, other) {
+            (AlreadyRegistered(a), AlreadyRegistered(b)) => a == b,
+            (NotFound(a),          NotFound(b))          => a == b,
+            (InvalidArity(a),      InvalidArity(b))      => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // ScalarFn entry — stored as a Heap<dyn ScalarFn>
 // -----------------------------------------------------------------------------

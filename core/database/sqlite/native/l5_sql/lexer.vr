@@ -100,6 +100,24 @@ public type SqlLexError is {
     position: Int,
 };
 
+implement Display for SqlLexError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"sqlite SQL lex error at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for SqlLexError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"SqlLexError {{ message: {self.message}, position: {self.position} }}".as_str())
+    }
+}
+
+implement Eq for SqlLexError {
+    fn eq(&self, other: &SqlLexError) -> Bool {
+        self.message == other.message && self.position == other.position
+    }
+}
+
 // -----------------------------------------------------------------------------
 // SqlKeyword lookup
 // -----------------------------------------------------------------------------

@@ -78,6 +78,37 @@ public type CsvError is
     | CeBadEscape(Int)
     | CeShortRow(Int);
 
+implement Display for CsvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeUnclosedQuote(line) => f.write_str(f"CSV unclosed quote at line {line}".as_str()),
+            CeBadEscape(line)     => f.write_str(f"CSV bad escape at line {line}".as_str()),
+            CeShortRow(line)      => f.write_str(f"CSV short row at line {line}".as_str()),
+        }
+    }
+}
+
+implement Debug for CsvError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeUnclosedQuote(line) => f.write_str(f"CeUnclosedQuote({line})".as_str()),
+            CeBadEscape(line)     => f.write_str(f"CeBadEscape({line})".as_str()),
+            CeShortRow(line)      => f.write_str(f"CeShortRow({line})".as_str()),
+        }
+    }
+}
+
+implement Eq for CsvError {
+    fn eq(&self, other: &CsvError) -> Bool {
+        match (self, other) {
+            (CeUnclosedQuote(a), CeUnclosedQuote(b)) => a == b,
+            (CeBadEscape(a),     CeBadEscape(b))     => a == b,
+            (CeShortRow(a),      CeShortRow(b))      => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Row + parser
 // -----------------------------------------------------------------------------

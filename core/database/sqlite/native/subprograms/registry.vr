@@ -25,6 +25,39 @@ public type SubProgramError is
     | SpNotFound
     | SpRegisterWindowTooLarge;
 
+implement Display for SubProgramError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            SpDuplicateName          => "sqlite subprogram duplicate name",
+            SpNotFound               => "sqlite subprogram not found",
+            SpRegisterWindowTooLarge => "sqlite subprogram register window too large",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for SubProgramError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            SpDuplicateName          => "SpDuplicateName",
+            SpNotFound               => "SpNotFound",
+            SpRegisterWindowTooLarge => "SpRegisterWindowTooLarge",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for SubProgramError {
+    fn eq(&self, other: &SubProgramError) -> Bool {
+        match (self, other) {
+            (SpDuplicateName,          SpDuplicateName)          => true,
+            (SpNotFound,               SpNotFound)               => true,
+            (SpRegisterWindowTooLarge, SpRegisterWindowTooLarge) => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Configuration
 // -----------------------------------------------------------------------------

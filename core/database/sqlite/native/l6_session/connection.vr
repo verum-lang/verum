@@ -109,6 +109,43 @@ public type ConnectionError is
     | TxNotActive
     | IoError(Text);
 
+implement Display for ConnectionError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotWritable     => f.write_str("sqlite connection not writable"),
+            NotAdmin        => f.write_str("sqlite connection not admin"),
+            TxAlreadyActive => f.write_str("sqlite transaction already active"),
+            TxNotActive     => f.write_str("sqlite no active transaction"),
+            IoError(m)      => f.write_str(f"sqlite connection I/O error: {m}".as_str()),
+        }
+    }
+}
+
+implement Debug for ConnectionError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotWritable     => f.write_str("NotWritable"),
+            NotAdmin        => f.write_str("NotAdmin"),
+            TxAlreadyActive => f.write_str("TxAlreadyActive"),
+            TxNotActive     => f.write_str("TxNotActive"),
+            IoError(m)      => f.write_str(f"IoError({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for ConnectionError {
+    fn eq(&self, other: &ConnectionError) -> Bool {
+        match (self, other) {
+            (NotWritable,     NotWritable)     => true,
+            (NotAdmin,        NotAdmin)        => true,
+            (TxAlreadyActive, TxAlreadyActive) => true,
+            (TxNotActive,     TxNotActive)     => true,
+            (IoError(a),      IoError(b))      => a == b,
+            _ => false,
+        }
+    }
+}
+
 public type Connection is {
     mode: ConnectionMode,
     pager: Pager,

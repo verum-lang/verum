@@ -38,6 +38,43 @@ public type MigrationPlanError is
     | PeUnknownDependency(Int, Int)   // (migration version, missing dep)
     | PeCycle(List<Int>);
 
+implement Display for MigrationPlanError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PeDuplicateVersion(v)         =>
+                f.write_str(f"sqlite migration duplicate version {v}".as_str()),
+            PeUnknownDependency(ver, dep) =>
+                f.write_str(f"sqlite migration {ver} depends on missing version {dep}".as_str()),
+            PeCycle(versions)             =>
+                f.write_str(f"sqlite migration cycle through {versions.len()} versions".as_str()),
+        }
+    }
+}
+
+implement Debug for MigrationPlanError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PeDuplicateVersion(v)         =>
+                f.write_str(f"PeDuplicateVersion({v})".as_str()),
+            PeUnknownDependency(ver, dep) =>
+                f.write_str(f"PeUnknownDependency({ver}, {dep})".as_str()),
+            PeCycle(versions)             =>
+                f.write_str(f"PeCycle(<{versions.len()} versions>)".as_str()),
+        }
+    }
+}
+
+implement Eq for MigrationPlanError {
+    fn eq(&self, other: &MigrationPlanError) -> Bool {
+        match (self, other) {
+            (PeDuplicateVersion(a), PeDuplicateVersion(b)) => a == b,
+            (PeUnknownDependency(va, da), PeUnknownDependency(vb, db)) => va == vb && da == db,
+            (PeCycle(a), PeCycle(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // MigrationPlan
 // -----------------------------------------------------------------------------

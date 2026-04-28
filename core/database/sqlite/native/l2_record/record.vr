@@ -69,6 +69,37 @@ public type RecordError is
     | ReservedCode(code: Int64)
     | InvalidLength(got: Int64);
 
+implement Display for RecordError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ShortBuffer        => f.write_str("sqlite record buffer truncated"),
+            ReservedCode(c)    => f.write_str(f"sqlite record reserved serial-type code {c}".as_str()),
+            InvalidLength(g)   => f.write_str(f"sqlite record invalid length {g}".as_str()),
+        }
+    }
+}
+
+implement Debug for RecordError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ShortBuffer        => f.write_str("ShortBuffer"),
+            ReservedCode(c)    => f.write_str(f"ReservedCode({c})".as_str()),
+            InvalidLength(g)   => f.write_str(f"InvalidLength({g})".as_str()),
+        }
+    }
+}
+
+implement Eq for RecordError {
+    fn eq(&self, other: &RecordError) -> Bool {
+        match (self, other) {
+            (ShortBuffer,      ShortBuffer)      => true,
+            (ReservedCode(a),  ReservedCode(b))  => a == b,
+            (InvalidLength(a), InvalidLength(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Encode a SerialType as its on-disk varint-able u64 code.
 public fn serial_type_encode(st: SerialType) -> Int64 {
     match st {

@@ -34,6 +34,24 @@ public fn parse_error(msg: Text, position: Int) -> SqlParseError {
     SqlParseError { message: msg, position: position }
 }
 
+implement Display for SqlParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"sqlite SQL parse error at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for SqlParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"SqlParseError {{ message: {self.message}, position: {self.position} }}".as_str())
+    }
+}
+
+implement Eq for SqlParseError {
+    fn eq(&self, other: &SqlParseError) -> Bool {
+        self.message == other.message && self.position == other.position
+    }
+}
+
 // -----------------------------------------------------------------------------
 // SqlTokenStream
 // -----------------------------------------------------------------------------

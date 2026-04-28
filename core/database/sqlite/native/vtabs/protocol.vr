@@ -32,6 +32,43 @@ public type VtabError is
     | VtabIo(Text)
     | VtabInternal(Text);
 
+implement Display for VtabError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            VtabUnsupported(m)   => f.write_str(f"vtab unsupported: {m}".as_str()),
+            VtabConstraint(m)    => f.write_str(f"vtab constraint: {m}".as_str()),
+            VtabSchemaInvalid(m) => f.write_str(f"vtab schema invalid: {m}".as_str()),
+            VtabIo(m)            => f.write_str(f"vtab I/O error: {m}".as_str()),
+            VtabInternal(m)      => f.write_str(f"vtab internal error: {m}".as_str()),
+        }
+    }
+}
+
+implement Debug for VtabError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            VtabUnsupported(m)   => f.write_str(f"VtabUnsupported({m})".as_str()),
+            VtabConstraint(m)    => f.write_str(f"VtabConstraint({m})".as_str()),
+            VtabSchemaInvalid(m) => f.write_str(f"VtabSchemaInvalid({m})".as_str()),
+            VtabIo(m)            => f.write_str(f"VtabIo({m})".as_str()),
+            VtabInternal(m)      => f.write_str(f"VtabInternal({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for VtabError {
+    fn eq(&self, other: &VtabError) -> Bool {
+        match (self, other) {
+            (VtabUnsupported(a),   VtabUnsupported(b))   => a == b,
+            (VtabConstraint(a),    VtabConstraint(b))    => a == b,
+            (VtabSchemaInvalid(a), VtabSchemaInvalid(b)) => a == b,
+            (VtabIo(a),            VtabIo(b))            => a == b,
+            (VtabInternal(a),      VtabInternal(b))      => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Schema announced by a vtab implementation
 // -----------------------------------------------------------------------------

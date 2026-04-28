@@ -48,6 +48,40 @@ public type ResolveError is
 public fn resolve_error_unknown_table(name: Text) -> ResolveError { UnknownTable(name) }
 public fn resolve_error_unknown_column(col: Text) -> ResolveError { UnknownColumn(col) }
 
+implement Display for ResolveError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnknownTable(name)    => f.write_str(f"sqlite unknown table: {name}".as_str()),
+            UnknownColumn(col)    => f.write_str(f"sqlite unknown column: {col}".as_str()),
+            AmbiguousColumn(col)  => f.write_str(f"sqlite ambiguous column reference: {col}".as_str()),
+            TooComplex(what)      => f.write_str(f"sqlite query too complex to resolve: {what}".as_str()),
+        }
+    }
+}
+
+implement Debug for ResolveError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnknownTable(name)    => f.write_str(f"UnknownTable({name})".as_str()),
+            UnknownColumn(col)    => f.write_str(f"UnknownColumn({col})".as_str()),
+            AmbiguousColumn(col)  => f.write_str(f"AmbiguousColumn({col})".as_str()),
+            TooComplex(what)      => f.write_str(f"TooComplex({what})".as_str()),
+        }
+    }
+}
+
+implement Eq for ResolveError {
+    fn eq(&self, other: &ResolveError) -> Bool {
+        match (self, other) {
+            (UnknownTable(a),    UnknownTable(b))    => a == b,
+            (UnknownColumn(a),   UnknownColumn(b))   => a == b,
+            (AmbiguousColumn(a), AmbiguousColumn(b)) => a == b,
+            (TooComplex(a),      TooComplex(b))      => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // ColumnScope
 // -----------------------------------------------------------------------------

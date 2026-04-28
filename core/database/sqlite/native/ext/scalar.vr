@@ -36,6 +36,40 @@ public type ScalarFnError is
     | TypeError(Text)
     | InternalError(Text);
 
+implement Display for ScalarFnError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ArityMismatch(m) => f.write_str(f"sqlite scalar fn arity mismatch: {m}".as_str()),
+            DomainError(m)   => f.write_str(f"sqlite scalar fn domain error: {m}".as_str()),
+            TypeError(m)     => f.write_str(f"sqlite scalar fn type error: {m}".as_str()),
+            InternalError(m) => f.write_str(f"sqlite scalar fn internal error: {m}".as_str()),
+        }
+    }
+}
+
+implement Debug for ScalarFnError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ArityMismatch(m) => f.write_str(f"ArityMismatch({m})".as_str()),
+            DomainError(m)   => f.write_str(f"DomainError({m})".as_str()),
+            TypeError(m)     => f.write_str(f"TypeError({m})".as_str()),
+            InternalError(m) => f.write_str(f"InternalError({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for ScalarFnError {
+    fn eq(&self, other: &ScalarFnError) -> Bool {
+        match (self, other) {
+            (ArityMismatch(a), ArityMismatch(b)) => a == b,
+            (DomainError(a),   DomainError(b))   => a == b,
+            (TypeError(a),     TypeError(b))     => a == b,
+            (InternalError(a), InternalError(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Protocol
 // -----------------------------------------------------------------------------
