@@ -210,9 +210,8 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             if minor == 31_u8 { return decode_indef_bytes(bytes, pos); }
             let len = read_arg(bytes, pos, minor)? as Int;
             if *pos + len > bytes.len() { return Err(CborError.Truncated(*pos)); }
-            let mut buf: List<Byte> = [];
-            let mut i: Int = 0;
-            while i < len { buf.push(bytes[*pos + i]); i = i + 1; }
+            let mut buf: List<Byte> = List.with_capacity(len);
+            buf.extend_from_slice(&bytes[*pos..*pos + len]);
             *pos = *pos + len;
             Ok(CborValue.CborBytes(buf))
         },
@@ -220,9 +219,8 @@ fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<CborValue, C
             if minor == 31_u8 { return decode_indef_text(bytes, pos); }
             let len = read_arg(bytes, pos, minor)? as Int;
             if *pos + len > bytes.len() { return Err(CborError.Truncated(*pos)); }
-            let mut buf: List<Byte> = [];
-            let mut i: Int = 0;
-            while i < len { buf.push(bytes[*pos + i]); i = i + 1; }
+            let mut buf: List<Byte> = List.with_capacity(len);
+            buf.extend_from_slice(&bytes[*pos..*pos + len]);
             *pos = *pos + len;
             Ok(CborValue.CborText(Text.from_utf8_unchecked(buf.as_slice())))
         },
@@ -331,8 +329,7 @@ fn decode_indef_bytes(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborEr
         let chunk = decode_item(bytes, pos, 1)?;
         match chunk {
             CborValue.CborBytes(b) => {
-                let mut i: Int = 0;
-                while i < b.len() { acc.push(b[i]); i = i + 1; }
+                acc.extend_from_slice(b.as_slice());
             },
             _ => return Err(CborError.InvalidIndefinite),
         }
@@ -347,9 +344,7 @@ fn decode_indef_text(bytes: &[Byte], pos: &mut Int) -> Result<CborValue, CborErr
         let chunk = decode_item(bytes, pos, 1)?;
         match chunk {
             CborValue.CborText(t) => {
-                let b = t.as_bytes();
-                let mut i: Int = 0;
-                while i < b.len() { acc.push(b[i]); i = i + 1; }
+                acc.extend_from_slice(t.as_bytes());
             },
             _ => return Err(CborError.InvalidIndefinite),
         }

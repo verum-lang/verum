@@ -309,16 +309,14 @@ implement H3Connection {
         match &mut st.kind {
             PeerUniKind.UnknownUni => {
                 // Not yet parsed the prefix — buffer + try.
-                let mut tmp: List<Byte> = [];
-                let mut i: Int = 0;
-                while i < bytes.len() { tmp.push(bytes[i]); i = i + 1; }
+                let mut tmp: List<Byte> = List.with_capacity(bytes.len());
+                tmp.extend_from_slice(bytes);
                 match decode_stream_type(tmp.as_slice()) {
                     Ok((uk, pos)) => {
                         match uk {
                             UniStreamType.ControlStream => {
-                                let mut remaining: List<Byte> = [];
-                                let mut j: Int = pos;
-                                while j < tmp.len() { remaining.push(tmp[j]); j = j + 1; }
+                                let mut remaining: List<Byte> = List.with_capacity(tmp.len() - pos);
+                                remaining.extend_from_slice(&tmp.as_slice()[pos..]);
                                 st.kind = PeerUniKind.ControlStream { buf: remaining };
                                 // Try to parse any already-buffered frames.
                                 self.drain_control_stream(stream_id)?;
@@ -341,8 +339,7 @@ implement H3Connection {
                 }
             },
             PeerUniKind.ControlStream { buf } => {
-                let mut i: Int = 0;
-                while i < bytes.len() { buf.push(bytes[i]); i = i + 1; }
+                buf.extend_from_slice(bytes);
                 self.drain_control_stream(stream_id)?;
             },
             PeerUniKind.QpackEncoderStream => {
@@ -401,9 +398,8 @@ implement H3Connection {
             if self.peer_unistreams[i].stream_id == sid {
                 match &mut self.peer_unistreams[i].kind {
                     PeerUniKind.ControlStream { buf } => {
-                        let mut new_buf: List<Byte> = [];
-                        let mut j: Int = consumed;
-                        while j < buf.len() { new_buf.push(buf[j]); j = j + 1; }
+                        let mut new_buf: List<Byte> = List.with_capacity(buf.len() - consumed);
+                        new_buf.extend_from_slice(&buf.as_slice()[consumed..]);
                         *buf = new_buf;
                     },
                     _ => {},
@@ -448,8 +444,7 @@ implement H3Connection {
         fin: Bool,
     ) -> Result<(), H3Error> {
         let st = self.find_or_create_req(stream_id);
-        let mut i: Int = 0;
-        while i < bytes.len() { st.buf.push(bytes[i]); i = i + 1; }
+        st.buf.extend_from_slice(bytes);
 
         // Drain frames.
         let mut decoded_headers: Maybe<List<QpackHeaderField>> = None;
@@ -459,9 +454,8 @@ implement H3Connection {
             match decode_frame(st.buf.as_slice(), 0) {
                 Ok((frame, consumed)) => {
                     // Remove consumed bytes.
-                    let mut new_buf: List<Byte> = [];
-                    let mut j: Int = consumed;
-                    while j < st.buf.len() { new_buf.push(st.buf[j]); j = j + 1; }
+                    let mut new_buf: List<Byte> = List.with_capacity(st.buf.len() - consumed);
+                    new_buf.extend_from_slice(&st.buf.as_slice()[consumed..]);
                     st.buf = new_buf;
 
                     match frame {
@@ -475,8 +469,7 @@ implement H3Connection {
                             }
                         },
                         H3Frame.DataFrame(body_chunk) => {
-                            let mut k: Int = 0;
-                            while k < body_chunk.len() { accumulated_body.push(body_chunk[k]); k = k + 1; }
+                            accumulated_body.extend_from_slice(body_chunk.as_slice());
                         },
                         _ => {
                             // Other frames on request stream — skip
