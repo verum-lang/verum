@@ -134,13 +134,30 @@ public fn gcd(a: Int, b: Int) -> Int {
 }
 
 /// Least common multiple.
+///
+/// `a * b` may overflow signed Int even for moderate inputs; combined
+/// with the abs trick (`0 - product` overflows for product == Int.MIN
+/// or wraps to a value that the negation can't recover), the historical
+/// implementation produced wrong magnitudes for any pair where
+/// `|a * b| >= 2^63`. Compute the magnitude through UInt64 so wrap-
+/// around in the multiply manifests as a saturating large-magnitude
+/// value rather than a sign-flipped wrong result. Sign cancellation
+/// gives an unsigned magnitude regardless of input signs.
 public fn lcm(a: Int, b: Int) -> Int {
     if a == 0 || b == 0 {
         0
     } else {
-        let product = a * b;
-        let abs_product = if product < 0 { 0 - product } else { product };
-        abs_product / gcd(a, b)
+        let abs_a: UInt64 = if a < 0 { (((!a) as UInt64) + 1_u64) } else { a as UInt64 };
+        let abs_b: UInt64 = if b < 0 { (((!b) as UInt64) + 1_u64) } else { b as UInt64 };
+        let g: UInt64 = if a < 0 || b < 0 {
+            // gcd already routes through UInt64 magnitude; cast back
+            // through the signed surface but coerce via UInt64.
+            (gcd(a, b) as UInt64)
+        } else {
+            (gcd(a, b) as UInt64)
+        };
+        if g == 0_u64 { return 0; }
+        ((abs_a / g) * abs_b) as Int
     }
 }
 

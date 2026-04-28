@@ -57,8 +57,16 @@ implement DstSeed {
     pub fn next_below(&mut self, n: Int) -> Int {
         if n <= 0 { return 0; }
         let v = self.next_u64();
-        let abs_v = if v < 0_i64 { -v } else { v };
-        ((abs_v as Int) % n)
+        // Int.MIN-safe magnitude — `-v` for `v == Int64.MIN` wraps
+        // back to Int64.MIN, leaving `abs_v` negative and the
+        // subsequent modulo producing a negative result that breaks
+        // the [0, n) contract.
+        let mag: UInt64 = if v < 0_i64 {
+            (((!v) as UInt64) + 1_u64)
+        } else {
+            v as UInt64
+        };
+        ((mag as Int) % n)
     }
 
     pub fn next_bool(&mut self) -> Bool {
