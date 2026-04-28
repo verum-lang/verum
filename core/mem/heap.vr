@@ -1290,6 +1290,41 @@ implement From<SegmentError> for HeapError {
     }
 }
 
+implement Display for HeapError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for HeapError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OutOfMemory                       => f.write_str("OutOfMemory"),
+            PageExhausted                     => f.write_str("PageExhausted"),
+            InvalidPointer                    => f.write_str("InvalidPointer"),
+            InvalidSize { size }              => f.write_str(f"InvalidSize {{ size: {size} }}".as_str()),
+            InvalidAlignment { alignment }    => f.write_str(f"InvalidAlignment {{ alignment: {alignment} }}".as_str()),
+            SegmentError { inner }            => f.write_str(f"SegmentError {{ inner: {inner:?} }}".as_str()),
+            UseAfterFree                      => f.write_str("UseAfterFree"),
+        }
+    }
+}
+
+implement Eq for HeapError {
+    fn eq(&self, other: &HeapError) -> Bool {
+        match (self, other) {
+            (OutOfMemory,                       OutOfMemory)                       => true,
+            (PageExhausted,                     PageExhausted)                     => true,
+            (InvalidPointer,                    InvalidPointer)                    => true,
+            (InvalidSize { size: a },           InvalidSize { size: b })           => a == b,
+            (InvalidAlignment { alignment: a }, InvalidAlignment { alignment: b }) => a == b,
+            (SegmentError { inner: a },         SegmentError { inner: b })         => a == b,
+            (UseAfterFree,                      UseAfterFree)                      => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Thread-Local Storage
 // =============================================================================

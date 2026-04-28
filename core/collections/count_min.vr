@@ -58,6 +58,30 @@ mount core.security.util.rng.{fill_secure};
 public type CountMinError is
       BadParameters(Text);
 
+implement Display for CountMinError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadParameters(reason) => f.write_str(f"count-min sketch: bad parameters ({reason})".as_str()),
+        }
+    }
+}
+
+implement Debug for CountMinError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadParameters(reason) => f.write_str(f"BadParameters({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for CountMinError {
+    fn eq(&self, other: &CountMinError) -> Bool {
+        match (self, other) {
+            (BadParameters(a), BadParameters(b)) => a == b,
+        }
+    }
+}
+
 // =============================================================================
 // Sketch
 // =============================================================================

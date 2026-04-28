@@ -41,6 +41,24 @@ public type UuidError is {
     message: Text,
 };
 
+implement Display for UuidError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"UUID at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for UuidError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"UuidError {{ position: {self.position}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for UuidError {
+    fn eq(&self, other: &UuidError) -> Bool {
+        self.position == other.position && self.message == other.message
+    }
+}
+
 // External primitives supplied by the runtime. The stdlib does not
 // implement time or entropy itself — those come from the platform.
 //

@@ -83,6 +83,34 @@ public type UlidError is
       InvalidLength(Int)
     | InvalidCharacter(Byte);
 
+implement Display for UlidError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidLength(n)    => f.write_str(f"ULID: invalid length {n} (expected 26)".as_str()),
+            InvalidCharacter(b) => f.write_str(f"ULID: invalid character 0x{b:x}".as_str()),
+        }
+    }
+}
+
+implement Debug for UlidError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidLength(n)    => f.write_str(f"InvalidLength({n})".as_str()),
+            InvalidCharacter(b) => f.write_str(f"InvalidCharacter(0x{b:x})".as_str()),
+        }
+    }
+}
+
+implement Eq for UlidError {
+    fn eq(&self, other: &UlidError) -> Bool {
+        match (self, other) {
+            (InvalidLength(a),    InvalidLength(b))    => a == b,
+            (InvalidCharacter(a), InvalidCharacter(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Typed ULID
 // =============================================================================

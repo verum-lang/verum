@@ -85,6 +85,37 @@ public type BloomError is
     | CapacityTooLarge(Int)
     | InvalidFpRate(Int);
 
+implement Display for BloomError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EmptyCapacity        => f.write_str("Bloom filter: empty capacity"),
+            CapacityTooLarge(n)  => f.write_str(f"Bloom filter: capacity {n} too large".as_str()),
+            InvalidFpRate(rate)  => f.write_str(f"Bloom filter: invalid false-positive rate {rate}".as_str()),
+        }
+    }
+}
+
+implement Debug for BloomError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EmptyCapacity        => f.write_str("EmptyCapacity"),
+            CapacityTooLarge(n)  => f.write_str(f"CapacityTooLarge({n})".as_str()),
+            InvalidFpRate(rate)  => f.write_str(f"InvalidFpRate({rate})".as_str()),
+        }
+    }
+}
+
+implement Eq for BloomError {
+    fn eq(&self, other: &BloomError) -> Bool {
+        match (self, other) {
+            (EmptyCapacity,       EmptyCapacity)       => true,
+            (CapacityTooLarge(a), CapacityTooLarge(b)) => a == b,
+            (InvalidFpRate(a),    InvalidFpRate(b))    => a == b,
+            _ => false,
+        }
+    }
+}
+
 implement BloomFilter {
     /// Build a filter sized for a target capacity and FP rate.
     /// Panics on invalid input; prefer [`try_with_target`] when the
