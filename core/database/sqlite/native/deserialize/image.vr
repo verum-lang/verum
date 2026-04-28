@@ -29,26 +29,19 @@ implement DbImage {
 
     /// Read one page (1-based index — SQLite convention).
     pub fn read_page(&self, page_no: Int) -> List<Byte> {
-        let mut out: List<Byte> = List.new();
-        if page_no < 1 || page_no > self.page_count { return out; }
+        if page_no < 1 || page_no > self.page_count { return List.new(); }
         let off = (page_no - 1) * self.page_size;
-        let end = off + self.page_size;
-        let mut i: Int = off;
-        while i < end && i < self.bytes.len() {
-            out.push(self.bytes[i]);
-            i = i + 1;
-        }
+        let mut end = off + self.page_size;
+        if end > self.bytes.len() { end = self.bytes.len(); }
+        let mut out: List<Byte> = List.with_capacity(end - off);
+        out.extend_from_slice(&self.bytes.as_slice()[off..end]);
         out
     }
 
     /// Append a page (used when re-serialising). Caller is responsible
     /// for keeping `page_count` in sync.
     pub fn append_page(&mut self, page_bytes: List<Byte>) {
-        let mut i: Int = 0;
-        while i < page_bytes.len() {
-            self.bytes.push(page_bytes[i]);
-            i = i + 1;
-        }
+        self.bytes.extend_from_slice(page_bytes.as_slice());
         self.page_count = self.page_count + 1;
     }
 }
