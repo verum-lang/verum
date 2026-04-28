@@ -5870,6 +5870,14 @@ impl<'s> CompilationPipeline<'s> {
         self.session.record_compiled_vbc(vbc_module.clone());
 
         let mut interpreter = VbcInterpreter::new(vbc_module);
+        // Transfer the script-mode permission policy (if the CLI
+        // installed one) into the interpreter's PermissionRouter
+        // before the first instruction dispatches. The router's
+        // one-entry cache + warm path keeps repeated checks at
+        // ≤2ns; the policy itself is consulted only on cache miss.
+        if let Some(policy) = self.session.take_script_permission_policy() {
+            interpreter.state.permission_router.set_policy(policy.0);
+        }
         let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
         let main_param_count = interpreter
             .state
@@ -10990,6 +10998,11 @@ impl<'s> CompilationPipeline<'s> {
             interpreter.state.config.task_stack_size = rt.task_stack_size;
             interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
         }
+        // Script-mode permission policy (see `phase_interpret_with_args`
+        // for the full rationale).
+        if let Some(policy) = self.session.take_script_permission_policy() {
+            interpreter.state.permission_router.set_policy(policy.0);
+        }
 
         // Step 3: Find and execute main function
         let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
@@ -11108,6 +11121,11 @@ impl<'s> CompilationPipeline<'s> {
 
         // Step 2: Create VBC interpreter
         let mut interpreter = VbcInterpreter::new(vbc_module);
+        // Script-mode permission policy (see `run_compiled_vbc` for
+        // the full rationale).
+        if let Some(policy) = self.session.take_script_permission_policy() {
+            interpreter.state.permission_router.set_policy(policy.0);
+        }
 
         // Step 2b: Skip global constructors (FFI initializers corrupt state on macOS).
 
