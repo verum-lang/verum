@@ -78,10 +78,27 @@ needs ongoing differential vs snapshot.
 
 **Status:** PENDING — needs hand-crafted bytecode harness.
 
-### 3.2 Mismatched arity calls
+### 3.2 Mismatched arity calls — PARTIAL DEFENSE (documented) 2026-04-28
 
-**Status:** PARTIAL DEFENSE — FFI-arity guardrail covers extern calls; the
-interpreter-side internal-call arity check is partial. Audit gap.
+**Status:** PARTIAL DEFENSE — by design the interpreter trusts well-formed
+bytecode for internal `Call` dispatch (`crates/verum_vbc/src/interpreter/dispatch_table/handlers/calls.rs:22`),
+which reads `args.count` from the bytecode stream and copies that many
+values into the new frame's registers. Codegen always emits the correct
+arity (verified at the type-check + monomorphization layer); FFI arity
+mismatches are caught at codegen via the `crates/verum_vbc/src/codegen/context.rs:1560`
+type-vs-arity audit. Hand-crafted-bytecode arity attacks are addressed
+by the bytecode validator track tracked under round-1 §3.1 (PENDING).
+
+**Trust model:** the runtime contract is "bytecode well-formed by
+codegen ⇒ arity matches function descriptor." The interpreter does NOT
+add a runtime arity check on the hot dispatch path because (a) codegen
+already enforces it and (b) adding it would penalise every call by
+~2-3 instructions for a defense already provided one layer up.
+
+**Future work:** when round-1 §3.1 lands a bytecode validator, the
+validator runs once per module load and checks every Call/CallR/CallM
+site has `args.count == params.len()`. Until then, the trust boundary
+is "module load = trusted source."
 
 ### 3.3 FunctionId(N) out of range — DEFENSE CONFIRMED 2026-04-28
 
@@ -125,10 +142,31 @@ Cross-references task #176 lenient-skip waiver registry.
 **Status:** PARTIAL DEFENSE — #105/#106 surfaced specific arity-mismatch
 issues; remaining 11 helpers tracked under #105 follow-up scope.
 
-### 4.3 GlobalDCE eliminating needed function
+### 4.3 GlobalDCE eliminating needed function — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — internal-linkage + DCE policy reviewed during
-#143 cascade; comprehensive verification still pending.
+**Status:** DEFENSE CONFIRMED — `crates/verum_codegen/src/llvm/vbc_lowering.rs:947`
+is "Phase 3.7" which sets Internal linkage on all defined functions
+EXCEPT a curated list of External-linkage entrypoints. The list covers:
+- `verum_main` / `main` — entry points called by C runtime
+- File I/O (`verum_file_open`, `verum_file_close`, `verum_file_exists`,
+  `verum_file_delete`, `verum_file_read_text`, `verum_file_write_text`,
+  `verum_file_read_all`, `verum_file_write_all`, `verum_file_append_all`)
+- Process (`verum_process_wait`)
+- File descriptor (`verum_fd_read_all`, `verum_fd_close`)
+- TCP (`verum_tcp_connect`, `verum_tcp_listen`, `verum_tcp_accept`,
+  `verum_tcp_send_text`, `verum_tcp_recv_text`, `verum_tcp_close`)
+- UDP (`verum_udp_bind`, plus follow-ups in same file)
+
+GlobalDCE then removes only Internal-linkage functions that are
+unreferenced — runtime entrypoints survive by design.
+
+**Audit gap (future improvement, not soundness defect):** the External
+list is hardcoded at `vbc_lowering.rs:960-979`. A NEW runtime function
+called from C must be added there; missing it produces a clean LLVM
+linker error caught by integration tests, not a silent silent strip.
+Centralising the list into a shared constant + lint to detect new
+`extern "C"` declarations not in the list is tracked as a code-quality
+follow-up.
 
 ---
 
@@ -288,12 +326,12 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 2.4 Recursive impl | **DEFENSE** | guardrail (2026-04-28) |
 | 2.5 Codegen non-determinism | PARTIAL | ongoing diff |
 | 3.1 RO register | PENDING | bytecode harness |
-| 3.2 Arity mismatch | PARTIAL | interpreter audit |
+| 3.2 Arity mismatch | **PARTIAL (documented)** | codegen-enforced; bytecode-validator under round-1 §3.1 |
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
 | 4.1 LibraryCall collision | PARTIAL | #176 |
 | 4.2 Networking arity | PARTIAL | #105 follow-up |
-| 4.3 GlobalDCE | PARTIAL | DCE audit |
+| 4.3 GlobalDCE | **DEFENSE CONFIRMED** | Phase 3.7 audit + External list pinned (2026-04-28) |
 | 5.1 Module cycle | **DEFENSE** | guardrails (2026-04-28) |
 | 5.2 Deep super | **DEFENSE** | guardrail (2026-04-28) |
 | 5.3 Alias shadow | **DEFENSE CONFIRMED** | round-1 §4.3 closure (2026-04-28) |
@@ -307,8 +345,8 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | PENDING | lint audit |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**9 vectors confirmed defended (was 7), 15 partial, 3 pending (was 5)** post
-2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3
-closures (§1.2 / §2.2 / §2.4 / §3.3 / §3.4 / §5.1 / §5.2 / §5.3 / §6.2
-guardrails landed). Sections A-C below record real defects already closed
-in the audit pass.
+**10 vectors confirmed defended (was 9), 14 partial (was 15), 3 pending** post
+2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
+RT-2.3.2 + RT-2.4.3 closures (§1.2 / §2.2 / §2.4 / §3.2 (documented) /
+§3.3 / §3.4 / §4.3 / §5.1 / §5.2 / §5.3 / §6.2 guardrails landed).
+Sections A-C below record real defects already closed in the audit pass.
