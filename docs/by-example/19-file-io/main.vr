@@ -1,0 +1,47 @@
+// docs/by-example/19-file-io/main.vr
+// File I/O: read_to_string, write, BufReader, lines iteration.
+
+mount core.io.{read_to_string, write, BufReader, File};
+mount core.io.println;
+
+fn main() {
+    let path = "/tmp/verum-by-example.txt";
+
+    // One-shot write: replaces the file, returns Result<(), IoError>.
+    let body = "line one\nline two\nline three\n";
+    match write(&path.to_text(), body.as_bytes()) {
+        Ok(())  => println(f"wrote {body.len()} bytes to {path}"),
+        Err(e)  => { println(f"write failed: {e:?}"); return; }
+    }
+
+    // One-shot read: returns the entire file as Text. Use only when
+    // the file fits comfortably in memory.
+    match read_to_string(&path.to_text()) {
+        Ok(text) => println(f"contents:\n{text}"),
+        Err(e)   => println(f"read failed: {e:?}"),
+    }
+
+    // BufReader for line-by-line iteration on large files. The
+    // buffer is amortised — one syscall per ~8KB chunk, line
+    // splitting is in-memory.
+    match File.open(&path.to_text()) {
+        Ok(file) => {
+            let reader = BufReader.new(file);
+            let mut count: Int = 0;
+            for line_result in reader.lines() {
+                match line_result {
+                    Ok(line) => {
+                        count = count + 1;
+                        println(f"  [{count}] {line}");
+                    }
+                    Err(e) => {
+                        println(f"  read error: {e:?}");
+                        break;
+                    }
+                }
+            }
+            println(f"total lines: {count}");
+        }
+        Err(e) => println(f"open failed: {e:?}"),
+    }
+}

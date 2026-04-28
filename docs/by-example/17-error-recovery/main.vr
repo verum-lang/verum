@@ -1,0 +1,58 @@
+// docs/by-example/17-error-recovery/main.vr
+// Error recovery: Result chaining, the ? operator, Try, supervisors.
+
+mount core.io.println;
+
+type ParseError is
+    | Empty
+    | NotANumber(Text)
+    | OutOfRange(Int);
+
+fn parse_age(s: &Text) -> Result<Int, ParseError> {
+    if s.is_empty() {
+        return Err(ParseError.Empty);
+    }
+    match s.parse_int() {
+        Ok(n) => {
+            if n < 0 || n > 150 {
+                Err(ParseError.OutOfRange(n))
+            } else {
+                Ok(n)
+            }
+        }
+        Err(_) => Err(ParseError.NotANumber(s.clone())),
+    }
+}
+
+// `?` propagates errors with zero ceremony. If `parse_age` returns
+// Err, this function returns Err with the same error type.
+fn validate_record(name: &Text, age_str: &Text) -> Result<(Text, Int), ParseError> {
+    let age = parse_age(age_str)?;
+    Ok((name.clone(), age))
+}
+
+// `match` on the Result is the explicit form when you need to
+// handle each variant differently.
+fn classify(s: &Text) {
+    match parse_age(s) {
+        Ok(n) if n >= 65 => println(f"  '{s}' → senior ({n})"),
+        Ok(n) if n >= 18 => println(f"  '{s}' → adult ({n})"),
+        Ok(n)            => println(f"  '{s}' → minor ({n})"),
+        Err(ParseError.Empty)        => println(f"  '{s}' → empty input"),
+        Err(ParseError.NotANumber(_))=> println(f"  '{s}' → not a number"),
+        Err(ParseError.OutOfRange(n))=> println(f"  '{s}' → out of range ({n})"),
+    }
+}
+
+fn main() {
+    let inputs = ["", "abc", "42", "200", "7", "-1", "65"];
+    for s in inputs.iter() {
+        classify(s);
+    }
+
+    // Chaining ?
+    match validate_record(&"alice", &"30") {
+        Ok((name, age)) => println(f"valid: {name} ({age})"),
+        Err(e)          => println(f"invalid: {e:?}"),
+    }
+}

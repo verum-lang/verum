@@ -1,0 +1,58 @@
+// docs/by-example/20-json-roundtrip/main.vr
+// JSON: parse, navigate, mutate, stringify (round-trip).
+
+mount core.encoding.json.{JsonValue, parse, stringify};
+mount core.io.println;
+
+fn main() {
+    let raw: Text = r#"
+        {
+            "name": "verum",
+            "version": [0, 1, 0],
+            "features": ["cbgr", "async", "refinement"],
+            "verified": true,
+            "uptime_secs": null
+        }
+    "#;
+
+    // Parse: returns Result<JsonValue, JsonError>.
+    let value = match parse(&raw) {
+        Ok(v)  => v,
+        Err(e) => { println(f"parse error: {e:?}"); return; }
+    };
+
+    // Pattern-match to navigate the tree.
+    if let JsonValue.JsonObject(map) = &value {
+        match map.get(&"name".to_text()) {
+            Some(JsonValue.JsonString(name)) =>
+                println(f"name = {name}"),
+            _ => println("name not a string"),
+        }
+        match map.get(&"version".to_text()) {
+            Some(JsonValue.JsonArray(parts)) => {
+                println(f"version has {parts.len()} parts");
+                let mut i: Int = 0;
+                while i < parts.len() {
+                    if let JsonValue.JsonInt(n) = &parts[i] {
+                        println(f"  part[{i}] = {n}");
+                    }
+                    i = i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Round-trip: stringify produces compact JSON. The audit-hardened
+    // parser (#203) enforces RFC 8259 + caps every length field, so
+    // parse(stringify(parse(x))) == parse(x) for every well-formed
+    // input.
+    let compact = stringify(&value);
+    println(f"compact: {compact}");
+
+    // Re-parse the compact form to confirm round-trip.
+    match parse(&compact) {
+        Ok(v2) => println(f"round-trip ok, equal? {value == v2}"),
+        Err(e) => println(f"re-parse failed: {e:?}"),
+    }
+}
