@@ -7951,6 +7951,22 @@ pub enum ExtendedSubOpcode {
     /// Encoders must not emit this; decoders must accept and skip its
     /// (length-prefixed) operand block.
     Reserved = 0x00,
+
+    /// Process termination — reads one `Int` register and terminates
+    /// the process with that exit code.  Format: `[0x1F][0x10][reg:u16]`.
+    ///
+    /// This is the first-class VBC primitive for `core.base.env::exit`.
+    /// Under the AOT tier the codegen lowers it to a `_exit` / `exit_group`
+    /// / `ExitProcess` call (zero-cost at the OS boundary).  Under the
+    /// VBC interpreter it dispatches to `std::process::exit`, giving
+    /// uniform termination semantics regardless of whether the FFI
+    /// runtime is linked into the interpreter binary.
+    ///
+    /// Mirrors the symmetry of `Opcode::Panic` / `Opcode::Unreachable`:
+    /// every divergent control-flow primitive in the language is a
+    /// dedicated VBC instruction, not a soft convention layered over
+    /// FFI calls.
+    ProcessExit = 0x10,
 }
 
 impl ExtendedSubOpcode {
@@ -7959,6 +7975,7 @@ impl ExtendedSubOpcode {
     pub fn from_byte(byte: u8) -> Option<Self> {
         match byte {
             0x00 => Some(Self::Reserved),
+            0x10 => Some(Self::ProcessExit),
             _ => None,
         }
     }
@@ -7972,6 +7989,7 @@ impl ExtendedSubOpcode {
     pub fn mnemonic(self) -> &'static str {
         match self {
             Self::Reserved => "EXT_RESERVED",
+            Self::ProcessExit => "EXT_PROCESS_EXIT",
         }
     }
 }
