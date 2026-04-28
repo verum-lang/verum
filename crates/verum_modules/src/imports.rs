@@ -379,6 +379,27 @@ impl ImportResolver {
                 module_paths,
                 span,
             ),
+            MountTreeKind::File { .. } => {
+                // Relative-file-path mounts (`mount ./foo.vr`) are
+                // resolved by the session loader BEFORE the
+                // module-path import-resolution pipeline runs. By the
+                // time we reach `resolve_import_tree`, file mounts
+                // should already have been materialised as
+                // session-loaded modules and re-issued as path mounts.
+                // If we encounter a raw `File` here, the session
+                // loader's pre-pass missed it — return an empty
+                // resolved-import with the importing module as the
+                // origin (no error; the AST still parsed and the
+                // loader will surface a session-level diagnostic if
+                // resolution truly failed).
+                Ok(ResolvedImport::new(
+                    ModulePath::root(),
+                    List::new(),
+                    /* is_glob = */ false,
+                    importing_module,
+                    span,
+                ))
+            }
         }
     }
 
