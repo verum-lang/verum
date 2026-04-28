@@ -273,17 +273,14 @@ fn on_client_hello(
                 .map_err(|_| TlsError.InternalError(Text.from_str("master input")))?;
 
             // Assemble outbound.
-            let mut out_wire: List<Byte> = [];
-            let mut i: Int = 0;
-            while i < sh_wire.len()    { out_wire.push(sh_wire[i]);    i = i + 1; }
-            i = 0;
-            while i < ee_wire.len()    { out_wire.push(ee_wire[i]);    i = i + 1; }
-            i = 0;
-            while i < cert_wire.len()  { out_wire.push(cert_wire[i]);  i = i + 1; }
-            i = 0;
-            while i < cv_wire.len()    { out_wire.push(cv_wire[i]);    i = i + 1; }
-            i = 0;
-            while i < fin_wire.len()   { out_wire.push(fin_wire[i]);   i = i + 1; }
+            let total = sh_wire.len() + ee_wire.len() + cert_wire.len()
+                      + cv_wire.len() + fin_wire.len();
+            let mut out_wire: List<Byte> = List.with_capacity(total);
+            out_wire.extend_from_slice(sh_wire.as_slice());
+            out_wire.extend_from_slice(ee_wire.as_slice());
+            out_wire.extend_from_slice(cert_wire.as_slice());
+            out_wire.extend_from_slice(cv_wire.as_slice());
+            out_wire.extend_from_slice(fin_wire.as_slice());
 
             let next = ServerSm.WaitClientFinishedSm(WaitClientFinished {
                 config: ws.config,
@@ -515,11 +512,9 @@ fn build_cert_verify_signed_input(transcript_hash: &[Byte], is_server: Bool) -> 
     } else {
         b"TLS 1.3, client CertificateVerify"
     };
-    let mut j: Int = 0;
-    while j < ctx.len() { out.push(ctx[j]); j = j + 1; }
+    out.extend_from_slice(ctx);
     out.push(0_u8);
-    let mut k: Int = 0;
-    while k < transcript_hash.len() { out.push(transcript_hash[k]); k = k + 1; }
+    out.extend_from_slice(transcript_hash.as_slice());
     out
 }
 
@@ -548,9 +543,8 @@ fn server_compute_shared(
             let sk = X25519.secret_key_from_bytes(&sk_raw);
             match X25519.diffie_hellman(&sk, &pk_raw) {
                 Ok(shared) => {
-                    let mut out: List<Byte> = [];
-                    let mut k: Int = 0;
-                    while k < 32 { out.push(shared[k]); k = k + 1; }
+                    let mut out: List<Byte> = List.with_capacity(32);
+                    out.extend_from_slice(&shared[..]);
                     Ok(out)
                 },
                 Err(_) => Err(TlsError.IllegalParameter),
@@ -569,9 +563,8 @@ fn server_compute_shared(
                 .map_err(|_| TlsError.IllegalParameter)?;
             match P256.ecdh(&sk, &pk) {
                 Ok(shared) => {
-                    let mut out: List<Byte> = [];
-                    let mut k: Int = 0;
-                    while k < 32 { out.push(shared[k]); k = k + 1; }
+                    let mut out: List<Byte> = List.with_capacity(32);
+                    out.extend_from_slice(shared.as_slice());
                     Ok(out)
                 },
                 Err(_) => Err(TlsError.IllegalParameter),
