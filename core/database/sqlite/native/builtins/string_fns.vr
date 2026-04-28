@@ -224,7 +224,7 @@ fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
     if right {
         while end > start && is_ws(bs[end - 1]) { end = end - 1; }
     }
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(end - start);
     let mut i: Int = start;
     while i < end { out.push_byte(bs[i]); i = i + 1; }
     out
@@ -242,7 +242,7 @@ fn trim_with_chars(s: &Text, chars: &Text, left: Bool, right: Bool) -> Text {
     if right {
         while end > start && byte_in_set(bs[end - 1], cb) { end = end - 1; }
     }
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(end - start);
     let mut i: Int = start;
     while i < end { out.push_byte(bs[i]); i = i + 1; }
     out
@@ -293,15 +293,19 @@ fn replace_all_bytes(s: &Text, find: &Text, repl: &Text) -> Text {
             k = k + 1;
         }
         if hit {
-            let mut j: Int = 0;
-            while j < rb.len() { out.push_byte(rb[j]); j = j + 1; }
+            out.push_str(repl);
             i = i + fb.len();
         } else {
             out.push_byte(sb[i]);
             i = i + 1;
         }
     }
-    while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+    // Unmatched suffix — pre-reserve so push_byte doesn't trigger
+    // capacity-doubling cascade for long tails.
+    if i < sb.len() {
+        out.reserve(sb.len() - i);
+        while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+    }
     out
 }
 
@@ -377,9 +381,8 @@ fn hex_encode(b: &List<Byte>) -> Text {
 
 fn hex_encode_text(s: &Text) -> Text {
     let bs = s.as_bytes();
-    let mut bl: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < bs.len() { bl.push(bs[i]); i = i + 1; }
+    let mut bl: List<Byte> = List.with_capacity(bs.len());
+    bl.extend_from_slice(bs);
     hex_encode(&bl)
 }
 
@@ -495,9 +498,7 @@ public fn concat_ws(sep: &Register, args: &List<Register>) -> Register {
 }
 
 fn append_text(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+    dst.push_str(s);
 }
 
 fn int_to_text(x: Int64) -> Text {
@@ -699,12 +700,10 @@ fn like_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int, esc: Maybe<Byte>
 fn glob_match(target: &Text, pattern: &Text) -> Bool {
     let tb_bs = target.as_bytes();
     let pb_bs = pattern.as_bytes();
-    let mut tb: List<Byte> = List.new();
-    let mut pb: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < tb_bs.len() { tb.push(tb_bs[i]); i = i + 1; }
-    i = 0;
-    while i < pb_bs.len() { pb.push(pb_bs[i]); i = i + 1; }
+    let mut tb: List<Byte> = List.with_capacity(tb_bs.len());
+    tb.extend_from_slice(tb_bs);
+    let mut pb: List<Byte> = List.with_capacity(pb_bs.len());
+    pb.extend_from_slice(pb_bs);
     glob_rec(&tb, 0, &pb, 0)
 }
 
