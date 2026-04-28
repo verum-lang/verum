@@ -1148,8 +1148,14 @@ fn emit_having_expr(
             }
             match op {
                 UNot => {
-                    // NOT by Integer(1, dst) - src; fast path omitted.
-                    let _ = st.program.emit(SCopy(src, dst));
+                    // Logical NOT — `dst = 1 - src` since HAVING children
+                    // produce boolean integers in {0, 1}.  Pre-fix this
+                    // was an SCopy(src, dst) — a no-op masquerading as
+                    // negation, so `HAVING NOT (count(*) > 5)` returned
+                    // the same rows as `HAVING count(*) > 5`.
+                    let one_reg = st.regs.alloc();
+                    let _ = st.program.emit(Integer(1, one_reg));
+                    let _ = st.program.emit(Subtract(one_reg, src, dst));
                     Ok(())
                 }
                 UNeg => {
