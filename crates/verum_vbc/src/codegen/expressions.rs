@@ -4623,6 +4623,11 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
+        // Raw-pointer `is_null()` interception happens AFTER the receiver
+        // is compiled (we need access to `raw_pointer_regs`).  The check
+        // is now placed at the end of the receiver-compilation block; see
+        // the matching block immediately after `let receiver_reg = ...`.
+
         // Intercept `Text.from(text)` — stdlib has both `From<&str>` and
         // `From<Char>` impls on Text, and the current method resolver picks
         // the `From<Char>` impl for text literals, re-entering `push_byte`
@@ -5185,6 +5190,46 @@ impl VbcCodegen {
         let receiver_reg = self
             .compile_expr(receiver)?
             .ok_or_else(|| CodegenError::internal("method receiver has no value"))?;
+
+        // Raw-pointer method interception — when the receiver register is
+        // tagged `raw_pointer` (set by `compile_cast` for `… as &unsafe T`,
+        // `… as *const T`, `… as *mut T`, propagated through
+        // `compile_pattern_bind`'s Mov), route a small set of bare method
+        // names directly to the matching stdlib intrinsic instead of
+        // emitting CallM.  Without this, CallM keyed by the bare name
+        // `is_null` resolves to the user-defined `FatRef.is_null` function
+        // (registered when `core/mem/fat_ref.vr` was processed) — that
+        // method reads `self.generation` at offset 0, but a raw pointer
+        // has no generation field, so its u64 address is reinterpreted
+        // as a generation counter and the runtime panics with a null-
+        // pointer dereference at pc=0 inside `FatRef.is_null`.  Same
+        // class as the `Heap.new` / `Shared.new` interception above: a
+        // built-in behaviour must always win over a stdlib `.method` of
+        // the same bare name when the receiver kind statically
+        // determines it.
+        if args.is_empty()
+            && self.ctx.is_raw_pointer(receiver_reg)
+            && method.name == "is_null"
+            && let Some(func_info) = self.ctx.lookup_function("is_null").cloned()
+        {
+            // Fresh consecutive arg register (Call instruction expects
+            // args in a contiguous range starting at `start`).
+            let arg_reg = self.ctx.registers.alloc_fresh();
+            if receiver_reg != arg_reg {
+                self.ctx.emit(Instruction::Mov { dst: arg_reg, src: receiver_reg });
+                // Carry the raw-pointer flag onto the new register so
+                // any subsequent operation on it remains correct.
+                self.ctx.mark_raw_pointer(arg_reg);
+                self.ctx.free_temp(receiver_reg);
+            }
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Call {
+                dst: result,
+                func_id: func_info.id.0,
+                args: crate::instruction::RegRange { start: arg_reg, count: 1 },
+            });
+            return Ok(Some(result));
+        }
 
         // Intercept `[T].slice(start, end)` — route straight to the
         // CBGR subop so we skip the compiled stdlib body entirely.
@@ -11689,6 +11734,20 @@ impl VbcCodegen {
             // Unsupported conversion: pass through for now
             _ => {
                 self.ctx.free_temp(dst);
+                // Tag pass-through casts to raw-pointer targets so
+                // downstream `compile_method_call` can route methods
+                // like `is_null` / `as_ptr` to the intrinsic instead
+                // of letting CallM resolve to a same-named user method
+                // (e.g. `FatRef.is_null` reads `self.generation`,
+                // panicking on a raw pointer receiver — the original
+                // #201 NPE site at `core/collections/list.vr` after
+                // `let ptr = raw as &unsafe T;`).
+                if matches!(target_kind,
+                    TypeKind::UnsafeReference { .. }
+                    | TypeKind::Pointer { .. }
+                ) {
+                    self.ctx.mark_raw_pointer(src_reg);
+                }
                 return Ok(Some(src_reg));
             }
         }
