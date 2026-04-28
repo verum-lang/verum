@@ -42,7 +42,7 @@
 module core.base.snowflake;
 
 mount core.*;
-mount core.time.instant;
+mount core.time.system_time.{SystemTime};
 
 // =============================================================================
 // Layout constants
@@ -66,7 +66,8 @@ public const DEFAULT_EPOCH_MS: UInt64 = 1_288_834_974_657_u64;
 
 public type SnowflakeError is
       WorkerIdOutOfRange(UInt64)
-    | ClockRegressed(UInt64);   // last_ts - now_ms (how far back)
+    | ClockRegressed(UInt64)    // last_ts - now_ms (how far back)
+    | ClockBeforeEpoch(UInt64); // epoch_ms - now_ms (how far before the configured epoch)
 
 // =============================================================================
 // Generator
@@ -102,9 +103,20 @@ implement Snowflake {
 
     /// Emit the next ID. Busy-spins if the sequence saturates within
     /// a single millisecond (awaits the next ms tick).
+    ///
+    /// Pre-fix bug: `now_ms - self.epoch_ms` underflowed `UInt64`
+    /// when the wall clock was before the configured epoch
+    /// (embedded systems with unset RTC reading 1970 against the
+    /// 2010 Twitter epoch; tests using a future epoch). The
+    /// underflowed value shifted left into bit 63 and produced a
+    /// corrupt, non-sortable ID with no error surfaced. Now
+    /// rejects via `ClockBeforeEpoch` before any arithmetic.
     public fn next_id(&mut self) -> Result<UInt64, SnowflakeError> {
         let mut now_ms = current_unix_ms();
 
+        if now_ms < self.epoch_ms {
+            return Err(SnowflakeError.ClockBeforeEpoch(self.epoch_ms - now_ms));
+        }
         if now_ms < self.last_ts_ms {
             return Err(SnowflakeError.ClockRegressed(self.last_ts_ms - now_ms));
         }
@@ -160,7 +172,14 @@ public fn parse(id: UInt64, epoch_ms: UInt64) -> SnowflakeParts {
 // =============================================================================
 
 fn current_unix_ms() -> UInt64 {
-    instant.unix_millis() as UInt64
+    // Wall-clock unix-ms via SystemTime → clock_gettime(CLOCK_REALTIME)
+    // on Linux/macOS, GetSystemTimePreciseAsFileTime on Windows.
+    // Pre-fix the call resolved to a non-existent
+    // `core.time.instant.unix_millis()` — `core.time.instant` is the
+    // monotonic-clock surface, not the wall-clock one. Lenient codegen
+    // silently no-op'd the call, so every Snowflake ID carried a zero
+    // timestamp prefix and the time-sortable invariant was broken.
+    SystemTime.now().timestamp_millis() as UInt64
 }
 
 fn wait_for_next_ms(last: UInt64) -> UInt64 {
