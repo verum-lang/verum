@@ -90,9 +90,7 @@ public fn accept_retry(
     // Build the Retry pseudo-packet: ODCID-len | ODCID | retry-packet-bytes-minus-tag.
     let mut pseudo: List<Byte> = [];
     pseudo.push(original_dcid.len() as Byte);
-    let mut i: Int = 0;
-    let odcid_slice = original_dcid.as_slice();
-    while i < odcid_slice.len() { pseudo.push(odcid_slice[i]); i = i + 1; }
+    pseudo.extend_from_slice(original_dcid.as_slice());
 
     // Serialise the Retry packet's bytes (excluding the 16-byte tag).
     // First byte = 0xF0..0xFF range; the pseudo uses the exact wire
@@ -103,15 +101,10 @@ public fn accept_retry(
     pseudo.push(((retry.version >>  8) & 0xFF_u32) as Byte);
     pseudo.push((retry.version & 0xFF_u32) as Byte);
     pseudo.push(retry.destination_id.len() as Byte);
-    let ds = retry.destination_id.as_slice();
-    let mut j: Int = 0;
-    while j < ds.len() { pseudo.push(ds[j]); j = j + 1; }
+    pseudo.extend_from_slice(retry.destination_id.as_slice());
     pseudo.push(retry.source_id.len() as Byte);
-    let ss = retry.source_id.as_slice();
-    let mut k: Int = 0;
-    while k < ss.len() { pseudo.push(ss[k]); k = k + 1; }
-    let mut m: Int = 0;
-    while m < retry.retry_token.len() { pseudo.push(retry.retry_token[m]); m = m + 1; }
+    pseudo.extend_from_slice(retry.source_id.as_slice());
+    pseudo.extend_from_slice(retry.retry_token.as_slice());
 
     // Verify integrity tag.
     if !verify_retry_integrity_tag(pseudo.as_slice(), &retry.integrity_tag) {
@@ -159,8 +152,7 @@ public fn build_server_retry(
     let mut pseudo: List<Byte> = [];
     pseudo.push(client_dcid.len() as Byte);
     let ds = client_dcid.as_slice();
-    let mut i: Int = 0;
-    while i < ds.len() { pseudo.push(ds[i]); i = i + 1; }
+    pseudo.extend_from_slice(ds);
 
     pseudo.push(0xF0_u8);
     pseudo.push(((version >> 24) & 0xFF_u32) as Byte);
@@ -172,14 +164,10 @@ public fn build_server_retry(
     // retry DCID — the caller's first Initial parser supplies the
     // actual client SCID.
     pseudo.push(client_dcid.len() as Byte);
-    let mut j: Int = 0;
-    while j < ds.len() { pseudo.push(ds[j]); j = j + 1; }
+    pseudo.extend_from_slice(ds);
     pseudo.push(retry_scid.len() as Byte);
-    let ss = retry_scid.as_slice();
-    let mut k: Int = 0;
-    while k < ss.len() { pseudo.push(ss[k]); k = k + 1; }
-    let mut m: Int = 0;
-    while m < token.len() { pseudo.push(token[m]); m = m + 1; }
+    pseudo.extend_from_slice(retry_scid.as_slice());
+    pseudo.extend_from_slice(token);
 
     let tag = compute_retry_integrity_tag(pseudo.as_slice())
         .map_err(|_| RetryError.KeyDeriveFailed)?;
@@ -187,11 +175,9 @@ public fn build_server_retry(
     // Final wire format = pseudo-bytes-minus-ODCID-prefix || tag.
     // Strip the leading ODCID length + bytes (they're pseudo-only).
     let prefix_len = 1 + ds.len();
-    let mut wire: List<Byte> = [];
-    let mut n: Int = prefix_len;
-    while n < pseudo.len() { wire.push(pseudo[n]); n = n + 1; }
-    let mut t: Int = 0;
-    while t < 16 { wire.push(tag[t]); t = t + 1; }
+    let mut wire: List<Byte> = List.with_capacity(pseudo.len() - prefix_len + 16);
+    wire.extend_from_slice(&pseudo.as_slice()[prefix_len..]);
+    wire.extend_from_slice(&tag[..]);
     Ok(wire)
 }
 
