@@ -1,6 +1,6 @@
 //! Proof-term export — `verum_kernel::CoreTerm` → external proof
-//! assistant syntax (Lean 4 / Coq / Agda). M-VVA-FU Sub-2.5/2.6/2.7
-//! V0/V1 (deferred per VVA spec L1422).
+//! assistant syntax (Lean 4 / Coq / Agda / Dedukti / Metamath).
+//! M-VVA-FU Sub-2.5/2.6/2.7 V0/V1 (deferred per VVA spec L1422).
 //!
 //! Pre-this-module the cross-format export emitted statement-level
 //! declarations only — the @theorem signature followed by `sorry` /
@@ -16,16 +16,21 @@
 //!   * `lean::lower_term(t)` — `CoreTerm → String` (Lean 4 syntax).
 //!   * `coq::lower_term(t)` — `CoreTerm → String` (Coq / Gallina).
 //!   * `agda::lower_term(t)` — `CoreTerm → String` (Agda 2.6).
+//!   * `dedukti::lower_term(t)` — `CoreTerm → String` (λΠ-modulo).
+//!   * `metamath::lower_term(t)` — `CoreTerm → String` (label form).
 //!
-//! All three use the same conservative-fallback strategy: when an
+//! All five use the same conservative-fallback strategy: when an
 //! unsupported constructor is encountered, return `sorry` (Lean) /
-//! `admit` (Coq) / `?` (Agda) with the constructor name embedded
-//! in a tactic-mode comment for downstream re-derivation hints.
+//! `admit` (Coq) / `?` (Agda) / `(* unsupported *)` (Dedukti) /
+//! `( ?ctor )` (Metamath) with the constructor name embedded in a
+//! tactic-mode comment for downstream re-derivation hints.
 //!
 //! References:
 //!   * Lean 4 manual §6 (term mode).
 //!   * Coq reference manual ch. 11 (Gallina).
 //!   * Agda 2.6 manual ch. 4 (term language).
+//!   * Dedukti — λΠ-calculus modulo, Saillard PhD ch. 3.
+//!   * Metamath book ch. 2 — proof-substitution model.
 
 use verum_kernel::{CoreTerm, UniverseLevel};
 
