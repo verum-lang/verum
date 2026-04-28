@@ -347,12 +347,13 @@ public fn winsock_sendto(fd: FileDesc, buf: &[Byte], flags: Int, dest_addr: &uns
 }
 
 /// Receive data with source address (UDP).
-public fn winsock_recvfrom(fd: FileDesc, buf: &mut [Byte], flags: Int, src_addr: &unsafe Byte, addrlen: &mut Int) -> Result<Int, OSError> {
-    let result = ws2_recvfrom(fd.0 as UInt64, buf.as_mut_ptr() as &unsafe Byte, buf.len() as Int, flags, src_addr, addrlen);
+/// `addrlen` is `socklen_t *` (Int32 on Win32). Phase 4 wrapper migration.
+public fn winsock_recvfrom(fd: FileDesc, buf: &mut [Byte], flags: Int32, src_addr: &unsafe Byte, addrlen: &mut Int32) -> Result<Int, OSError> {
+    let result = ws2_recvfrom(fd.0 as UInt64, buf.as_mut_ptr() as &unsafe Byte, buf.len() as Int32, flags, src_addr, addrlen);
     if result == SOCKET_ERROR {
         Err(wsa_error())
     } else {
-        Ok(result)
+        Ok(result as Int)
     }
 }
 
@@ -433,7 +434,8 @@ public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
 }
 
 /// Get local socket address.
-public fn winsock_getsockname(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int) -> Result<(), OSError> {
+/// `addrlen` is `socklen_t *` (Int32 on Win32). Phase 4 wrapper migration.
+public fn winsock_getsockname(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int32) -> Result<(), OSError> {
     let result = ws2_getsockname(fd.0 as UInt64, addr, addrlen);
     if result == SOCKET_ERROR {
         Err(wsa_error())
@@ -442,8 +444,8 @@ public fn winsock_getsockname(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut In
     }
 }
 
-/// Get peer socket address.
-public fn winsock_getpeername(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int) -> Result<(), OSError> {
+/// Get peer socket address. Same socklen_t* invariant as `winsock_getsockname`.
+public fn winsock_getpeername(fd: FileDesc, addr: &unsafe Byte, addrlen: &mut Int32) -> Result<(), OSError> {
     let result = ws2_getpeername(fd.0 as UInt64, addr, addrlen);
     if result == SOCKET_ERROR {
         Err(wsa_error())

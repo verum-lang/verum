@@ -492,7 +492,11 @@ implement TcpStream {
     /// Returns the local IP and port assigned to this socket by the kernel.
     public fn local_addr(&self) -> Result<SocketAddr, IoError> {
         let mut addr_buf = [0_u8; 128];
-        let mut addr_len: Int = 128;
+        // socklen_t is 4 bytes on every supported platform (UInt32 on
+        // POSIX, Int32 on Win32) — using UInt32 here matches the kernel's
+        // 4-byte write semantics; the typechecker absorbs the &mut UInt32
+        // vs &mut Int32 difference at the Windows wrapper boundary.
+        let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows")) {
             getsockname(self.fd, &mut addr_buf, &mut addr_len)
@@ -1071,7 +1075,7 @@ implement TcpListener {
     /// Returns the connected TcpStream and the peer's socket address.
     public fn accept(&self) -> Result<(TcpStream, SocketAddr), IoError> {
         let mut addr_buf = [0_u8; 128];
-        let mut addr_len: Int = 128;
+        let mut addr_len: UInt32 = 128;
 
         // Linux: use accept4 with SOCK_CLOEXEC for atomic close-on-exec
         @cfg(any(target_os = "linux", target_os = "windows"))
@@ -1112,7 +1116,7 @@ implement TcpListener {
 
         loop {
             let mut addr_buf = [0_u8; 128];
-            let mut addr_len: Int = 128;
+            let mut addr_len: UInt32 = 128;
 
             // Try to accept immediately
             @cfg(any(target_os = "linux", target_os = "windows"))
@@ -1234,7 +1238,7 @@ implement<'a> Stream for AsyncIncoming<'a> {
 
     fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<TcpStream, IoError>>> {
         let mut addr_buf = [0_u8; 128];
-        let mut addr_len: Int = 128;
+        let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let accept_result = accept4(
