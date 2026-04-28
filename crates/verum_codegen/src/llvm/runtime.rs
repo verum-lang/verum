@@ -6517,7 +6517,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
             let func = module.get_function("verum_tcp_accept")
                 .unwrap_or_else(|| module.add_function("verum_tcp_accept", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Skip body emission if existing function has wrong arity — see
+            // verum_tcp_listen above for the rationale (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let b = self.context.create_builder();
                 b.position_at_end(entry);
@@ -6538,7 +6541,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_tcp_connect")
                 .unwrap_or_else(|| module.add_function("verum_tcp_connect", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null_host");
                 let resolve_bb = self.context.append_basic_block(func, "resolve");
@@ -6666,7 +6671,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_tcp_send_text")
                 .unwrap_or_else(|| module.add_function("verum_tcp_send_text", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
                 let ok_bb = self.context.append_basic_block(func, "ok");
@@ -6699,7 +6706,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_tcp_recv_text")
                 .unwrap_or_else(|| module.add_function("verum_tcp_recv_text", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fix_bb = self.context.append_basic_block(func, "fix");
                 let alloc_bb = self.context.append_basic_block(func, "alloc");
@@ -6753,7 +6762,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
             let func = module.get_function("verum_tcp_close")
                 .unwrap_or_else(|| module.add_function("verum_tcp_close", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let b = self.context.create_builder();
                 b.position_at_end(entry);
@@ -6770,7 +6781,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into()], false);
             let func = module.get_function("verum_udp_bind")
                 .unwrap_or_else(|| module.add_function("verum_udp_bind", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let sf = self.context.append_basic_block(func, "sf");
                 let so = self.context.append_basic_block(func, "so");
@@ -6815,7 +6828,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), ptr_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_udp_send_text")
                 .unwrap_or_else(|| module.add_function("verum_udp_send_text", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
                 let pton_bb = self.context.append_basic_block(func, "pton");
@@ -6890,7 +6905,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_udp_recv_text")
                 .unwrap_or_else(|| module.add_function("verum_udp_recv_text", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fix_bb = self.context.append_basic_block(func, "fix");
                 let alloc_bb = self.context.append_basic_block(func, "alloc");
@@ -6949,7 +6966,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_udp_sendto")
                 .unwrap_or_else(|| module.add_function("verum_udp_sendto", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let null_bb = self.context.append_basic_block(func, "null");
                 let ok_bb = self.context.append_basic_block(func, "ok");
@@ -6984,7 +7003,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             let func = module.get_function("verum_udp_recvfrom")
                 .unwrap_or_else(|| module.add_function("verum_udp_recvfrom", fn_type, None));
-            if func.count_basic_blocks() == 0 {
+            // Arity-skip guard (round-2 §4.2 audit).
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
                 let entry = self.context.append_basic_block(func, "entry");
                 let fix_bb = self.context.append_basic_block(func, "fix");
                 let alloc_bb = self.context.append_basic_block(func, "alloc");

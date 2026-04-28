@@ -151,10 +151,35 @@ Remaining `LibraryCall` references in the codebase are historical
 commentary in changelog-style comments at `intrinsics/codegen.rs:1838,
 1888, 3098` and `instruction.rs:7721` — none represent live dispatch.
 
-### 4.2 emit_verum_networking_functions arity
+### 4.2 emit_verum_networking_functions arity — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — #105/#106 surfaced specific arity-mismatch
-issues; remaining 11 helpers tracked under #105 follow-up scope.
+**Status:** DEFENSE CONFIRMED — uniform arity-skip guard applied to all
+11 networking helpers in `emit_verum_networking_functions`
+(`crates/verum_codegen/src/llvm/runtime.rs:6384`):
+- verum_tcp_listen (pre-existing, with eprintln trace)
+- verum_tcp_accept, verum_tcp_connect, verum_tcp_send_text,
+  verum_tcp_recv_text, verum_tcp_close
+- verum_udp_bind, verum_udp_send_text, verum_udp_recv_text,
+  verum_udp_sendto, verum_udp_recvfrom
+
+Pattern at every body-emit site:
+```rust
+if func.count_params() == fn_type.count_param_types()
+    && func.count_basic_blocks() == 0 {
+    // emit body only when arity matches AND no body exists yet
+}
+```
+
+If a Verum-side function with the same name was lowered from VBC with a
+different signature, the helper's body emission is now silently skipped
+(LLVM module remains valid; the existing function declaration stays).
+Pre-fix, emitting against a wrong-arity function would fail with
+`missing param N` errors at LLVM verification time.
+
+**Future improvement (UX):** centralise the trace eprintln pattern via a
+helper closure to surface arity mismatches in `VERUM_AOT_TRACE_RUNTIME=1`
+runs across all 11 helpers. Currently only verum_tcp_listen has the
+trace.
 
 ### 4.3 GlobalDCE eliminating needed function — DEFENSE CONFIRMED 2026-04-28
 
@@ -344,7 +369,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
 | 4.1 LibraryCall collision | **DEFENSE CONFIRMED** | strategy removed entirely under #168 (2026-04-28) |
-| 4.2 Networking arity | PARTIAL | #105 follow-up |
+| 4.2 Networking arity | **DEFENSE CONFIRMED** | uniform arity-guard across 11 helpers (2026-04-28) |
 | 4.3 GlobalDCE | **DEFENSE CONFIRMED** | Phase 3.7 audit + External list pinned (2026-04-28) |
 | 5.1 Module cycle | **DEFENSE** | guardrails (2026-04-28) |
 | 5.2 Deep super | **DEFENSE** | guardrail (2026-04-28) |
@@ -359,7 +384,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | PENDING | lint audit |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**11 vectors confirmed defended (was 10), 13 partial (was 14), 3 pending** post
+**12 vectors confirmed defended (was 11), 12 partial (was 13), 3 pending** post
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
-RT-2.3.2 + RT-2.4.3 + RT-2.4.1 closures. Sections A-C below record real
-defects already closed in the audit pass.
+RT-2.3.2 + RT-2.4.3 + RT-2.4.1 + RT-2.4.2 closures. Sections A-C below
+record real defects already closed in the audit pass.
