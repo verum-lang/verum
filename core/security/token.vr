@@ -42,7 +42,7 @@ mount core.*;
 mount core.collections.List;
 mount core.encoding.base64.{encode_url as b64u_encode};
 mount core.encoding.hex.{encode as hex_encode};
-mount core.security.util.rng.{fill_secure};
+mount core.security.util.rng.{fill_secure_array};
 mount core.security.util.constant_time.{constant_time_eq};
 
 // =============================================================================
@@ -59,9 +59,14 @@ public const DEFAULT_TOKEN_BYTES:   Int = 32;    // 256 bits — over-budget saf
 public fn generate_bytes(len_bytes: Int) -> List<Byte> {
     let n = if len_bytes < MIN_TOKEN_BYTES { MIN_TOKEN_BYTES } else { len_bytes };
     let mut out: List<Byte> = [];
+    // Per-chunk CSPRNG buffer is fixed-size — use the array entry
+    // point (`fill_secure_array`) so the type matches. The earlier
+    // `fill_secure(&mut tmp)` call passed `[Byte; 32]` to a function
+    // expecting `&mut List<Byte>` and was silently no-op'd by
+    // lenient codegen — every token generated had zero entropy.
     let mut tmp: [Byte; 32] = [0_u8; 32];
     while out.len() < n {
-        fill_secure(&mut tmp);
+        fill_secure_array(&mut tmp);
         let take = if (n - out.len()) >= 32 { 32 } else { n - out.len() };
         let mut i: Int = 0;
         while i < take { out.push(tmp[i]); i = i + 1; }
@@ -136,7 +141,7 @@ fn uniform_digit() -> Byte {
 
 fn random_u32() -> UInt32 {
     let mut buf: [Byte; 4] = [0_u8; 4];
-    fill_secure(&mut buf);
+    fill_secure_array(&mut buf);
     ((buf[0] as UInt32) << 24_u32)
   | ((buf[1] as UInt32) << 16_u32)
   | ((buf[2] as UInt32) << 8_u32)
