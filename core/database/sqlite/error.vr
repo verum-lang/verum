@@ -89,9 +89,11 @@ public fn dberr_from_loom(e: core.database.sqlite.native.l7_api.DbError) -> DbEr
         DbOk => {
             // loom returns DbOk only at the API boundary as a "no error"
             // pad. We never wrap an Ok in an Err — but if we somehow are
-            // given one, surface as a misuse adapter error.
+            // given one, surface as a misuse adapter error tagged
+            // against the sqlite adapter (this conversion is the
+            // sqlite-native → unified-DbError boundary).
             DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,    // placeholder — overwritten below
+                adapter: AdSqlite,
                 code: "OK".clone(),
                 message: "loom DbOk reached the error path".clone(),
                 retryable: false,
