@@ -23,11 +23,28 @@ mount super.super.raw.RawTerminal;
 // POSIX: poll(2) FFI
 // =============================================================================
 
-@cfg(not(target_os = "windows"))
+// FFI signatures use C-ABI integer widths (T0.4.2 Phase 2 sweep).
+// `int poll(struct pollfd *fds, nfds_t nfds, int timeout)`:
+//   * nfds_t is `unsigned long` on Linux (UInt64) and `unsigned int`
+//     on macOS BSD (UInt32). We split the declaration per platform so
+//     LLVM emits the right ABI on each.
+//   * timeout / return value are POSIX `int` (Int32).
+@cfg(target_os = "linux")
 @ffi("libc")
 extern {
     /// POSIX poll(2) — wait for events on file descriptors.
-    fn poll(fds: &mut PollFd, nfds: Int, timeout: Int) -> Int;
+    /// Linux: `int poll(struct pollfd *fds, nfds_t nfds, int timeout);`
+    /// where `nfds_t` is `unsigned long int`.
+    fn poll(fds: &mut PollFd, nfds: UInt64, timeout: Int32) -> Int32;
+}
+
+@cfg(target_os = "macos")
+@ffi("libc")
+extern {
+    /// POSIX poll(2) — wait for events on file descriptors.
+    /// macOS BSD: `int poll(struct pollfd *fds, nfds_t nfds, int timeout);`
+    /// where `nfds_t` is `unsigned int`.
+    fn poll(fds: &mut PollFd, nfds: UInt32, timeout: Int32) -> Int32;
 }
 
 /// poll(2) file descriptor structure.
