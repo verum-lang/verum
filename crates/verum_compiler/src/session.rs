@@ -274,6 +274,16 @@ impl Session {
         self.cog_resolver = Some(resolver);
     }
 
+    /// Borrow the cross-cog resolver, if one is installed. Used by the
+    /// pipeline's `load_external_cog_modules` phase to walk every
+    /// registered cog's filesystem root and pre-register its modules
+    /// in the session's module registry — same machinery as
+    /// `load_project_modules`, sourced from the resolver instead of
+    /// the manifest.
+    pub fn cog_resolver(&self) -> Option<&verum_modules::cog_resolver::CogResolver> {
+        self.cog_resolver.as_ref()
+    }
+
     /// Convenience accessor for the unified language-feature set.
     ///
     /// Equivalent to `self.options().language_features`, but callers that

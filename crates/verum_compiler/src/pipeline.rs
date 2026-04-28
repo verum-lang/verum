@@ -3976,6 +3976,162 @@ impl<'s> CompilationPipeline<'s> {
     /// that directory is treated as a multi-file project. All sibling `.vr` files
     /// are discovered, parsed, and registered as modules, enabling cross-file
     /// `mount` imports (e.g., `mount bootstrap.token.*`).
+    /// Walk every cog registered in the session's `CogResolver` and
+    /// load its modules into the session's module registry. Symmetric
+    /// with `load_project_modules` but sourced from the resolver
+    /// (script-mode `dependencies = [...]`, `verum add`, etc.) instead
+    /// of the manifest's project tree.
+    ///
+    /// Each cog's filesystem root is walked recursively; every `.vr`
+    /// file is parsed in library mode and registered under the dotted
+    /// path `<cog_name>.<relative_path>` (with `mod.vr` collapsing to
+    /// the directory name). Subsequent `mount cog_name.foo` from the
+    /// entry source resolves through the same registry as workspace
+    /// modules — the consumer can't tell the difference.
+    ///
+    /// No-op when no resolver is installed (project mode, plain
+    /// scripts without `dependencies = [...]`).
+    fn load_external_cog_modules(&mut self) -> Result<()> {
+        let cog_locations: Vec<(String, PathBuf)> = match self.session.cog_resolver() {
+            Some(resolver) => resolver
+                .cog_names()
+                .into_iter()
+                .filter_map(|name| {
+                    resolver
+                        .get_cog_root(name.as_str())
+                        .map(|root| (name.as_str().to_string(), root.clone()))
+                })
+                .collect(),
+            None => return Ok(()),
+        };
+
+        for (cog_name, cog_root) in cog_locations {
+            let canonical_root = cog_root.canonicalize().unwrap_or(cog_root.clone());
+            let mut cog_files: Vec<PathBuf> = Vec::new();
+            // Reuse the same recursive walker as project modules — the
+            // skip-list (hidden dirs, target/, node_modules/, test_*)
+            // applies identically to external cogs.
+            Self::discover_vr_files_recursive(&canonical_root, &None, &mut cog_files);
+            if cog_files.is_empty() {
+                debug!(
+                    "External cog '{}' at {} has no .vr files",
+                    cog_name,
+                    canonical_root.display()
+                );
+                continue;
+            }
+
+            info!(
+                "Loading {} module(s) from external cog '{}' at {}",
+                cog_files.len(),
+                cog_name,
+                canonical_root.display()
+            );
+
+            for file_path in &cog_files {
+                let stem =
+                    file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+                let module_path_str = {
+                    let rel = file_path
+                        .parent()
+                        .and_then(|p| p.strip_prefix(&canonical_root).ok())
+                        .unwrap_or(std::path::Path::new(""));
+                    let mut parts = vec![cog_name.clone()];
+                    for component in rel.components() {
+                        if let std::path::Component::Normal(seg) = component {
+                            if let Some(s) = seg.to_str() {
+                                parts.push(s.to_string());
+                            }
+                        }
+                    }
+                    if stem != "mod" {
+                        parts.push(stem.to_string());
+                    }
+                    Text::from(parts.join("."))
+                };
+
+                if self.modules.contains_key(&module_path_str) {
+                    continue;
+                }
+
+                let source_text = match std::fs::read_to_string(file_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        debug!(
+                            "Failed to read external cog module {}: {:?}",
+                            module_path_str.as_str(),
+                            e
+                        );
+                        continue;
+                    }
+                };
+
+                match self.parse_stdlib_module(
+                    &module_path_str,
+                    &Text::from(source_text.clone()),
+                    file_path,
+                ) {
+                    Ok(module) => {
+                        let module_path = ModulePath::from_str(module_path_str.as_str());
+                        let module_registry = self.session.module_registry();
+                        let module_id = module_registry.read().allocate_id();
+                        let file_id = module
+                            .items
+                            .first()
+                            .map(|item| item.span.file_id)
+                            .unwrap_or(FileId::new(0));
+
+                        let mut module_info = ModuleInfo::new(
+                            module_id,
+                            module_path.clone(),
+                            module.clone(),
+                            file_id,
+                            Text::from(source_text),
+                        );
+
+                        // External-cog modules behave like project
+                        // modules from the consumer's perspective —
+                        // export ALL items, not just `pub` ones,
+                        // so the script can reach internals it
+                        // explicitly mounts.
+                        let export_table =
+                            Self::extract_all_exports(&module, module_id, &module_path);
+                        module_info.exports = export_table;
+
+                        module_registry.write().register(module_info);
+                        self.register_inline_modules(&module, &module_path, file_id);
+                        let module_rc = Arc::new(module);
+                        self.modules.insert(module_path_str.clone(), module_rc.clone());
+                        self.project_modules
+                            .insert(module_path_str.clone(), module_rc);
+                        debug!(
+                            "Loaded external-cog module: {}",
+                            module_path_str.as_str()
+                        );
+                    }
+                    Err(e) => {
+                        debug!(
+                            "Failed to parse external-cog module {}: {:?}",
+                            module_path_str.as_str(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        // Resolve re-exports across the registered modules (mirrors
+        // the same step at the end of load_project_modules).
+        {
+            let module_registry = self.session.module_registry();
+            let mut guard = module_registry.write();
+            let _ = resolve_specific_reexport_kinds(&mut guard);
+            let _ = resolve_glob_reexports(&mut guard);
+        }
+
+        Ok(())
+    }
+
     fn load_project_modules(&mut self) -> Result<()> {
         let input_path = self.session.options().input.clone();
         let input_dir = match input_path.parent() {
@@ -5771,6 +5927,10 @@ impl<'s> CompilationPipeline<'s> {
 
         // Load sibling project modules (enables cross-file mount imports)
         self.load_project_modules()?;
+        // Load externally-registered cogs (script-mode `dependencies`,
+        // verum-add deps, etc.) using the same module-registration
+        // machinery so cross-cog `mount foo.bar` resolves transparently.
+        self.load_external_cog_modules()?;
 
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
@@ -5910,6 +6070,10 @@ impl<'s> CompilationPipeline<'s> {
 
         // Load sibling project modules (enables cross-file mount imports)
         self.load_project_modules()?;
+        // Load externally-registered cogs (script-mode `dependencies`,
+        // verum-add deps, etc.) using the same module-registration
+        // machinery so cross-cog `mount foo.bar` resolves transparently.
+        self.load_external_cog_modules()?;
 
         let file_id = self.phase_load_source()?;
         let module = self.phase_parse(file_id)?;
@@ -12458,6 +12622,7 @@ impl<'s> CompilationPipeline<'s> {
         let _bc_proj = verum_error::breadcrumb::enter("compiler.phase.project_modules", "");
         let t0 = Instant::now();
         self.load_project_modules()?;
+        self.load_external_cog_modules()?;
         self.session.record_phase_metrics("Project Modules", t0.elapsed(), 0);
         drop(_bc_proj);
 
