@@ -140,6 +140,22 @@ pub enum IntrinsicHint {
     Alloc,
     /// Has side effects (writes, I/O, etc.).
     SideEffect,
+    /// Crosses the trust boundary — reaches OS resources (file
+    /// descriptors, sockets, processes, environment, raw syscalls,
+    /// FFI extern calls). Codegen consults this hint to insert a
+    /// `__permission_check(scope, target) -> Result<(), PermissionDenied>`
+    /// gate before the intrinsic body so deny-listed contexts
+    /// (sandboxed scripts, capability-attenuated subroutines) get
+    /// a typed refusal instead of silent execution.
+    ///
+    /// Coverage rule (enforced by
+    /// `tests::test_syscall_intrinsics_require_permission`): every
+    /// `IntrinsicCategory::Syscall` entry MUST carry this hint —
+    /// raw syscalls are the unconditional trust boundary regardless
+    /// of platform abstraction layer above them. Other I/O-shaped
+    /// intrinsics (Time, Platform read-only, Logging) are excluded
+    /// because they expose no caller-controlled resource targets.
+    RequiresPermission,
 }
 
 /// Code generation strategy for an intrinsic.
@@ -2503,7 +2519,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall0",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 1, // num
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 0),
@@ -2513,7 +2529,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall1",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 2, // num, a1
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 1),
@@ -2523,7 +2539,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall2",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 3,
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 2),
@@ -2533,7 +2549,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall3",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 4,
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 3),
@@ -2543,7 +2559,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall4",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 5,
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 4),
@@ -2553,7 +2569,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall5",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 6,
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 5),
@@ -2563,7 +2579,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "syscall6",
         category: IntrinsicCategory::Syscall,
-        hints: &[IntrinsicHint::IoEffect],
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::RequiresPermission],
         param_count: 7, // num, a1-a6
         return_count: 1,
         strategy: CodegenStrategy::OpcodeWithMode(Opcode::SyscallLinux, 6),
@@ -10029,5 +10045,74 @@ mod tests {
         assert!(INTRINSIC_REGISTRY.lookup("REGEX_FIND").is_none());
         assert!(INTRINSIC_REGISTRY.lookup("REGEX_REPLACE").is_none());
         assert!(INTRINSIC_REGISTRY.lookup("REGEX_CAPTURES").is_none());
+    }
+
+    /// #12 / P3.2 — every `Syscall`-category intrinsic MUST carry
+    /// `RequiresPermission`. Raw syscalls are the unconditional
+    /// trust boundary: codegen will insert a
+    /// `__permission_check(scope, target) -> Result<(),
+    /// PermissionDenied>` gate before the intrinsic body so
+    /// sandboxed contexts see a typed refusal instead of silent
+    /// resource access. This pin test fails loudly if a future
+    /// syscall-class intrinsic is added without the hint, locking
+    /// the gating policy at the registry level.
+    #[test]
+    fn test_syscall_intrinsics_require_permission() {
+        let mut tagged: Vec<&'static str> = Vec::new();
+        let mut untagged: Vec<&'static str> = Vec::new();
+        for name in INTRINSIC_REGISTRY.names() {
+            let intr = INTRINSIC_REGISTRY.lookup(name).unwrap();
+            if !matches!(intr.category, IntrinsicCategory::Syscall) {
+                continue;
+            }
+            if intr.hints.contains(&IntrinsicHint::RequiresPermission) {
+                tagged.push(name);
+            } else {
+                untagged.push(name);
+            }
+        }
+        assert!(
+            untagged.is_empty(),
+            "every Syscall-category intrinsic must carry IntrinsicHint::RequiresPermission. \
+             missing: {:?}",
+            untagged
+        );
+        assert!(
+            tagged.len() >= 7,
+            "expected at least 7 syscall-class intrinsics tagged \
+             (syscall0..=syscall6); got {}: {:?}",
+            tagged.len(),
+            tagged
+        );
+    }
+
+    /// Sanity check: observational categories that happen to carry
+    /// `IoEffect` (Time, Platform, Logging) MUST NOT carry
+    /// `RequiresPermission`. Gating those would force every
+    /// `print()` and every `monotonic_nanos()` through the
+    /// permission router, breaking the latency budget on hot paths
+    /// without securing anything (these intrinsics expose no
+    /// caller-controlled resource targets).
+    #[test]
+    fn test_observational_intrinsics_skip_permission() {
+        for name in INTRINSIC_REGISTRY.names() {
+            let intr = INTRINSIC_REGISTRY.lookup(name).unwrap();
+            let observational = matches!(
+                intr.category,
+                IntrinsicCategory::Time
+                    | IntrinsicCategory::Platform
+                    | IntrinsicCategory::Logging
+            );
+            if !observational {
+                continue;
+            }
+            assert!(
+                !intr.hints.contains(&IntrinsicHint::RequiresPermission),
+                "observational intrinsic `{}` (category {:?}) must not carry \
+                 RequiresPermission — it has no caller-controlled resource target",
+                name,
+                intr.category
+            );
+        }
     }
 }
