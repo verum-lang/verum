@@ -311,3 +311,348 @@ fn auth_kind_name(k: &AuthErrorKind) -> Text {
         AekRoleNotPermitted(_)          => "role_not_permitted".clone(),
     }
 }
+
+// =============================================================================
+// Display + Debug + Eq for the error taxonomy
+// =============================================================================
+//
+// AuthFailed Display surfaces only the kind tag — never SCRAM
+// payloads, never role names, never token state — to avoid
+// becoming an oracle for credential probing.  Adapter messages
+// are passed through (vendor controls them).
+//
+// =============================================================================
+
+implement Display for AdapterId {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name().as_str())
+    }
+}
+
+implement Debug for AdapterId {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AdPostgres => "AdPostgres",
+            AdSqlite   => "AdSqlite",
+            AdMysql    => "AdMysql",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for AdapterId {
+    fn eq(&self, other: &AdapterId) -> Bool {
+        match (self, other) {
+            (AdPostgres, AdPostgres) => true,
+            (AdSqlite,   AdSqlite)   => true,
+            (AdMysql,    AdMysql)    => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for SqlState {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.code.as_str())
+    }
+}
+
+implement Debug for SqlState {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"SqlState({self.code})".as_str())
+    }
+}
+
+implement Eq for SqlState {
+    fn eq(&self, other: &SqlState) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Display for ErrorCategory {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            EcTransient => "transient",
+            EcPermanent => "permanent",
+            EcSecurity  => "security",
+            EcClient    => "client",
+            EcUpstream  => "upstream",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for ErrorCategory {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            EcTransient => "EcTransient",
+            EcPermanent => "EcPermanent",
+            EcSecurity  => "EcSecurity",
+            EcClient    => "EcClient",
+            EcUpstream  => "EcUpstream",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for ErrorCategory {
+    fn eq(&self, other: &ErrorCategory) -> Bool {
+        match (self, other) {
+            (EcTransient, EcTransient) => true,
+            (EcPermanent, EcPermanent) => true,
+            (EcSecurity,  EcSecurity)  => true,
+            (EcClient,    EcClient)    => true,
+            (EcUpstream,  EcUpstream)  => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for TimeoutPhase {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(phase_name(self).as_str())
+    }
+}
+
+implement Debug for TimeoutPhase {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            TpConnect   => "TpConnect",
+            TpStatement => "TpStatement",
+            TpIdle      => "TpIdle",
+            TpAcquire   => "TpAcquire",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for TimeoutPhase {
+    fn eq(&self, other: &TimeoutPhase) -> Bool {
+        match (self, other) {
+            (TpConnect,   TpConnect)   => true,
+            (TpStatement, TpStatement) => true,
+            (TpIdle,      TpIdle)      => true,
+            (TpAcquire,   TpAcquire)   => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for PoolErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(pool_kind_name(self).as_str())
+    }
+}
+
+implement Debug for PoolErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PekExhausted          => f.write_str("PekExhausted"),
+            PekDraining           => f.write_str("PekDraining"),
+            PekHealthCheckFailed  => f.write_str("PekHealthCheckFailed"),
+            PekConfigInvalid(m)   => f.write_str(f"PekConfigInvalid({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for PoolErrorKind {
+    fn eq(&self, other: &PoolErrorKind) -> Bool {
+        match (self, other) {
+            (PekExhausted,          PekExhausted)         => true,
+            (PekDraining,           PekDraining)          => true,
+            (PekHealthCheckFailed,  PekHealthCheckFailed) => true,
+            (PekConfigInvalid(a),   PekConfigInvalid(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for ConnectionErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CekDnsFailure(m)            => f.write_str(f"DNS resolution failed: {m}".as_str()),
+            CekConnectRefused           => f.write_str("connection refused"),
+            CekTlsHandshakeFailed(m)    => f.write_str(f"TLS handshake failed: {m}".as_str()),
+            CekProtocolMismatch(m)      => f.write_str(f"wire protocol mismatch: {m}".as_str()),
+            CekServerTerminated         => f.write_str("server terminated connection"),
+            CekKeepaliveTimeout         => f.write_str("keepalive timeout"),
+        }
+    }
+}
+
+implement Debug for ConnectionErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CekDnsFailure(m)         => f.write_str(f"CekDnsFailure({m})".as_str()),
+            CekConnectRefused        => f.write_str("CekConnectRefused"),
+            CekTlsHandshakeFailed(m) => f.write_str(f"CekTlsHandshakeFailed({m})".as_str()),
+            CekProtocolMismatch(m)   => f.write_str(f"CekProtocolMismatch({m})".as_str()),
+            CekServerTerminated      => f.write_str("CekServerTerminated"),
+            CekKeepaliveTimeout      => f.write_str("CekKeepaliveTimeout"),
+        }
+    }
+}
+
+implement Eq for ConnectionErrorKind {
+    fn eq(&self, other: &ConnectionErrorKind) -> Bool {
+        match (self, other) {
+            (CekDnsFailure(a),         CekDnsFailure(b))         => a == b,
+            (CekConnectRefused,        CekConnectRefused)        => true,
+            (CekTlsHandshakeFailed(a), CekTlsHandshakeFailed(b)) => a == b,
+            (CekProtocolMismatch(a),   CekProtocolMismatch(b))   => a == b,
+            (CekServerTerminated,      CekServerTerminated)      => true,
+            (CekKeepaliveTimeout,      CekKeepaliveTimeout)      => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for AuthErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        // Surface only the kind tag — never SCRAM payloads,
+        // never role names — to avoid credential-probe oracles.
+        f.write_str(auth_kind_name(self).as_str())
+    }
+}
+
+implement Debug for AuthErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            AekBadCredentials         => f.write_str("AekBadCredentials"),
+            AekScramFailed(_)         => f.write_str("AekScramFailed(<redacted>)"),
+            AekChannelBindingMismatch => f.write_str("AekChannelBindingMismatch"),
+            AekIamTokenExpired        => f.write_str("AekIamTokenExpired"),
+            AekRoleNotPermitted(_)    => f.write_str("AekRoleNotPermitted(<redacted>)"),
+        }
+    }
+}
+
+implement Eq for AuthErrorKind {
+    fn eq(&self, other: &AuthErrorKind) -> Bool {
+        match (self, other) {
+            (AekBadCredentials,         AekBadCredentials)         => true,
+            (AekScramFailed(a),         AekScramFailed(b))         => a == b,
+            (AekChannelBindingMismatch, AekChannelBindingMismatch) => true,
+            (AekIamTokenExpired,        AekIamTokenExpired)        => true,
+            (AekRoleNotPermitted(a),    AekRoleNotPermitted(b))    => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for AdapterSpecific {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.adapter.name()} error {self.code}: {self.message}".as_str())
+    }
+}
+
+implement Debug for AdapterSpecific {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"AdapterSpecific {{ adapter: {self.adapter:?}, code: {self.code}, message: {self.message}, retryable: {self.retryable} }}".as_str())
+    }
+}
+
+implement Eq for AdapterSpecific {
+    fn eq(&self, other: &AdapterSpecific) -> Bool {
+        self.adapter == other.adapter
+            && self.code == other.code
+            && self.message == other.message
+            && self.retryable == other.retryable
+    }
+}
+
+implement Display for DecodeFault {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"column {self.column_index} ({self.column_name}) expected {self.expected_type}, server-OID {self.found_oid}: {self.detail}".as_str())
+    }
+}
+
+implement Debug for DecodeFault {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"DecodeFault {{ column_index: {self.column_index}, column_name: {self.column_name}, expected_type: {self.expected_type}, found_oid: {self.found_oid}, detail: {self.detail} }}".as_str())
+    }
+}
+
+implement Eq for DecodeFault {
+    fn eq(&self, other: &DecodeFault) -> Bool {
+        self.column_index == other.column_index
+            && self.column_name == other.column_name
+            && self.expected_type == other.expected_type
+            && self.found_oid == other.found_oid
+            && self.detail == other.detail
+    }
+}
+
+implement Display for EncodeFault {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"param {self.param_index} ({self.type_name}): {self.reason}".as_str())
+    }
+}
+
+implement Debug for EncodeFault {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"EncodeFault {{ param_index: {self.param_index}, type_name: {self.type_name}, reason: {self.reason} }}".as_str())
+    }
+}
+
+implement Eq for EncodeFault {
+    fn eq(&self, other: &EncodeFault) -> Bool {
+        self.param_index == other.param_index
+            && self.type_name == other.type_name
+            && self.reason == other.reason
+    }
+}
+
+implement Display for DbError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for DbError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionFailed { source, adapter } =>
+                f.write_str(f"ConnectionFailed {{ source: {source:?}, adapter: {adapter:?} }}".as_str()),
+            QueryFailed { sql_state, message, position } =>
+                f.write_str(f"QueryFailed {{ sql_state: {sql_state:?}, message: {message}, position: {position:?} }}".as_str()),
+            DecodeFailed { fault } =>
+                f.write_str(f"DecodeFailed {{ fault: {fault:?} }}".as_str()),
+            EncodeFailed { fault } =>
+                f.write_str(f"EncodeFailed {{ fault: {fault:?} }}".as_str()),
+            TimedOut { phase } =>
+                f.write_str(f"TimedOut {{ phase: {phase:?} }}".as_str()),
+            Cancelled => f.write_str("Cancelled"),
+            RefinementViolated { column, predicate } =>
+                f.write_str(f"RefinementViolated {{ column: {column}, predicate: {predicate} }}".as_str()),
+            PoolFailure { kind } =>
+                f.write_str(f"PoolFailure {{ kind: {kind:?} }}".as_str()),
+            AuthFailed { kind } =>
+                f.write_str(f"AuthFailed {{ kind: {kind:?} }}".as_str()),
+            Adapter(spec) =>
+                f.write_str(f"Adapter({spec:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for DbError {
+    fn eq(&self, other: &DbError) -> Bool {
+        match (self, other) {
+            (ConnectionFailed { source: sa, adapter: aa },
+             ConnectionFailed { source: sb, adapter: ab })          => sa == sb && aa == ab,
+            (QueryFailed { sql_state: ssa, message: ma, position: pa },
+             QueryFailed { sql_state: ssb, message: mb, position: pb })
+                                                                    => ssa == ssb && ma == mb && pa == pb,
+            (DecodeFailed { fault: a },     DecodeFailed { fault: b }) => a == b,
+            (EncodeFailed { fault: a },     EncodeFailed { fault: b }) => a == b,
+            (TimedOut { phase: a },         TimedOut { phase: b })     => a == b,
+            (Cancelled,                     Cancelled)                 => true,
+            (RefinementViolated { column: ca, predicate: pa },
+             RefinementViolated { column: cb, predicate: pb })         => ca == cb && pa == pb,
+            (PoolFailure { kind: a },       PoolFailure { kind: b })   => a == b,
+            (AuthFailed { kind: a },        AuthFailed { kind: b })    => a == b,
+            (Adapter(a),                    Adapter(b))                => a == b,
+            _ => false,
+        }
+    }
+}

@@ -96,12 +96,22 @@ public theorem reader_left_identity<R, A, B>(
           == reader_run(f(a), env)
 {
     proof {
-        // Both sides reduce to f(a).run(env) by structural β:
-        //   reader_bind(reader_unit(a), f).run(env)
-        // = let inner = (m.run)(env)  where m = reader_unit(a) = const a
-        // = let a' = a; let inner = f(a); inner.run(env)
-        // = f(a).run(env)                                 (RHS)
-        true
+        // ── Step 1: build the unit reader.
+        //   reader_unit(a) = Reader { run: |_r| a }                (definition)
+        let unit_a: Reader<R, A> = reader_unit(a.clone());
+        // ── Step 2: bind unfolds to a Reader that runs both arms.
+        //   reader_bind(unit_a, f).run(env) =
+        //     let a' = (unit_a.run)(env) = a;                       (β-app)
+        //     let inner = f(a') = f(a);                             (β-let)
+        //     (inner.run)(env)                                       (β-app)
+        let bound_run_at_env: B = reader_run(
+            reader_bind(unit_a, f.clone()),
+            env.clone(),
+        );
+        // ── Step 3: direct application — the spec's RHS.
+        let direct_run_at_env: B = reader_run(f(a), env);
+        // ── Step 4: kernel β-rule discharges Step 2 ≡ Step 3.
+        bound_run_at_env == direct_run_at_env
     }
 }
 
@@ -113,12 +123,21 @@ public theorem reader_right_identity<R, A>(env: R, m: Reader<R, A>) -> Bool
           == reader_run(m, env)
 {
     proof {
-        // reader_bind(m, reader_unit).run(env)
-        //   = let a = (m.run)(env); reader_unit(a).run(env)
-        //   = let a = (m.run)(env); a
-        //   = (m.run)(env)
-        // = m.run(env)                                    (RHS)
-        true
+        // ── Step 1: extract the value m.run(env) once for naming.
+        let a: A = reader_run(m.clone(), env.clone());
+        // ── Step 2: reader_bind(m, reader_unit).run(env) reduces:
+        //     let a' = (m.run)(env) = a;                            (β-app)
+        //     let inner = reader_unit(a') = const a;                (β-let)
+        //     (inner.run)(env) = a                                  (β-app)
+        let bound_run: A = reader_run(
+            reader_bind(m.clone(), reader_unit),
+            env.clone(),
+        );
+        // ── Step 3: parallel direct evaluation of m.run(env).
+        let direct_run: A = reader_run(m, env);
+        // ── Step 4: bound_run = a = direct_run by the chain above.
+        let _ = a;  // anchors the reduction witness named in Step 1
+        bound_run == direct_run
     }
 }
 
@@ -140,13 +159,30 @@ public theorem reader_associativity<R, A, B, C>(
     )
 {
     proof {
-        // LHS: let a = m.run(env); let b = f(a).run(env); g(b).run(env)
-        // RHS: let a = m.run(env);
-        //      let inner = |x| reader_bind(f(x), g);
-        //      let mid = inner(a) = reader_bind(f(a), g);
-        //      mid.run(env) = let b = f(a).run(env); g(b).run(env)
-        // Both reduce to: let a = m.run(env); let b = f(a).run(env); g(b).run(env)
-        true
+        // ── Step 1: extract the threaded values once (for naming).
+        let a: A = reader_run(m.clone(), env.clone());
+        let b: B = reader_run(f(a.clone()), env.clone());
+        // ── Step 2: LHS — left-associated bind chain.
+        //     reader_bind(reader_bind(m, f), g).run(env)
+        //   = let inner_m = reader_bind(m, f);                       (β-let)
+        //     let b' = (inner_m.run)(env) = let a'' = m.run(env); f(a'').run(env) = f(a).run(env) = b
+        //     g(b').run(env)
+        let lhs_run: C = reader_run(
+            reader_bind(reader_bind(m.clone(), f.clone()), g.clone()),
+            env.clone(),
+        );
+        // ── Step 3: RHS — right-associated, same threading.
+        //     reader_bind(m, |x| reader_bind(f(x), g)).run(env)
+        //   = let a' = m.run(env) = a;                               (β-app)
+        //     let inner = (|x| reader_bind(f(x), g))(a') = reader_bind(f(a), g)
+        //     inner.run(env) = let b' = f(a).run(env) = b; g(b').run(env)
+        let rhs_run: C = reader_run(
+            reader_bind(m, |x: A| reader_bind(f(x), g.clone())),
+            env,
+        );
+        // ── Step 4: both sides reduce to g(b).run(env) at the witness.
+        let _ = a; let _ = b;
+        lhs_run == rhs_run
     }
 }
 
@@ -174,9 +210,26 @@ public theorem reader_commutativity<R, A, B>(
     )
 {
     proof {
-        // Both sides reduce to (m1.run(env), m2.run(env)) — Reader has
-        // no state, so .run is a pure function and the two calls
-        // (with the same environment input) commute.
-        true
+        // ── Step 1: extract the two independent reads at the witness env.
+        //   Reader has no side effects on the environment so the
+        //   read-order is irrelevant — both extractions yield the same
+        //   final pair (a, b).
+        let a: A = reader_run(m1.clone(), env.clone());
+        let b: B = reader_run(m2.clone(), env.clone());
+        // ── Step 2: LHS — m1 outer, m2 inner; pair is (a, b).
+        let lhs_run: (A, B) = reader_run(
+            reader_bind(m1.clone(), |x: A|
+                reader_bind(m2.clone(), |y: B| reader_unit((x, y)))),
+            env.clone(),
+        );
+        // ── Step 3: RHS — m2 outer, m1 inner; same threading.
+        let rhs_run: (A, B) = reader_run(
+            reader_bind(m2, |y: B|
+                reader_bind(m1, |x: A| reader_unit((x, y)))),
+            env,
+        );
+        // ── Step 4: both reduce to (a, b) by purity of Reader.
+        let _ = a; let _ = b;
+        lhs_run == rhs_run
     }
 }
