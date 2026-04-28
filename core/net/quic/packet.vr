@@ -154,18 +154,16 @@ fn parse_long_prefix(buf: &[Byte]) -> Result<(UInt8, UInt32, ConnectionId, Conne
     if dcid_len > MAX_CID_LEN { return Err(PacketError.CidTooLong(dcid_len)); }
     let dcid_end = 6 + dcid_len;
     if dcid_end + 1 > buf.len() { return Err(PacketError.Truncated); }
-    let mut dcid_bytes: List<Byte> = [];
-    let mut i: Int = 6;
-    while i < dcid_end { dcid_bytes.push(buf[i]); i = i + 1; }
+    let mut dcid_bytes: List<Byte> = List.with_capacity(dcid_len);
+    dcid_bytes.extend_from_slice(&buf[6..dcid_end]);
 
     // SCID length
     let scid_len = buf[dcid_end] as Int;
     if scid_len > MAX_CID_LEN { return Err(PacketError.CidTooLong(scid_len)); }
     let scid_end = dcid_end + 1 + scid_len;
     if scid_end > buf.len() { return Err(PacketError.Truncated); }
-    let mut scid_bytes: List<Byte> = [];
-    let mut j: Int = dcid_end + 1;
-    while j < scid_end { scid_bytes.push(buf[j]); j = j + 1; }
+    let mut scid_bytes: List<Byte> = List.with_capacity(scid_len);
+    scid_bytes.extend_from_slice(&buf[dcid_end + 1..scid_end]);
 
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice())
         .map_err(|_| PacketError.CidTooLong(dcid_len))?;
@@ -210,9 +208,8 @@ fn parse_retry(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Connecti
     // Remainder = token (variable) || integrity tag (16 bytes)
     if buf.len() < pos + 16 { return Err(PacketError.Truncated); }
     let tag_start = buf.len() - 16;
-    let mut token: List<Byte> = [];
-    let mut i: Int = pos;
-    while i < tag_start { token.push(buf[i]); i = i + 1; }
+    let mut token: List<Byte> = List.with_capacity(tag_start - pos);
+    token.extend_from_slice(&buf[pos..tag_start]);
     let mut tag: [Byte; 16] = [0_u8; 16];
     let mut j: Int = 0;
     while j < 16 { tag[j] = buf[tag_start + j]; j = j + 1; }
@@ -247,9 +244,8 @@ fn parse_initial(first: UInt8, version: UInt32, dcid: ConnectionId, scid: Connec
     let (token_len, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
     let token_end = p1 + (token_len as Int);
     if token_end > buf.len() { return Err(PacketError.Truncated); }
-    let mut token: List<Byte> = [];
-    let mut i: Int = p1;
-    while i < token_end { token.push(buf[i]); i = i + 1; }
+    let mut token: List<Byte> = List.with_capacity(token_end - p1);
+    token.extend_from_slice(&buf[p1..token_end]);
 
     let (length, p2) = quic_decode(buf, token_end).map_err(|_| PacketError.VarintFailure)?;
     let (pn, pn_len, payload, end) = parse_pn_and_payload(first, buf, p2, length)?;
@@ -321,9 +317,9 @@ fn parse_pn_and_payload(
         k = k + 1_u8;
     }
     // Payload bytes — from after PN to payload_end.
-    let mut payload: List<Byte> = [];
-    let mut i: Int = pn_start + (pn_len as Int);
-    while i < payload_end { payload.push(buf[i]); i = i + 1; }
+    let payload_start = pn_start + (pn_len as Int);
+    let mut payload: List<Byte> = List.with_capacity(payload_end - payload_start);
+    payload.extend_from_slice(&buf[payload_start..payload_end]);
     Ok((pn, pn_len, payload, payload_end))
 }
 
@@ -348,9 +344,8 @@ public fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError
     if (first & 0x80_u8) != 0_u8 { return Err(PacketError.InvalidHeaderForm); }
 
     let dcid_end = 1 + dcid_len;
-    let mut dcid_bytes: List<Byte> = [];
-    let mut i: Int = 1;
-    while i < dcid_end { dcid_bytes.push(buf[i]); i = i + 1; }
+    let mut dcid_bytes: List<Byte> = List.with_capacity(dcid_len);
+    dcid_bytes.extend_from_slice(&buf[1..dcid_end]);
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice())
         .map_err(|_| PacketError.CidTooLong(dcid_len))?;
 
@@ -365,9 +360,8 @@ public fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError
         k = k + 1;
     }
     let payload_start = dcid_end + (pn_len as Int);
-    let mut payload: List<Byte> = [];
-    let mut j: Int = payload_start;
-    while j < buf.len() { payload.push(buf[j]); j = j + 1; }
+    let mut payload: List<Byte> = List.with_capacity(buf.len() - payload_start);
+    payload.extend_from_slice(&buf[payload_start..]);
 
     Ok(Packet.Short(ShortHeader {
         first_byte:    first,
