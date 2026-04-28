@@ -804,6 +804,117 @@ struct CfgBuildContext<'a> {
     closure_captures: List<(verum_cbgr::analysis::RefId, bool)>,
 }
 
+// =====================================================================
+// Script-mode parse-routing helper
+// =====================================================================
+
+/// Decide whether `source` should be parsed in **script mode** (top-level
+/// statements allowed, folded into `__verum_script_main`).
+///
+/// Two independent triggers, OR-joined:
+///
+/// 1. **Shebang autodetection** — any source whose first bytes are a `#!`
+///    line (BOM-tolerant: `EF BB BF #!` is accepted) is a script regardless
+///    of CLI invocation form. This makes shebang exec (`./hello.vr`) work
+///    without any compiler-options plumbing.
+///
+/// 2. **Explicit entry-source flag** — `opts.script_mode` enables script
+///    mode for the entry source identified by `opts.input`. We compare via
+///    canonicalised paths when both sides exist (handles `./hello.vr` vs
+///    `/abs/hello.vr` vs `hello.vr`); when canonicalisation fails (file
+///    deleted between load and parse), fall back to a literal match. The
+///    flag only matches the entry; stdlib and imported modules ignore it,
+///    keeping their library-mode parsing untouched.
+///
+/// The function is allocation-free on the hot path (shebang check is a
+/// 5-byte slice comparison).
+fn should_parse_as_script(
+    source: &str,
+    opts: &crate::options::CompilerOptions,
+    source_path: Option<&std::path::Path>,
+) -> bool {
+    // (1) Shebang autodetection — BOM-tolerant.
+    let bytes = source.as_bytes();
+    if bytes.len() >= 2 && &bytes[..2] == b"#!" {
+        return true;
+    }
+    if bytes.len() >= 5 && &bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
+        return true;
+    }
+
+    // (2) Explicit entry-source flag.
+    if !opts.script_mode {
+        return false;
+    }
+    let Some(path) = source_path else {
+        return false;
+    };
+    let entry = opts.input.as_path();
+    if entry.as_os_str().is_empty() {
+        return false;
+    }
+    if path == entry {
+        return true;
+    }
+    // Canonicalise both sides and retry. When canonicalisation fails for
+    // either side (file moved or relative path that no longer resolves),
+    // the literal compare above is the only signal — return false rather
+    // than over-trigger script mode on stdlib files.
+    match (path.canonicalize(), entry.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod script_parse_routing_tests {
+    use super::should_parse_as_script;
+    use crate::options::CompilerOptions;
+    use std::path::PathBuf;
+
+    fn opts(input: &str, flag: bool) -> CompilerOptions {
+        CompilerOptions {
+            input: PathBuf::from(input),
+            script_mode: flag,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shebang_triggers_script_mode_regardless_of_flag() {
+        let o = opts("", false);
+        assert!(should_parse_as_script("#!/usr/bin/env verum\nprint(1)", &o, None));
+        assert!(should_parse_as_script("#!/usr/bin/env verum\nprint(1)", &o, Some(std::path::Path::new("/tmp/x.vr"))));
+    }
+
+    #[test]
+    fn bom_then_shebang_is_a_script() {
+        let bom_shebang = "\u{FEFF}#!/usr/bin/env verum\nprint(1)";
+        let o = opts("", false);
+        assert!(should_parse_as_script(bom_shebang, &o, None));
+    }
+
+    #[test]
+    fn no_shebang_no_flag_is_library() {
+        let o = opts("/tmp/foo.vr", false);
+        assert!(!should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/foo.vr"))));
+    }
+
+    #[test]
+    fn flag_alone_requires_path_match() {
+        let o = opts("/tmp/entry.vr", true);
+        assert!(!should_parse_as_script("fn main(){}", &o, None));
+        assert!(!should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/other.vr"))));
+        assert!(should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/entry.vr"))));
+    }
+
+    #[test]
+    fn flag_with_empty_input_matches_nothing() {
+        let o = opts("", true);
+        assert!(!should_parse_as_script("fn main(){}", &o, Some(std::path::Path::new("/tmp/x.vr"))));
+    }
+}
+
 impl<'s> CompilationPipeline<'s> {
     /// Create a new compilation pipeline for normal user code compilation.
     ///
@@ -1507,6 +1618,121 @@ impl<'s> CompilationPipeline<'s> {
         for module in &modules_to_compile {
             let ast_modules = self.parse_stdlib_module_files(module)?;
             all_parsed_modules.push((module.name.clone(), ast_modules));
+        }
+
+        // ====================================================================
+        // STEP 2.25: Resolve file-relative mounts (#5 / P1.5)
+        // ====================================================================
+        //
+        // Before module-registry registration, walk every
+        // parsed module for `MountTreeKind::File` declarations
+        // (`mount ./helper.vr;`).  For each, the resolver
+        // loads the referenced file via the loader's sandbox,
+        // parses it, and surfaces it as a synthetic module
+        // ready to be registered alongside its peers.
+        //
+        // This plugs file mounts into the existing
+        // module-path pipeline with zero new resolution
+        // codepaths — the synthesised module name (alias or
+        // file basename) becomes the canonical module-path
+        // identifier in the registry, and downstream import
+        // resolution treats it identically to any other
+        // module.
+        //
+        // Soft-fail strategy: file-mount resolution errors
+        // surface as warnings during stdlib bootstrap (no
+        // user-authored file mounts in core/ today, so any
+        // failure is a regression in our own infrastructure)
+        // and as hard errors during normal compilation.
+        if !modules_to_compile.is_empty() {
+            let mut resolver_seeds: Vec<(PathBuf, verum_ast::Module)> = Vec::new();
+            for (_mod_name, files) in &all_parsed_modules {
+                for (path, ast) in files {
+                    resolver_seeds.push((path.clone(), ast.clone()));
+                }
+            }
+            match verum_modules::file_mount::resolve_file_mounts(
+                &mut self.module_loader,
+                &resolver_seeds,
+                |source| {
+                    use verum_lexer::Lexer;
+                    use verum_fast_parser::VerumParser;
+                    let lexer = Lexer::new(source.source.as_str(), source.file_id);
+                    let parser = VerumParser::new();
+                    parser
+                        .parse_module(lexer, source.file_id)
+                        .map_err(|errs| {
+                            let summary: String = errs
+                                .iter()
+                                .map(|e| e.to_string())
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            verum_modules::error::ModuleError::Other {
+                                message: verum_common::Text::from(format!(
+                                    "parse error in file mount `{}`: {}",
+                                    source.file_path.display(),
+                                    summary
+                                )),
+                                span: None,
+                            }
+                        })
+                },
+            ) {
+                Ok(resolved) => {
+                    if !resolved.is_empty() && config.verbose {
+                        eprintln!(
+                            "Phase 1.25: Resolved {} file-relative mount(s)",
+                            resolved.len()
+                        );
+                    }
+                    // Each resolved file becomes its own
+                    // module entry in `all_parsed_modules`,
+                    // with the synthesised name acting as
+                    // the canonical module path.  The
+                    // existing Phase 1.5 registration loop
+                    // picks them up uniformly.
+                    for entry in resolved {
+                        // Re-parse the source for AST
+                        // ownership — the parsed module from
+                        // the resolver callback is dropped.
+                        // (Cheap: the loader cached the read,
+                        // and parse is fast.)
+                        let lexer = verum_lexer::Lexer::new(
+                            entry.source.as_str(),
+                            entry.file_id,
+                        );
+                        let parser = verum_fast_parser::VerumParser::new();
+                        let ast = match parser.parse_module(lexer, entry.file_id) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Parse error re-parsing file mount `{}`: {:?}",
+                                    entry.absolute_path.display(),
+                                    e
+                                ));
+                            }
+                        };
+                        all_parsed_modules.push((
+                            entry.synthetic_name.clone(),
+                            vec![(entry.absolute_path.clone(), ast)],
+                        ));
+                    }
+                }
+                Err(e) => {
+                    // During stdlib bootstrap there should
+                    // be no file mounts; if there are, log
+                    // a clear warning rather than aborting
+                    // (defensive — keeps stdlib compilation
+                    // resilient to accidental mount syntax
+                    // sneaking into core/).
+                    if config.verbose {
+                        eprintln!(
+                            "Phase 1.25: file-mount resolution warning: {}",
+                            e
+                        );
+                    }
+                }
+            }
         }
 
         // ====================================================================
@@ -4175,13 +4401,26 @@ impl<'s> CompilationPipeline<'s> {
         let virtual_path = PathBuf::from(path.as_str());
         let file_id = self
             .session
-            .load_source_string(source.as_str(), virtual_path)?;
+            .load_source_string(source.as_str(), virtual_path.clone())?;
 
-        let lexer = Lexer::new(source.as_str(), file_id);
+        // Decide library-mode vs script-mode parsing based on shebang
+        // autodetection or the entry-source script_mode flag. See
+        // `should_parse_as_script` for the full rule.
+        let script = should_parse_as_script(
+            source.as_str(),
+            self.session.options(),
+            Some(virtual_path.as_path()),
+        );
 
         // Parse
         let parser = VerumParser::new();
-        let mut module = parser.parse_module(lexer, file_id).map_err(|errors| {
+        let parse_result = if script {
+            parser.parse_module_script_str(source.as_str(), file_id)
+        } else {
+            let lexer = Lexer::new(source.as_str(), file_id);
+            parser.parse_module(lexer, file_id)
+        };
+        let mut module = parse_result.map_err(|errors| {
             let error_count = errors.len();
             for error in errors {
                 let diag = DiagnosticBuilder::error()
@@ -5700,10 +5939,24 @@ impl<'s> CompilationPipeline<'s> {
 
         // Lexing + Parsing (combined via parser)
         let start = Instant::now();
-        let lexer = Lexer::new(&source.source, file_id);
+
+        // Decide library-mode vs script-mode parsing based on shebang
+        // autodetection or the entry-source script_mode flag. See
+        // `should_parse_as_script` for the full rule.
+        let script = should_parse_as_script(
+            source.source.as_str(),
+            self.session.options(),
+            source.path.as_deref(),
+        );
 
         let parser = VerumParser::new();
-        let mut module = parser.parse_module(lexer, file_id).map_err(|errors| {
+        let parse_result = if script {
+            parser.parse_module_script_str(source.source.as_str(), file_id)
+        } else {
+            let lexer = Lexer::new(&source.source, file_id);
+            parser.parse_module(lexer, file_id)
+        };
+        let mut module = parse_result.map_err(|errors| {
             // Convert parser errors to diagnostics
             let error_count = errors.len();
             for error in errors.iter() {
@@ -11815,12 +12068,33 @@ impl<'s> CompilationPipeline<'s> {
         );
     }
 
-    /// Find the main function in the module and return its VBC function ID
+    /// Find the main function in the module and return its VBC function ID.
+    ///
+    /// Lookup order:
+    /// 1. `main` — explicit user-declared entry. Always preferred when
+    ///    present so script-mode files with both top-level statements
+    ///    AND a hand-rolled `fn main()` keep `main()` as the entry.
+    /// 2. `__verum_script_main` — the wrapper synthesised by the parser
+    ///    when script-mode is on. The AST-level entry-detection pass
+    ///    (`phases/entry_detection.rs`) selects the same wrapper, but
+    ///    that decision must also reach the VBC layer where the
+    ///    interpreter resolves entry by name. Without this fallback the
+    ///    pipeline would parse the script successfully then fail at
+    ///    `Phase 7: Execution` with "No main function found in VBC
+    ///    module".
     fn find_main_function_id(&self, vbc_module: &VbcModule) -> Result<VbcFunctionId> {
-        // Search the VBC module's function table for a function named "main".
+        // First pass: explicit `main`.
         for (idx, func_desc) in vbc_module.functions.iter().enumerate() {
             if let Some(name) = vbc_module.get_string(func_desc.name) {
                 if name == "main" {
+                    return Ok(VbcFunctionId(idx as u32));
+                }
+            }
+        }
+        // Second pass: synthesised script wrapper.
+        for (idx, func_desc) in vbc_module.functions.iter().enumerate() {
+            if let Some(name) = vbc_module.get_string(func_desc.name) {
+                if name == "__verum_script_main" {
                     return Ok(VbcFunctionId(idx as u32));
                 }
             }
