@@ -105,10 +105,19 @@ fn parse_index(bs: &List<Byte>, start: Int) -> base.Result<(Int, Int), PathParse
     let mut i: Int = start + 1;
     let mut idx: Int = 0;
     let mut had_digit: Bool = false;
+    let mut digit_count: Int = 0;
+    // JSON-path indices arrive from user SQL (`json_extract(json,
+    // '$[99999999999999999999]')`). Apply 3-layer overflow defense
+    // so a hostile path can't wrap `idx * 10 + d` past Int.MAX into
+    // a small positive value that flows into list-indexing.
     while i < bs.len() && bs[i] != (93 as Byte) {
         if bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+            if digit_count >= 19 { return Err(PpInvalidIndex); }
+            if idx > 922_337_203_685_477_580 { return Err(PpInvalidIndex); }
             idx = idx * 10 + ((bs[i] as Int) - 48);
+            if idx < 0 { return Err(PpInvalidIndex); }
             had_digit = true;
+            digit_count = digit_count + 1;
         } else {
             return Err(PpInvalidIndex);
         }

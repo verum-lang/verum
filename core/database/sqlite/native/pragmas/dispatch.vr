@@ -307,11 +307,16 @@ fn parse_signed_int(s: &Text) -> Maybe<Int64> {
     if bs[0] == (45 as Byte) { sign = -1 as Int64; i = 1; }
     else if bs[0] == (43 as Byte) { i = 1; }
     if i >= bs.len() { return None; }
+    // PRAGMA argument values arrive from user SQL — apply 3-layer
+    // overflow defense per the recipe codified in #70-#74.
+    if (bs.len() - i) > 19 { return None; }
     let mut acc: Int64 = 0 as Int64;
     while i < bs.len() {
         let b = bs[i];
         if b < (48 as Byte) || b > (57 as Byte) { return None; }
+        if acc > 922_337_203_685_477_580_i64 { return None; }
         acc = acc * 10_i64 + ((b as Int64) - 48_i64);
+        if acc < 0_i64 { return None; }
         i = i + 1;
     }
     Some(acc * sign)
