@@ -621,9 +621,7 @@ fn emit_intersect(
     // For INTERSECT: skip emit, advance A.
     let no_match_label = st.program.instruction_count();
     let _ = st.program.emit(Next(a_cid, outer_top));
-    let after_no_match = st.program.instruction_count();
-    let _ = after_no_match;
-    let _ = st.program.emit(Goto(0));            // patched to end_label (after-A-exhaust path)
+    let after_a_exhaust_jmp = st.program.emit(Goto(0));   // patched to end_label
 
     // Match path: emit A.curr, advance A.
     let match_label = st.program.instruction_count();
@@ -637,7 +635,7 @@ fn emit_intersect(
     emit_result_row(st, dst, n_proj);
     emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(a_cid, outer_top));
-    let _ = st.program.emit(Goto(0));            // patched to end_label
+    let after_match_emit_jmp = st.program.emit(Goto(0));   // patched to end_label
 
     let end_label = st.program.instruction_count();
 
@@ -645,6 +643,13 @@ fn emit_intersect(
     st.program.replace(outer_rewind, Rewind(a_cid, end_label));
     st.program.replace(rewind_b, Rewind(b_cid, no_match_label));
     st.program.replace(match_goto, Goto(match_label));
+    // Pre-fix: these two Goto(0) instructions were emitted into `_` and
+    // never patched, so when A was exhausted mid-scan (or after the
+    // match-emit Next fell through) control jumped to PC 0 — restarting
+    // the entire program.  INTERSECT could produce duplicate result
+    // rows or hang.  Now both jumps target end_label cleanly.
+    st.program.replace(after_a_exhaust_jmp, Goto(end_label));
+    st.program.replace(after_match_emit_jmp, Goto(end_label));
     let mut p: Int = 0;
     while p < nes.len() {
         let triple = nes[p];
@@ -707,18 +712,24 @@ fn emit_except(
     emit_result_row(st, dst, n_proj);
     emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(a_cid, outer_top));
-    let _ = st.program.emit(Goto(0));            // patched to end_label
+    let after_no_match_emit_jmp = st.program.emit(Goto(0));   // patched to end_label
 
     // Match path: skip a, advance A.
     let match_label = st.program.instruction_count();
     let _ = st.program.emit(Next(a_cid, outer_top));
-    let _ = st.program.emit(Goto(0));            // patched to end_label
+    let after_match_skip_jmp = st.program.emit(Goto(0));      // patched to end_label
 
     let end_label = st.program.instruction_count();
 
     st.program.replace(outer_rewind, Rewind(a_cid, end_label));
     st.program.replace(rewind_b, Rewind(b_cid, no_match_label));
     st.program.replace(match_goto, Goto(match_label));
+    // Same INTERSECT-style fix: pre-patch these two Goto(0) instructions
+    // that were emitted into `_` and never reached `replace()` — they
+    // jumped to PC 0 (program restart) instead of end_label, producing
+    // duplicate-row or hang behavior on EXCEPT.
+    st.program.replace(after_no_match_emit_jmp, Goto(end_label));
+    st.program.replace(after_match_skip_jmp, Goto(end_label));
     let mut p: Int = 0;
     while p < nes.len() {
         let triple = nes[p];
