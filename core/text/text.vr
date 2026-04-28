@@ -745,10 +745,22 @@ implement Text {
     }
 
     /// Push a string.
+    ///
+    /// Pre-reserves capacity then bulk-copies via `memcpy`, instead of
+    /// looping `push_byte` which paid the per-byte capacity probe and
+    /// null-terminator memset on every byte. For an N-byte append the
+    /// new path is one growth + one memcpy + one terminator write,
+    /// not N grows + N writes + N terminators.
     public fn push_str(&mut self, s: &Text) {
-        let bytes = s.as_bytes();
-        for i in range(0, bytes.len()) {
-            self.push_byte(bytes[i]);
+        let n = s.as_bytes().len();
+        if n == 0 { return; }
+        self.reserve(n);
+        unsafe {
+            memcpy(ptr_offset(self.ptr, self.len), s.as_ptr(), n);
+        }
+        self.len = self.len + n;
+        unsafe {
+            memset(ptr_offset(self.ptr, self.len), 0 as Byte, 1);
         }
     }
 
@@ -2503,9 +2515,7 @@ implement Text {
     public fn into_bytes(self) -> List<Byte> {
         let bytes = self.as_bytes();
         let mut result: List<Byte> = List.with_capacity(bytes.len());
-        for i in range(0, bytes.len()) {
-            result.push(bytes[i]);
-        }
+        result.extend_from_slice(bytes);
         result
     }
 

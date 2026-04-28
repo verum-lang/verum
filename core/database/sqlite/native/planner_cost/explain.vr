@@ -138,7 +138,5 @@ implement ExplainBuilder {
 }
 
 fn push_text(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+    dst.push_str(s);
 }
