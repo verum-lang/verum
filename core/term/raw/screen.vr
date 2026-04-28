@@ -99,24 +99,44 @@ public fn get_stdout_size() -> IoResult<TerminalSize> {
 // Cursor position query (via DSR)
 // =============================================================================
 
+/// Low-level poll+read with millisecond timeout.  Wired against the
+/// same intrinsic `core.term.raw.capabilities` uses so a single
+/// runtime entry-point services every blocking-with-deadline read.
+@intrinsic("verum.io.poll_read")
+fn poll_read_raw(fd: Int, buf: &mut [Byte], timeout_ms: Int) -> Int;
+
+/// Per-byte deadline for the DSR response.  Local TTYs typically reply
+/// within a few milliseconds; 100ms is conservative for SSH'd sessions.
+const DSR_TIMEOUT_MS: Int = 100;
+
 /// Query cursor position via Device Status Report (CSI 6 n).
 /// Terminal responds with CSI row ; col R.
 /// Returns (row, col), 0-indexed.
 ///
-/// NOTE: Requires raw mode. This is a blocking operation.
+/// Each byte-read is gated by `DSR_TIMEOUT_MS` so a terminal that
+/// silently swallows the DSR (CI runners, dumb pipes, hardware
+/// without ECMA-48 support) surfaces `IoErrorKind.TimedOut` instead
+/// of hanging the calling thread.
+///
+/// NOTE: Requires raw mode.
 public fn query_cursor_position(fd: FileDesc) -> IoResult<(Int, Int)> {
     // Send DSR: ESC [ 6 n
     write_to_fd(fd, "\x1b[6n")?;
 
     // Read response: ESC [ rows ; cols R
-    // This is a simplified reader — real implementation needs timeout
     let mut buf: [Byte; 32] = [0; 32];
     let mut pos = 0;
     let mut found = false;
 
     while pos < 32 && !found {
-        let n = read_from_fd(fd, &mut buf[pos..pos + 1])?;
-        if n == 0 { break; }
+        let mut byte_buf: [Byte; 1] = [0; 1];
+        let n = poll_read_raw(fd.0, &mut byte_buf, DSR_TIMEOUT_MS);
+        if n <= 0 {
+            // 0 = EOF, < 0 = timeout / error.  Either way the terminal
+            // didn't finish the report — fall through to `!found` check.
+            break;
+        }
+        buf[pos] = byte_buf[0];
         if buf[pos] == 'R' as Byte {
             found = true;
         }
