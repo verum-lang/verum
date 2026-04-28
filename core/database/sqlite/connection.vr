@@ -40,10 +40,49 @@ mount core.database.sqlite.error.dberr_from_loom;
 // `DbError` into scope (sibling-name collision with common's); we
 // reach for it via the full path inside `dberr_from_loom`.
 mount core.database.sqlite.native.l7_api.{
-    Database as LoomDatabase,
+    Database,
     Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
     open_memory_db, open_readonly, open_readwrite, open_admin,
     open_path, open_path_readonly, open_path_readwrite, open_path_admin,
+
+    // Backup
+    BackupSession,
+    backup_init_to_path, backup_init_into,
+    backup_step, backup_finish, backup_abandon,
+    backup_to_path_in_one_go,
+
+    // Pragma
+    PragmaValue, PvNull, PvInt, PvText, PvBool,
+    pragma_get as loom_pragma_get,
+    pragma_set as loom_pragma_set,
+    pragma_get_int as loom_pragma_get_int,
+    pragma_set_int as loom_pragma_set_int,
+    pragma_get_text as loom_pragma_get_text,
+    pragma_set_text as loom_pragma_set_text,
+    pragma_get_bool as loom_pragma_get_bool,
+    pragma_set_bool as loom_pragma_set_bool,
+
+    // Hooks
+    set_commit_hook    as loom_hooks_set_commit,
+    clear_commit_hook  as loom_hooks_clear_commit,
+    has_commit_hook    as loom_hooks_has_commit,
+    set_rollback_hook  as loom_hooks_set_rollback,
+    has_rollback_hook  as loom_hooks_has_rollback,
+    set_update_hook    as loom_hooks_set_update,
+    has_update_hook    as loom_hooks_has_update,
+    set_pre_update_hook as loom_hooks_set_pre_update,
+    set_authorizer     as loom_hooks_set_authorizer,
+    has_authorizer     as loom_hooks_has_authorizer,
+    set_busy_handler   as loom_hooks_set_busy,
+    set_progress_handler as loom_hooks_set_progress,
+    set_trace_hook     as loom_hooks_set_trace,
+};
+mount core.database.sqlite.native.pragmas.registry.{PragmaKind};
+mount core.database.sqlite.native.backup_api.outcome.{BackupOutcome};
+mount core.database.sqlite.native.backup_api.request.{BackupStepRequest};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
+    AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
 };
 mount core.database.sqlite.native.l6_session.{
     ConnectionMode, CmRead, CmWrite, CmAdmin,
@@ -128,7 +167,7 @@ implement SqliteCapability {
 /// wraps a session-layer `Connection`); all errors crossing this
 /// boundary get translated into the common `DbError`.
 public type SqliteConnection is {
-    inner: LoomDatabase,
+    inner: core.database.sqlite.native.l7_api.database.Database,
 };
 
 implement SqliteConnection {
@@ -288,6 +327,185 @@ implement SqliteConnection {
 
     public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
         match self.inner.rollback_tx(tx) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Backup — online copy to a destination database
+    // -------------------------------------------------------------------------
+    //
+    // Surface mirrors `core.database.sqlite.native.l7_api.backup` —
+    // see that module for full semantics.  Every call forwards through
+    // the loom L7 API; the only adapter-side translation is the loom
+    // `DbError` (a per-connection sum) into the unified Spindle
+    // `DbError` (a cross-vendor sum) via `dberr_from_loom`.
+
+    /// Initialise an online backup that will copy this connection's
+    /// data into a fresh database at `dst_path`.  Returns the affine
+    /// `BackupSession` the caller MUST consume via `backup_step` +
+    /// `backup_finish`.
+    public fn backup_init_to_path(&self, dst_path: &Text)
+        -> Result<BackupSession, DbError>
+    {
+        match backup_init_to_path(&self.inner, dst_path) {
+            Ok(s)  => Ok(s),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Initialise a backup writing into an already-open destination
+    /// loom Database.  Used by tests with `:memory:` destinations and
+    /// by advanced flows that have already tuned the destination.
+    public fn backup_init_into(&self, dst: core.database.sqlite.native.l7_api.database.Database)
+        -> Result<BackupSession, DbError>
+    {
+        match backup_init_into(&self.inner, dst) {
+            Ok(s)  => Ok(s),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Copy up to `pages` source pages into the destination.  Returns
+    /// `BackupOutcome::BoOk` while progress remains, `BoDone` on
+    /// completion, `BoFailed { code, reason }` on I/O failure.
+    public fn backup_step(
+        &mut self,
+        session: &mut BackupSession,
+        req: BackupStepRequest,
+    ) -> BackupOutcome {
+        backup_step(session, &mut self.inner, req)
+    }
+
+    /// Consume the backup session, returning the destination Database.
+    public fn backup_finish(&self, session: BackupSession) -> core.database.sqlite.native.l7_api.database.Database {
+        backup_finish(session)
+    }
+
+    /// Convenience: open dst, copy everything, finish.
+    public fn backup_to_path_in_one_go(&mut self, dst_path: &Text)
+        -> Result<core.database.sqlite.native.l7_api.database.Database, DbError>
+    {
+        match backup_to_path_in_one_go(&mut self.inner, dst_path) {
+            Ok(d)  => Ok(d),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Hooks — observation surfaces
+    // -------------------------------------------------------------------------
+
+    public fn set_commit_hook(&mut self, h: Heap<dyn CommitHook>) {
+        loom_hooks_set_commit(&mut self.inner, h);
+    }
+    public fn clear_commit_hook(&mut self) {
+        loom_hooks_clear_commit(&mut self.inner);
+    }
+    public fn has_commit_hook(&self) -> Bool {
+        loom_hooks_has_commit(&self.inner)
+    }
+
+    public fn set_rollback_hook(&mut self, h: Heap<dyn RollbackHook>) {
+        loom_hooks_set_rollback(&mut self.inner, h);
+    }
+    public fn has_rollback_hook(&self) -> Bool {
+        loom_hooks_has_rollback(&self.inner)
+    }
+
+    public fn set_update_hook(&mut self, h: Heap<dyn UpdateHook>) {
+        loom_hooks_set_update(&mut self.inner, h);
+    }
+    public fn has_update_hook(&self) -> Bool {
+        loom_hooks_has_update(&self.inner)
+    }
+
+    public fn set_pre_update_hook(&mut self, h: Heap<dyn PreUpdateHook>) {
+        loom_hooks_set_pre_update(&mut self.inner, h);
+    }
+
+    public fn set_authorizer(&mut self, h: Heap<dyn AuthorizerHook>) {
+        loom_hooks_set_authorizer(&mut self.inner, h);
+    }
+    public fn has_authorizer(&self) -> Bool {
+        loom_hooks_has_authorizer(&self.inner)
+    }
+
+    public fn set_busy_handler(&mut self, h: Heap<dyn BusyHandler>) {
+        loom_hooks_set_busy(&mut self.inner, h);
+    }
+    public fn set_progress_handler(&mut self, h: Heap<dyn ProgressHandler>) {
+        loom_hooks_set_progress(&mut self.inner, h);
+    }
+    public fn set_trace_hook(&mut self, h: Heap<dyn TraceHook>) {
+        loom_hooks_set_trace(&mut self.inner, h);
+    }
+
+    // -------------------------------------------------------------------------
+    // Pragma — typed get / set without raw SQL
+    // -------------------------------------------------------------------------
+    //
+    // Wraps the loom `pragma_api` surface: typed `PragmaKind` /
+    // `PragmaValue` instead of `PRAGMA name = value` strings; closes
+    // the SQLite-C footgun where typo'd PRAGMAs silently no-op.
+
+    /// Read a PRAGMA by typed kind.
+    public fn pragma_get(&mut self, kind: PragmaKind)
+        -> Result<PragmaValue, DbError>
+    {
+        match loom_pragma_get(&mut self.inner, kind) {
+            Ok(v)  => Ok(v),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Write a PRAGMA by typed kind + value.
+    public fn pragma_set(
+        &mut self,
+        kind: PragmaKind,
+        value: PragmaValue,
+    ) -> Result<(), DbError> {
+        match loom_pragma_set(&mut self.inner, kind, value) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    /// Typed-shape conveniences — reject mismatched value-shape with
+    /// `DbMisuse` rather than silently coercing.
+    public fn pragma_get_int(&mut self, kind: PragmaKind) -> Result<Int64, DbError> {
+        match loom_pragma_get_int(&mut self.inner, kind) {
+            Ok(n)  => Ok(n),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+    public fn pragma_set_int(&mut self, kind: PragmaKind, n: Int64) -> Result<(), DbError> {
+        match loom_pragma_set_int(&mut self.inner, kind, n) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+    public fn pragma_get_text(&mut self, kind: PragmaKind) -> Result<Text, DbError> {
+        match loom_pragma_get_text(&mut self.inner, kind) {
+            Ok(s)  => Ok(s),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+    public fn pragma_set_text(&mut self, kind: PragmaKind, s: Text) -> Result<(), DbError> {
+        match loom_pragma_set_text(&mut self.inner, kind, s) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+    public fn pragma_get_bool(&mut self, kind: PragmaKind) -> Result<Bool, DbError> {
+        match loom_pragma_get_bool(&mut self.inner, kind) {
+            Ok(b)  => Ok(b),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+    public fn pragma_set_bool(&mut self, kind: PragmaKind, b: Bool) -> Result<(), DbError> {
+        match loom_pragma_set_bool(&mut self.inner, kind, b) {
             Ok(_)  => Ok(()),
             Err(e) => Err(dberr_from_loom(e)),
         }
