@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, hostile-input, http, range, cve-2011-3192
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173 vector A — closed
+// soundness defect). RFC 7233 byte-offset values from hostile Range
+// headers ran `v * 10 + d` over UInt64 with no overflow protection;
+// `Range: bytes=99999999999999999999999-` silently wrapped to a
+// small offset, slipping past length checks. Closed in commit
+// ee12b616 with the standard 3-layer recipe (length cap +
+// per-step MAX/10 + post-add wrap-around).
+//
+// Cross-references CVE-2011-3192 (Apache mod_proxy / mod_disk_cache
+// Range-DoS) — the range-spec count cap was already in place pre-
+// fix; this test pins the per-spec digit-count cap that the
+// audit added.
+
+mount core.net.http_range.{RangeError, RangeSet, parse};
+
+// Hostile: 23-digit byte offset in the start position. Pre-fix,
+// `parse_u64` wrapped UInt64 silently. Post-fix, length cap rejects.
+fn http_range_huge_start_rejected() {
+    let res = parse(&Text.from("bytes=99999999999999999999999-"), 1024 as Int64);
+    match res {
+        Ok(_)  => panic(
+            "Range header with 23-digit start offset MUST be rejected"),
+        Err(_) => {},
+    }
+}
+
+// Same in the end position.
+fn http_range_huge_end_rejected() {
+    let res = parse(&Text.from("bytes=0-99999999999999999999999"), 1024 as Int64);
+    match res {
+        Ok(_)  => panic(
+            "Range header with 23-digit end offset MUST be rejected"),
+        Err(_) => {},
+    }
+}
+
+// Suffix form — last N bytes. Same overflow surface.
+fn http_range_huge_suffix_rejected() {
+    let res = parse(&Text.from("bytes=-99999999999999999999999"), 1024 as Int64);
+    match res {
+        Ok(_)  => panic(
+            "Range header with 23-digit suffix length MUST be rejected"),
+        Err(_) => {},
+    }
+}
+
+// Boundary: exactly 21 digits is over UInt64.MAX (max 20 digits).
+// Cap rejects pre-loop.
+fn http_range_21_digit_rejected() {
+    let res = parse(&Text.from("bytes=999999999999999999999-"), 1024 as Int64);
+    match res {
+        Ok(_)  => panic("21-digit range start MUST be rejected"),
+        Err(_) => {},
+    }
+}
+
+// Sanity: small valid range still parses.
+fn http_range_normal_works() {
+    let res = parse(&Text.from("bytes=0-499"), 1024 as Int64);
+    match res {
+        Ok(rs) => assert(rs.specs.len() == 1),
+        Err(e) => panic(f"normal range must parse: {e}"),
+    }
+}
+
+fn main() {
+    http_range_huge_start_rejected();
+    http_range_huge_end_rejected();
+    http_range_huge_suffix_rejected();
+    http_range_21_digit_rejected();
+    http_range_normal_works();
+}

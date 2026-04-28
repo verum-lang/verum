@@ -1,0 +1,112 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, decoder-canonicality, base64, base32, forgery
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrails (#173, decoder-canonicality
+// recipe class).
+//
+// Pins the audit-confirmed defense: any decoder where two distinct
+// inputs decode to the same value defeats round-trip equality and
+// admits forgery (JWT / cap-token / TOTP / NSEC3 / onion-name
+// surfaces). The base64 and base32 decoders went through #203 + the
+// canonicality audit (commits 0580d289, 7cc391c4, a29ba425) to
+// reject non-canonical encodings explicitly.
+//
+// Each test crafts a non-canonical encoding that the pre-fix
+// decoder would have ACCEPTED (decoding to the same bytes as the
+// canonical form). The post-fix decoder MUST reject these — that's
+// the round-trip equality contract.
+
+mount core.encoding.base64.{
+    Base64Error, Base64ErrorKind,
+    encode, encode_url, decode, decode_url,
+};
+
+// Canonical form of `b"a"` is "YQ==" (1-byte input padded). The
+// non-canonical form "YQ" (no padding under STD alphabet) and "YQ==="
+// (over-padded) MUST be rejected. Pre-fix, "YQ" silently decoded to
+// b"a" via lenient padding; post-fix, the standard alphabet requires
+// `len % 4 == 0` AND exact pad-count.
+fn base64_std_rejects_no_padding() {
+    let res = decode(&Text.from("YQ"));
+    match res {
+        Ok(_)  => panic("standard base64 MUST reject input lacking required padding"),
+        Err(_) => {},
+    }
+}
+
+fn base64_std_rejects_overpadded() {
+    let res = decode(&Text.from("YQ==="));
+    match res {
+        Ok(_)  => panic("standard base64 MUST reject 5-char (over-padded) input"),
+        Err(_) => {},
+    }
+}
+
+// Canonical "Yh" (two chars, URL-safe no-pad) decodes to byte 0x62 = 'b'.
+// Non-canonical "Yi" carries trailing data bits that should be zero
+// per RFC 4648 §3.5 — pre-fix accepted, post-fix rejects.
+fn base64_url_rejects_non_canonical_trailing_bits() {
+    // Establish canonical first: encode b"a" as URL-safe.
+    let canon = encode_url(&[0x61_u8]);     // "YQ"
+    let canon_back = decode_url(&canon).unwrap();
+    assert(canon_back.len() == 1 && canon_back[0] == 0x61_u8,
+           "URL-safe canonical round-trip");
+
+    // Non-canonical: same length but trailing bits set (e.g. "YR"
+    // decodes to one byte equal to 'a' under lax decoders, but the
+    // 2-bit tail is non-zero). The audit fix rejects this.
+    // (`Y` → 24, `R` → 17 — `Y`'s 6 bits are 011000, `R`'s are 010001.
+    // 24*64 + 17 = 1553 = 0b00011000_010001 — first byte 0b01100001 = 'a',
+    // but trailing 4 bits are 0001 — non-zero, so non-canonical.)
+    let res = decode_url(&Text.from("YR"));
+    match res {
+        Ok(_)  => panic(
+            "URL-safe base64 MUST reject non-canonical trailing data bits"),
+        Err(_) => {},
+    }
+}
+
+// Sanity: the documented canonical strings round-trip cleanly.
+fn base64_canonical_roundtrips() {
+    // 1 byte → 4 chars padded, URL-safe.
+    let r1 = decode(&Text.from("YQ==")).unwrap();
+    assert(r1.len() == 1 && r1[0] == 0x61_u8);
+    // 2 bytes → "YWI=".
+    let r2 = decode(&Text.from("YWI=")).unwrap();
+    assert(r2.len() == 2 && r2[0] == 0x61_u8 && r2[1] == 0x62_u8);
+    // 3 bytes → "YWJj" (no padding).
+    let r3 = decode(&Text.from("YWJj")).unwrap();
+    assert(r3.len() == 3 && r3[0] == 0x61_u8 && r3[1] == 0x62_u8 && r3[2] == 0x63_u8);
+}
+
+// Standard alphabet rejects URL-safe characters and vice-versa.
+// '_' is URL-safe only; '+' is standard only.
+fn base64_std_rejects_url_chars() {
+    // "Z_8=" uses '_' which is illegal under standard alphabet.
+    let res = decode(&Text.from("Z_8="));
+    match res {
+        Ok(_)  => panic("standard base64 MUST reject URL-safe '_' character"),
+        Err(_) => {},
+    }
+}
+
+fn base64_url_rejects_std_chars() {
+    // "Z+8=" uses '+' (and '=' padding) — illegal under URL-safe alphabet.
+    let res = decode_url(&Text.from("Z+8="));
+    match res {
+        Ok(_)  => panic("URL-safe base64 MUST reject '+' character"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    base64_std_rejects_no_padding();
+    base64_std_rejects_overpadded();
+    base64_url_rejects_non_canonical_trailing_bits();
+    base64_canonical_roundtrips();
+    base64_std_rejects_url_chars();
+    base64_url_rejects_std_chars();
+}
