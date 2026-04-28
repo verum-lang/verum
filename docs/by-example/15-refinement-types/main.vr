@@ -1,0 +1,54 @@
+// docs/by-example/15-refinement-types/main.vr
+// Refinement types: predicates attached to base types, verified by SMT.
+
+mount core.io.println;
+
+// `Int{> 0}` is the type of strictly positive integers — every value
+// of this type carries a compile-time proof that it's > 0.
+fn divide(numerator: Int, denominator: Int{!= 0}) -> Int {
+    // No `if denominator == 0 { panic(...) }` needed — the type
+    // system rules out 0 at every call site.
+    numerator / denominator
+}
+
+// Refinements over the result type: this function PROMISES its
+// output is non-negative, and the verifier checks that promise
+// against every return path.
+fn abs_value(n: Int) -> Int{>= 0} {
+    if n == Int.MIN {
+        // -Int.MIN overflows; return Int.MAX (still satisfies >= 0).
+        Int.MAX
+    } else if n < 0 {
+        -n
+    } else {
+        n
+    }
+}
+
+// Refinements compose with structural types: List length and index
+// preconditions can both appear.
+fn nth(xs: &List<Int>{len > 0}, i: Int{>= 0}) -> Int {
+    // The SMT solver discharges the "i < xs.len()" obligation if
+    // the caller proves it. If the caller can't, they get a
+    // compile error instead of a runtime panic.
+    if i < xs.len() { xs[i] } else { 0 }
+}
+
+fn main() {
+    // Compile-time proof: literal `7` satisfies `!= 0`.
+    println(f"10 / 7 = {divide(10, 7)}");
+
+    // The verifier sees `n != 0` from the if-branch and accepts
+    // the call without runtime check.
+    let n = 3;
+    if n != 0 {
+        println(f"abs(-1) = {abs_value(-1)}");
+        println(f"divide via proven n: {divide(20, n)}");
+    }
+
+    // Without a proof, the call is rejected:
+    //   let m: Int = read_user_input();
+    //   divide(10, m);     // ERROR: cannot prove m != 0
+    // Caller must either pattern-match, assert, or change the
+    // input type.
+}

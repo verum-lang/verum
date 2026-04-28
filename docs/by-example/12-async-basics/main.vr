@@ -1,0 +1,40 @@
+// docs/by-example/12-async-basics/main.vr
+// Async / await: suspendable functions, structured concurrency.
+
+mount core.async.{spawn, sleep};
+mount core.time.duration.from_millis;
+mount core.io.println;
+
+// `async fn` returns a `Future<T>` that doesn't run until awaited.
+async fn fetch_user(id: Int) -> Text {
+    // Simulate an I/O round-trip — the runtime parks the task here
+    // and reuses the OS thread for other work in the meantime.
+    sleep(from_millis(50)).await;
+    f"user-{id}"
+}
+
+// Multiple awaits compose linearly: one task, two suspension points.
+async fn fetch_user_with_friend(id: Int) -> (Text, Text) {
+    let user = fetch_user(id).await;
+    let friend = fetch_user(id + 1).await;
+    (user, friend)
+}
+
+fn main() {
+    // `spawn` launches an async task on the runtime; the returned
+    // handle resolves when the task finishes.
+    let handle = spawn(async {
+        let (u, f) = fetch_user_with_friend(42).await;
+        println(f"sequential: user={u}, friend={f}");
+    });
+    handle.join();
+
+    // Structured concurrency: `join` runs two futures in parallel and
+    // gathers both results. Total wall-clock time ≈ max(50ms, 50ms),
+    // not 100ms — the two `sleep` calls overlap.
+    let parallel_handle = spawn(async {
+        let (a, b) = core.async.join(fetch_user(1), fetch_user(2)).await;
+        println(f"parallel:   user1={a}, user2={b}");
+    });
+    parallel_handle.join();
+}
