@@ -62,16 +62,20 @@ pathological inputs.
 - `crates/verum_smt/tests/timeout_fail_closed_invariant.rs` — Rust-level invariant tests
 - `vcs/specs/L1-core/refinement/smt/proof_timeout.vr` — broader L1 surface
 
-### 1.3 Module dependency graph fan-out / fan-in — PARTIAL DEFENSE 2026-04-28
+### 1.3 Module dependency graph fan-out / fan-in — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — 16-leaf-1-hub guardrail at representative
-fan-out scale; full 1000-module worst-case generator deferred.
+**Status:** DEFENSE CONFIRMED — 64-leaf-1-hub-1-aggregator guardrail
+demonstrates linear closure-walker scaling against the worst-case
+fan-in/fan-out pattern.  Companion: R3-§5.1 covers independent (no
+cross-mount) module count at 256.
 
 **Guardrail:** `vcs/specs/L4-performance/red-team-3-perf/module_fanout_bounded.vr`
-constructs a hub module with 16 leaves each mounting it, plus an aggregator
-fanning IN from all 16. Closure walker visits each edge exactly once;
-sum_all() pins both compile-time linearity and runtime correctness
-(1+2+...+16 = 136).
+constructs a hub module with 64 leaves each mounting it, plus an
+aggregator fanning IN from all 64.  Closure walker visits each edge
+exactly once; `sum_all()` pins both compile-time linearity (~18s) and
+runtime correctness (1+2+...+64 = 2080).  All 64 mount points
+converge on `cog.hub.{Shared, make}` — stresses the cache-locality of
+repeated lookups against the same hub symbol-table entry.
 
 ---
 
@@ -285,7 +289,7 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | --- | --- | --- |
 | 1.1 Deep generic | **DEFENSE CONFIRMED** | 2^14 wrapping guardrail (2026-04-28) |
 | 1.2 SMT exponential | **DEFENSE CONFIRMED** | closed via round-1 §5.1 (2026-04-28) |
-| 1.3 Module fan-out | **PARTIAL** | 16-leaf+hub guardrail (2026-04-28); 1000-module pending |
+| 1.3 Module fan-out | **DEFENSE CONFIRMED** | 64-leaf+hub+aggregator guardrail (2026-04-28) |
 | 2.1 Alloc pressure | PARTIAL | wire-frame done |
 | 2.2 Refinement caching | PENDING | hot-loop test |
 | 2.3 10^6 tasks | **DEFENSE CONFIRMED** | atomic spawn-time cap (2026-04-28) |
@@ -298,9 +302,9 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 5.1 1000-module load | **DEFENSE CONFIRMED** | 256-module synthetic guardrail (2026-04-28) |
 | 5.2 Deep cfg | **DEFENSE CONFIRMED** | 78-predicate walker linearity (2026-04-28) |
 
-**8 vectors confirmed defended (channel backlog, 10^6 tasks, SMT exponential,
-dispatch worst case, deep cfg, atomic contention, module load, deep generic),
-3 partial defences (alloc pressure, module fan-out, plus ~170+ wire-frame
+**9 vectors confirmed defended (channel backlog, 10^6 tasks, SMT exponential,
+dispatch worst case, deep cfg, atomic contention, module load, deep generic,
+module fan-out), 2 partial defences (alloc pressure, plus ~170+ wire-frame
 sites swept), 3 pending** post 2026-04-28 closures.  Sections A-C above
 document performance-class invariants already upheld through the closed
 audit.

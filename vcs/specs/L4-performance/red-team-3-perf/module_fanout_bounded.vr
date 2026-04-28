@@ -5,15 +5,16 @@
 // @tier: 0
 // @level: L4
 // @tags: red-team, perf, modules, closure-walker, red-team-3.1.3
-// @timeout: 30000
+// @timeout: 60000
 // @expect: pass
 // =============================================================================
 //
 // Pins the closure-walker scaling against the worst-case fan-in/fan-out
 // pattern where many modules each mount a common dependency. Production
-// scale is 1000+ modules each mounting `core.*`; here we exercise 16
-// fan-in modules + 1 hub, sufficient to expose super-linear cliffs
-// without timing out CI.
+// scale is 1000+ modules each mounting `core.*`; here we exercise 64
+// fan-in modules + 1 hub + 1 aggregator, sufficient to expose super-
+// linear cliffs without timing out CI.  Companion: R3-§5.1 covers
+// independent (no cross-mount) module count at 256.
 //
 // **Audit reference:** vcs/red-team/round-3-perf.md §1.3.
 //
@@ -27,7 +28,9 @@ module hub {
     pub fn make(v: Int) -> Shared { Shared { value: v } }
 }
 
-// 16 leaf modules each mounting the hub.
+// 64 leaf modules each mounting the hub.  All 64 mount points
+// converge on `cog.hub.{Shared, make}` — stresses the cache-locality
+// of repeated lookups against the same hub symbol-table entry.
 module leaf_01 { mount cog.hub.{Shared, make}; pub fn use_01() -> Shared { make(1) } }
 module leaf_02 { mount cog.hub.{Shared, make}; pub fn use_02() -> Shared { make(2) } }
 module leaf_03 { mount cog.hub.{Shared, make}; pub fn use_03() -> Shared { make(3) } }
@@ -44,8 +47,56 @@ module leaf_13 { mount cog.hub.{Shared, make}; pub fn use_13() -> Shared { make(
 module leaf_14 { mount cog.hub.{Shared, make}; pub fn use_14() -> Shared { make(14) } }
 module leaf_15 { mount cog.hub.{Shared, make}; pub fn use_15() -> Shared { make(15) } }
 module leaf_16 { mount cog.hub.{Shared, make}; pub fn use_16() -> Shared { make(16) } }
+module leaf_17 { mount cog.hub.{Shared, make}; pub fn use_17() -> Shared { make(17) } }
+module leaf_18 { mount cog.hub.{Shared, make}; pub fn use_18() -> Shared { make(18) } }
+module leaf_19 { mount cog.hub.{Shared, make}; pub fn use_19() -> Shared { make(19) } }
+module leaf_20 { mount cog.hub.{Shared, make}; pub fn use_20() -> Shared { make(20) } }
+module leaf_21 { mount cog.hub.{Shared, make}; pub fn use_21() -> Shared { make(21) } }
+module leaf_22 { mount cog.hub.{Shared, make}; pub fn use_22() -> Shared { make(22) } }
+module leaf_23 { mount cog.hub.{Shared, make}; pub fn use_23() -> Shared { make(23) } }
+module leaf_24 { mount cog.hub.{Shared, make}; pub fn use_24() -> Shared { make(24) } }
+module leaf_25 { mount cog.hub.{Shared, make}; pub fn use_25() -> Shared { make(25) } }
+module leaf_26 { mount cog.hub.{Shared, make}; pub fn use_26() -> Shared { make(26) } }
+module leaf_27 { mount cog.hub.{Shared, make}; pub fn use_27() -> Shared { make(27) } }
+module leaf_28 { mount cog.hub.{Shared, make}; pub fn use_28() -> Shared { make(28) } }
+module leaf_29 { mount cog.hub.{Shared, make}; pub fn use_29() -> Shared { make(29) } }
+module leaf_30 { mount cog.hub.{Shared, make}; pub fn use_30() -> Shared { make(30) } }
+module leaf_31 { mount cog.hub.{Shared, make}; pub fn use_31() -> Shared { make(31) } }
+module leaf_32 { mount cog.hub.{Shared, make}; pub fn use_32() -> Shared { make(32) } }
+module leaf_33 { mount cog.hub.{Shared, make}; pub fn use_33() -> Shared { make(33) } }
+module leaf_34 { mount cog.hub.{Shared, make}; pub fn use_34() -> Shared { make(34) } }
+module leaf_35 { mount cog.hub.{Shared, make}; pub fn use_35() -> Shared { make(35) } }
+module leaf_36 { mount cog.hub.{Shared, make}; pub fn use_36() -> Shared { make(36) } }
+module leaf_37 { mount cog.hub.{Shared, make}; pub fn use_37() -> Shared { make(37) } }
+module leaf_38 { mount cog.hub.{Shared, make}; pub fn use_38() -> Shared { make(38) } }
+module leaf_39 { mount cog.hub.{Shared, make}; pub fn use_39() -> Shared { make(39) } }
+module leaf_40 { mount cog.hub.{Shared, make}; pub fn use_40() -> Shared { make(40) } }
+module leaf_41 { mount cog.hub.{Shared, make}; pub fn use_41() -> Shared { make(41) } }
+module leaf_42 { mount cog.hub.{Shared, make}; pub fn use_42() -> Shared { make(42) } }
+module leaf_43 { mount cog.hub.{Shared, make}; pub fn use_43() -> Shared { make(43) } }
+module leaf_44 { mount cog.hub.{Shared, make}; pub fn use_44() -> Shared { make(44) } }
+module leaf_45 { mount cog.hub.{Shared, make}; pub fn use_45() -> Shared { make(45) } }
+module leaf_46 { mount cog.hub.{Shared, make}; pub fn use_46() -> Shared { make(46) } }
+module leaf_47 { mount cog.hub.{Shared, make}; pub fn use_47() -> Shared { make(47) } }
+module leaf_48 { mount cog.hub.{Shared, make}; pub fn use_48() -> Shared { make(48) } }
+module leaf_49 { mount cog.hub.{Shared, make}; pub fn use_49() -> Shared { make(49) } }
+module leaf_50 { mount cog.hub.{Shared, make}; pub fn use_50() -> Shared { make(50) } }
+module leaf_51 { mount cog.hub.{Shared, make}; pub fn use_51() -> Shared { make(51) } }
+module leaf_52 { mount cog.hub.{Shared, make}; pub fn use_52() -> Shared { make(52) } }
+module leaf_53 { mount cog.hub.{Shared, make}; pub fn use_53() -> Shared { make(53) } }
+module leaf_54 { mount cog.hub.{Shared, make}; pub fn use_54() -> Shared { make(54) } }
+module leaf_55 { mount cog.hub.{Shared, make}; pub fn use_55() -> Shared { make(55) } }
+module leaf_56 { mount cog.hub.{Shared, make}; pub fn use_56() -> Shared { make(56) } }
+module leaf_57 { mount cog.hub.{Shared, make}; pub fn use_57() -> Shared { make(57) } }
+module leaf_58 { mount cog.hub.{Shared, make}; pub fn use_58() -> Shared { make(58) } }
+module leaf_59 { mount cog.hub.{Shared, make}; pub fn use_59() -> Shared { make(59) } }
+module leaf_60 { mount cog.hub.{Shared, make}; pub fn use_60() -> Shared { make(60) } }
+module leaf_61 { mount cog.hub.{Shared, make}; pub fn use_61() -> Shared { make(61) } }
+module leaf_62 { mount cog.hub.{Shared, make}; pub fn use_62() -> Shared { make(62) } }
+module leaf_63 { mount cog.hub.{Shared, make}; pub fn use_63() -> Shared { make(63) } }
+module leaf_64 { mount cog.hub.{Shared, make}; pub fn use_64() -> Shared { make(64) } }
 
-// Aggregator — fans IN from all 16 leaves. This stresses the closure
+// Aggregator — fans IN from all 64 leaves. This stresses the closure
 // walker's union-of-imports step.
 module aggregator {
     mount cog.leaf_01.use_01;
@@ -64,19 +115,71 @@ module aggregator {
     mount cog.leaf_14.use_14;
     mount cog.leaf_15.use_15;
     mount cog.leaf_16.use_16;
+    mount cog.leaf_17.use_17;
+    mount cog.leaf_18.use_18;
+    mount cog.leaf_19.use_19;
+    mount cog.leaf_20.use_20;
+    mount cog.leaf_21.use_21;
+    mount cog.leaf_22.use_22;
+    mount cog.leaf_23.use_23;
+    mount cog.leaf_24.use_24;
+    mount cog.leaf_25.use_25;
+    mount cog.leaf_26.use_26;
+    mount cog.leaf_27.use_27;
+    mount cog.leaf_28.use_28;
+    mount cog.leaf_29.use_29;
+    mount cog.leaf_30.use_30;
+    mount cog.leaf_31.use_31;
+    mount cog.leaf_32.use_32;
+    mount cog.leaf_33.use_33;
+    mount cog.leaf_34.use_34;
+    mount cog.leaf_35.use_35;
+    mount cog.leaf_36.use_36;
+    mount cog.leaf_37.use_37;
+    mount cog.leaf_38.use_38;
+    mount cog.leaf_39.use_39;
+    mount cog.leaf_40.use_40;
+    mount cog.leaf_41.use_41;
+    mount cog.leaf_42.use_42;
+    mount cog.leaf_43.use_43;
+    mount cog.leaf_44.use_44;
+    mount cog.leaf_45.use_45;
+    mount cog.leaf_46.use_46;
+    mount cog.leaf_47.use_47;
+    mount cog.leaf_48.use_48;
+    mount cog.leaf_49.use_49;
+    mount cog.leaf_50.use_50;
+    mount cog.leaf_51.use_51;
+    mount cog.leaf_52.use_52;
+    mount cog.leaf_53.use_53;
+    mount cog.leaf_54.use_54;
+    mount cog.leaf_55.use_55;
+    mount cog.leaf_56.use_56;
+    mount cog.leaf_57.use_57;
+    mount cog.leaf_58.use_58;
+    mount cog.leaf_59.use_59;
+    mount cog.leaf_60.use_60;
+    mount cog.leaf_61.use_61;
+    mount cog.leaf_62.use_62;
+    mount cog.leaf_63.use_63;
+    mount cog.leaf_64.use_64;
     mount cog.hub.Shared;
 
     pub fn sum_all() -> Int {
-        use_01().value + use_02().value + use_03().value + use_04().value
-        + use_05().value + use_06().value + use_07().value + use_08().value
-        + use_09().value + use_10().value + use_11().value + use_12().value
-        + use_13().value + use_14().value + use_15().value + use_16().value
+        use_01().value + use_02().value + use_03().value + use_04().value + use_05().value + use_06().value + use_07().value + use_08().value
+        + use_09().value + use_10().value + use_11().value + use_12().value + use_13().value + use_14().value + use_15().value + use_16().value
+        + use_17().value + use_18().value + use_19().value + use_20().value + use_21().value + use_22().value + use_23().value + use_24().value
+        + use_25().value + use_26().value + use_27().value + use_28().value + use_29().value + use_30().value + use_31().value + use_32().value
+        + use_33().value + use_34().value + use_35().value + use_36().value + use_37().value + use_38().value + use_39().value + use_40().value
+        + use_41().value + use_42().value + use_43().value + use_44().value + use_45().value + use_46().value + use_47().value + use_48().value
+        + use_49().value + use_50().value + use_51().value + use_52().value + use_53().value + use_54().value + use_55().value + use_56().value
+        + use_57().value + use_58().value + use_59().value + use_60().value + use_61().value + use_62().value + use_63().value + use_64().value
     }
 }
 
 fn main() {
     let s = aggregator.sum_all();
-    // 1+2+...+16 = 136
-    assert(s == 136);
+    // 1+2+...+64 = 2080
+    assert(s == 2080);
     print("L4-perf: red-team-3.1.3 module fan-out bounded");
 }
