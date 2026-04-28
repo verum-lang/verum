@@ -555,6 +555,23 @@ public fn open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError
     }
 }
 
+/// Raw-pointer entry that bypasses the `&[Byte]` parameter coercion
+/// path (RUNTIME-3-DEEPER).  Caller is responsible for NUL-terminating
+/// the buffer; this entry does no copy and no length check.  Used by
+/// l0_vfs/posix_vfs.vr `sys_open_raw` so PosixVfs.open works under the
+/// Tier-0 interpreter on Linux mirroring the libsystem.safe_open_raw
+/// path on macOS.
+public fn open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_OPENAT, AT_FDCWD, path as Int, flags, mode, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(FileDesc.from_raw(result))
+    }
+}
+
 /// Open a file relative to a directory file descriptor.
 public fn openat(dirfd: FileDesc, path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
     // Ensure null-terminated path
