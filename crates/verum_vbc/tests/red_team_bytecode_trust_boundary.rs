@@ -400,3 +400,78 @@ fn interpreter_try_new_validated_accepts_well_formed_module() {
         ),
     }
 }
+
+// -----------------------------------------------------------------------------
+// Round 1 §3.1 — Content-hash tampering detection
+// -----------------------------------------------------------------------------
+// The `VbcHeader.content_hash` field was COMPUTED at serialize time but
+// never CHECKED at deserialize time.  An attacker could edit a `.vbc`
+// file in place (flip a byte in the bytecode section) without
+// re-stamping the hash, and the loader wouldn't notice — silent
+// integrity bypass.  `deserialize_module_validated` now recomputes
+// blake3 over `data[HEADER_SIZE..]` and compares against the header.
+// Pin both directions: well-formed bytes pass; one tampered byte
+// rejects.
+
+#[test]
+fn deserialize_validated_rejects_content_hash_tampering() {
+    use verum_vbc::deserialize::{deserialize_module, deserialize_module_validated};
+    use verum_vbc::error::VbcError;
+    use verum_vbc::format::HEADER_SIZE;
+    use verum_vbc::serialize::serialize_module;
+
+    // Serialize a well-formed minimal module.
+    let mut module = (*build_minimal_module()).clone();
+    module.header.function_table_count = module.functions.len() as u32;
+    let mut bytes = serialize_module(&module).expect("serialize");
+
+    // Sanity: untampered bytes pass the validating load.
+    deserialize_module_validated(&bytes)
+        .expect("untampered bytes must validate");
+
+    // Tamper a single byte in the post-header region — flip the
+    // last byte (typically inside the extensions / source-map area).
+    // This is the minimum-corruption attack: one bit flip on disk.
+    assert!(bytes.len() > HEADER_SIZE);
+    let last = bytes.len() - 1;
+    bytes[last] = bytes[last].wrapping_add(1);
+
+    // Lenient `deserialize_module` MAY still accept (it doesn't
+    // hash-check).  We don't assert on its behaviour because the
+    // tampered byte might land in a structurally-meaningful slot
+    // and break decode for unrelated reasons; the contract is only
+    // that the VALIDATED entry point rejects.
+    let _ = deserialize_module(&bytes);
+
+    // Validated entry point MUST reject with ContentHashMismatch.
+    match deserialize_module_validated(&bytes) {
+        Ok(_) => panic!("validated load must reject tampered bytes"),
+        Err(VbcError::ContentHashMismatch { expected, computed }) => {
+            assert_ne!(
+                expected, computed,
+                "ContentHashMismatch should carry distinct expected/computed",
+            );
+        }
+        Err(VbcError::MultipleErrors(errs)) => {
+            assert!(
+                errs.iter().any(|e| matches!(e, VbcError::ContentHashMismatch { .. })),
+                "MultipleErrors must contain ContentHashMismatch, got: {:?}",
+                errs,
+            );
+        }
+        Err(other) => {
+            // The tampered byte may also have corrupted a structural
+            // field that fires earlier in the decode path (e.g.,
+            // truncated string-table size).  Any decode-time
+            // rejection is acceptable as long as the load doesn't
+            // succeed silently.  But ContentHashMismatch is the
+            // primary intended signal — log so future regressions on
+            // the hash check don't silently pass behind another error.
+            eprintln!(
+                "tampered bytes rejected via {:?} (expected ContentHashMismatch — \
+                 acceptable if structural decode fired first)",
+                other,
+            );
+        }
+    }
+}

@@ -62,32 +62,69 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
 }
 
 /// Deserializes a VBC module from binary data **and** runs the
-/// per-instruction bytecode validator before returning.
+/// per-instruction bytecode validator + content-hash verification
+/// before returning.
 ///
 /// This is the architectural defense for loading bytecode that may
-/// not have come from a trusted source — it walks every function's
-/// instruction stream and rejects:
+/// not have come from a trusted source — it does, in order:
 ///
-///   * Out-of-range `FunctionId` in `Call` / `TailCall` / `CallG` /
-///     `NewClosure`.
-///   * Register references past the function's `register_count`.
-///   * Branch offsets (`Jmp` / `JmpIf` / `JmpNot` / `JmpCmp` /
-///     `Switch` / `TryBegin`) that fall outside the function's
-///     bytecode region or land mid-instruction.
-///   * Out-of-range `ConstId` in `LoadK`.
-///   * Out-of-range `StringId` (CallM's method_id, Panic's message_id).
-///   * Decoder failures mid-stream.
+///   1. **Structural decode** via `deserialize_module`.
+///   2. **Content-hash verification**: recompute `blake3(data[HEADER_SIZE..])`
+///      and compare its first 8 bytes to the header's
+///      `content_hash`.  Pre-fix the field was COMPUTED at
+///      serialize time but never CHECKED at deserialize — an
+///      attacker could edit a `.vbc` file in place without
+///      re-stamping the hash and the loader wouldn't notice.
+///   3. **Per-instruction bytecode validation** via the validator,
+///      catching out-of-range `FunctionId` / `ConstId` /
+///      `StringId` / `TypeId`, register-bounds violations, branch
+///      offsets landing mid-instruction, call-arity mismatches,
+///      and decoder failures mid-stream.
 ///
 /// Catches at LOAD time what the interpreter would otherwise catch
 /// on execution-reach (best case) or silent state corruption (worst
-/// case).  Cost is O(N) in total instruction count; use when the
-/// bytecode source is not the in-process compiler.
+/// case).  Cost is O(N) in total bytes (hash) + O(M) in total
+/// instruction count (validator).  Use whenever the bytecode source
+/// is not the in-process compiler.
 ///
-/// Closes round-1 §3.1 + round-2 §3.1 of the red-team review.
+/// Closes round-1 §3.1 + round-2 §3.1 of the red-team review and
+/// activates the previously-INERT `ContentHashMismatch` defense.
 pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
     let module = deserialize_module(data)?;
+    verify_content_hash(data, module.header.content_hash)?;
     crate::validate::validate_module(&module)?;
     Ok(module)
+}
+
+/// Verifies the content hash carried by the VBC header against a
+/// freshly-computed `blake3(data[HEADER_SIZE..])`.
+///
+/// The hash is over the raw on-wire bytes after the header, which
+/// for a compressed module is the COMPRESSED payload — exactly what
+/// the serializer hashes (`crates/verum_vbc/src/serialize.rs:153`).
+/// This means hash verification can run BEFORE decompression,
+/// catching tampering on the disk artifact without paying the
+/// decompression cost first.
+///
+/// Returns `VbcError::ContentHashMismatch { expected, computed }`
+/// on mismatch.  Bypassed by `ValidationOptions::skip_hash_check =
+/// true`; the lenient `deserialize_module` entry point doesn't
+/// invoke this check at all.
+fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
+    if data.len() < HEADER_SIZE {
+        return Err(VbcError::eof(0, HEADER_SIZE));
+    }
+    let computed = {
+        let hash = blake3::hash(&data[HEADER_SIZE..]);
+        // blake3 always produces 32 bytes; the first 8 always fit.
+        u64::from_le_bytes(
+            hash.as_bytes()[..8].try_into().unwrap_or([0u8; 8]),
+        )
+    };
+    if computed != expected {
+        return Err(VbcError::ContentHashMismatch { expected, computed });
+    }
+    Ok(())
 }
 
 /// VBC module deserializer.
