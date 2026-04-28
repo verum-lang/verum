@@ -24,7 +24,7 @@ module core.database.sqlite.native.l5_sql.compile;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text};
-mount core.database.sqlite.native.l5_sql.lexer.{lex, LexError};
+mount core.database.sqlite.native.l5_sql.lexer.{lex, SqlLexError as LexError};
 mount core.database.sqlite.native.l5_sql.ast.Statement;
 mount core.database.sqlite.native.l5_sql.parser.{
     stream_new, parse_one, ParseError,
@@ -49,6 +49,40 @@ public type CompileError is
     | CeParse(ParseError)
     | CePlan(PlanError)
     | CeCodegen(CodegenError);
+
+implement Display for CompileError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeLex(e)     => f.write_str(f"sqlite compile (lex): {e}".as_str()),
+            CeParse(e)   => f.write_str(f"sqlite compile (parse): {e}".as_str()),
+            CePlan(e)    => f.write_str(f"sqlite compile (plan): {e}".as_str()),
+            CeCodegen(e) => f.write_str(f"sqlite compile (codegen): {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for CompileError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeLex(e)     => f.write_str(f"CeLex({e:?})".as_str()),
+            CeParse(e)   => f.write_str(f"CeParse({e:?})".as_str()),
+            CePlan(e)    => f.write_str(f"CePlan({e:?})".as_str()),
+            CeCodegen(e) => f.write_str(f"CeCodegen({e:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for CompileError {
+    fn eq(&self, other: &CompileError) -> Bool {
+        match (self, other) {
+            (CeLex(a),     CeLex(b))     => a == b,
+            (CeParse(a),   CeParse(b))   => a == b,
+            (CePlan(a),    CePlan(b))    => a == b,
+            (CeCodegen(a), CeCodegen(b)) => a == b,
+            _ => false,
+        }
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Entry point

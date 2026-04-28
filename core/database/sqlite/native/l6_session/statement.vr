@@ -96,6 +96,40 @@ public type StmtError is
     | StmtMisuse(Text)
     | StmtBindOutOfRange(Int);
 
+implement Display for StmtError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            StmtCompile(e)        => f.write_str(f"sqlite stmt: {e}".as_str()),
+            StmtExec(code, msg)   => f.write_str(f"sqlite stmt exec error {code}: {msg}".as_str()),
+            StmtMisuse(msg)       => f.write_str(f"sqlite stmt misuse: {msg}".as_str()),
+            StmtBindOutOfRange(i) => f.write_str(f"sqlite stmt bind index {i} out of range".as_str()),
+        }
+    }
+}
+
+implement Debug for StmtError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            StmtCompile(e)        => f.write_str(f"StmtCompile({e:?})".as_str()),
+            StmtExec(code, msg)   => f.write_str(f"StmtExec({code}, {msg})".as_str()),
+            StmtMisuse(msg)       => f.write_str(f"StmtMisuse({msg})".as_str()),
+            StmtBindOutOfRange(i) => f.write_str(f"StmtBindOutOfRange({i})".as_str()),
+        }
+    }
+}
+
+implement Eq for StmtError {
+    fn eq(&self, other: &StmtError) -> Bool {
+        match (self, other) {
+            (StmtCompile(a),         StmtCompile(b))         => a == b,
+            (StmtExec(ca, ma),       StmtExec(cb, mb))       => ca == cb && ma == mb,
+            (StmtMisuse(a),          StmtMisuse(b))          => a == b,
+            (StmtBindOutOfRange(a),  StmtBindOutOfRange(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 public type PreparedStatement is {
     program: VdbeProgram,
     state: VdbeState,
