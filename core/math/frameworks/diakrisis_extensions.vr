@@ -22,8 +22,8 @@
 // annotations carry the Diakrisis-side citation.
 // =============================================================================
 
-mount core.action.articulation.{Articulation};
-mount core.action.enactments.{Enactment};
+mount core.action.articulation.{Articulation, articulation_eq};
+mount core.action.enactments.{Enactment, alpha_of, epsilon, is_adjoint};
 
 // =============================================================================
 // 136.T — Transfinite modal stratification (T-2f***)
@@ -38,9 +38,13 @@ mount core.action.enactments.{Enactment};
 /// Operational form: every well-formed term has a finite or small-
 /// transfinite modal-depth bound, ensuring the K-Refine-omega kernel
 /// rule (deferred to VVA-7 V1) terminates on all input.
+/// V3: parameterised over an articulation whose modal depth is
+/// being checked; ensures the α ⊣ ε round-trip (the stratification
+/// preserves the kernel's adjunction).
 @framework(diakrisis, "Theorem 136.T (T-2f*** transfinite modal stratification)")
-public axiom transfinite_modal_stratification() -> Bool
-    ensures true;
+public axiom transfinite_modal_stratification(alpha: Articulation) -> Bool
+    requires true
+    ensures  articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 137.T — Weak-arithmetic no-go (bounded-arithmetic stratum is sterile)
@@ -57,9 +61,14 @@ public axiom transfinite_modal_stratification() -> Bool
 /// VVA-8 V1) is sound — bounded-arithmetic verification is rigorously
 /// weaker than full-arithmetic verification, with the boundary
 /// witnessed at ν = ω.
+/// V3: parameterised over a candidate articulation in the
+/// bounded-arithmetic stratum; ensures the kernel α ⊣ ε round-trip
+/// holds. The "no L_Abs realisation" is a NEGATIVE catalogue claim
+/// — V4 will add the explicit non-realisability witness.
 @framework(diakrisis, "Theorem 137.T (weak-AFN-T: bounded-arithmetic stratum is sterile)")
-public axiom weak_arithmetic_no_universal() -> Bool
-    ensures true;
+public axiom weak_arithmetic_no_universal(alpha: Articulation) -> Bool
+    requires true
+    ensures  articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 140.T — ε-invariant on (∞,∞)-categories
@@ -75,9 +84,13 @@ public axiom weak_arithmetic_no_universal() -> Bool
 /// Operational form: an ε-coordinate is well-defined for any
 /// (∞,∞)-categorical articulation; truncations to (∞,n) recover the
 /// finite-n ε-coordinate.
+/// V3: parameterised over an articulation whose ε-invariant is
+/// computed; ensures the kernel α ⊣ ε round-trip holds (i.e., the
+/// invariant respects the canonical adjunction).
 @framework(diakrisis, "Theorem 140.T (ε-invariant on (∞,∞)-categories)")
-public axiom epsilon_invariant_infinity_infinity() -> Bool
-    ensures true;
+public axiom epsilon_invariant_infinity_infinity(alpha: Articulation) -> Bool
+    requires true
+    ensures  articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 141.T — Constructive autopoiesis (ω²-iteration in effective topos)
@@ -95,5 +108,7 @@ public axiom epsilon_invariant_infinity_infinity() -> Bool
 /// V1 ships the witness construction; this V0 axiom records its
 /// existence.
 @framework(diakrisis, "Theorem 141.T (constructive autopoiesis: ω²-iteration in Eff)")
-public axiom constructive_autopoiesis_witness<E: Enactment>(e: E) -> Bool
-    ensures true;
+public axiom constructive_autopoiesis_witness(e: Enactment) -> Bool
+    requires true
+    ensures  is_adjoint(alpha_of(e.clone()), e)
+          && e.activation_rank >= 0;
