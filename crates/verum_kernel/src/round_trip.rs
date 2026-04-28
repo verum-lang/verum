@@ -228,20 +228,26 @@ fn rewrite_one_pass(
             CoreTerm::EpsilonOf(Heap::new(inner_rw))
         }
 
-        // K-Refine fold: Refine(Refine(B, p₁), p₂) → Refine(B, p₁ ∧ p₂).
-        // V2 ships the structural recogniser. The actual conjunction
-        // construction needs an `And` connective on `Bool`; we mark
-        // the audit when the fold would apply but defer the term
-        // shape to a future K-Refine V3 promotion. For V2 we recurse
-        // into the substructure, leaving the structural Refine intact.
+        // K-Refine V3 fold (NEW, was V2 stub):
+        //
+        //   Refine(Refine(B, x: p₁), y: p₂) → Refine(B, y: p₁[x↦y] ∧ p₂)
+        //
+        // Now decidable end-to-end via support::fold_refine_of_refine,
+        // which handles the alpha-rename when the inner and outer
+        // binders differ. Iteration to fixed point happens at the
+        // outer canonical_form layer — a K-level-N nested Refine
+        // collapses in N-1 outer iterations.
         CoreTerm::Refine { base, binder, predicate } => {
             let base_rw = rewrite_one_pass(base.as_ref(), audit, context);
             let pred_rw = rewrite_one_pass(predicate.as_ref(), audit, context);
-            CoreTerm::Refine {
+            let candidate = CoreTerm::Refine {
                 base: Heap::new(base_rw),
                 binder: binder.clone(),
                 predicate: Heap::new(pred_rw),
-            }
+            };
+            // V3 fold: if the rewritten base is itself a Refine, fuse.
+            crate::support::fold_refine_of_refine(&candidate)
+                .unwrap_or(candidate)
         }
 
         // K-Modal-Idem (S5): ModalBox(ModalBox(x)) → ModalBox(x),
@@ -612,5 +618,159 @@ mod tests {
         let canon2 = canonical_form(&canon1, &mut audit2, "test");
         assert_eq!(canon1, canon2,
             "canonicalize must be idempotent");
+    }
+
+    // -------------------------------------------------------------------------
+    // K-Refine V3 fold tests — refine-of-refine collapse via canonical_form.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn canonical_form_folds_refine_of_refine_same_binder() {
+        // Refine(Refine(B, x: p), x: q)  →  Refine(B, x: p ∧ q)
+        let b = var("Int");
+        let p = var("p");
+        let q = var("q");
+        let inner = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("x"),
+            predicate: Heap::new(p.clone()),
+        };
+        let outer = CoreTerm::Refine {
+            base: Heap::new(inner),
+            binder: Text::from("x"),
+            predicate: Heap::new(q.clone()),
+        };
+        let mut audit = BridgeAudit::new();
+        let canon = canonical_form(&outer, &mut audit, "K-Refine V3 same-binder");
+        match canon {
+            CoreTerm::Refine { base, binder, predicate } => {
+                assert_eq!(base.as_ref(), &b, "base must be the original Int");
+                assert_eq!(binder.as_str(), "x");
+                let (p_back, q_back) = crate::support::is_conjunction(predicate.as_ref())
+                    .expect("predicate must be a conjunction");
+                assert_eq!(p_back, &p);
+                assert_eq!(q_back, &q);
+            }
+            other => panic!("expected single Refine, got {:?}", other),
+        }
+        assert!(audit.is_decidable(),
+            "K-Refine V3 fold must be fully decidable (no bridge admit)");
+    }
+
+    #[test]
+    fn canonical_form_folds_three_level_refine_chain() {
+        // Refine(Refine(Refine(B, x: p), x: q), x: r)
+        //   canonical iter 1:  Refine(Refine(B, x: p), x: q ∧ r)
+        //   canonical iter 2:  Refine(B, x: p ∧ (q ∧ r))
+        let b = var("Int");
+        let l1 = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("p")),
+        };
+        let l2 = CoreTerm::Refine {
+            base: Heap::new(l1),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("q")),
+        };
+        let l3 = CoreTerm::Refine {
+            base: Heap::new(l2),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("r")),
+        };
+        let mut audit = BridgeAudit::new();
+        let canon = canonical_form(&l3, &mut audit, "K-Refine V3 three-level");
+        match &canon {
+            CoreTerm::Refine { base, predicate, .. } => {
+                assert_eq!(base.as_ref(), &b,
+                    "three-level fold must collapse fully to a single Refine over the underlying base");
+                // Predicate is some conjunction of p, q, r — check the
+                // structural shape contains all three names.
+                let pred_str = format!("{:?}", predicate.as_ref());
+                assert!(pred_str.contains('p'));
+                assert!(pred_str.contains('q'));
+                assert!(pred_str.contains('r'));
+            }
+            other => panic!("three-level fold must produce single Refine, got {:?}", other),
+        }
+        assert!(audit.is_decidable());
+    }
+
+    #[test]
+    fn canonical_form_folds_refine_with_alpha_rename() {
+        // Refine(Refine(B, y: p(y)), x: q(x))
+        //   →  Refine(B, x: p(x) ∧ q(x))   (inner-binder y renamed to x)
+        let b = var("Int");
+        let inner = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("y"),
+            predicate: Heap::new(CoreTerm::App(
+                Heap::new(var("p")),
+                Heap::new(var("y")),
+            )),
+        };
+        let outer = CoreTerm::Refine {
+            base: Heap::new(inner),
+            binder: Text::from("x"),
+            predicate: Heap::new(CoreTerm::App(
+                Heap::new(var("q")),
+                Heap::new(var("x")),
+            )),
+        };
+        let mut audit = BridgeAudit::new();
+        let canon = canonical_form(&outer, &mut audit, "K-Refine V3 alpha-rename");
+        match canon {
+            CoreTerm::Refine { base, binder, predicate } => {
+                assert_eq!(base.as_ref(), &b);
+                assert_eq!(binder.as_str(), "x");
+                // Verify y was renamed to x by checking the conjunction
+                // contains p(x), not p(y).
+                let pred_str = format!("{:?}", predicate.as_ref());
+                assert!(!pred_str.contains("\"y\""),
+                    "inner binder y must have been alpha-renamed away: {pred_str}");
+            }
+            other => panic!("expected Refine, got {:?}", other),
+        }
+        assert!(audit.is_decidable());
+    }
+
+    #[test]
+    fn canonical_form_preserves_single_refine() {
+        // Single-level Refine is already canonical.
+        let r = CoreTerm::Refine {
+            base: Heap::new(var("Int")),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("p")),
+        };
+        let mut audit = BridgeAudit::new();
+        let canon = canonical_form(&r, &mut audit, "K-Refine V3 single");
+        assert_eq!(canon, r, "single Refine must be a fixed point");
+        assert!(audit.is_decidable());
+    }
+
+    #[test]
+    fn check_round_trip_v2_admits_refine_fold_pair() {
+        // Refine(Refine(B, x: p), x: q) is round-trip-equivalent to
+        // Refine(B, x: p ∧ q) — V2 admits via the structural fold,
+        // V0/V1 reject (not structurally identical).
+        let b = var("Int");
+        let inner = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("p")),
+        };
+        let nested = CoreTerm::Refine {
+            base: Heap::new(inner),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("q")),
+        };
+        let folded = CoreTerm::Refine {
+            base: Heap::new(b),
+            binder: Text::from("x"),
+            predicate: Heap::new(crate::support::make_conjunction(&var("p"), &var("q"))),
+        };
+        let audit = check_round_trip_v2(&nested, &folded, "Refine fold").unwrap();
+        assert!(audit.is_decidable(),
+            "K-Refine V3 fold must be fully decidable — no Diakrisis bridge");
     }
 }
