@@ -33,6 +33,37 @@ public type CodecError is
     | Overflow
     | InvalidValue(Text);
 
+implement Display for CodecError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated         => f.write_str("TLS 1.3 codec: truncated input"),
+            Overflow          => f.write_str("TLS 1.3 codec: length-prefix overflow"),
+            InvalidValue(r)   => f.write_str(f"TLS 1.3 codec: invalid value ({r})".as_str()),
+        }
+    }
+}
+
+implement Debug for CodecError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated         => f.write_str("Truncated"),
+            Overflow          => f.write_str("Overflow"),
+            InvalidValue(r)   => f.write_str(f"InvalidValue({r})".as_str()),
+        }
+    }
+}
+
+implement Eq for CodecError {
+    fn eq(&self, other: &CodecError) -> Bool {
+        match (self, other) {
+            (Truncated,        Truncated)        => true,
+            (Overflow,         Overflow)         => true,
+            (InvalidValue(a),  InvalidValue(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Writer helpers — all append to a List<Byte>
 // =============================================================================

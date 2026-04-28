@@ -71,6 +71,70 @@ public type JsonErrorKind is
     | ObjectTooLarge
     | TrailingGarbage;
 
+fn json_error_kind_name(k: &JsonErrorKind) -> Text {
+    match k {
+        UnexpectedEof    => "UnexpectedEof".clone(),
+        UnexpectedChar   => "UnexpectedChar".clone(),
+        InvalidEscape    => "InvalidEscape".clone(),
+        InvalidNumber    => "InvalidNumber".clone(),
+        InvalidUnicode   => "InvalidUnicode".clone(),
+        DepthLimit       => "DepthLimit".clone(),
+        StringTooLong    => "StringTooLong".clone(),
+        ArrayTooLarge    => "ArrayTooLarge".clone(),
+        ObjectTooLarge   => "ObjectTooLarge".clone(),
+        TrailingGarbage  => "TrailingGarbage".clone(),
+    }
+}
+
+fn json_error_kind_tag(k: &JsonErrorKind) -> Int {
+    match k {
+        UnexpectedEof    => 0,  UnexpectedChar  => 1,
+        InvalidEscape    => 2,  InvalidNumber   => 3,
+        InvalidUnicode   => 4,  DepthLimit      => 5,
+        StringTooLong    => 6,  ArrayTooLarge   => 7,
+        ObjectTooLarge   => 8,  TrailingGarbage => 9,
+    }
+}
+
+implement Display for JsonErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(json_error_kind_name(self).as_str())
+    }
+}
+
+implement Debug for JsonErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(json_error_kind_name(self).as_str())
+    }
+}
+
+implement Eq for JsonErrorKind {
+    fn eq(&self, other: &JsonErrorKind) -> Bool {
+        json_error_kind_tag(self) == json_error_kind_tag(other)
+    }
+}
+
+implement Display for JsonError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"JSON {self.kind} at line {self.line} column {self.column}: {self.message}".as_str())
+    }
+}
+
+implement Debug for JsonError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"JsonError {{ kind: {self.kind:?}, line: {self.line}, column: {self.column}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for JsonError {
+    fn eq(&self, other: &JsonError) -> Bool {
+        self.kind == other.kind
+            && self.line == other.line
+            && self.column == other.column
+            && self.message == other.message
+    }
+}
+
 // =============================================================================
 // Parser state
 // =============================================================================

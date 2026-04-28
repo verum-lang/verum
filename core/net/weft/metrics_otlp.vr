@@ -318,6 +318,40 @@ public type OtlpError is
     | HttpStatus(Int)
     | EncodeFailed;
 
+implement Display for OtlpError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectFailed(reason) => f.write_str(f"OTLP exporter: connect failed ({reason})".as_str()),
+            Timeout               => f.write_str("OTLP exporter: timeout"),
+            HttpStatus(status)    => f.write_str(f"OTLP exporter: HTTP status {status}".as_str()),
+            EncodeFailed          => f.write_str("OTLP exporter: encode failed"),
+        }
+    }
+}
+
+implement Debug for OtlpError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectFailed(reason) => f.write_str(f"ConnectFailed({reason})".as_str()),
+            Timeout               => f.write_str("Timeout"),
+            HttpStatus(status)    => f.write_str(f"HttpStatus({status})".as_str()),
+            EncodeFailed          => f.write_str("EncodeFailed"),
+        }
+    }
+}
+
+implement Eq for OtlpError {
+    fn eq(&self, other: &OtlpError) -> Bool {
+        match (self, other) {
+            (ConnectFailed(a), ConnectFailed(b)) => a == b,
+            (Timeout,          Timeout)          => true,
+            (HttpStatus(a),    HttpStatus(b))    => a == b,
+            (EncodeFailed,     EncodeFailed)     => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Protobuf primitive helpers — minimal, deterministic encoder
 // =============================================================================

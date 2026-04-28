@@ -192,6 +192,40 @@ public type WasmFilterError is
     | RuntimeNotReady
     | CapabilityDenied(Text);
 
+implement Display for WasmFilterError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ModuleInvalid(reason)        => f.write_str(f"wasm filter: module invalid ({reason})".as_str()),
+            LimitsExceeded { kind }      => f.write_str(f"wasm filter: limits exceeded ({kind})".as_str()),
+            RuntimeNotReady              => f.write_str("wasm filter: runtime not ready"),
+            CapabilityDenied(cap)        => f.write_str(f"wasm filter: capability denied ({cap})".as_str()),
+        }
+    }
+}
+
+implement Debug for WasmFilterError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ModuleInvalid(reason)        => f.write_str(f"ModuleInvalid({reason})".as_str()),
+            LimitsExceeded { kind }      => f.write_str(f"LimitsExceeded {{ kind: {kind} }}".as_str()),
+            RuntimeNotReady              => f.write_str("RuntimeNotReady"),
+            CapabilityDenied(cap)        => f.write_str(f"CapabilityDenied({cap})".as_str()),
+        }
+    }
+}
+
+implement Eq for WasmFilterError {
+    fn eq(&self, other: &WasmFilterError) -> Bool {
+        match (self, other) {
+            (ModuleInvalid(a),       ModuleInvalid(b))       => a == b,
+            (LimitsExceeded { kind: a }, LimitsExceeded { kind: b }) => a == b,
+            (RuntimeNotReady,        RuntimeNotReady)        => true,
+            (CapabilityDenied(a),    CapabilityDenied(b))    => a == b,
+            _ => false,
+        }
+    }
+}
+
 implement WasmFilter {
     /// Load a Wasm module from its raw bytes. Parses + validates
     /// (basic wasm-header / import-surface check); actual

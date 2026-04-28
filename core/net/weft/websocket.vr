@@ -63,9 +63,10 @@ mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, Headers};
 mount core.net.http_parser.{HttpParser, ParseProgress, HeaderView};
 mount core.net.websocket.{
-    Frame as WsFrame, Opcode, CloseCode,
+    WsFrame, WsOpcode as Opcode, CloseCode,
     encode as ws_encode, decode as ws_decode, accept_key as ws_accept_key,
-    DecodeResult, DecodeError,
+    WebSocketDecodeResult as DecodeResult,
+    WebSocketDecodeError as DecodeError,
 };
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
@@ -136,6 +137,47 @@ public type WsError is
     | ProtocolError(Text)
     | Transport(Text)
     | Cancelled;
+
+implement Display for WsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadHandshake(reason)                   => f.write_str(f"WebSocket: bad handshake ({reason})".as_str()),
+            FrameDecode(e)                         => f.write_str(f"WebSocket: {e}".as_str()),
+            MessageTooBig { limit, attempted }     => f.write_str(f"WebSocket: message {attempted} bytes exceeds limit {limit}".as_str()),
+            ProtocolError(reason)                  => f.write_str(f"WebSocket: protocol error ({reason})".as_str()),
+            Transport(reason)                      => f.write_str(f"WebSocket transport: {reason}".as_str()),
+            Cancelled                              => f.write_str("WebSocket: cancelled"),
+        }
+    }
+}
+
+implement Debug for WsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadHandshake(reason)                   => f.write_str(f"BadHandshake({reason})".as_str()),
+            FrameDecode(e)                         => f.write_str(f"FrameDecode({e:?})".as_str()),
+            MessageTooBig { limit, attempted }     => f.write_str(f"MessageTooBig {{ limit: {limit}, attempted: {attempted} }}".as_str()),
+            ProtocolError(reason)                  => f.write_str(f"ProtocolError({reason})".as_str()),
+            Transport(reason)                      => f.write_str(f"Transport({reason})".as_str()),
+            Cancelled                              => f.write_str("Cancelled"),
+        }
+    }
+}
+
+implement Eq for WsError {
+    fn eq(&self, other: &WsError) -> Bool {
+        match (self, other) {
+            (BadHandshake(a),                  BadHandshake(b))                  => a == b,
+            (FrameDecode(a),                   FrameDecode(b))                   => a == b,
+            (MessageTooBig { limit: la, attempted: aa },
+             MessageTooBig { limit: lb, attempted: ab })                         => la == lb && aa == ab,
+            (ProtocolError(a),                 ProtocolError(b))                 => a == b,
+            (Transport(a),                     Transport(b))                     => a == b,
+            (Cancelled,                        Cancelled)                        => true,
+            _ => false,
+        }
+    }
+}
 
 // =============================================================================
 // WsSession — framed WebSocket connection over a WeftTransport

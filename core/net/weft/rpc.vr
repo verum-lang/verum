@@ -154,6 +154,24 @@ implement Clone for RpcStatus {
 
 implement Copy for RpcStatus {}
 
+implement Display for RpcStatus {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name())
+    }
+}
+
+implement Debug for RpcStatus {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name())
+    }
+}
+
+implement Eq for RpcStatus {
+    fn eq(&self, other: &RpcStatus) -> Bool {
+        self.to_code() == other.to_code()
+    }
+}
+
 // =============================================================================
 // RpcError
 // =============================================================================
@@ -186,6 +204,26 @@ implement RpcError {
         // Escape the message — minimal (no U+0000..U+001F other than \n/\t).
         let msg = json_escape(&self.message);
         f"{{\"code\":\"{self.status.name()}\",\"message\":\"{msg}\"{details}}}"
+    }
+}
+
+implement Display for RpcError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"RPC {self.status}: {self.message}".as_str())
+    }
+}
+
+implement Debug for RpcError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"RpcError {{ status: {self.status:?}, message: {self.message}, details_json: {self.details_json:?} }}".as_str())
+    }
+}
+
+implement Eq for RpcError {
+    fn eq(&self, other: &RpcError) -> Bool {
+        self.status == other.status
+            && self.message == other.message
+            && self.details_json == other.details_json
     }
 }
 

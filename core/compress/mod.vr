@@ -125,6 +125,89 @@ public type CompressError is
     /// Underlying I/O error propagated from inner writer/reader.
     | IoError(Text);
 
+fn algorithm_name(a: &Algorithm) -> Text {
+    match a {
+        Gzip     => "gzip".clone(),
+        Deflate  => "deflate".clone(),
+        Zlib     => "zlib".clone(),
+        Brotli   => "brotli".clone(),
+        Zstd     => "zstd".clone(),
+        Lz4      => "lz4".clone(),
+        Identity => "identity".clone(),
+    }
+}
+
+fn algorithm_tag(a: &Algorithm) -> Int {
+    match a {
+        Gzip     => 0, Deflate  => 1, Zlib    => 2,
+        Brotli   => 3, Zstd     => 4, Lz4     => 5,
+        Identity => 6,
+    }
+}
+
+implement Display for Algorithm {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(algorithm_name(self).as_str())
+    }
+}
+
+implement Debug for Algorithm {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(algorithm_name(self).as_str())
+    }
+}
+
+implement Eq for Algorithm {
+    fn eq(&self, other: &Algorithm) -> Bool {
+        algorithm_tag(self) == algorithm_tag(other)
+    }
+}
+
+implement Display for CompressError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnsupportedAlgorithm(a)        => f.write_str(f"compress: unsupported algorithm {a}".as_str()),
+            CorruptInput(reason)           => f.write_str(f"compress: corrupt input ({reason})".as_str()),
+            BufferTooSmall { need, have }  => f.write_str(f"compress: buffer too small (need {need}, have {have})".as_str()),
+            InvalidLevel { algo, level }   => f.write_str(f"compress {algo}: invalid level {level}".as_str()),
+            DictionaryMismatch             => f.write_str("compress: dictionary mismatch"),
+            OutputTooLarge { limit }       => f.write_str(f"compress: decompressed output exceeds limit {limit}".as_str()),
+            IoError(reason)                => f.write_str(f"compress I/O error: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for CompressError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnsupportedAlgorithm(a)        => f.write_str(f"UnsupportedAlgorithm({a:?})".as_str()),
+            CorruptInput(reason)           => f.write_str(f"CorruptInput({reason})".as_str()),
+            BufferTooSmall { need, have }  => f.write_str(f"BufferTooSmall {{ need: {need}, have: {have} }}".as_str()),
+            InvalidLevel { algo, level }   => f.write_str(f"InvalidLevel {{ algo: {algo:?}, level: {level} }}".as_str()),
+            DictionaryMismatch             => f.write_str("DictionaryMismatch"),
+            OutputTooLarge { limit }       => f.write_str(f"OutputTooLarge {{ limit: {limit} }}".as_str()),
+            IoError(reason)                => f.write_str(f"IoError({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for CompressError {
+    fn eq(&self, other: &CompressError) -> Bool {
+        match (self, other) {
+            (UnsupportedAlgorithm(a),       UnsupportedAlgorithm(b))       => a == b,
+            (CorruptInput(a),               CorruptInput(b))               => a == b,
+            (BufferTooSmall { need: na, have: ha },
+             BufferTooSmall { need: nb, have: hb })                        => na == nb && ha == hb,
+            (InvalidLevel { algo: aa, level: la },
+             InvalidLevel { algo: ab, level: lb })                         => aa == ab && la == lb,
+            (DictionaryMismatch,            DictionaryMismatch)            => true,
+            (OutputTooLarge { limit: a },   OutputTooLarge { limit: b })   => a == b,
+            (IoError(a),                    IoError(b))                    => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Codec protocol — one-shot encode/decode
 // =============================================================================
