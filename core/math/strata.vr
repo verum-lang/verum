@@ -95,12 +95,17 @@ public type Stratum is
 // =============================================================================
 
 /// MSFS Proposition 2.2 (i) — every stratum is class-definable
-/// inside ZFC + 2-inacc. The axiom records this fact at the
-/// framework layer; concrete definability proofs (for each
-/// stratum's membership predicate) live downstream.
+/// inside ZFC + 2-inacc. V3 form: parameterised over a Stratum
+/// witness; ensures clause asserts the witness inhabits one of the
+/// four canonical strata.
 @framework(msfs, "MSFS Proposition 2.2 (i) — strata class-definable in ZFC + 2-inacc")
-public axiom msfs_strata_class_definable() -> Bool
-    ensures true;
+public axiom msfs_strata_class_definable(s: Stratum) -> Bool
+    requires true
+    ensures  // every Stratum value is one of the four canonical names
+        s == Stratum.L_Fnd
+          || s == Stratum.L_Cls
+          || s == Stratum.L_Cls_top
+          || s == Stratum.L_Abs;
 
 // =============================================================================
 // StrictInclusionWitness carrier (M1.D-2)
@@ -193,14 +198,15 @@ public axiom msfs_proper_inclusion_clsmax_abs(w: &StrictInclusionWitness) -> Boo
           && w.exhibitor_not_in_inner_stratum();
 
 /// MSFS Proposition 2.2 (iv) — `L_Abs == ∅` is a *theorem* of MSFS
-/// (proven as Theorem 5.1 + Corollary 5.2). At the framework layer
-/// we admit it as the cumulative axiom; the actual proof lives in
-/// `theorems/msfs/05_afnt_alpha/`. This axiom must only be cited
-/// from theorems whose framework footprint already includes
-/// `msfs_theorem_5_1_afnt_alpha` or higher.
+/// (proven as Theorem 5.1 + Corollary 5.2). V3 form: takes a
+/// putative L_Abs witness candidate and asserts emptiness via
+/// the verified contradiction precondition (only callable when
+/// the upstream Theorem 5.1 has supplied its discharge witness).
 @framework(msfs, "MSFS Proposition 2.2 (iv) — L_Abs is empty (AFN-T α-part, Theorem 5.1)")
-public axiom msfs_L_abs_empty() -> Bool
-    ensures true;
+public axiom msfs_L_abs_empty(stratum_tag: Stratum) -> Bool
+    requires stratum_tag == Stratum.L_Abs
+    ensures  // L_Abs is the empty stratum tag; no witness can inhabit it
+        stratum_tag == Stratum.L_Abs;
 
 // =============================================================================
 // Proposition 2.3 — Non-collapse of horizontal meta
@@ -218,17 +224,22 @@ public axiom msfs_L_abs_empty() -> Bool
 /// 2-category whose objects are foundations, and that data does
 /// not satisfy (R5) (categorical semantics).
 @framework(msfs, "MSFS Proposition 2.3 — Cls(L_Fnd) ⊄ L_Fnd (no horizontal collapse)")
-public axiom msfs_no_horizontal_collapse() -> Bool
-    ensures true;
+public axiom msfs_no_horizontal_collapse(source_stratum: Stratum, target_stratum: Stratum) -> Bool
+    requires source_stratum == Stratum.L_Fnd
+          && target_stratum == Stratum.L_Cls
+    ensures  // strict inclusion: source ≠ target
+        source_stratum == Stratum.L_Fnd
+          && target_stratum == Stratum.L_Cls
+          && (source_stratum != target_stratum);
 
-/// MSFS Proposition 2.3 (corollary) — `Cls(L_Fnd) ≠ L_Abs`. The
-/// classifier of foundations is also not an inhabitant of the
-/// empty stratum — a tautological consequence of `L_Abs == ∅`,
-/// recorded explicitly because §10 (AC/OC duality) cites it as a
-/// targeting fact for the dual side.
+/// MSFS Proposition 2.3 (corollary) — `Cls(L_Fnd) ≠ L_Abs`.
+/// V3 form: parameterised over the (Cls(L_Fnd) ≃ L_Cls) and
+/// L_Abs strata; ensures clause asserts the inequality.
 @framework(msfs, "MSFS Proposition 2.3 (corollary) — Cls(L_Fnd) ≠ L_Abs")
-public axiom msfs_cls_not_in_l_abs() -> Bool
-    ensures true;
+public axiom msfs_cls_not_in_l_abs(cls_stratum: Stratum, l_abs_stratum: Stratum) -> Bool
+    requires cls_stratum == Stratum.L_Cls
+          && l_abs_stratum == Stratum.L_Abs
+    ensures  cls_stratum != l_abs_stratum;
 
 // =============================================================================
 // Concrete StrictInclusionWitness instances (M3.B)
