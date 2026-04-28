@@ -5781,6 +5781,19 @@ pub(super) fn dispatch_array_method(
         return Ok(Some(Value::from_ptr(data_ptr)));
     }
 
+    // `as_slice` / `as_mut_slice` are identity casts at runtime — a
+    // Verum slice and a List share the same `{ObjectHeader, data...}`
+    // memory layout, the distinction is purely type-system.  The
+    // stdlib defines them in `core/collections/list.vr:725` as
+    // `unsafe { slice_from_raw_parts(self.ptr, self.len) }`; the
+    // VBC interpreter pre-fix had no entry for them and panicked
+    // "method 'List.as_slice' not found on value" — broke every
+    // call site passing a Verum-built buffer to a C-ABI syscall.
+    // Closes RUNTIME-2 from `internal/diag/sqlite-real/FINDINGS.md`.
+    if method == "as_slice" || method == "as_mut_slice" {
+        return Ok(Some(receiver));
+    }
+
     // Only handle Value arrays and Lists, not byte arrays or specialized collections
     if header.type_id == TypeId::U8 {
         return Ok(None);
