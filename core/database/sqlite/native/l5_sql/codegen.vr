@@ -2898,6 +2898,54 @@ fn emit_binary(
             st.program.replace(b_true, If(rb, after));
             Ok(())
         }
+        BIs | BIsNot => {
+            // NULL-safe equality.  `x IS y` is true iff (a==b) treating
+            // NULL as equal to NULL.  Build:
+            //
+            //   Integer(0, dst)
+            //   IfNull(ra) -> A_NULL
+            //   IfNull(rb) -> AFTER          # a non-null, b null → 0
+            //   Eq(ra, rb) -> SET_TRUE       # both non-null and equal
+            //   Goto(AFTER)
+            //   A_NULL:
+            //     IfNull(rb) -> SET_TRUE     # both null → 1
+            //     Goto(AFTER)
+            //   SET_TRUE:
+            //     Integer(1, dst)
+            //   AFTER:
+            //
+            // `x IS NOT y` is the bitwise inverse via `XOR 1`.
+            let _ = st.program.emit(Integer(0, dst));
+            let a_null_jmp = st.program.emit(IfNull(ra, 0));    // patched
+            let b_null_short = st.program.emit(IfNull(rb, 0));  // patched (a non-null, b null → 0)
+            let eq_jmp = st.program.emit(Eq(ra, rb, 0));        // patched to SET_TRUE
+            let goto_after_eq = st.program.emit(Goto(0));       // patched
+
+            let a_null_target = st.program.instruction_count();
+            let b_both_null = st.program.emit(IfNull(rb, 0));   // patched to SET_TRUE
+            let goto_after_anull = st.program.emit(Goto(0));    // patched
+
+            let set_true_target = st.program.instruction_count();
+            let _ = st.program.emit(Integer(1, dst));
+
+            let after_target = st.program.instruction_count();
+
+            st.program.replace(a_null_jmp,    IfNull(ra, a_null_target));
+            st.program.replace(b_null_short,  IfNull(rb, after_target));
+            st.program.replace(eq_jmp,        Eq(ra, rb, set_true_target));
+            st.program.replace(goto_after_eq, Goto(after_target));
+            st.program.replace(b_both_null,   IfNull(rb, set_true_target));
+            st.program.replace(goto_after_anull, Goto(after_target));
+
+            if op == BIsNot {
+                // Flip 0↔1 via `dst = 1 - dst` — dst is the BIs result,
+                // already in {0, 1}, so subtraction yields the negation.
+                let one_reg = st.regs.alloc();
+                let _ = st.program.emit(Integer(1, one_reg));
+                let _ = st.program.emit(Subtract(one_reg, dst, dst));
+            }
+            Ok(())
+        }
         _ => Err(unsupported("binop codegen pending".clone())),
     }
 }
