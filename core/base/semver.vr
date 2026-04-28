@@ -76,7 +76,17 @@ public type SemVer is {
 public type SemVerError is
       Malformed(Text)
     | LeadingZero(Text)
-    | InvalidIdentifier(Text);
+    | InvalidIdentifier(Text)
+    | Overflow(Text);
+
+// UInt64.MAX = 18_446_744_073_709_551_615 — exactly 20 decimal digits.
+// Any decimal string longer than 20 digits cannot fit; reject pre-loop.
+const MAX_NUMERIC_DIGITS: Int = 20;
+// UInt64.MAX / 10 — the per-step guard against `v * 10` overflowing the
+// next iteration. SemVer §9 numeric identifiers carry no semantic upper
+// bound, so without this check a hostile manifest can wrap the major /
+// minor / patch comparator silently.
+const U64_MAX_DIV_10: UInt64 = 1_844_674_407_370_955_161_u64;
 
 // =============================================================================
 // Parser
@@ -147,6 +157,10 @@ fn parse_numeric(b: &[Byte], start: Int, end: Int) -> Result<UInt64, SemVerError
     if start >= end {
         return Err(SemVerError.Malformed(Text.from("empty numeric")));
     }
+    // Pre-loop length cap — anything past UInt64 width cannot represent.
+    if end - start > MAX_NUMERIC_DIGITS {
+        return Err(SemVerError.Overflow(slice_text(b, start, end)));
+    }
     // §9: "numeric identifiers MUST NOT include leading zeroes."
     if end - start > 1 && b[start] == ('0' as Byte) {
         return Err(SemVerError.LeadingZero(slice_text(b, start, end)));
@@ -158,7 +172,20 @@ fn parse_numeric(b: &[Byte], start: Int, end: Int) -> Result<UInt64, SemVerError
         if c < ('0' as Byte) || c > ('9' as Byte) {
             return Err(SemVerError.InvalidIdentifier(slice_text(b, start, end)));
         }
-        v = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        // Per-step guard: if v > MAX/10, the next `v * 10` overflows.
+        // Length cap above admits 20-digit strings whose final value can
+        // still exceed UInt64.MAX (e.g. `99999999999999999999`), so the
+        // per-step check is required even with the cap.
+        if v > U64_MAX_DIV_10 {
+            return Err(SemVerError.Overflow(slice_text(b, start, end)));
+        }
+        let next = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        // Wrap-around defence: at v == MAX/10 = 1_844_674_407_370_955_161
+        // the next `* 10 + d` overflows for d ≥ 6 (because MAX = ...615).
+        if next < v {
+            return Err(SemVerError.Overflow(slice_text(b, start, end)));
+        }
+        v = next;
         i = i + 1;
     }
     Ok(v)
@@ -198,6 +225,12 @@ fn validate_prerelease_id(b: &[Byte], start: Int, end: Int) -> Result<(), SemVer
     }
     if is_numeric && (end - start) > 1 && b[start] == ('0' as Byte) {
         return Err(SemVerError.LeadingZero(slice_text(b, start, end)));
+    }
+    // Numeric prerelease IDs are compared as decimals via §11.4.1, which
+    // routes through `parse_u64_unchecked`. Reject digit-counts past
+    // UInt64 width here so the comparator stays sound by precondition.
+    if is_numeric && (end - start) > MAX_NUMERIC_DIGITS {
+        return Err(SemVerError.Overflow(slice_text(b, start, end)));
     }
     Ok(())
 }
@@ -304,11 +337,28 @@ fn is_all_numeric(b: &[Byte]) -> Bool {
     true
 }
 
+// SAFETY (precondition): only called from `cmp_prerelease_id` after
+// `validate_prerelease_id` has rejected numeric identifiers with more
+// than MAX_NUMERIC_DIGITS digits. So `b.len() ≤ 20`, which on its own
+// still admits values past UInt64.MAX (`99...9`, 20 nines), but `cmp`
+// is comparing two such values for ordering — wrap-around would silently
+// invert the order. Per-step guard kept defence-in-depth: on overflow
+// we saturate at UInt64.MAX so the comparator at least preserves the
+// `≥` direction across overflowed inputs. In practice no validator-
+// approved input reaches this path because §9 leading-zero rule + §11.4
+// numeric-vs-alphanumeric split keeps prerelease IDs short.
 fn parse_u64_unchecked(b: &[Byte]) -> UInt64 {
     let mut v: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < b.len() {
-        v = v * 10_u64 + ((b[i] - ('0' as Byte)) as UInt64);
+        if v > U64_MAX_DIV_10 {
+            return 18_446_744_073_709_551_615_u64;
+        }
+        let next = v * 10_u64 + ((b[i] - ('0' as Byte)) as UInt64);
+        if next < v {
+            return 18_446_744_073_709_551_615_u64;
+        }
+        v = next;
         i = i + 1;
     }
     v
