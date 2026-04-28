@@ -254,7 +254,7 @@ fn parent_path(p: &Text) -> Text {
     let mut i: Int = bs.len() - 1;
     while i > 0 && bs[i] != (46 as Byte) && bs[i] != (91 as Byte) { i = i - 1; }
     if i <= 0 { return "$".clone(); }
-    let mut out = Text.new();
+    let mut out = Text.with_capacity(i);
     let mut k: Int = 0;
     while k < i { out.push_byte(bs[k]); k = k + 1; }
     out
@@ -281,9 +281,7 @@ fn format_index(base: &Text, idx: Int) -> Text {
 fn format_dot(base: &Text, key: &Text) -> Text {
     let mut out = base.clone();
     out.push_byte(46 as Byte);  // .
-    let kb = key.as_bytes();
-    let mut k: Int = 0;
-    while k < kb.len() { out.push_byte(kb[k]); k = k + 1; }
+    out.push_str(key);
     out
 }
 
