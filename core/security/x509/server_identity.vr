@@ -57,6 +57,48 @@ public type ServerIdentityError is
     | IpLiteralRequiresIpSan          // reference is an IP literal but cert only has dNSName entries
     | EmptyReference;                 // caller passed ""
 
+// Display + Debug + Eq for ServerIdentityError — standard
+// stdlib protocol impls.  Display surfaces the *reference*
+// the caller asked us to verify (already known to caller),
+// not anything from the cert itself.
+
+implement Display for ServerIdentityError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ServerIdentityError.NoSubjectAltName       => f.write_str("X.509 cert has no SubjectAltName extension"),
+            ServerIdentityError.DnsNameMismatch(name)  => f.write_str(f"X.509 SAN does not match DNS reference {name}".as_str()),
+            ServerIdentityError.IpAddressMismatch(_)   => f.write_str("X.509 SAN does not match IP reference"),
+            ServerIdentityError.IpLiteralRequiresIpSan => f.write_str("X.509 IP-literal reference requires iPAddress SAN entry"),
+            ServerIdentityError.EmptyReference         => f.write_str("X.509 server-identity reference is empty"),
+        }
+    }
+}
+
+implement Debug for ServerIdentityError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ServerIdentityError.NoSubjectAltName       => f.write_str("NoSubjectAltName"),
+            ServerIdentityError.DnsNameMismatch(name)  => f.write_str(f"DnsNameMismatch({name})".as_str()),
+            ServerIdentityError.IpAddressMismatch(b)   => f.write_str(f"IpAddressMismatch(<{b.len()} bytes>)".as_str()),
+            ServerIdentityError.IpLiteralRequiresIpSan => f.write_str("IpLiteralRequiresIpSan"),
+            ServerIdentityError.EmptyReference         => f.write_str("EmptyReference"),
+        }
+    }
+}
+
+implement Eq for ServerIdentityError {
+    fn eq(&self, other: &ServerIdentityError) -> Bool {
+        match (self, other) {
+            (ServerIdentityError.NoSubjectAltName,       ServerIdentityError.NoSubjectAltName)       => true,
+            (ServerIdentityError.DnsNameMismatch(a),     ServerIdentityError.DnsNameMismatch(b))     => a == b,
+            (ServerIdentityError.IpAddressMismatch(a),   ServerIdentityError.IpAddressMismatch(b))   => a == b,
+            (ServerIdentityError.IpLiteralRequiresIpSan, ServerIdentityError.IpLiteralRequiresIpSan) => true,
+            (ServerIdentityError.EmptyReference,         ServerIdentityError.EmptyReference)         => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Public API
 // =============================================================================

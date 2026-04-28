@@ -119,6 +119,85 @@ fn err(kind: DerErrorKind, pos: Int, msg: Text) -> DerError {
     DerError { kind: kind, position: pos, message: msg }
 }
 
+// Display + Debug + Eq for DerErrorKind / DerError —
+// standard stdlib protocol impls.  Foundation for any
+// security-layer error variant that wraps DerError
+// (CrlError, OcspError, X509ParseError, …).
+
+implement Display for DerErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            DerErrorKind.UnexpectedEndOfInput => "DER input ran off buffer",
+            DerErrorKind.MalformedDer         => "DER violates strict-DER rules",
+            DerErrorKind.UnexpectedTag        => "DER tag mismatch",
+            DerErrorKind.LengthOverflow       => "DER length overflow",
+            DerErrorKind.TrailingBytes        => "DER trailing bytes after expected end",
+            DerErrorKind.InvalidOid           => "DER OID arc encoding invalid",
+            DerErrorKind.InvalidBoolean       => "DER boolean value octet not 0x00/0xFF",
+            DerErrorKind.InvalidInteger       => "DER integer has redundant leading bytes",
+            DerErrorKind.InvalidBitString     => "DER bitstring unused-bits invalid",
+            DerErrorKind.InvalidTime          => "DER UTCTime / GeneralizedTime malformed",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for DerErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            DerErrorKind.UnexpectedEndOfInput => "UnexpectedEndOfInput",
+            DerErrorKind.MalformedDer         => "MalformedDer",
+            DerErrorKind.UnexpectedTag        => "UnexpectedTag",
+            DerErrorKind.LengthOverflow       => "LengthOverflow",
+            DerErrorKind.TrailingBytes        => "TrailingBytes",
+            DerErrorKind.InvalidOid           => "InvalidOid",
+            DerErrorKind.InvalidBoolean       => "InvalidBoolean",
+            DerErrorKind.InvalidInteger       => "InvalidInteger",
+            DerErrorKind.InvalidBitString     => "InvalidBitString",
+            DerErrorKind.InvalidTime          => "InvalidTime",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for DerErrorKind {
+    fn eq(&self, other: &DerErrorKind) -> Bool {
+        match (self, other) {
+            (DerErrorKind.UnexpectedEndOfInput, DerErrorKind.UnexpectedEndOfInput) => true,
+            (DerErrorKind.MalformedDer,         DerErrorKind.MalformedDer)         => true,
+            (DerErrorKind.UnexpectedTag,        DerErrorKind.UnexpectedTag)        => true,
+            (DerErrorKind.LengthOverflow,       DerErrorKind.LengthOverflow)       => true,
+            (DerErrorKind.TrailingBytes,        DerErrorKind.TrailingBytes)        => true,
+            (DerErrorKind.InvalidOid,           DerErrorKind.InvalidOid)           => true,
+            (DerErrorKind.InvalidBoolean,       DerErrorKind.InvalidBoolean)       => true,
+            (DerErrorKind.InvalidInteger,       DerErrorKind.InvalidInteger)       => true,
+            (DerErrorKind.InvalidBitString,     DerErrorKind.InvalidBitString)     => true,
+            (DerErrorKind.InvalidTime,          DerErrorKind.InvalidTime)          => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for DerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.kind} at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for DerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"DerError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for DerError {
+    fn eq(&self, other: &DerError) -> Bool {
+        self.kind == other.kind
+            && self.position == other.position
+            && self.message == other.message
+    }
+}
+
 // =============================================================================
 // BitString — preserved as slice + unused-bit count (caller decides meaning)
 // =============================================================================

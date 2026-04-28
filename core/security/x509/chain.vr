@@ -93,6 +93,77 @@ public type ChainError is
     | EkuMismatch                  // EE doesn't allow serverAuth
     | UnsupportedAlgorithm(Int);
 
+// Display + Debug + Eq for ChainError — standard stdlib
+// protocol impls.  Cert-index payloads ARE surfaced
+// (helpful for diagnostics without leaking key/signature
+// bytes); BadSignature surfaces only the index, never
+// the failing signature or key material.
+
+implement Display for ChainError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ChainError.EmptyChain                       => f.write_str("X.509 chain is empty"),
+            ChainError.ChainTooLong { length, limit }   => f.write_str(f"X.509 chain length {length} exceeds limit {limit}".as_str()),
+            ChainError.UnknownIssuer                    => f.write_str("X.509 chain top has no matching trust anchor"),
+            ChainError.IssuerSubjectMismatch(i)         => f.write_str(f"X.509 issuer/subject mismatch at index {i}".as_str()),
+            ChainError.NotYetValid(i)                   => f.write_str(f"X.509 cert at index {i} not yet valid".as_str()),
+            ChainError.Expired(i)                       => f.write_str(f"X.509 cert at index {i} expired".as_str()),
+            ChainError.BadSignature(i)                  => f.write_str(f"X.509 signature verification failed at index {i}".as_str()),
+            ChainError.NonCaIssuer(i)                   => f.write_str(f"X.509 non-EE cert at index {i} lacks cA=TRUE".as_str()),
+            ChainError.NoKeyCertSign(i)                 => f.write_str(f"X.509 non-EE cert at index {i} lacks keyCertSign".as_str()),
+            ChainError.PathLenExceeded                  => f.write_str("X.509 pathLenConstraint exceeded"),
+            ChainError.HostnameMismatch                 => f.write_str("X.509 hostname mismatch"),
+            ChainError.NameConstraintViolation          => f.write_str("X.509 name constraints violated"),
+            ChainError.EkuMismatch                      => f.write_str("X.509 EKU does not include serverAuth"),
+            ChainError.UnsupportedAlgorithm(_)          => f.write_str("X.509 unsupported signature algorithm"),
+        }
+    }
+}
+
+implement Debug for ChainError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ChainError.EmptyChain                       => f.write_str("EmptyChain"),
+            ChainError.ChainTooLong { length, limit }   => f.write_str(f"ChainTooLong {{ length: {length}, limit: {limit} }}".as_str()),
+            ChainError.UnknownIssuer                    => f.write_str("UnknownIssuer"),
+            ChainError.IssuerSubjectMismatch(i)         => f.write_str(f"IssuerSubjectMismatch({i})".as_str()),
+            ChainError.NotYetValid(i)                   => f.write_str(f"NotYetValid({i})".as_str()),
+            ChainError.Expired(i)                       => f.write_str(f"Expired({i})".as_str()),
+            ChainError.BadSignature(i)                  => f.write_str(f"BadSignature({i})".as_str()),
+            ChainError.NonCaIssuer(i)                   => f.write_str(f"NonCaIssuer({i})".as_str()),
+            ChainError.NoKeyCertSign(i)                 => f.write_str(f"NoKeyCertSign({i})".as_str()),
+            ChainError.PathLenExceeded                  => f.write_str("PathLenExceeded"),
+            ChainError.HostnameMismatch                 => f.write_str("HostnameMismatch"),
+            ChainError.NameConstraintViolation          => f.write_str("NameConstraintViolation"),
+            ChainError.EkuMismatch                      => f.write_str("EkuMismatch"),
+            ChainError.UnsupportedAlgorithm(a)          => f.write_str(f"UnsupportedAlgorithm({a})".as_str()),
+        }
+    }
+}
+
+implement Eq for ChainError {
+    fn eq(&self, other: &ChainError) -> Bool {
+        match (self, other) {
+            (ChainError.EmptyChain,                     ChainError.EmptyChain)                     => true,
+            (ChainError.ChainTooLong { length: la, limit: lia },
+             ChainError.ChainTooLong { length: lb, limit: lib })                                   => la == lb && lia == lib,
+            (ChainError.UnknownIssuer,                  ChainError.UnknownIssuer)                  => true,
+            (ChainError.IssuerSubjectMismatch(a),       ChainError.IssuerSubjectMismatch(b))       => a == b,
+            (ChainError.NotYetValid(a),                 ChainError.NotYetValid(b))                 => a == b,
+            (ChainError.Expired(a),                     ChainError.Expired(b))                     => a == b,
+            (ChainError.BadSignature(a),                ChainError.BadSignature(b))                => a == b,
+            (ChainError.NonCaIssuer(a),                 ChainError.NonCaIssuer(b))                 => a == b,
+            (ChainError.NoKeyCertSign(a),               ChainError.NoKeyCertSign(b))               => a == b,
+            (ChainError.PathLenExceeded,                ChainError.PathLenExceeded)                => true,
+            (ChainError.HostnameMismatch,               ChainError.HostnameMismatch)               => true,
+            (ChainError.NameConstraintViolation,        ChainError.NameConstraintViolation)        => true,
+            (ChainError.EkuMismatch,                    ChainError.EkuMismatch)                    => true,
+            (ChainError.UnsupportedAlgorithm(a),        ChainError.UnsupportedAlgorithm(b))        => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Result
 // =============================================================================
