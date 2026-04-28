@@ -113,18 +113,58 @@ level. No confused-deputy callers found through audit.
 
 ## Vector 5 — Verification gap: SMT timeout
 
-### 5.1 Z3 timeout default-fail-open?
+### 5.1 Z3 timeout default-fail-open? — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PENDING — needs Z3 timeout-policy review.
+**Status:** DEFENSE CONFIRMED — full 9-site audit of every `SatResult::Unknown`
+consumer. All sites are fail-closed or sound-conservative.
 
-Critical question: when Z3 times out on a refinement check, does Verum
-default-fail-closed (reject the program — sound) or default-fail-open (accept —
-unsound)? Locate Z3 invocation in `verum_smt/src/z3_backend.rs`; trace timeout
-return path.
+Default global timeout: 30s (`crates/verum_smt/src/z3_backend.rs:76`,
+`global_timeout_ms: Maybe::Some(30000)`). Set on solver via
+`cfg.set_timeout_msec()` (L119, L1855). Z3 returns `SatResult::Unknown` on
+timeout, resource limit, or undecidability.
 
-### 5.2 Always-timeout predicate
+**Audit table (every consumer of `SatResult::Unknown`):**
 
-**Status:** PENDING — depends on 5.1 outcome.
+| Site | Verdict on `Unknown` | Soundness |
+|---|---|---|
+| `verum_smt/src/verify.rs:378` | `Err(VerificationError::Timeout/Unknown)` | fail-closed ✓ |
+| `verum_verification/src/proof_validator.rs:1584` | `Err(ValidationError::SmtValidationFailed)` | fail-closed ✓ |
+| `verum_verification/src/proof_validator.rs:5120` | `Err(ValidationError::SmtValidationFailed)` | fail-closed ✓ |
+| `verum_verification/src/integration.rs:327` | `Err(WPError::Unknown)` | fail-closed ✓ |
+| `verum_verification/src/integration.rs:973` | `Err(WPError::Unknown)` | fail-closed ✓ |
+| `verum_verification/src/hoare_logic.rs:1098` | `Err(WPError::Unknown)` + `unknown_count++` | fail-closed ✓ |
+| `verum_verification/src/bounds_elimination.rs:1213` | `Ok(false)` — keep bounds check | sound-conservative ✓ |
+| `verum_verification/src/tactic_evaluation.rs:4454` | `Err(TacticError::Timeout/SmtError)` | fail-closed ✓ |
+| `verum_verification/src/separation_logic.rs:908` | `return true` — assume satisfiable | sound-conservative ✓ |
+
+The two `sound-conservative` sites are explained by their callers:
+- `bounds_elimination`: returning `Ok(false)` means "do NOT eliminate the bounds
+  check at runtime" — i.e. keep the runtime verification active. Sound.
+- `separation_logic::is_satisfiable`: returning `true` on Unknown is conservative
+  for feasibility analysis — over-approximates the set of feasible paths, never
+  misses one. The function's docstring explicitly states "may have false
+  positives but no false negatives". Sound.
+
+**Verdict:** Z3 timeout is universally fail-closed across the verifier; no SMT
+backend output can silently lift a refinement-type obligation. The verifier's
+worst-case behaviour on timeout is "spurious rejection" (over-conservative),
+never "spurious acceptance" (unsound).
+
+**Surface-level guardrail tests pinning the invariant:**
+- `vcs/specs/L1-core/refinement/smt/proof_timeout.vr` — `verify-fail` with
+  `verification-timeout` expected; pins surface-level fail-closed behaviour.
+- `vcs/specs/L0-critical/verification/z3_timeout_fail_closed.vr` (added 2026-04-28)
+  — focused L0-critical guardrail with deliberate Z3-stress predicate at 50ms timeout.
+- `crates/verum_smt/tests/timeout_fail_closed_invariant.rs` (added 2026-04-28)
+  — Rust-level test programmatically constructing a Z3-hard formula + 1ms timeout,
+  asserting the verify result is `Err`.
+
+### 5.2 Always-timeout predicate — DEFENSE CONFIRMED 2026-04-28
+
+**Status:** DEFENSE CONFIRMED via the surface + L0 + Rust guardrails listed above.
+A predicate Z3 cannot decide within budget is rejected at the SMT layer with
+`Err(*::Unknown)`; the error propagates to the verifier and to the kernel as a
+verification failure, never as a silent accept.
 
 ---
 
@@ -241,17 +281,17 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 4.1 Same-name @cfg types | DEFENSE | — |
 | 4.2 Deep super | DEFENSE | — |
 | 4.3 Mount alias shadow | PENDING | dedicated test |
-| 5.1 Z3 timeout policy | PENDING | Z3 review |
-| 5.2 Always-timeout | PENDING | depends on 5.1 |
+| 5.1 Z3 timeout policy | **DEFENSE CONFIRMED** | 9-site audit + 3 guardrails (2026-04-28) |
+| 5.2 Always-timeout | **DEFENSE CONFIRMED** | guardrails pin fail-closed (2026-04-28) |
 | 6.1 Capability monomorph | PENDING | monomorph audit |
 | 6.2 Erased/reified | PARTIAL | exhaustive cases |
 | 7.1 Tier-0 vs Tier-1 | PENDING | #196 |
 | 7.2 Hash determinism | PARTIAL | full audit |
 
-**5 vectors confirmed defended (full or partial), 13 pending.** Round 1 success
-condition: every PENDING entry has either a guardrail test or a tracked
-weakness with concrete fix scope. Current pending count needs the listed
-infrastructure (concurrent-write harness, Z3-timeout review, bytecode
+**7 vectors confirmed defended (full or partial), 11 pending** (post 2026-04-28
+RT-1.5 closure). Round 1 success condition: every PENDING entry has either a
+guardrail test or a tracked weakness with concrete fix scope. Current pending
+count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.
 
 The audit-class defenses listed above (Sections A-E) document invariants
