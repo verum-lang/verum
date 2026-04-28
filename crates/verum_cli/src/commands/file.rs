@@ -233,6 +233,34 @@ pub fn run_with_tier(
     tier: Option<u8>,
     timings: bool,
 ) -> Result<(), CliError> {
+    run_with_tier_and_flags(
+        file,
+        args,
+        skip_verify,
+        tier,
+        timings,
+        crate::script::permission_flags::PermissionFlags::default(),
+    )
+}
+
+/// Run single file with tier selection AND CLI permission overrides.
+///
+/// Permission flags (`--allow`, `--allow-all`, `--deny-all`) merge
+/// with the script's frontmatter `permissions = [...]` declaration
+/// per the Deno-style precedence in [`build_permission_set`]:
+/// frontmatter ∪ CLI flags, then `--allow-all` / `--deny-all`
+/// overrides. For non-script invocations the flags are ignored —
+/// the permission policy is built only when the entry source has a
+/// frontmatter `permissions = [...]` field OR a CLI grant is
+/// present.
+pub fn run_with_tier_and_flags(
+    file: &str,
+    args: List<Text>,
+    skip_verify: bool,
+    tier: Option<u8>,
+    timings: bool,
+    permission_flags: crate::script::permission_flags::PermissionFlags,
+) -> Result<(), CliError> {
     let tier_num = match tier {
         Some(0) | None => 0,
         Some(1) => 1,
@@ -288,7 +316,7 @@ pub fn run_with_tier(
             };
 
             if is_script_shaped(&input) {
-                run_script_interpreted(&input, options, args, timings)?;
+                run_script_interpreted(&input, options, args, timings, permission_flags)?;
             } else {
                 let mut session = Session::new(options);
                 {
@@ -593,17 +621,35 @@ fn run_script_interpreted(
     mut options: CompilerOptions,
     args: List<Text>,
     timings: bool,
+    permission_flags: crate::script::permission_flags::PermissionFlags,
 ) -> Result<(), CliError> {
     use crate::script::cache::ScriptCache;
     use crate::script::context::{ScriptContext, ScriptContextOptions};
-    use crate::script::permission_flags::PermissionFlags;
+
+    // Stable cache-key contributors include the CLI permission
+    // flags so a `--allow-net` run doesn't reuse a `--deny-all` run's
+    // cached VBC. (Cache content is identical, but conservative —
+    // future codegen-emitted permission asserts will encode the
+    // resolved set into the bytecode.)
+    let mut extra_flags = cache_flag_inputs(&options);
+    if permission_flags.allow_all {
+        extra_flags.push("perm=allow-all".to_string());
+    }
+    if permission_flags.deny_all {
+        extra_flags.push("perm=deny-all".to_string());
+    }
+    if !permission_flags.allow.is_empty() {
+        let mut sorted = permission_flags.allow.clone();
+        sorted.sort();
+        extra_flags.push(format!("perm-allow=[{}]", sorted.join(",")));
+    }
 
     // 1. Build the ScriptContext: read source, hash, extract+validate
     //    frontmatter, merge CLI permission flags, compute cache key.
     let ctx_opts = ScriptContextOptions {
-        flags: PermissionFlags::default(),
+        flags: permission_flags.clone(),
         compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-        extra_cache_flags: cache_flag_inputs(&options),
+        extra_cache_flags: extra_flags,
     };
     let ctx = ScriptContext::from_path(input, &ctx_opts).map_err(|e| {
         CliError::Custom(format!("script context: {e}"))
@@ -978,17 +1024,13 @@ fn build_script_permission_policy(
     use verum_compiler::session::ScriptPermissionPolicy;
     use verum_vbc::interpreter::permission::{PermissionDecision, PermissionScope};
 
-    // Opt-in to sandboxing — only install a policy when the
-    // frontmatter explicitly declared permissions. Plain scripts
-    // (no frontmatter, or a frontmatter without a permissions
-    // field) keep the router's default allow-all so they continue
-    // to work unchanged.
-    let has_explicit_permissions = ctx
-        .frontmatter
-        .as_ref()
-        .map(|fm| !fm.permissions.is_empty())
-        .unwrap_or(false);
-    if !has_explicit_permissions {
+    // Opt-in to sandboxing — install a policy when EITHER the
+    // frontmatter explicitly declared `permissions = [...]` OR the
+    // user passed any `--allow*` / `--deny-all` CLI flag (visible
+    // to us indirectly via a non-empty `ctx.permissions`). Plain
+    // scripts with neither signal keep the router's default
+    // allow-all so untouched scripts continue to work unchanged.
+    if ctx.permissions.is_empty() {
         return None;
     }
 

@@ -284,6 +284,13 @@ enum Commands {
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
+
+        /// Script-mode permission overrides. `--allow <scope>`,
+        /// `--allow-all`, `--deny-all`. Applied on top of any
+        /// `permissions = [...]` declaration in the script's
+        /// frontmatter. No-op for non-script invocations.
+        #[clap(flatten)]
+        permission_flags: crate::script::permission_flags::PermissionFlags,
     },
 
     /// Run tests
@@ -1660,6 +1667,7 @@ fn run_command(cli: Cli) -> Result<()> {
             timings,
             args,
             feature_overrides,
+            permission_flags,
         } => {
             // Tier resolution precedence:
             //   1. `--interp` / `--aot` shortcuts on the Run command
@@ -1712,12 +1720,13 @@ fn run_command(cli: Cli) -> Result<()> {
                 )
                 .map_err(|e| CliError::Custom(format!("synthesize -e: {e}")))?;
                 ui::status("Running", &format!("-e ({})", tier_label));
-                let result = commands::file::run_with_tier(
+                let result = commands::file::run_with_tier_and_flags(
                     tmp.path().to_str().expect("temp path is utf-8"),
                     args_list,
                     false,
                     tier_num,
                     timings,
+                    permission_flags.clone(),
                 );
                 drop(tmp);
                 return result;
@@ -1731,12 +1740,13 @@ fn run_command(cli: Cli) -> Result<()> {
                 let tmp = commands::file::synthesize_script_temp(&buf, "stdin")
                     .map_err(|e| CliError::Custom(format!("synthesize stdin: {e}")))?;
                 ui::status("Running", &format!("- ({})", tier_label));
-                let result = commands::file::run_with_tier(
+                let result = commands::file::run_with_tier_and_flags(
                     tmp.path().to_str().expect("temp path is utf-8"),
                     args_list,
                     false,
                     tier_num,
                     timings,
+                    permission_flags.clone(),
                 );
                 drop(tmp);
                 return result;
@@ -1746,7 +1756,14 @@ fn run_command(cli: Cli) -> Result<()> {
                 PathTarget::SingleFile(file_path) => {
                     verum_error::crash::set_input_file(file_path.as_str());
                     ui::status("Running", &format!("{} ({})", file_path, tier_label));
-                    commands::file::run_with_tier(file_path.as_str(), args_list, false, tier_num, timings)
+                    commands::file::run_with_tier_and_flags(
+                        file_path.as_str(),
+                        args_list,
+                        false,
+                        tier_num,
+                        timings,
+                        permission_flags,
+                    )
                 }
                 PathTarget::Project => {
                     commands::run::execute(tier_num, None, release, None, None, args_list)
