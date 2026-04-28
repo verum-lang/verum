@@ -788,6 +788,12 @@ pub enum InlineSequenceId {
     RegexIsMatch,
     /// regex_split: split text by pattern
     RegexSplit,
+    /// regex_find: first match only
+    RegexFind,
+    /// regex_replace: first replace only
+    RegexReplace,
+    /// regex_captures: ordered capture groups of first match
+    RegexCaptures,
 
     // =========================================================================
     // Type Introspection Operations
@@ -9604,6 +9610,36 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexSplit),
         mlir_op: Some("verum.regex_split"),
         doc: "Split text by a regex pattern",
+    },
+    Intrinsic {
+        name: "regex_find",
+        category: IntrinsicCategory::Regex,
+        hints: &[IntrinsicHint::Alloc],
+        param_count: 2, // pattern, text
+        return_count: 1, // Maybe<Text>
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexFind),
+        mlir_op: Some("verum.regex_find"),
+        doc: "Find the first regex match in text",
+    },
+    Intrinsic {
+        name: "regex_replace",
+        category: IntrinsicCategory::Regex,
+        hints: &[IntrinsicHint::Alloc],
+        param_count: 3, // pattern, text, replacement
+        return_count: 1, // result text (one replacement)
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexReplace),
+        mlir_op: Some("verum.regex_replace"),
+        doc: "Replace the first regex match in text",
+    },
+    Intrinsic {
+        name: "regex_captures",
+        category: IntrinsicCategory::Regex,
+        hints: &[IntrinsicHint::Alloc],
+        param_count: 2, // pattern, text
+        return_count: 1, // Maybe<List<Text>> — group 0 + capture groups
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexCaptures),
+        mlir_op: Some("verum.regex_captures"),
+        doc: "Run a capturing regex; return ordered group captures of the first match",
     },
     // =========================================================================
     // Time Operations
