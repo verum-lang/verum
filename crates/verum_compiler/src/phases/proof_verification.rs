@@ -829,7 +829,20 @@ fn verify_contradiction(
         goal.hypotheses.clone()
     };
 
-    let inner_steps = verify_proof_steps(engine, smt_ctx, proof_steps, &inner_hypotheses)?;
+    // Walk the inner steps under the dedicated `Contradiction`
+    // context — un-justified `have` statements are rejected with
+    // a contradiction-specific diagnostic surface (currently the
+    // same rejection path as `TopLevel`, but distinct in the AST
+    // so future diagnostics can attribute the rejection to the
+    // surrounding `proof by contradiction`).
+    let mut accumulated = inner_hypotheses;
+    let inner_steps = verify_proof_steps_accumulating_ctx(
+        engine,
+        smt_ctx,
+        proof_steps,
+        &mut accumulated,
+        StepContext::Contradiction,
+    )?;
     steps.extend(inner_steps);
 
     // After the steps, the goal should be `False`; close with contradiction
