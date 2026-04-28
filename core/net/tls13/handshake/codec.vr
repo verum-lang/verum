@@ -58,8 +58,7 @@ public fn put_u32(out: &mut List<Byte>, v: UInt32) {
 }
 
 public fn put_bytes(out: &mut List<Byte>, bytes: &[Byte]) {
-    let mut i: Int = 0;
-    while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+    out.extend_from_slice(bytes);
 }
 
 /// Reserve a u8 length prefix, call `f` to emit the variable-length
@@ -115,9 +114,8 @@ public type Tls13HandshakeReader is {
 
 implement Tls13HandshakeReader {
     public fn new(input: &[Byte]) -> Tls13HandshakeReader {
-        let mut b: List<Byte> = [];
-        let mut i: Int = 0;
-        while i < input.len() { b.push(input[i]); i = i + 1; }
+        let mut b: List<Byte> = List.with_capacity(input.len());
+        b.extend_from_slice(input);
         let n = b.len();
         Tls13HandshakeReader { buf: b, pos: 0, end: n }
     }
@@ -164,9 +162,8 @@ implement Tls13HandshakeReader {
 
     public fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, CodecError> {
         if n < 0 || self.pos + n > self.end { return Err(CodecError.Truncated); }
-        let mut out: List<Byte> = [];
-        let mut i: Int = 0;
-        while i < n { out.push(self.buf[self.pos + i]); i = i + 1; }
+        let mut out: List<Byte> = List.with_capacity(n);
+        out.extend_from_slice(&self.buf.as_slice()[self.pos..self.pos + n]);
         self.pos = self.pos + n;
         Ok(out)
     }

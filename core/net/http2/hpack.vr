@@ -213,12 +213,10 @@ public fn encode_string(input: &[Byte], use_huffman: Bool, out: &mut List<Byte>)
         encode_integer(enc_len as UInt64, 7, 0x80, out);
         let mut buf: List<Byte> = List.with_capacity(enc_len);
         core.net.http2.huffman.encode(input, &mut buf);
-        let mut i = 0;
-        while i < buf.len() { out.push(buf[i]); i = i + 1; }
+        out.extend_from_slice(buf.as_slice());
     } else {
         encode_integer(input.len() as UInt64, 7, 0, out);
-        let mut i = 0;
-        while i < input.len() { out.push(input[i]); i = i + 1; }
+        out.extend_from_slice(input);
     }
 }
 
@@ -241,8 +239,7 @@ public fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
         }
     } else {
         let mut out: List<Byte> = List.with_capacity(length);
-        let mut i = 0;
-        while i < length { out.push(raw[i]); i = i + 1; }
+        out.extend_from_slice(raw);
         Ok((out, after_len + length))
     }
 }
