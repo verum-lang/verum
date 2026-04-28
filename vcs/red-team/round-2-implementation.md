@@ -51,9 +51,26 @@ a cliff. The encoding has ~2.1 billion offsets of headroom (i32 range).
 including offsets at `i32::MAX`, `i32::MIN`, ±100_000 (well past i16
 range). All passing.
 
-### 2.3 Nested generics 100 levels deep
+### 2.3 Nested generics 100 levels deep — DEFENSE CONFIRMED + guardrail 2026-04-28
 
-**Status:** PENDING — needs nested-generic generator.
+**Status:** DEFENSE CONFIRMED — `ast_to_type` has a hard recursion-depth cap
+(currently 64) that surfaces deep generics as a typed compile error
+(`error: recursion limit exceeded: ast_to_type recursion depth exceeded (max 64)`)
+rather than overflowing the host stack with a SIGSEGV.
+
+A secondary type-substitution depth cap (30) emits structured warnings on
+the same axis (`WARN: Maximum type substitution depth (30) exceeded`)
+without failing the compile, so legitimate deep generics produce
+diagnostic noise but compile cleanly.
+
+**Guardrails (added 2026-04-28):**
+- `vcs/specs/L0-critical/red_team_round_2_confirmations.vr` §2.3 —
+  `deep_generic_witness` returns `Maybe<…<Maybe<Int>>>` 32-deep
+  (well within the cap) and must `typecheck-pass` cleanly.
+- `vcs/specs/L0-critical/parser/edge_cases/red_team_nested_generic_recursion_limit.vr`
+  — `deep_generic_overflow` at 65-deep MUST `typecheck-fail` with the
+  recursion-limit error.  Together the two pin the
+  DEFENSE CONFIRMED interval [≤64 OK, ≥65 graceful-fail].
 
 ### 2.4 Recursive impl blocks — DEFENSE CONFIRMED + guardrail 2026-04-28
 
