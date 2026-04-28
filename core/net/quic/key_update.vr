@@ -113,6 +113,45 @@ public type KeyUpdateError is
     | IntegrityLimitExceeded
     | ConfidentialityLimitExceeded;
 
+implement Display for KeyUpdateError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            PendingRotationInProgress     => "QUIC key update: pending rotation in progress",
+            PeerInitiatedTooEarly         => "QUIC key update: peer initiated update too early",
+            DeriveFailed                  => "QUIC key update: HKDF derive failed",
+            IntegrityLimitExceeded        => "QUIC key update: AEAD integrity limit reached",
+            ConfidentialityLimitExceeded  => "QUIC key update: AEAD confidentiality limit reached",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for KeyUpdateError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            PendingRotationInProgress     => "PendingRotationInProgress",
+            PeerInitiatedTooEarly         => "PeerInitiatedTooEarly",
+            DeriveFailed                  => "DeriveFailed",
+            IntegrityLimitExceeded        => "IntegrityLimitExceeded",
+            ConfidentialityLimitExceeded  => "ConfidentialityLimitExceeded",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for KeyUpdateError {
+    fn eq(&self, other: &KeyUpdateError) -> Bool {
+        match (self, other) {
+            (PendingRotationInProgress,    PendingRotationInProgress)    => true,
+            (PeerInitiatedTooEarly,        PeerInitiatedTooEarly)        => true,
+            (DeriveFailed,                 DeriveFailed)                 => true,
+            (IntegrityLimitExceeded,       IntegrityLimitExceeded)       => true,
+            (ConfidentialityLimitExceeded, ConfidentialityLimitExceeded) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Outcome of an inbound phase observation.
 public type InboundPhaseAction is
       NoChange                      // peer is still in our current phase

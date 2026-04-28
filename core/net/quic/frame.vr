@@ -73,6 +73,40 @@ public type FrameError is
     | InvalidValue(Text)
     | VarintFailure;
 
+implement Display for FrameError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FrameError.Truncated         => f.write_str("QUIC frame: truncated"),
+            FrameError.InvalidType(t)    => f.write_str(f"QUIC frame: invalid type 0x{t:x}".as_str()),
+            FrameError.InvalidValue(r)   => f.write_str(f"QUIC frame: invalid value ({r})".as_str()),
+            FrameError.VarintFailure     => f.write_str("QUIC frame: varint decode failed"),
+        }
+    }
+}
+
+implement Debug for FrameError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FrameError.Truncated         => f.write_str("Truncated"),
+            FrameError.InvalidType(t)    => f.write_str(f"InvalidType(0x{t:x})".as_str()),
+            FrameError.InvalidValue(r)   => f.write_str(f"InvalidValue({r})".as_str()),
+            FrameError.VarintFailure     => f.write_str("VarintFailure"),
+        }
+    }
+}
+
+implement Eq for FrameError {
+    fn eq(&self, other: &FrameError) -> Bool {
+        match (self, other) {
+            (FrameError.Truncated,        FrameError.Truncated)        => true,
+            (FrameError.InvalidType(a),   FrameError.InvalidType(b))   => a == b,
+            (FrameError.InvalidValue(a),  FrameError.InvalidValue(b))  => a == b,
+            (FrameError.VarintFailure,    FrameError.VarintFailure)    => true,
+            _ => false,
+        }
+    }
+}
+
 fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Err(FrameError.VarintFailure) }
 
 // =============================================================================

@@ -49,3 +49,47 @@ implement ContextError {
         }
     }
 }
+
+implement Display for ContextError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for ContextError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound { context_name } =>
+                f.write_str(f"NotFound {{ context_name: {context_name} }}".as_str()),
+            NotProvided { context_name, function_name } =>
+                f.write_str(f"NotProvided {{ context_name: {context_name}, function_name: {function_name} }}".as_str()),
+            TypeMismatch { context_name, expected, found } =>
+                f.write_str(f"TypeMismatch {{ context_name: {context_name}, expected: {expected}, found: {found} }}".as_str()),
+            CircularDependency { chain } =>
+                f.write_str(f"CircularDependency {{ chain: <{chain.len()} entries> }}".as_str()),
+            ScopeViolation { dependent, dependency, dependent_scope, dependency_scope } =>
+                f.write_str(f"ScopeViolation {{ dependent: {dependent}, dependency: {dependency}, dependent_scope: {dependent_scope}, dependency_scope: {dependency_scope} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for ContextError {
+    fn eq(&self, other: &ContextError) -> Bool {
+        match (self, other) {
+            (NotFound { context_name: a }, NotFound { context_name: b }) =>
+                a == b,
+            (NotProvided { context_name: ca, function_name: fa },
+             NotProvided { context_name: cb, function_name: fb }) =>
+                ca == cb && fa == fb,
+            (TypeMismatch { context_name: ca, expected: ea, found: fa },
+             TypeMismatch { context_name: cb, expected: eb, found: fb }) =>
+                ca == cb && ea == eb && fa == fb,
+            (CircularDependency { chain: a }, CircularDependency { chain: b }) =>
+                a == b,
+            (ScopeViolation { dependent: da, dependency: ya, dependent_scope: dsa, dependency_scope: ysa },
+             ScopeViolation { dependent: db, dependency: yb, dependent_scope: dsb, dependency_scope: ysb }) =>
+                da == db && ya == yb && dsa == dsb && ysa == ysb,
+            _ => false,
+        }
+    }
+}

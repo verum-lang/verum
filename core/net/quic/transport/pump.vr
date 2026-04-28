@@ -101,6 +101,46 @@ public type PumpError is
 
 fn txerr(e: TransportError) -> PumpError { PumpError.Transport(e) }
 
+implement Display for PumpError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PumpError.Transport(e)         => f.write_str(f"QUIC pump transport: {e}".as_str()),
+            PumpError.Crypto(reason)       => f.write_str(f"QUIC pump crypto: {reason}".as_str()),
+            PumpError.Handshake(reason)    => f.write_str(f"QUIC pump handshake: {reason}".as_str()),
+            PumpError.Frame(reason)        => f.write_str(f"QUIC pump frame: {reason}".as_str()),
+            PumpError.Quic(e)              => f.write_str(f"QUIC pump: {e}".as_str()),
+            PumpError.Cancelled            => f.write_str("QUIC pump: cancelled"),
+        }
+    }
+}
+
+implement Debug for PumpError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PumpError.Transport(e)         => f.write_str(f"Transport({e:?})".as_str()),
+            PumpError.Crypto(reason)       => f.write_str(f"Crypto({reason})".as_str()),
+            PumpError.Handshake(reason)    => f.write_str(f"Handshake({reason})".as_str()),
+            PumpError.Frame(reason)        => f.write_str(f"Frame({reason})".as_str()),
+            PumpError.Quic(e)              => f.write_str(f"Quic({e:?})".as_str()),
+            PumpError.Cancelled            => f.write_str("Cancelled"),
+        }
+    }
+}
+
+implement Eq for PumpError {
+    fn eq(&self, other: &PumpError) -> Bool {
+        match (self, other) {
+            (PumpError.Transport(a),   PumpError.Transport(b))   => a == b,
+            (PumpError.Crypto(a),      PumpError.Crypto(b))      => a == b,
+            (PumpError.Handshake(a),   PumpError.Handshake(b))   => a == b,
+            (PumpError.Frame(a),       PumpError.Frame(b))       => a == b,
+            (PumpError.Quic(a),        PumpError.Quic(b))        => a == b,
+            (PumpError.Cancelled,      PumpError.Cancelled)      => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // ConnectionPump
 // =============================================================================

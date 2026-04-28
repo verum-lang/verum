@@ -54,6 +54,43 @@ public type CidPoolError is
     | RetirePriorRegression              // retire_prior_to decreased
     | PoolExhausted;                     // no active CIDs left
 
+implement Display for CidPoolError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LimitExceeded(n)        => f.write_str(f"QUIC CID pool: active count {n} exceeds limit".as_str()),
+            DuplicateSequence(seq)  => f.write_str(f"QUIC CID pool: duplicate sequence {seq}".as_str()),
+            UnknownSequence(seq)    => f.write_str(f"QUIC CID pool: retire of unknown sequence {seq}".as_str()),
+            RetirePriorRegression   => f.write_str("QUIC CID pool: retire_prior_to regressed"),
+            PoolExhausted           => f.write_str("QUIC CID pool: no active CIDs left"),
+        }
+    }
+}
+
+implement Debug for CidPoolError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LimitExceeded(n)        => f.write_str(f"LimitExceeded({n})".as_str()),
+            DuplicateSequence(seq)  => f.write_str(f"DuplicateSequence({seq})".as_str()),
+            UnknownSequence(seq)    => f.write_str(f"UnknownSequence({seq})".as_str()),
+            RetirePriorRegression   => f.write_str("RetirePriorRegression"),
+            PoolExhausted           => f.write_str("PoolExhausted"),
+        }
+    }
+}
+
+implement Eq for CidPoolError {
+    fn eq(&self, other: &CidPoolError) -> Bool {
+        match (self, other) {
+            (LimitExceeded(a),       LimitExceeded(b))       => a == b,
+            (DuplicateSequence(a),   DuplicateSequence(b))   => a == b,
+            (UnknownSequence(a),     UnknownSequence(b))     => a == b,
+            (RetirePriorRegression,  RetirePriorRegression)  => true,
+            (PoolExhausted,          PoolExhausted)          => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // A single entry in the pool
 // =============================================================================

@@ -107,6 +107,51 @@ public type CoseError is
     | WrongKeyKind
     | SignatureMismatch;
 
+// Display + Debug + Eq for CoseError.  SignatureMismatch
+// surfaces no detail — RFC 9052 §6 mandates value-blind
+// COSE_Sign1 / COSE_Mac0 verification (oracle-attack
+// discipline carried across from JwtError / TlsError).
+
+implement Display for CoseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MalformedStructure        => f.write_str("COSE: malformed structure"),
+            CborDecode                => f.write_str("COSE: CBOR decode failed"),
+            UnsupportedAlgorithm(a)   => f.write_str(f"COSE: unsupported algorithm {a}".as_str()),
+            AlgorithmMismatch         => f.write_str("COSE: alg header mismatch"),
+            WrongKeyKind              => f.write_str("COSE: key kind incompatible with algorithm"),
+            SignatureMismatch         => f.write_str("COSE: signature verification failed"),
+        }
+    }
+}
+
+implement Debug for CoseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MalformedStructure        => f.write_str("MalformedStructure"),
+            CborDecode                => f.write_str("CborDecode"),
+            UnsupportedAlgorithm(a)   => f.write_str(f"UnsupportedAlgorithm({a})".as_str()),
+            AlgorithmMismatch         => f.write_str("AlgorithmMismatch"),
+            WrongKeyKind              => f.write_str("WrongKeyKind"),
+            SignatureMismatch         => f.write_str("SignatureMismatch"),
+        }
+    }
+}
+
+implement Eq for CoseError {
+    fn eq(&self, other: &CoseError) -> Bool {
+        match (self, other) {
+            (MalformedStructure,      MalformedStructure)      => true,
+            (CborDecode,              CborDecode)              => true,
+            (UnsupportedAlgorithm(a), UnsupportedAlgorithm(b)) => a == b,
+            (AlgorithmMismatch,       AlgorithmMismatch)       => true,
+            (WrongKeyKind,            WrongKeyKind)            => true,
+            (SignatureMismatch,       SignatureMismatch)       => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Key types
 // =============================================================================
