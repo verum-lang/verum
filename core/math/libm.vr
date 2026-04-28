@@ -43,8 +43,20 @@ public fn abs(x: Float) -> Float {
 }
 
 /// Integer absolute value.
+///
+/// `iabs(Int.MIN)` is unrepresentable in signed Int (|Int.MIN| =
+/// 2^63 = Int.MAX + 1), so the historical `-x` for `x == Int.MIN`
+/// wrapped back to Int.MIN — a silent contract violation. Saturate
+/// at Int.MAX for the Int.MIN input. Callers that need the exact
+/// magnitude should switch to a UInt64-returning variant.
 public fn iabs(x: Int) -> Int {
-    if x < 0 { -x } else { x }
+    if x == -9_223_372_036_854_775_808 {
+        9_223_372_036_854_775_807
+    } else if x < 0 {
+        -x
+    } else {
+        x
+    }
 }
 
 /// Minimum of two floats.
@@ -331,17 +343,28 @@ public fn pow(x: Float, y: Float) -> Float {
 }
 
 /// Integer power: x^n using repeated squaring.
+///
+/// Int.MIN-safe magnitude: the historical `-n` for `n == Int.MIN`
+/// wrapped back to Int.MIN, leaving `exp` negative; the squaring
+/// loop never entered and the function returned 1.0 (or 1.0 for
+/// the negative-n reciprocal) instead of the true |x|^|n| (which
+/// for Int.MIN is essentially 0 or ±Inf in Float). UInt64 magnitude
+/// gives correct |n| for every input including Int.MIN.
 public fn ipow(x: Float, n: Int) -> Float {
     if n == 0 { return 1.0; }
     let mut result = 1.0;
     let mut base = x;
-    let mut exp = if n < 0 { -n } else { n };
-    while exp > 0 {
-        if exp % 2 == 1 {
+    let mut exp: UInt64 = if n < 0 {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
+    while exp > 0_u64 {
+        if exp % 2_u64 == 1_u64 {
             result = result * base;
         }
         base = base * base;
-        exp = exp / 2;
+        exp = exp / 2_u64;
     }
     if n < 0 { 1.0 / result } else { result }
 }

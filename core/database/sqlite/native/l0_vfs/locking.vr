@@ -90,9 +90,19 @@ public fn lock_manager_new(fd: common.FileDesc) -> SqliteLockManager {
 /// intra-process connections deterministically pick distinct bytes up
 /// to the SHARED_SIZE limit.
 fn choose_shared_byte(fd: common.FileDesc) -> Int {
+    // Int.MIN-safe magnitude — file descriptors are typically small
+    // positive Int32, but the cast through Int makes Int.MIN
+    // theoretically reachable; the historical `-raw` wrapped for
+    // Int.MIN, leaving `h` negative and `h % SHARED_SIZE` returning
+    // a negative byte offset — which the locking byte selector
+    // would then treat as an invalid range.
     let raw: Int = fd.0 as Int;
-    let h: Int = if raw < 0 { -raw } else { raw };
-    SHARED_FIRST + (h % SHARED_SIZE)
+    let h: UInt64 = if raw < 0 {
+        (((!raw) as UInt64) + 1_u64)
+    } else {
+        raw as UInt64
+    };
+    SHARED_FIRST + ((h as Int) % SHARED_SIZE)
 }
 
 // -----------------------------------------------------------------------------
