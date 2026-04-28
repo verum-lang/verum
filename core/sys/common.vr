@@ -818,7 +818,7 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
                         &mut ov,
                     )
                 };
-                if !ok {
+                if ok == 0 {
                     let err = super.windows.kernel32.GetLastError() as Int;
                     return Err(OSError { code: err, message: "UnlockFileEx failed" });
                 }
@@ -844,7 +844,7 @@ public fn try_lock_region(fd: FileDesc, kind: FcntlLockKind, start: Int, len: In
                         &mut ov,
                     )
                 };
-                if !ok {
+                if ok == 0 {
                     let err = super.windows.kernel32.GetLastError() as Int;
                     return Err(OSError { code: err, message: "LockFileEx failed" });
                 }
@@ -932,7 +932,7 @@ public fn file_size(fd: FileDesc) -> Result<Int, OSError> {
                 &mut size_out,
             )
         };
-        if !ok {
+        if ok == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
             return Err(OSError { code: err, message: "GetFileSizeEx failed" });
         }
@@ -966,7 +966,7 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
                 0 as UInt32, // FILE_BEGIN
             )
         };
-        if !ok_seek {
+        if ok_seek == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
             return Err(OSError { code: err, message: "SetFilePointerEx failed" });
         }
@@ -975,7 +975,7 @@ public fn truncate(fd: FileDesc, length: Int) -> Result<(), OSError> {
                 super.windows.kernel32.Handle(fd.0),
             )
         };
-        if !ok_eof {
+        if ok_eof == 0 {
             let err = super.windows.kernel32.GetLastError() as Int;
             return Err(OSError { code: err, message: "SetEndOfFile failed" });
         }
