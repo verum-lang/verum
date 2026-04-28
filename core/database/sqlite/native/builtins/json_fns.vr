@@ -148,7 +148,7 @@ fn resolve_path(root: &SqlJsonValue, path: &Text) -> Maybe<SqlJsonValue> {
             while i < bs.len() && bs[i] != (46 as Byte) && bs[i] != (91 as Byte) {
                 i = i + 1;
             }
-            let mut key = Text.new();
+            let mut key = Text.with_capacity(i - key_start);
             let mut k: Int = key_start;
             while k < i { key.push_byte(bs[k]); k = k + 1; }
             cur = match cur {
@@ -275,9 +275,8 @@ public type JsonParseState is { bs: List<Byte>, pos: Int };
 
 public fn parse_json(s: &Text) -> Maybe<SqlJsonValue> {
     let bsv = s.as_bytes();
-    let mut bs: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < bsv.len() { bs.push(bsv[i]); i = i + 1; }
+    let mut bs: List<Byte> = List.with_capacity(bsv.len());
+    bs.extend_from_slice(bsv);
     let mut st = JsonParseState { bs: bs, pos: 0 };
     skip_ws(&mut st);
     let r = parse_value(&mut st);
@@ -344,7 +343,7 @@ fn parse_number(st: &mut JsonParseState) -> Maybe<SqlJsonValue> {
             || b == (43 as Byte)  || b == (45 as Byte);
         if is_num { st.pos = st.pos + 1; } else { break; }
     }
-    let mut text = Text.new();
+    let mut text = Text.with_capacity(st.pos - start);
     let mut k: Int = start;
     while k < st.pos { text.push_byte(st.bs[k]); k = k + 1; }
     Some(JNumber(parse_real_text(&text)))
@@ -539,9 +538,7 @@ fn write_string(out: &mut Text, s: &Text) {
 }
 
 fn append(out: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out.push_str(s);
 }
 
 fn real_to_text(_x: Float64) -> Text {

@@ -247,8 +247,7 @@ public type ProtobufCursor is {
 implement ProtobufCursor {
     public fn new(buf: &[Byte]) -> ProtobufCursor {
         let mut copy = List.with_capacity(buf.len());
-        let mut i = 0;
-        while i < buf.len() { copy.push(buf[i]); i = i + 1; }
+        copy.extend_from_slice(buf);
         ProtobufCursor { buf: copy, pos: 0 }
     }
 
@@ -355,8 +354,7 @@ implement ProtobufCursor {
     public fn read_string(&mut self) -> Result<Text, ProtobufError> {
         let (start, len) = self.read_length_delim_view()?;
         let mut copy = List.with_capacity(len);
-        let mut i = 0;
-        while i < len { copy.push(self.buf[start + i]); i = i + 1; }
+        copy.extend_from_slice(&self.buf.as_slice()[start..start + len]);
         match Text.from_utf8(&copy) {
             Ok(t) => Ok(t),
             Err(_) => Err(ProtobufError.InvalidUtf8),
@@ -367,8 +365,7 @@ implement ProtobufCursor {
     public fn read_bytes(&mut self) -> Result<List<Byte>, ProtobufError> {
         let (start, len) = self.read_length_delim_view()?;
         let mut out = List.with_capacity(len);
-        let mut i = 0;
-        while i < len { out.push(self.buf[start + i]); i = i + 1; }
+        out.extend_from_slice(&self.buf.as_slice()[start..start + len]);
         Ok(out)
     }
 

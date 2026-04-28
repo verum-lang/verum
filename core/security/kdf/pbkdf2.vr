@@ -141,9 +141,8 @@ fn pbkdf2_inner(
     let mut block_idx: UInt32 = 1_u32;
     while (block_idx as Int) <= num_blocks {
         // U_1 = PRF(password, salt || INT(block_idx))
-        let mut salt_with_idx: List<Byte> = [];
-        let mut k: Int = 0;
-        while k < salt.len() { salt_with_idx.push(salt[k]); k = k + 1; }
+        let mut salt_with_idx: List<Byte> = List.with_capacity(salt.len() + 4);
+        salt_with_idx.extend_from_slice(salt);
         salt_with_idx.push(((block_idx >> 24_u32) & 0xFF_u32) as Byte);
         salt_with_idx.push(((block_idx >> 16_u32) & 0xFF_u32) as Byte);
         salt_with_idx.push(((block_idx >>  8_u32) & 0xFF_u32) as Byte);
@@ -164,8 +163,7 @@ fn pbkdf2_inner(
         let start = out.len();
         let remaining = out_len - start;
         let take = if remaining < h_len { remaining } else { h_len };
-        let mut j: Int = 0;
-        while j < take { out.push(t_block[j]); j = j + 1; }
+        out.extend_from_slice(&t_block.as_slice()[..take]);
 
         block_idx = block_idx + 1_u32;
     }
@@ -177,9 +175,8 @@ fn pbkdf2_inner(
 // =============================================================================
 
 fn bytes_of(src: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = 0;
-    while i < src.len() { out.push(src[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(src.len());
+    out.extend_from_slice(src);
     out
 }
 
