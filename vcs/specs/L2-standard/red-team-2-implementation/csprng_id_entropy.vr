@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, csprng, dishonest-stub, uuid, ulid, snowflake
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173 — dishonest-stub
+// class fix from CSPRNG / time-source audit).
+//
+// Pre-fix: UUID v4 / v7 / Snowflake / ULID all routed through
+// missing functions (`core.base.random.fill`, `core.time.instant.unix_millis`)
+// that lenient codegen silently no-op'd. Every UUID v4 was
+// `00000000-0000-4000-8000-000000000000`; every Snowflake / ULID
+// had a zero timestamp. Closed by commits b40c5b75 (CSPRNG sweep
+// to `core.sys.common.random_bytes`) and 61ebd7a6 (time sources
+// to `core.time.system_time.SystemTime.now()`).
+//
+// This test pins the CONTRACT that two successive ID generations
+// MUST differ — the strongest signal that entropy is actually
+// flowing through (not silently zero).
+
+mount core.base.uuid.{Uuid};
+mount core.base.ulid.{Ulid};
+
+// UUID v4: 122 bits of entropy. Two successive draws being
+// byte-identical has probability 2^-122 ≈ 0 — if it happens, the
+// CSPRNG is broken.
+fn uuid_v4_successive_differ() {
+    let a = Uuid.new_v4();
+    let b = Uuid.new_v4();
+    assert(a != b,
+           "two successive UUID v4 must differ — pre-fix bug had all-zero v4");
+    // Sanity: at least one of the values is non-zero. Pre-fix
+    // every byte was zero except the version/variant bits.
+    let bytes = a.to_bytes();
+    let mut all_zero = true;
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        // Skip version nibble (byte 6 high) + variant bits (byte 8
+        // high) which are deterministic.
+        if i != 6 && i != 8 && bytes[i] != 0x00_u8 {
+            all_zero = false;
+        }
+        i = i + 1;
+    }
+    assert(!all_zero,
+           "UUID v4 random bytes must NOT all be zero — pre-fix bug fingerprint");
+}
+
+// UUID v7: 48 bits of timestamp + 74 bits entropy. Two successive
+// draws within the same millisecond may share timestamp prefix but
+// MUST differ in the random suffix.
+fn uuid_v7_successive_differ() {
+    let a = Uuid.new_v7();
+    let b = Uuid.new_v7();
+    assert(a != b,
+           "two successive UUID v7 must differ — pre-fix had zero timestamp + entropy");
+}
+
+// UUID v7's 48-bit timestamp prefix MUST be non-zero (real wall
+// clock). Pre-fix bug surfaced as zero timestamp because
+// `unix_millis()` did not exist.
+fn uuid_v7_timestamp_nonzero() {
+    let v = Uuid.new_v7();
+    let bytes = v.to_bytes();
+    // First 6 bytes (48 bits) are the timestamp big-endian.
+    let mut ts_zero = true;
+    let mut i: Int = 0;
+    while i < 6 {
+        if bytes[i] != 0x00_u8 { ts_zero = false; }
+        i = i + 1;
+    }
+    assert(!ts_zero,
+           "UUID v7 timestamp prefix must be non-zero — pre-fix dishonest-stub");
+}
+
+// ULID: 48-bit timestamp + 80-bit entropy. Two successive draws
+// MUST differ in the random suffix even within the same millisecond.
+fn ulid_successive_differ() {
+    let a = Ulid.new();
+    let b = Ulid.new();
+    assert(a != b,
+           "two successive ULIDs must differ — pre-fix had zero timestamp prefix");
+}
+
+// ULID timestamp: any value of the form `00000000-0000-…` from a
+// real wall clock would mean we're at the unix epoch (1970), which
+// no production system is. Assert the timestamp is positive.
+fn ulid_timestamp_nonzero() {
+    let v = Ulid.new();
+    let ts = v.timestamp_ms();
+    assert(ts > 0_u64,
+           "ULID timestamp must be > 0 — pre-fix dishonest-stub returned 0");
+}
+
+fn main() {
+    uuid_v4_successive_differ();
+    uuid_v7_successive_differ();
+    uuid_v7_timestamp_nonzero();
+    ulid_successive_differ();
+    ulid_timestamp_nonzero();
+}
