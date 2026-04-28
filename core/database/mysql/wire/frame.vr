@@ -201,17 +201,11 @@ public fn put_u32_le(buf: &mut List<Byte>, v: Int) {
 }
 
 public fn put_bytes(buf: &mut List<Byte>, src: &[Byte]) {
-    let mut i = 0;
-    while i < src.len() {
-        buf.push(src[i]);
-        i = i + 1;
-    }
+    buf.extend_from_slice(src);
 }
 
 public fn put_cstr(buf: &mut List<Byte>, s: &Text) {
-    let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() { buf.push(b[i]); i = i + 1; }
+    buf.extend_from_slice(s.as_bytes());
     buf.push(0 as Byte);
 }
 
@@ -253,9 +247,8 @@ public fn read_cstr(buf: &[Byte], off: Int) -> Result<(Text, Int), FrameError> {
     let n = buf.len() as Int;
     while i < n && (buf[i] as Int) != 0 { i = i + 1; }
     if i >= n { return Err(FeShort { wanted: 1, available: 0 }); }
-    let mut bytes: List<Byte> = List.new();
-    let mut j = off;
-    while j < i { bytes.push(buf[j]); j = j + 1; }
+    let mut bytes: List<Byte> = List.with_capacity(i - off);
+    bytes.extend_from_slice(&buf[off..i]);
     let s = match Text.from_bytes(&bytes) {
         Ok(t)  => t,
         Err(_) => { return Err(FeInvalidUtf8); }

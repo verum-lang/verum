@@ -133,9 +133,7 @@ fn clone_outcome(o: &DiffOutcome) -> DiffOutcome {
 }
 
 fn push(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+    dst.push_str(s);
 }
 
 fn push_int(dst: &mut Text, n: Int) {

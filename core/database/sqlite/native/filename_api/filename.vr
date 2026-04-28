@@ -30,11 +30,8 @@ public fn new_handle(database: Text) -> FilenameHandle {
 
 fn concat(a: &Text, b: &Text) -> Text {
     let mut out = "".clone();
-    let ab = a.as_bytes();
-    let bb = b.as_bytes();
-    let mut i: Int = 0;
-    while i < ab.len() { out.push_byte(ab[i]); i = i + 1; }
-    i = 0;
-    while i < bb.len() { out.push_byte(bb[i]); i = i + 1; }
+    out.reserve(a.as_bytes().len() + b.as_bytes().len());
+    out.push_str(a);
+    out.push_str(b);
     out
 }

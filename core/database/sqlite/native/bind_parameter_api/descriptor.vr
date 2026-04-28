@@ -56,9 +56,7 @@ public fn spec_name(s: &ParamSpec) -> Maybe<Text> {
 }
 
 fn push_text(dst: &mut Text, s: &Text) {
-    let bs = s.as_bytes();
-    let mut i: Int = 0;
-    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+    dst.push_str(s);
 }
 
 public fn is_named(k: &ParamKind) -> Bool {

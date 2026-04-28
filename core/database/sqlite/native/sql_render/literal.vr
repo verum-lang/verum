@@ -114,10 +114,7 @@ public fn render_literal(dst: &mut Text, l: &RenderLiteral) {
             // Real formatting isn't byte-exact across platforms; emit a
             // placeholder.  Embedders that need byte-exact output pass
             // RlText(format_real_locally) instead.
-            let five = "REAL?".clone();
-            let bs = five.as_bytes();
-            let mut i: Int = 0;
-            while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+            dst.push_str(&"REAL?".clone());
         }
         RlText(t) => push_single_quoted(dst, t),
         RlBlob(b) => push_blob_x_literal(dst, b),

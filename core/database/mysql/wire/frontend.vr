@@ -196,8 +196,7 @@ public fn param_int(n: Int64) -> StmtParam { SpLongLong(n) }
 public fn param_text(s: &Text) -> StmtParam { SpString(s.clone()) }
 public fn param_blob(b: &[Byte]) -> StmtParam {
     let mut out: List<Byte> = List.with_capacity(b.len());
-    let mut i: Int = 0;
-    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out.extend_from_slice(b);
     SpBlob(out)
 }
 public fn param_double(x: Float64) -> StmtParam { SpDouble(x) }

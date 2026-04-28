@@ -220,10 +220,7 @@ fn render_row(r: &DifferentialResultRow) -> Text {
             out.push_byte(44 as Byte);
             out.push_byte(32 as Byte);
         }
-        let lit = render_sql_literal(&r.values[i]);
-        let bs = lit.as_bytes();
-        let mut k: Int = 0;
-        while k < bs.len() { out.push_byte(bs[k]); k = k + 1; }
+        out.push_str(&render_sql_literal(&r.values[i]));
         i = i + 1;
     }
     out.push_byte(93 as Byte);

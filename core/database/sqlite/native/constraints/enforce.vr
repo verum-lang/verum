@@ -37,20 +37,10 @@ mount core.database.sqlite.native.constraints.conflict.{
 
 fn build_msg(prefix: Text, table: &Text, detail: &Text) -> Text {
     let mut out = prefix;
-    let pb = " on ".clone();
-    let pbb = pb.as_bytes();
-    let mut i: Int = 0;
-    while i < pbb.len() { out.push_byte(pbb[i]); i = i + 1; }
-    let tb = table.as_bytes();
-    i = 0;
-    while i < tb.len() { out.push_byte(tb[i]); i = i + 1; }
-    let sep = ": ".clone();
-    let sb = sep.as_bytes();
-    i = 0;
-    while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
-    let db = detail.as_bytes();
-    i = 0;
-    while i < db.len() { out.push_byte(db[i]); i = i + 1; }
+    out.push_str(&" on ".clone());
+    out.push_str(table);
+    out.push_str(&": ".clone());
+    out.push_str(detail);
     out
 }
 
