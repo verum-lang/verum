@@ -387,6 +387,22 @@ implement<T, U: TryFrom<T>> TryInto<U> for T {
 /// Format error type.
 public type FormatError is {};
 
+implement Display for FormatError {
+    fn fmt(&self, _f: &mut Formatter) -> Result<(), FormatError> {
+        Ok(())
+    }
+}
+
+implement Debug for FormatError {
+    fn fmt_debug(&self, _f: &mut Formatter) -> Result<(), FormatError> {
+        Ok(())
+    }
+}
+
+implement Eq for FormatError {
+    fn eq(&self, _other: &FormatError) -> Bool { true }
+}
+
 /// Format result alias - used by Display and Debug implementations.
 public type FmtResult is Result<Unit, FormatError>;
 
