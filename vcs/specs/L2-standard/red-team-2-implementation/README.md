@@ -8,8 +8,12 @@ that the defense must reject.
 
 | File | Defense | Source bug-class |
 |---|---|---|
-| `parse_u64_overflow_guards.vr` | 3-layer overflow recipe on UInt64 parsers | `acc * 10 + d` silent wrap-around |
+| `parse_u64_overflow_guards.vr` | 3-layer overflow recipe on UInt64 parsers (`semver`) | `acc * 10 + d` silent wrap-around |
 | `sqlite_text_to_int_coercion.vr` | INTEGER/NUMERIC affinity → REAL fallback on overflow | dishonest-comment class (`parse_int64` claimed to "mirror SQLite" but didn't) |
+| `decoder_canonicality.vr` | base64 standard / URL canonicality (no-pad / overpad / non-canonical trailing bits / alphabet boundary) | round-trip-equality forgery surface |
+| `http_range_overflow.vr` | RFC 7233 byte-offset 3-layer overflow defense | CVE-2011-3192-class |
+| `constant_time_compare.vr` | `constant_time_eq` / `_compare` behavioural contract (no early exit, length-mismatch handled at boundary) | timing-attack class |
+| `csprng_id_entropy.vr` | UUID v4 / v7 + ULID entropy + timestamp non-zero | dishonest-stub class (lenient-codegen swallowed missing-fn calls) |
 
 ## Adding new vectors
 
