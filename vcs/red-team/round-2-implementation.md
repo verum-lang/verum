@@ -44,10 +44,15 @@ PC offset / branch-target encoding overflow.
 
 **Status:** PENDING — needs nested-generic generator.
 
-### 2.4 Recursive impl blocks
+### 2.4 Recursive impl blocks — DEFENSE CONFIRMED + guardrail 2026-04-28
 
 **Status:** DEFENSE CONFIRMED — closure-walker termination checks during
 audit show terminal cycle handling at impl-block level.
+
+**Guardrail:** `vcs/specs/L0-critical/red_team_round_2_confirmations.vr` §2.4
+exercises mutually-recursive impl-graph (AType / BType each implementing
+both AProtocol and BProtocol — 4 implement-blocks form a graph cycle the
+closure walker must terminate on).
 
 ### 2.5 Pre-canon snapshot diff
 
@@ -71,11 +76,21 @@ interpreter-side internal-call arity check is partial. Audit gap.
 
 **Status:** PENDING — needs out-of-range-call test harness.
 
-### 3.4 Frame-stack overflow
+### 3.4 Frame-stack overflow — DEFENSE CONFIRMED + guardrails 2026-04-28
 
-**Status:** DEFENSE CONFIRMED — `try_push_frame` is fallible by design.
-Audit confirmed all callers route through it (no direct push). Recipe
-(grep for `frame_stack.push\b` outside the wrapper) found zero violations.
+**Status:** DEFENSE CONFIRMED — `try_push_frame`
+(`crates/verum_vbc/src/interpreter/registers.rs:117`) is fallible by
+design. Audit confirmed all callers route through it (no direct push).
+Recipe (grep for `frame_stack.push\b` outside the wrapper) found zero
+violations.
+
+**Guardrails:**
+- Rust unit test `test_stack_overflow` in
+  `crates/verum_vbc/src/interpreter/stack.rs:294` pins the limit at the
+  CallStack-level.
+- `vcs/specs/L0-critical/red_team_round_2_confirmations.vr` §3.4 exercises
+  surface-level deep recursion — `deep_recursion_witness` surfaces as
+  `InterpreterError::StackOverflow`, not a SIGSEGV / panic.
 
 ---
 
@@ -100,18 +115,32 @@ issues; remaining 11 helpers tracked under #105 follow-up scope.
 
 ## Vector 5 — Stdlib abuse
 
-### 5.1 Module cycle A→B→A
+### 5.1 Module cycle A→B→A — DEFENSE CONFIRMED + guardrail 2026-04-28
 
 **Status:** DEFENSE CONFIRMED — closure walker terminates on cycles
 (verified during #181 audit). No infinite-loop attacks observed.
 
-### 5.2 4-level deep super chain
+**Guardrails:**
+- `vcs/specs/L0-critical/modules/circular_type_dependency.vr` — 2-cycle and
+  mutual-function-recursion cases.
+- `vcs/specs/L0-critical/red_team_round_2_confirmations.vr` §5.1 — 4-cycle
+  W → X → Y → Z → W to stress closure-walker depth.
+
+### 5.2 4-level deep super chain — DEFENSE CONFIRMED + guardrail 2026-04-28
 
 **Status:** DEFENSE CONFIRMED — currently no-op at lexer level.
 
-### 5.3 Mount alias shadowing built-in
+**Guardrail:** `vcs/specs/L0-critical/red_team_round_2_confirmations.vr` §5.2
+constructs 4 nested module declarations and exercises
+`super.super.super.super.OuterT` reach-back.
 
-**Status:** PENDING — see round-1 vector 4.3.
+### 5.3 Mount alias shadowing built-in — DEFENSE CONFIRMED 2026-04-28
+
+**Status:** DEFENSE CONFIRMED — closed by round-1 vector §4.3 closure on
+2026-04-28. See `vcs/specs/L0-critical/modules/mount_alias_shadows_builtin.vr`
+and round-1 doc §4.3 for the audit trail. Architectural rule:
+`crates/verum_types/src/CLAUDE.md` "User-defined variant names must freely
+override built-in convenience aliases".
 
 ---
 
@@ -228,18 +257,18 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 2.1 256+ variants | DEFECT-CLOSED | #167 |
 | 2.2 2^16+ instructions | PENDING | synthetic gen |
 | 2.3 Deep generics | PENDING | gen + termination |
-| 2.4 Recursive impl | DEFENSE | — |
+| 2.4 Recursive impl | **DEFENSE** | guardrail (2026-04-28) |
 | 2.5 Codegen non-determinism | PARTIAL | ongoing diff |
 | 3.1 RO register | PENDING | bytecode harness |
 | 3.2 Arity mismatch | PARTIAL | interpreter audit |
 | 3.3 OOR FunctionId | PENDING | OOR harness |
-| 3.4 Frame overflow | DEFENSE | — |
+| 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
 | 4.1 LibraryCall collision | PARTIAL | #176 |
 | 4.2 Networking arity | PARTIAL | #105 follow-up |
 | 4.3 GlobalDCE | PARTIAL | DCE audit |
-| 5.1 Module cycle | DEFENSE | — |
-| 5.2 Deep super | DEFENSE | — |
-| 5.3 Alias shadow | PENDING | dedicated test |
+| 5.1 Module cycle | **DEFENSE** | guardrails (2026-04-28) |
+| 5.2 Deep super | **DEFENSE** | guardrail (2026-04-28) |
+| 5.3 Alias shadow | **DEFENSE CONFIRMED** | round-1 §4.3 closure (2026-04-28) |
 | 6.1 Π/Σ recursion | PENDING | termination harness |
 | 6.2 Side-effect witness | PARTIAL | guardrail |
 | 6.3 Stmt refinement | PENDING | SMT audit |
@@ -250,5 +279,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | PENDING | lint audit |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**6 vectors confirmed defended, 14 partial, 7 pending.** Sections A-C above
-record real defects already closed in the audit pass.
+**7 vectors confirmed defended (was 6), 14 partial, 6 pending (was 7)** post
+2026-04-28 round-2-batch closure (RT-2 §2.4 / §3.4 / §5.1 / §5.2 / §5.3
+guardrails landed). Sections A-C below record real defects already closed
+in the audit pass.
