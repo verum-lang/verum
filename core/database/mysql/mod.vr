@@ -34,8 +34,14 @@ public mount .config.{
 public mount .connection.{
     MysqlConnection, MysqlConnState, SimpleQueryResult,
     MysqlTextValue, MtvNull, MtvBytes,
+    MysqlPreparedStatement, MysqlPreparedResult,
     McsConnecting, McsAuthenticating, McsReady, McsBusy, McsClosed, McsFailed,
     connect,
+};
+public mount .wire.frontend.{
+    StmtParam, SpNull, SpTinyInt, SpShort, SpLong, SpLongLong,
+    SpDouble, SpFloat, SpString, SpBlob,
+    param_null, param_int, param_text, param_blob, param_double,
 };
 public mount .adapter.MysqlAdapter;
 public mount .error.dberr_from_mysql;
