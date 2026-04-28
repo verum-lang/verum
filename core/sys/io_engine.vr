@@ -449,6 +449,82 @@ public type EngineIoError is
     | Other(Text)
     ;
 
+implement Display for EngineIoError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WouldBlock                  => f.write_str("I/O would block"),
+            Interrupted                 => f.write_str("I/O interrupted by signal"),
+            NotFound { path }           => f.write_str(f"I/O: not found ({path})".as_str()),
+            AlreadyExists               => f.write_str("I/O: already exists"),
+            InvalidInput { reason }     => f.write_str(f"I/O: invalid input ({reason})".as_str()),
+            PermissionDenied            => f.write_str("I/O: permission denied"),
+            ConnectionRefused           => f.write_str("I/O: connection refused"),
+            ConnectionReset             => f.write_str("I/O: connection reset"),
+            BrokenPipe                  => f.write_str("I/O: broken pipe"),
+            TimedOut                    => f.write_str("I/O: timed out"),
+            SubmissionQueueFull         => f.write_str("I/O: submission queue full"),
+            CompletionQueueFull         => f.write_str("I/O: completion queue full"),
+            Closed                      => f.write_str("I/O: engine closed"),
+            EndOfFile                   => f.write_str("I/O: end of file"),
+            Cancelled                   => f.write_str("I/O: cancelled"),
+            NotSupported                => f.write_str("I/O: not supported"),
+            NotConnected                => f.write_str("I/O: not connected"),
+            Other(reason)               => f.write_str(f"I/O: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for EngineIoError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WouldBlock                  => f.write_str("WouldBlock"),
+            Interrupted                 => f.write_str("Interrupted"),
+            NotFound { path }           => f.write_str(f"NotFound {{ path: {path} }}".as_str()),
+            AlreadyExists               => f.write_str("AlreadyExists"),
+            InvalidInput { reason }     => f.write_str(f"InvalidInput {{ reason: {reason} }}".as_str()),
+            PermissionDenied            => f.write_str("PermissionDenied"),
+            ConnectionRefused           => f.write_str("ConnectionRefused"),
+            ConnectionReset             => f.write_str("ConnectionReset"),
+            BrokenPipe                  => f.write_str("BrokenPipe"),
+            TimedOut                    => f.write_str("TimedOut"),
+            SubmissionQueueFull         => f.write_str("SubmissionQueueFull"),
+            CompletionQueueFull         => f.write_str("CompletionQueueFull"),
+            Closed                      => f.write_str("Closed"),
+            EndOfFile                   => f.write_str("EndOfFile"),
+            Cancelled                   => f.write_str("Cancelled"),
+            NotSupported                => f.write_str("NotSupported"),
+            NotConnected                => f.write_str("NotConnected"),
+            Other(reason)               => f.write_str(f"Other({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for EngineIoError {
+    fn eq(&self, other: &EngineIoError) -> Bool {
+        match (self, other) {
+            (WouldBlock,           WouldBlock)           => true,
+            (Interrupted,          Interrupted)          => true,
+            (NotFound { path: a }, NotFound { path: b }) => a == b,
+            (AlreadyExists,        AlreadyExists)        => true,
+            (InvalidInput { reason: a }, InvalidInput { reason: b }) => a == b,
+            (PermissionDenied,     PermissionDenied)     => true,
+            (ConnectionRefused,    ConnectionRefused)    => true,
+            (ConnectionReset,      ConnectionReset)      => true,
+            (BrokenPipe,           BrokenPipe)           => true,
+            (TimedOut,             TimedOut)             => true,
+            (SubmissionQueueFull,  SubmissionQueueFull)  => true,
+            (CompletionQueueFull,  CompletionQueueFull)  => true,
+            (Closed,               Closed)               => true,
+            (EndOfFile,            EndOfFile)            => true,
+            (Cancelled,            Cancelled)            => true,
+            (NotSupported,         NotSupported)         => true,
+            (NotConnected,         NotConnected)         => true,
+            (Other(a),             Other(b))             => a == b,
+            _ => false,
+        }
+    }
+}
+
 
 implement EngineIoError {
     /// Create from POSIX errno value

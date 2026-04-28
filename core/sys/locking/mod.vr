@@ -63,6 +63,39 @@ public type LockError is
       Conflict(owner_pid: Maybe<Int>)
     | IoError(err: common.OSError);
 
+implement Display for LockError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Conflict(owner_pid) =>
+                if let Maybe.Some(pid) = owner_pid {
+                    f.write_str(f"file lock conflict (owner pid {pid})".as_str())
+                } else {
+                    f.write_str("file lock conflict (owner unknown)")
+                },
+            IoError(err) => f.write_str(f"file lock I/O error: {err}".as_str()),
+        }
+    }
+}
+
+implement Debug for LockError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Conflict(owner_pid) => f.write_str(f"Conflict(owner_pid: {owner_pid:?})".as_str()),
+            IoError(err)        => f.write_str(f"IoError(err: {err:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for LockError {
+    fn eq(&self, other: &LockError) -> Bool {
+        match (self, other) {
+            (Conflict(a), Conflict(b)) => a == b,
+            (IoError(a),  IoError(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// RAII handle to an acquired byte-range lock.
 ///
 /// Marked `affine`: may be moved, but not copied, and must be consumed

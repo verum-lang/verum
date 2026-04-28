@@ -93,6 +93,24 @@ public type JsonRpcError is {
     message: Text,
 };
 
+implement Display for JsonRpcError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"JSON-RPC error {self.code}: {self.message}".as_str())
+    }
+}
+
+implement Debug for JsonRpcError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"JsonRpcError {{ code: {self.code}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for JsonRpcError {
+    fn eq(&self, other: &JsonRpcError) -> Bool {
+        self.code == other.code && self.message == other.message
+    }
+}
+
 // =============================================================================
 // §2. Typed Parameter Records
 // =============================================================================

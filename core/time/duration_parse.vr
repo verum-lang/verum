@@ -58,6 +58,43 @@ public type DurationParseError is
     | Overflow
     | InputTooLong { limit_bytes: Int };
 
+implement Display for DurationParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Empty                          => f.write_str("duration parse: empty input"),
+            Malformed(reason)              => f.write_str(f"duration parse: malformed ({reason})".as_str()),
+            UnknownUnit(unit)              => f.write_str(f"duration parse: unknown unit ({unit})".as_str()),
+            Overflow                       => f.write_str("duration parse: value overflow"),
+            InputTooLong { limit_bytes }   => f.write_str(f"duration parse: input exceeds {limit_bytes} bytes".as_str()),
+        }
+    }
+}
+
+implement Debug for DurationParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Empty                          => f.write_str("Empty"),
+            Malformed(reason)              => f.write_str(f"Malformed({reason})".as_str()),
+            UnknownUnit(unit)              => f.write_str(f"UnknownUnit({unit})".as_str()),
+            Overflow                       => f.write_str("Overflow"),
+            InputTooLong { limit_bytes }   => f.write_str(f"InputTooLong {{ limit_bytes: {limit_bytes} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for DurationParseError {
+    fn eq(&self, other: &DurationParseError) -> Bool {
+        match (self, other) {
+            (Empty,           Empty)           => true,
+            (Malformed(a),    Malformed(b))    => a == b,
+            (UnknownUnit(a),  UnknownUnit(b))  => a == b,
+            (Overflow,        Overflow)        => true,
+            (InputTooLong { limit_bytes: a }, InputTooLong { limit_bytes: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Maximum accepted duration-input length. Real-world Go-style
 /// durations top out at ~30 chars (`-9999999h59m59.999999999s`);
 /// 256 B is generous-by-8x and rejects gigabyte-scale DoS payloads

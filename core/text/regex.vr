@@ -61,6 +61,24 @@ public type Regex is {
 /// pre-validate via a future `Regex.compile`.
 public type RegexError is { message: Text };
 
+implement Display for RegexError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message.as_str())
+    }
+}
+
+implement Debug for RegexError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"RegexError {{ message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for RegexError {
+    fn eq(&self, other: &RegexError) -> Bool {
+        self.message == other.message
+    }
+}
+
 // =============================================================================
 // Regex Methods
 // =============================================================================

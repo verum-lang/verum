@@ -65,6 +65,37 @@ public type AliasError is
     | NonFiniteWeight(Int)
     | NegativeWeight(Int);
 
+implement Display for AliasError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EmptyWeights        => f.write_str("alias sampler: weights list is empty"),
+            NonFiniteWeight(i)  => f.write_str(f"alias sampler: non-finite weight at index {i}".as_str()),
+            NegativeWeight(i)   => f.write_str(f"alias sampler: negative weight at index {i}".as_str()),
+        }
+    }
+}
+
+implement Debug for AliasError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EmptyWeights        => f.write_str("EmptyWeights"),
+            NonFiniteWeight(i)  => f.write_str(f"NonFiniteWeight({i})".as_str()),
+            NegativeWeight(i)   => f.write_str(f"NegativeWeight({i})".as_str()),
+        }
+    }
+}
+
+implement Eq for AliasError {
+    fn eq(&self, other: &AliasError) -> Bool {
+        match (self, other) {
+            (EmptyWeights,       EmptyWeights)       => true,
+            (NonFiniteWeight(a), NonFiniteWeight(b)) => a == b,
+            (NegativeWeight(a),  NegativeWeight(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Sampler
 // =============================================================================

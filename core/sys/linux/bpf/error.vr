@@ -26,3 +26,58 @@ public type BpfError is
     | NotFound
     /// Program requested a helper the current kernel does not expose.
     | UnsupportedHelper(UInt32);
+
+implement Display for BpfError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OsError { errno }                 => f.write_str(f"BPF: bpf() syscall errno {errno}".as_str()),
+            VerifierRejected { log }          => f.write_str(f"BPF: verifier rejected program ({log.len()} bytes of log)".as_str()),
+            InvalidAttachType { program, attach } =>
+                f.write_str(f"BPF: invalid attach type {attach} for program {program}".as_str()),
+            FeatureNotSupported(feat)         => f.write_str(f"BPF: feature not supported ({feat})".as_str()),
+            MapTypeMismatch { expected, actual } =>
+                f.write_str(f"BPF: map type mismatch (expected {expected}, actual {actual})".as_str()),
+            SizeMismatch { expected, actual } =>
+                f.write_str(f"BPF: size mismatch (expected {expected}, actual {actual})".as_str()),
+            NotFound                          => f.write_str("BPF: not found"),
+            UnsupportedHelper(h)              => f.write_str(f"BPF: unsupported helper {h}".as_str()),
+        }
+    }
+}
+
+implement Debug for BpfError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OsError { errno }                 => f.write_str(f"OsError {{ errno: {errno} }}".as_str()),
+            VerifierRejected { log }          => f.write_str(f"VerifierRejected {{ log: <{log.len()} bytes> }}".as_str()),
+            InvalidAttachType { program, attach } =>
+                f.write_str(f"InvalidAttachType {{ program: {program}, attach: {attach} }}".as_str()),
+            FeatureNotSupported(feat)         => f.write_str(f"FeatureNotSupported({feat})".as_str()),
+            MapTypeMismatch { expected, actual } =>
+                f.write_str(f"MapTypeMismatch {{ expected: {expected}, actual: {actual} }}".as_str()),
+            SizeMismatch { expected, actual } =>
+                f.write_str(f"SizeMismatch {{ expected: {expected}, actual: {actual} }}".as_str()),
+            NotFound                          => f.write_str("NotFound"),
+            UnsupportedHelper(h)              => f.write_str(f"UnsupportedHelper({h})".as_str()),
+        }
+    }
+}
+
+implement Eq for BpfError {
+    fn eq(&self, other: &BpfError) -> Bool {
+        match (self, other) {
+            (OsError { errno: a },        OsError { errno: b })        => a == b,
+            (VerifierRejected { log: a }, VerifierRejected { log: b }) => a == b,
+            (InvalidAttachType { program: pa, attach: aa },
+             InvalidAttachType { program: pb, attach: ab }) => pa == pb && aa == ab,
+            (FeatureNotSupported(a),      FeatureNotSupported(b))      => a == b,
+            (MapTypeMismatch { expected: ea, actual: aa },
+             MapTypeMismatch { expected: eb, actual: ab }) => ea == eb && aa == ab,
+            (SizeMismatch { expected: ea, actual: aa },
+             SizeMismatch { expected: eb, actual: ab })   => ea == eb && aa == ab,
+            (NotFound,                    NotFound)                    => true,
+            (UnsupportedHelper(a),        UnsupportedHelper(b))        => a == b,
+            _ => false,
+        }
+    }
+}

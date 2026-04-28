@@ -56,6 +56,34 @@ public type HllError is
       PrecisionOutOfRange(Int)
     | PrecisionMismatch;
 
+implement Display for HllError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PrecisionOutOfRange(p) => f.write_str(f"HyperLogLog: precision {p} out of range".as_str()),
+            PrecisionMismatch      => f.write_str("HyperLogLog: precision mismatch on merge"),
+        }
+    }
+}
+
+implement Debug for HllError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PrecisionOutOfRange(p) => f.write_str(f"PrecisionOutOfRange({p})".as_str()),
+            PrecisionMismatch      => f.write_str("PrecisionMismatch"),
+        }
+    }
+}
+
+implement Eq for HllError {
+    fn eq(&self, other: &HllError) -> Bool {
+        match (self, other) {
+            (PrecisionOutOfRange(a), PrecisionOutOfRange(b)) => a == b,
+            (PrecisionMismatch,      PrecisionMismatch)      => true,
+            _ => false,
+        }
+    }
+}
+
 public const MIN_PRECISION: Int = 4;
 public const MAX_PRECISION: Int = 16;
 public const DEFAULT_PRECISION: Int = 14;    // Redis default
