@@ -48,6 +48,49 @@ public type H3FrameError is
     | VarintFailure
     | InvalidValue(Text);
 
+// Display + Debug + Eq for H3FrameError — adds the
+// standard stdlib protocol impls so callers can log,
+// format, and compare these errors directly without
+// rolling per-call-site match blocks.
+
+implement Display for H3FrameError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            H3FrameError.Truncated     => f.write_str("HTTP/3 frame truncated"),
+            H3FrameError.VarintFailure => f.write_str("HTTP/3 frame varint decode failure"),
+            H3FrameError.InvalidValue(msg) => {
+                f.write_str("HTTP/3 frame has invalid value: ")?;
+                f.write_str(msg.as_str())
+            },
+        }
+    }
+}
+
+implement Debug for H3FrameError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            H3FrameError.Truncated     => f.write_str("Truncated"),
+            H3FrameError.VarintFailure => f.write_str("VarintFailure"),
+            H3FrameError.InvalidValue(msg) => {
+                f.write_str("InvalidValue(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+        }
+    }
+}
+
+implement Eq for H3FrameError {
+    fn eq(&self, other: &H3FrameError) -> Bool {
+        match (self, other) {
+            (H3FrameError.Truncated,     H3FrameError.Truncated)     => true,
+            (H3FrameError.VarintFailure, H3FrameError.VarintFailure) => true,
+            (H3FrameError.InvalidValue(a), H3FrameError.InvalidValue(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 fn vfail<T>(_: VarintError) -> Result<T, H3FrameError> { Err(H3FrameError.VarintFailure) }
 
 // =============================================================================
