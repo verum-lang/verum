@@ -291,6 +291,30 @@ pub enum InterpreterError {
         /// Maximum allowed bytes.
         max_allowed: usize,
     },
+
+    /// Module failed bytecode-level validation.
+    ///
+    /// Surfaced by `Interpreter::try_new_validated` when the module
+    /// failed the per-instruction bytecode validator
+    /// (`crates/verum_vbc/src/validate.rs`).  The wrapped reason is
+    /// rendered from the `VbcError` produced by the validator —
+    /// typically `InvalidFunctionId(N)`, `InvalidTypeId(N)`,
+    /// `RegisterOutOfBounds { ... }`, `JumpOutOfBounds { ... }`,
+    /// `InvalidConstId(N)`, `InvalidStringId(N)`, or
+    /// `InvalidInstructionEncoding { reason: ... }` (which carries
+    /// arity-mismatch detail).
+    ///
+    /// Use the validating constructor for any module that did NOT
+    /// come from this process's compiler (downloaded modules,
+    /// archives shared across processes, files edited by hand).
+    /// `Interpreter::try_new` skips this check for trusted-source
+    /// loads where the validator's O(N) walk is wasted work.
+    ValidationFailed {
+        /// Module name (for user-facing diagnostics).
+        module_name: String,
+        /// Rendered description of the underlying validation failure.
+        reason: String,
+    },
 }
 
 // Note: CbgrViolationKind is re-exported from verum_common above
@@ -468,6 +492,13 @@ impl fmt::Display for InterpreterError {
                     f,
                     "Allocation too large: requested {} bytes (max allowed: {} bytes)",
                     requested, max_allowed
+                )
+            }
+            Self::ValidationFailed { module_name, reason } => {
+                write!(
+                    f,
+                    "Module '{}' failed bytecode validation: {}",
+                    module_name, reason
                 )
             }
         }

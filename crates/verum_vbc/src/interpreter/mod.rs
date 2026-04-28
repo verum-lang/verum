@@ -210,6 +210,44 @@ impl Interpreter {
         })
     }
 
+    /// Creates a new interpreter for the given module **after** running
+    /// the per-instruction bytecode validator.
+    ///
+    /// This is the secure-default constructor for any module that
+    /// did NOT come from this process's own compiler — downloaded
+    /// modules, archives shared across processes, files edited by
+    /// hand, network-loaded bytecode.  The validator walks every
+    /// function's bytecode and rejects out-of-range cross-references,
+    /// register-bounds violations, branch offsets landing mid-
+    /// instruction, and call-arity mismatches.  Cost is O(N) in
+    /// total instruction count.
+    ///
+    /// `try_new` (the non-validating constructor) is preserved for
+    /// trusted-source loads where the validator's walk is wasted
+    /// work — for example, the in-process compiler emitting bytecode
+    /// it just produced.
+    ///
+    /// # Errors
+    ///
+    /// * `ModuleNotInterpretable` — propagated from `try_new`.
+    /// * `ValidationFailed { module_name, reason }` — the bytecode
+    ///   validator surfaced a typed error.  The `reason` string is
+    ///   the rendered `VbcError`.
+    pub fn try_new_validated(module: Arc<VbcModule>) -> InterpreterResult<Self> {
+        // Run the validator BEFORE the interpretable-flag check so
+        // the user gets a load-time validation failure on a corrupt
+        // module even if the flag would have rejected it for a
+        // different reason.  In practice both surfaces are early-
+        // exit; ordering here is only relevant when both apply.
+        if let Err(err) = crate::validate::validate_module(&module) {
+            return Err(InterpreterError::ValidationFailed {
+                module_name: module.name.clone(),
+                reason: err.to_string(),
+            });
+        }
+        Self::try_new(module)
+    }
+
     /// Executes a function by ID and returns the result.
     ///
     /// Executes a function by ID using function pointer table dispatch.
