@@ -681,6 +681,47 @@ fn verify_full_rejects_mismatched_type() {
     assert!(matches!(err, KernelError::TypeMismatch { .. }));
 }
 
+/// M-VVA Sub-2.3 (definitional_eq lifting, 2026-04-28).
+///
+/// Pin the new behaviour: `verify_full` accepts a term whose inferred
+/// type is β-equivalent (but not structurally identical) to the
+/// expected type. Pre-fix this would have been rejected by
+/// `structural_eq`; post-fix the kernel's β-/ι-/δ-aware
+/// `definitional_eq_with_axioms` accepts the conversion.
+///
+/// Construction: an identity lambda over Unit → Unit. We compare
+/// against an expected Π-type whose codomain is `(λT. T) Unit` —
+/// a β-redex that normalises to `Unit` but is NOT structurally equal
+/// to `Unit`.
+#[test]
+fn verify_full_accepts_beta_equivalent_codomain() {
+    let ax = AxiomRegistry::new();
+    let id_unit = CoreTerm::Lam {
+        binder: Text::from("x"),
+        domain: Heap::new(unit_ty()),
+        body: Heap::new(CoreTerm::Var(Text::from("x"))),
+    };
+    // Expected type: Π(x : Unit). ((λT. T) Unit)
+    // The codomain is a β-redex whose normal form is Unit. structural_eq
+    // would reject this; definitional_eq_with_axioms accepts it.
+    let beta_redex_codomain = CoreTerm::App(
+        Heap::new(CoreTerm::Lam {
+            binder: Text::from("T"),
+            domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            body: Heap::new(CoreTerm::Var(Text::from("T"))),
+        }),
+        Heap::new(unit_ty()),
+    );
+    let expected = CoreTerm::Pi {
+        binder: Text::from("x"),
+        domain: Heap::new(unit_ty()),
+        codomain: Heap::new(beta_redex_codomain),
+    };
+    // Pre-Sub-2.3 (structural_eq): would Err(TypeMismatch).
+    // Post-Sub-2.3 (definitional_eq_with_axioms): Ok.
+    verify_full(&Context::new(), &id_unit, &expected, &ax).unwrap();
+}
+
 // -----------------------------------------------------------------
 // Σ-type rules — Sigma / Pair / Fst / Snd
 // -----------------------------------------------------------------
