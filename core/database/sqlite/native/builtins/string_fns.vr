@@ -48,12 +48,20 @@ public fn length(v: &Register) -> Register {
 }
 
 fn int_text_len(x: Int64) -> Int {
+    // Int.MIN-safe digit count. The naive `-x` for `x == Int.MIN`
+    // wraps back to Int.MIN; `n > 0` never enters; the function
+    // returned 1 (just the sign char) instead of 20 (full
+    // `-9223372036854775808` width). Same fix as the formatters.
     if x == 0_i64 { return 1; }
-    let mut n: Int64 = if x < 0_i64 { -x } else { x };
+    let mut n: UInt64 = if x < 0_i64 {
+        (((!x) as UInt64) + 1_u64)
+    } else {
+        x as UInt64
+    };
     let mut count: Int = if x < 0_i64 { 1 } else { 0 };
-    while n > 0_i64 {
+    while n > 0_u64 {
         count = count + 1;
-        n = n / 10_i64;
+        n = n / 10_u64;
     }
     count
 }
