@@ -393,4 +393,73 @@ mod tests {
         assert_eq!(CompressionAlgorithm::try_from(2), Ok(CompressionAlgorithm::Lz4));
         assert_eq!(CompressionAlgorithm::try_from(3), Err(3));
     }
+
+    /// Pins the rejection contract for the magic check — any byte
+    /// pattern other than `b"VBC1"` MUST be rejected. Tracks #175
+    /// "Decoder rejects unknown major versions with a clear error".
+    #[test]
+    fn test_rejects_wrong_magic() {
+        let mut header = VbcHeader::new();
+        header.magic = *b"XXXX";
+        assert!(!header.is_magic_valid());
+
+        // Single-byte corruption.
+        for i in 0..4 {
+            let mut h = VbcHeader::new();
+            h.magic[i] ^= 0x01;
+            assert!(
+                !h.is_magic_valid(),
+                "magic with byte {} flipped should be rejected",
+                i
+            );
+        }
+    }
+
+    /// Pins the rejection contract for unsupported major versions —
+    /// per the VBC migration policy, "Major version bump = breaking
+    /// change. Old archives can't be read." A header advertising a
+    /// higher major than what the consumer supports MUST surface as
+    /// `is_version_compatible() == false`. Same on the symmetric
+    /// lower-major case (an old archive expecting a newer
+    /// interpreter must also be rejected, because the interpreter
+    /// only commits to the current major).
+    #[test]
+    fn test_rejects_unsupported_major_version() {
+        let mut higher = VbcHeader::new();
+        higher.version_major = VERSION_MAJOR.saturating_add(1);
+        assert!(!higher.is_version_compatible());
+
+        if VERSION_MAJOR > 0 {
+            let mut lower = VbcHeader::new();
+            lower.version_major = VERSION_MAJOR - 1;
+            assert!(!lower.is_version_compatible());
+        }
+    }
+
+    /// Pins the additive-minor compatibility contract — per the
+    /// migration policy, "Minor version bump = additive. Old
+    /// archives readable; archives with new opcodes can't be
+    /// executed by old runtimes." So a header at the same major and
+    /// a strictly lower minor MUST be readable.
+    #[test]
+    fn test_accepts_lower_minor_version() {
+        if VERSION_MINOR > 0 {
+            let mut header = VbcHeader::new();
+            header.version_minor = VERSION_MINOR - 1;
+            assert!(header.is_version_compatible());
+        }
+        // Same minor — the canonical-current case — also reads.
+        let header = VbcHeader::new();
+        assert!(header.is_version_compatible());
+    }
+
+    /// And a header advertising a HIGHER minor than the consumer
+    /// supports MUST be rejected — that header may carry opcodes
+    /// the current interpreter can't execute.
+    #[test]
+    fn test_rejects_higher_minor_version() {
+        let mut header = VbcHeader::new();
+        header.version_minor = VERSION_MINOR.saturating_add(1);
+        assert!(!header.is_version_compatible());
+    }
 }
