@@ -340,20 +340,16 @@ public async fn emit_streaming_response(
         handle.write_body(&chunk).await?;
     }
 
-    // 4. Trailers (RFC 9114 §4.5). For Phase-F the trailing-headers
-    // pathway is deferred; non-empty trailers degrade to a warning
-    // header on the response. The H3 layer will gain proper trailer
-    // emission alongside the streaming-DATA intrinsic.
-    let trailers_present = response.trailers.len() > 0;
-    if trailers_present {
-        // Best-effort signal — observability tools that key off the
-        // header can fire an audit alert.
-        let mut warn_field = List.new();
-        warn_field.push(HeaderField.new(
-            f"x-weft-trailers-deferred",
-            f"phase-F",
-        ));
-        // Nothing else to do here without trailer-emit support.
+    // 4. Trailers (RFC 9114 §4.4).  Emitted as a second QPACK-encoded
+    // HEADERS frame after the final DATA frame and before stream FIN.
+    // gRPC over HTTP/3 carries grpc-status / grpc-message in trailers,
+    // so this is a load-bearing path.
+    if response.trailers.len() > 0 {
+        let mut tr: List<HeaderField> = List.with_capacity(response.trailers.len());
+        for f in response.trailers.iter() {
+            tr.push(HeaderField.new(f.name.clone(), f.value.clone()));
+        }
+        handle.write_trailers(&tr).await?;
     }
 
     // 5. Finish. If the writer errored we still finish gracefully so

@@ -56,6 +56,15 @@ implement Http3RequestHandle {
         @intrinsic("verum.h3.server_write_body", self.handle, data).await
     }
 
+    /// Emit response trailers as a second QPACK-encoded HEADERS frame
+    /// after the final DATA frame and before stream FIN — RFC 9114 §4.4.
+    /// Caller must invoke this *before* `finish()` since `finish` closes
+    /// the stream with FIN; intrinsic side guarantees the trailing
+    /// HEADERS frame precedes the FIN bit.
+    pub async fn write_trailers(&self, trailers: &List<HeaderField>) -> Result<(), Http3Error> {
+        @intrinsic("verum.h3.server_write_trailers", self.handle, trailers).await
+    }
+
     pub async fn finish(&self) -> Result<(), Http3Error> {
         @intrinsic("verum.h3.server_finish", self.handle).await
     }
