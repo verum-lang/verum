@@ -2905,6 +2905,25 @@ pub enum TensorExtSubOpcode {
     /// returns `None` and falls through to the extended
     /// dispatch path.
     PermissionCheckWire = 0x1C,
+
+    /// Atomic permission assert (#12 / P3.2).
+    ///
+    /// Format: `scope_tag:u8, target_id:reg`
+    /// Routes the check through `PermissionRouter`; on Allow
+    /// proceeds to the next instruction with no observable
+    /// effect, on Deny raises an interpreter `PermissionDenied`
+    /// runtime error that surfaces to the catch frame as a
+    /// typed Verum exception.
+    ///
+    /// The single-instruction shape lets the codegen emit a
+    /// gate prologue without branching machinery — the dispatch
+    /// handler holds all the deny-path logic.  Designed to be
+    /// auto-emitted by the AST→VBC pass before any intrinsic
+    /// carrying `IntrinsicHint::RequiresPermission`.
+    ///
+    /// Byte 0x1D, picked one past `PermissionCheckWire` for
+    /// locality.
+    PermissionAssert = 0x1D,
 }
 
 impl TensorExtSubOpcode {
@@ -2925,6 +2944,7 @@ impl TensorExtSubOpcode {
             0x0B => Some(Self::RegexReplace),
             0x0C => Some(Self::RegexCaptures),
             0x1C => Some(Self::PermissionCheckWire),
+            0x1D => Some(Self::PermissionAssert),
             _ => None,
         }
     }
@@ -2951,6 +2971,7 @@ impl TensorExtSubOpcode {
             Self::RegexReplace => "REGEX_REPLACE",
             Self::RegexCaptures => "REGEX_CAPTURES",
             Self::PermissionCheckWire => "PERMISSION_CHECK_WIRE",
+            Self::PermissionAssert => "PERMISSION_ASSERT",
         }
     }
 }
@@ -9652,6 +9673,29 @@ pub enum Instruction {
         dst: Reg,
         /// Register holding the scope wire tag (u32).
         scope_tag: Reg,
+        /// Register holding the target id (u64).
+        target_id: Reg,
+    },
+
+    /// Atomic permission assert (#12 / P3.2).
+    ///
+    /// Routes the check through the runtime `PermissionRouter`;
+    /// on Allow proceeds to the next instruction with no
+    /// observable effect, on Deny raises a typed Verum
+    /// `PermissionDenied` exception that the surrounding catch
+    /// frame can intercept.
+    ///
+    /// The single-instruction shape lets the codegen emit a
+    /// gate prologue without branching machinery — the dispatch
+    /// handler holds all the deny-path logic. Designed to be
+    /// auto-emitted by the AST→VBC pass before any intrinsic
+    /// carrying `IntrinsicHint::RequiresPermission`.
+    PermissionAssert {
+        /// Compile-time-known scope tag (0..=6 mirroring
+        /// `PermissionScope::to_wire_tag`).  Picked at the
+        /// emission site from the intrinsic's
+        /// `IntrinsicCategory`.
+        scope_tag: u8,
         /// Register holding the target id (u64).
         target_id: Reg,
     },

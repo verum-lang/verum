@@ -3908,6 +3908,60 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     Ok(DispatchResult::Continue)
                 }
 
+                // #12 / P3.2 — atomic permission assert.
+                // Read scope_tag (u8 immediate) and target_id (u64
+                // packed into Int register). On Allow proceeds
+                // silently; on Deny raises a runtime panic with a
+                // PermissionDenied message that catch frames can
+                // intercept as a typed exception.
+                //
+                // Auto-emitted by codegen before tagged-intrinsic
+                // calls so the gate is mandatory at the bytecode
+                // level — opt-in invocations of check_permission
+                // remain available for code that wants to surface
+                // a typed Result instead of a panic.
+                Some(TensorExtSubOpcode::PermissionAssert) => {
+                    use crate::interpreter::permission::{
+                        PermissionDecision, PermissionScope,
+                    };
+                    let scope_byte = read_u8(state)?;
+                    let target_reg = read_reg(state)?;
+                    let target_val = state.get_reg(target_reg);
+                    let target_id = if target_val.is_int() {
+                        target_val.as_i64() as u64
+                    } else {
+                        0
+                    };
+                    let scope = match scope_byte {
+                        0 => PermissionScope::Syscall,
+                        1 => PermissionScope::FileSystem,
+                        2 => PermissionScope::Network,
+                        3 => PermissionScope::Process,
+                        4 => PermissionScope::Memory,
+                        5 => PermissionScope::Cryptography,
+                        6 => PermissionScope::Time,
+                        // Unknown scope tag → conservative: treat
+                        // as Syscall so a malformed call site
+                        // errs on stronger gating, not weaker.
+                        _ => PermissionScope::Syscall,
+                    };
+                    let decision = state.check_permission(scope, target_id);
+                    match decision {
+                        PermissionDecision::Allow => Ok(DispatchResult::Continue),
+                        PermissionDecision::Deny => {
+                            // Build a stable diagnostic — the
+                            // surrounding catch frame sees this
+                            // as a PermissionDenied panic and can
+                            // pattern-match on it.
+                            let message = format!(
+                                "permission denied: {:?}({})",
+                                scope, target_id
+                            );
+                            Err(InterpreterError::Panic { message })
+                        }
+                    }
+                }
+
                 // #12 / P3.2 — wire-level bridge to PermissionRouter.
                 // Read scope_tag (u32 packed into Int) and target_id
                 // (u64 packed into Int), route through

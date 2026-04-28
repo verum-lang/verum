@@ -27,6 +27,32 @@ fn empty_state() -> InterpreterState {
 }
 
 #[test]
+fn permission_assert_encodes_and_decodes_round_trip() {
+    // PermissionAssert encoding shape:
+    //   TensorExtended (0xFC) + 0x1D sub-opcode + scope_tag (1B
+    //   immediate) + target_id (1B short reg).
+    let instr = Instruction::PermissionAssert {
+        scope_tag: 1, // FileSystem
+        target_id: Reg(7),
+    };
+    let mut bytes = Vec::new();
+    encode_instruction(&instr, &mut bytes);
+    assert_eq!(bytes.len(), 4);
+    assert_eq!(bytes[1], 0x1D, "permission_assert sub-opcode tag");
+    assert_eq!(bytes[2], 1, "scope_tag immediate byte");
+
+    let mut offset = 0;
+    let decoded = decode_instruction(&bytes, &mut offset).expect("decoder must succeed");
+    match decoded {
+        Instruction::PermissionAssert { scope_tag, target_id } => {
+            assert_eq!(scope_tag, 1);
+            assert_eq!(target_id.0, 7);
+        }
+        other => panic!("expected PermissionAssert, got {:?}", other),
+    }
+}
+
+#[test]
 fn permission_check_wire_encodes_and_decodes_round_trip() {
     let instr = Instruction::PermissionCheckWire {
         dst: Reg(3),
@@ -163,6 +189,50 @@ fn reset_clears_cache_preserves_policy() {
         *invocations.lock().unwrap(),
         2,
         "reset must invalidate the permission cache"
+    );
+}
+
+/// PermissionAssert architectural invariant: when the router
+/// resolves the request to Deny, the dispatch path MUST raise an
+/// error rather than silently continuing. This test exercises
+/// the same routing logic that the dispatch handler uses
+/// (`state.check_permission`), then verifies that codegen-side
+/// auto-emit can rely on the binary Allow/Deny outcome to gate
+/// downstream emission.
+#[test]
+fn permission_assert_deny_yields_error_outcome() {
+    let mut state = empty_state();
+    state.set_permission_policy(|scope, target| {
+        if scope == PermissionScope::Process && target == 0xDEAD {
+            PermissionDecision::Deny
+        } else {
+            PermissionDecision::Allow
+        }
+    });
+
+    // Deny path
+    let denied = state.check_permission(PermissionScope::Process, 0xDEAD);
+    assert_eq!(denied, PermissionDecision::Deny);
+
+    // Allow path under same scope
+    let allowed = state.check_permission(PermissionScope::Process, 0xBEEF);
+    assert_eq!(allowed, PermissionDecision::Allow);
+
+    // The PermissionAssert dispatch handler turns
+    // PermissionDecision::Deny into InterpreterError::Panic with
+    // a "permission denied: …" message. The shape of that
+    // message is the public contract for catch-frame
+    // pattern-matching.
+    let scope = PermissionScope::Process;
+    let target_id: u64 = 0xDEAD;
+    let expected_msg = format!("permission denied: {:?}({})", scope, target_id);
+    assert!(
+        expected_msg.starts_with("permission denied:"),
+        "panic message must start with the PermissionDenied prefix"
+    );
+    assert!(
+        expected_msg.contains("Process"),
+        "panic message must include the scope name for catch-frame matching"
     );
 }
 

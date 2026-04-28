@@ -812,6 +812,18 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*target_id, output);
         }
 
+        // #12 / P3.2 — Atomic permission assert.
+        // scope_tag is encoded as a single immediate byte (0..6
+        // mirroring PermissionScope::to_wire_tag) since codegen
+        // knows it statically from the intrinsic category;
+        // target_id remains a register read at dispatch time.
+        Instruction::PermissionAssert { scope_tag, target_id } => {
+            output.push(Opcode::TensorExtended.to_byte());
+            output.push(TensorExtSubOpcode::PermissionAssert.to_byte());
+            output.push(*scope_tag);
+            encode_reg(*target_id, output);
+        }
+
         // ====================================================================
         // GPU - Fast Path (single-byte opcodes for common operations)
         // ====================================================================
@@ -4072,6 +4084,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                             let target_id = decode_reg(data, offset)?;
                             Ok(Instruction::PermissionCheckWire {
                                 dst,
+                                scope_tag,
+                                target_id,
+                            })
+                        }
+                        // #12 / P3.2 — permission_assert encoding:
+                        // [scope_tag:u8, target_id:reg].
+                        Some(TensorExtSubOpcode::PermissionAssert) => {
+                            let scope_tag = decode_u8(data, offset)?;
+                            let target_id = decode_reg(data, offset)?;
+                            Ok(Instruction::PermissionAssert {
                                 scope_tag,
                                 target_id,
                             })
