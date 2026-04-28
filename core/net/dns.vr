@@ -1140,7 +1140,12 @@ implement Resolver {
         let resp_len = ((len_buf[0] as Int) << 8) | (len_buf[1] as Int);
 
         if resp_len <= 0 || resp_len > 65535 {
-            return Err(DnsError.Other("Invalid TCP DNS response length"));
+            // Length-prefix outside the valid u16 range is a
+            // protocol-level malformed response, not a generic
+            // "other" — surface the typed kind so callers can
+            // pattern-match on InvalidResponse vs. transport
+            // errors (Timeout / NetworkError / Refused).
+            return Err(DnsError.InvalidResponse);
         }
 
         // Read full response.
