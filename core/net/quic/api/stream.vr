@@ -29,6 +29,43 @@ public type QuicStreamError is
     | Timeout
     | Transport(Text);
 
+implement Display for QuicStreamError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicStreamError.Closed         => f.write_str("QUIC stream: closed"),
+            QuicStreamError.Reset(code)    => f.write_str(f"QUIC stream: peer reset with code {code}".as_str()),
+            QuicStreamError.FlowControl    => f.write_str("QUIC stream: flow-control violation"),
+            QuicStreamError.Timeout        => f.write_str("QUIC stream: timeout"),
+            QuicStreamError.Transport(r)   => f.write_str(f"QUIC stream transport: {r}".as_str()),
+        }
+    }
+}
+
+implement Debug for QuicStreamError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicStreamError.Closed         => f.write_str("Closed"),
+            QuicStreamError.Reset(code)    => f.write_str(f"Reset({code})".as_str()),
+            QuicStreamError.FlowControl    => f.write_str("FlowControl"),
+            QuicStreamError.Timeout        => f.write_str("Timeout"),
+            QuicStreamError.Transport(r)   => f.write_str(f"Transport({r})".as_str()),
+        }
+    }
+}
+
+implement Eq for QuicStreamError {
+    fn eq(&self, other: &QuicStreamError) -> Bool {
+        match (self, other) {
+            (QuicStreamError.Closed,       QuicStreamError.Closed)       => true,
+            (QuicStreamError.Reset(a),     QuicStreamError.Reset(b))     => a == b,
+            (QuicStreamError.FlowControl,  QuicStreamError.FlowControl)  => true,
+            (QuicStreamError.Timeout,      QuicStreamError.Timeout)      => true,
+            (QuicStreamError.Transport(a), QuicStreamError.Transport(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Bidirectional QUIC stream handle. Both halves owned — caller may
 /// split via `into_halves()` for independent read/write tasks.
 public type QuicApiStream is {

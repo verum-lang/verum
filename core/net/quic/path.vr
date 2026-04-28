@@ -64,6 +64,39 @@ public type PathError is
     | ChallengeTimeout
     | UnexpectedResponse;
 
+implement Display for PathError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AmplificationLimitExceeded => "QUIC path: amplification limit exceeded",
+            ChallengeTimeout           => "QUIC path: PATH_CHALLENGE timed out",
+            UnexpectedResponse         => "QUIC path: unexpected PATH_RESPONSE",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for PathError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AmplificationLimitExceeded => "AmplificationLimitExceeded",
+            ChallengeTimeout           => "ChallengeTimeout",
+            UnexpectedResponse         => "UnexpectedResponse",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for PathError {
+    fn eq(&self, other: &PathError) -> Bool {
+        match (self, other) {
+            (AmplificationLimitExceeded, AmplificationLimitExceeded) => true,
+            (ChallengeTimeout,           ChallengeTimeout)           => true,
+            (UnexpectedResponse,         UnexpectedResponse)         => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Constants
 // =============================================================================

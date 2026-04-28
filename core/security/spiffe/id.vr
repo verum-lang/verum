@@ -29,6 +29,50 @@ public type SpiffeIdError is
     | PathTooLong { len: Int }
     | InvalidCharacters { at: Int, character: Byte };
 
+implement Display for SpiffeIdError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Empty                              => f.write_str("SPIFFE ID: empty"),
+            MissingScheme                      => f.write_str("SPIFFE ID: missing scheme"),
+            InvalidScheme(s)                   => f.write_str(f"SPIFFE ID: invalid scheme ({s})".as_str()),
+            EmptyTrustDomain                   => f.write_str("SPIFFE ID: empty trust domain"),
+            InvalidTrustDomain { reason }      => f.write_str(f"SPIFFE ID: invalid trust domain ({reason})".as_str()),
+            PathTooLong { len }                => f.write_str(f"SPIFFE ID: path too long ({len} bytes)".as_str()),
+            InvalidCharacters { at, character }=> f.write_str(f"SPIFFE ID: invalid character at {at} (byte {character})".as_str()),
+        }
+    }
+}
+
+implement Debug for SpiffeIdError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Empty                              => f.write_str("Empty"),
+            MissingScheme                      => f.write_str("MissingScheme"),
+            InvalidScheme(s)                   => f.write_str(f"InvalidScheme({s})".as_str()),
+            EmptyTrustDomain                   => f.write_str("EmptyTrustDomain"),
+            InvalidTrustDomain { reason }      => f.write_str(f"InvalidTrustDomain {{ reason: {reason} }}".as_str()),
+            PathTooLong { len }                => f.write_str(f"PathTooLong {{ len: {len} }}".as_str()),
+            InvalidCharacters { at, character }=> f.write_str(f"InvalidCharacters {{ at: {at}, character: {character} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for SpiffeIdError {
+    fn eq(&self, other: &SpiffeIdError) -> Bool {
+        match (self, other) {
+            (Empty,                Empty)                => true,
+            (MissingScheme,        MissingScheme)        => true,
+            (InvalidScheme(a),     InvalidScheme(b))     => a == b,
+            (EmptyTrustDomain,     EmptyTrustDomain)     => true,
+            (InvalidTrustDomain { reason: a }, InvalidTrustDomain { reason: b }) => a == b,
+            (PathTooLong { len: a }, PathTooLong { len: b }) => a == b,
+            (InvalidCharacters { at: aa, character: ca },
+             InvalidCharacters { at: ab, character: cb }) => aa == ab && ca == cb,
+            _ => false,
+        }
+    }
+}
+
 public const MAX_SPIFFE_ID_LENGTH: Int = 2048;
 public const SPIFFE_SCHEME: &'static Text = "spiffe://";
 

@@ -51,6 +51,56 @@ public type WorkloadApiError is
     | Cancelled
     | Closed;
 
+implement Display for WorkloadApiError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoEndpointConfigured            => f.write_str("SPIFFE workload API: no endpoint configured"),
+            ConnectFailed(e)                => f.write_str(f"SPIFFE workload API: connect failed ({e})".as_str()),
+            HandshakeFailed(reason)         => f.write_str(f"SPIFFE workload API: handshake failed ({reason})".as_str()),
+            RpcError { code, message }      => f.write_str(f"SPIFFE workload API: RPC error {code}: {message}".as_str()),
+            ResponseMalformed(reason)       => f.write_str(f"SPIFFE workload API: malformed response ({reason})".as_str()),
+            SvidParseError(e)               => f.write_str(f"SPIFFE workload API: SVID parse error: {e}".as_str()),
+            NoIdentityAvailable             => f.write_str("SPIFFE workload API: no identity available"),
+            Cancelled                       => f.write_str("SPIFFE workload API: cancelled"),
+            Closed                          => f.write_str("SPIFFE workload API: stream closed"),
+        }
+    }
+}
+
+implement Debug for WorkloadApiError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoEndpointConfigured            => f.write_str("NoEndpointConfigured"),
+            ConnectFailed(e)                => f.write_str(f"ConnectFailed({e:?})".as_str()),
+            HandshakeFailed(reason)         => f.write_str(f"HandshakeFailed({reason})".as_str()),
+            RpcError { code, message }      => f.write_str(f"RpcError {{ code: {code}, message: {message} }}".as_str()),
+            ResponseMalformed(reason)       => f.write_str(f"ResponseMalformed({reason})".as_str()),
+            SvidParseError(e)               => f.write_str(f"SvidParseError({e:?})".as_str()),
+            NoIdentityAvailable             => f.write_str("NoIdentityAvailable"),
+            Cancelled                       => f.write_str("Cancelled"),
+            Closed                          => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for WorkloadApiError {
+    fn eq(&self, other: &WorkloadApiError) -> Bool {
+        match (self, other) {
+            (NoEndpointConfigured,           NoEndpointConfigured)           => true,
+            (ConnectFailed(a),               ConnectFailed(b))               => a == b,
+            (HandshakeFailed(a),             HandshakeFailed(b))             => a == b,
+            (RpcError { code: ca, message: ma },
+             RpcError { code: cb, message: mb })                             => ca == cb && ma == mb,
+            (ResponseMalformed(a),           ResponseMalformed(b))           => a == b,
+            (SvidParseError(a),              SvidParseError(b))              => a == b,
+            (NoIdentityAvailable,            NoIdentityAvailable)            => true,
+            (Cancelled,                      Cancelled)                      => true,
+            (Closed,                         Closed)                         => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Endpoint discovery
 // =============================================================================

@@ -312,3 +312,47 @@ public type LbCidError is
     | InvalidConfigByte
     | LengthMismatch { expected: Int, actual: Int }
     | NoMatchingKey;
+
+implement Display for LbCidError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidServerIdLen { expected, actual } =>
+                f.write_str(f"QUIC LB CID: server_id length expected {expected}, got {actual}".as_str()),
+            InvalidConfigByte =>
+                f.write_str("QUIC LB CID: invalid config byte"),
+            LengthMismatch { expected, actual } =>
+                f.write_str(f"QUIC LB CID: length expected {expected}, got {actual}".as_str()),
+            NoMatchingKey =>
+                f.write_str("QUIC LB CID: no matching encryption key"),
+        }
+    }
+}
+
+implement Debug for LbCidError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidServerIdLen { expected, actual } =>
+                f.write_str(f"InvalidServerIdLen {{ expected: {expected}, actual: {actual} }}".as_str()),
+            InvalidConfigByte =>
+                f.write_str("InvalidConfigByte"),
+            LengthMismatch { expected, actual } =>
+                f.write_str(f"LengthMismatch {{ expected: {expected}, actual: {actual} }}".as_str()),
+            NoMatchingKey =>
+                f.write_str("NoMatchingKey"),
+        }
+    }
+}
+
+implement Eq for LbCidError {
+    fn eq(&self, other: &LbCidError) -> Bool {
+        match (self, other) {
+            (InvalidServerIdLen { expected: ea, actual: aa },
+             InvalidServerIdLen { expected: eb, actual: ab }) => ea == eb && aa == ab,
+            (InvalidConfigByte, InvalidConfigByte)            => true,
+            (LengthMismatch { expected: ea, actual: aa },
+             LengthMismatch { expected: eb, actual: ab })     => ea == eb && aa == ab,
+            (NoMatchingKey, NoMatchingKey)                    => true,
+            _ => false,
+        }
+    }
+}

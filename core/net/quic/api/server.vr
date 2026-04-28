@@ -93,6 +93,40 @@ public type QuicServerError is
     | Closed
     | StreamError(QuicStreamError);
 
+implement Display for QuicServerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicServerError.Bind(reason)       => f.write_str(f"QUIC server: bind failed ({reason})".as_str()),
+            QuicServerError.Handshake(reason)  => f.write_str(f"QUIC server: handshake failed ({reason})".as_str()),
+            QuicServerError.Closed             => f.write_str("QUIC server: closed"),
+            QuicServerError.StreamError(e)     => f.write_str(f"QUIC server stream: {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for QuicServerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicServerError.Bind(reason)       => f.write_str(f"Bind({reason})".as_str()),
+            QuicServerError.Handshake(reason)  => f.write_str(f"Handshake({reason})".as_str()),
+            QuicServerError.Closed             => f.write_str("Closed"),
+            QuicServerError.StreamError(e)     => f.write_str(f"StreamError({e:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for QuicServerError {
+    fn eq(&self, other: &QuicServerError) -> Bool {
+        match (self, other) {
+            (QuicServerError.Bind(a),         QuicServerError.Bind(b))         => a == b,
+            (QuicServerError.Handshake(a),    QuicServerError.Handshake(b))    => a == b,
+            (QuicServerError.Closed,          QuicServerError.Closed)          => true,
+            (QuicServerError.StreamError(a),  QuicServerError.StreamError(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// One freshly-accepted connection, along with its peer address and
 /// a way to pull successive streams off of it.
 public type QuicAccepted is {

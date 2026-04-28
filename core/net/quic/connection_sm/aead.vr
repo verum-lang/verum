@@ -40,6 +40,39 @@ public type QuicAeadError is
       BadKeyLength(Int)
     | AeadFailure;
 
+// QuicAeadError.AeadFailure surfaces no detail — RFC 9001
+// §5.4 mandates value-blind AEAD opens to avoid an oracle
+// for the QUIC packet-protection key material (same
+// discipline as TLS 1.3 record / ticket / address-token).
+
+implement Display for QuicAeadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadKeyLength(n)  => f.write_str(f"QUIC AEAD: bad key length {n}".as_str()),
+            AeadFailure      => f.write_str("QUIC AEAD: open failed"),
+        }
+    }
+}
+
+implement Debug for QuicAeadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadKeyLength(n)  => f.write_str(f"BadKeyLength({n})".as_str()),
+            AeadFailure      => f.write_str("AeadFailure"),
+        }
+    }
+}
+
+implement Eq for QuicAeadError {
+    fn eq(&self, other: &QuicAeadError) -> Bool {
+        match (self, other) {
+            (BadKeyLength(a), BadKeyLength(b)) => a == b,
+            (AeadFailure,     AeadFailure)     => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Nonce construction — RFC 9001 §5.3
 // =============================================================================

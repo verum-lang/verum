@@ -55,6 +55,42 @@ public type QuicSendError is
     | FinalSizeViolation
     | FlowControlExceeded;
 
+implement Display for QuicSendError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AlreadyReset          => "QUIC send stream: already reset",
+            AlreadyFinished       => "QUIC send stream: already finished",
+            FinalSizeViolation    => "QUIC send stream: final size violation",
+            FlowControlExceeded   => "QUIC send stream: flow control exceeded",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for QuicSendError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            AlreadyReset          => "AlreadyReset",
+            AlreadyFinished       => "AlreadyFinished",
+            FinalSizeViolation    => "FinalSizeViolation",
+            FlowControlExceeded   => "FlowControlExceeded",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for QuicSendError {
+    fn eq(&self, other: &QuicSendError) -> Bool {
+        match (self, other) {
+            (AlreadyReset,        AlreadyReset)        => true,
+            (AlreadyFinished,     AlreadyFinished)     => true,
+            (FinalSizeViolation,  FinalSizeViolation)  => true,
+            (FlowControlExceeded, FlowControlExceeded) => true,
+            _ => false,
+        }
+    }
+}
+
 public type SendStream is {
     state:          SendState,
     stream_id:      UInt64,

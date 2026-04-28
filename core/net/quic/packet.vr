@@ -58,6 +58,49 @@ public type PacketError is
     | InvalidPacketNumberLength(Int)
     | TokenTooLong(Int);
 
+implement Display for PacketError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                    => f.write_str("QUIC packet: truncated"),
+            InvalidHeaderForm            => f.write_str("QUIC packet: invalid header form"),
+            UnsupportedVersion(v)        => f.write_str(f"QUIC packet: unsupported version 0x{v:x}".as_str()),
+            VarintFailure                => f.write_str("QUIC packet: varint decode failed"),
+            CidTooLong(n)                => f.write_str(f"QUIC packet: CID too long ({n} bytes)".as_str()),
+            InvalidPacketNumberLength(n) => f.write_str(f"QUIC packet: invalid PN length {n}".as_str()),
+            TokenTooLong(n)              => f.write_str(f"QUIC packet: token too long ({n} bytes)".as_str()),
+        }
+    }
+}
+
+implement Debug for PacketError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                    => f.write_str("Truncated"),
+            InvalidHeaderForm            => f.write_str("InvalidHeaderForm"),
+            UnsupportedVersion(v)        => f.write_str(f"UnsupportedVersion(0x{v:x})".as_str()),
+            VarintFailure                => f.write_str("VarintFailure"),
+            CidTooLong(n)                => f.write_str(f"CidTooLong({n})".as_str()),
+            InvalidPacketNumberLength(n) => f.write_str(f"InvalidPacketNumberLength({n})".as_str()),
+            TokenTooLong(n)              => f.write_str(f"TokenTooLong({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for PacketError {
+    fn eq(&self, other: &PacketError) -> Bool {
+        match (self, other) {
+            (Truncated,                    Truncated)                    => true,
+            (InvalidHeaderForm,            InvalidHeaderForm)            => true,
+            (UnsupportedVersion(a),        UnsupportedVersion(b))        => a == b,
+            (VarintFailure,                VarintFailure)                => true,
+            (CidTooLong(a),                CidTooLong(b))                => a == b,
+            (InvalidPacketNumberLength(a), InvalidPacketNumberLength(b)) => a == b,
+            (TokenTooLong(a),              TokenTooLong(b))              => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Packet-type discriminant for long headers
 // =============================================================================

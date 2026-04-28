@@ -55,6 +55,42 @@ public type QuicRecvError is
     | FlowControlViolation
     | ReceiveAfterReset;
 
+implement Display for QuicRecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            FinalSizeChanged      => "QUIC recv stream: final size changed",
+            ResetAfterFin         => "QUIC recv stream: reset after FIN",
+            FlowControlViolation  => "QUIC recv stream: flow control violation",
+            ReceiveAfterReset     => "QUIC recv stream: receive after reset",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for QuicRecvError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            FinalSizeChanged      => "FinalSizeChanged",
+            ResetAfterFin         => "ResetAfterFin",
+            FlowControlViolation  => "FlowControlViolation",
+            ReceiveAfterReset     => "ReceiveAfterReset",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for QuicRecvError {
+    fn eq(&self, other: &QuicRecvError) -> Bool {
+        match (self, other) {
+            (FinalSizeChanged,     FinalSizeChanged)     => true,
+            (ResetAfterFin,        ResetAfterFin)        => true,
+            (FlowControlViolation, FlowControlViolation) => true,
+            (ReceiveAfterReset,    ReceiveAfterReset)    => true,
+            _ => false,
+        }
+    }
+}
+
 /// A contiguous run of received bytes at offset `start`.
 type Run is { start: UInt64, bytes: List<Byte> };
 

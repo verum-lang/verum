@@ -156,6 +156,40 @@ public type TpError is
     | InvalidLength(Text)
     | InvalidValue(Text);
 
+implement Display for TpError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TpError.Truncated         => f.write_str("QUIC transport parameter: truncated"),
+            TpError.VarintFailure     => f.write_str("QUIC transport parameter: varint decode failed"),
+            TpError.InvalidLength(r)  => f.write_str(f"QUIC transport parameter: invalid length ({r})".as_str()),
+            TpError.InvalidValue(r)   => f.write_str(f"QUIC transport parameter: invalid value ({r})".as_str()),
+        }
+    }
+}
+
+implement Debug for TpError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TpError.Truncated         => f.write_str("Truncated"),
+            TpError.VarintFailure     => f.write_str("VarintFailure"),
+            TpError.InvalidLength(r)  => f.write_str(f"InvalidLength({r})".as_str()),
+            TpError.InvalidValue(r)   => f.write_str(f"InvalidValue({r})".as_str()),
+        }
+    }
+}
+
+implement Eq for TpError {
+    fn eq(&self, other: &TpError) -> Bool {
+        match (self, other) {
+            (TpError.Truncated,        TpError.Truncated)        => true,
+            (TpError.VarintFailure,    TpError.VarintFailure)    => true,
+            (TpError.InvalidLength(a), TpError.InvalidLength(b)) => a == b,
+            (TpError.InvalidValue(a),  TpError.InvalidValue(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 fn vfail<T>(_: VarintError) -> Result<T, TpError> { Err(TpError.VarintFailure) }
 
 // =============================================================================
