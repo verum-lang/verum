@@ -186,10 +186,9 @@ public fn sign_compact(
     // Final token = signing_input || "." || sig_b64.
     let token_cap = signing_input.len() + 1 + sig_b64.as_bytes().len();
     let mut token: List<Byte> = List.with_capacity(token_cap);
-    let mut i: Int = 0;
-    while i < signing_input.len() { token.push(signing_input[i]); i = i + 1; }
+    token.extend_from_slice(signing_input.as_slice());
     token.push('.' as Byte);
-    push_bytes(&mut token, sig_b64.as_bytes());
+    token.extend_from_slice(sig_b64.as_bytes());
     Ok(Text.from_utf8_unchecked(token.as_slice()))
 }
 
@@ -256,11 +255,9 @@ public fn verify_compact(
     // Constant-time signature verification.
     let mut signing_input: List<Byte> =
         List.with_capacity(header_b64.len() + 1 + payload_b64.len());
-    let mut i: Int = 0;
-    while i < header_b64.len()  { signing_input.push(header_b64[i]);  i = i + 1; }
+    signing_input.extend_from_slice(header_b64);
     signing_input.push('.' as Byte);
-    let mut j: Int = 0;
-    while j < payload_b64.len() { signing_input.push(payload_b64[j]); j = j + 1; }
+    signing_input.extend_from_slice(payload_b64);
 
     verify_signature(&header.alg, signing_input.as_slice(), sig_bytes.as_slice(), key)?;
 
@@ -482,14 +479,12 @@ fn find_two_dots(bytes: &[Byte]) -> Result<(Int, Int), JwtError> {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 fn slice_owned(src: &[Byte]) -> List<Byte> {
     // Output is exactly src.len() bytes.
     let mut out: List<Byte> = List.with_capacity(src.len());
-    let mut i: Int = 0;
-    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out.extend_from_slice(src);
     out
 }
