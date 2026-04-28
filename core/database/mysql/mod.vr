@@ -26,6 +26,7 @@ public module connection;
 public module adapter;
 public module pool;
 public module introspect;
+public module transaction;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
@@ -40,3 +41,14 @@ public mount .adapter.MysqlAdapter;
 public mount .error.dberr_from_mysql;
 public mount .pool.MysqlPool;
 public mount .introspect.introspect as introspect_mysql;
+public mount .transaction.{
+    MysqlTransaction, MyTxKind, MyTxOpts, MyAccessMode,
+    MyTkRepeatableRead, MyTkReadCommitted, MyTkReadUncommitted, MyTkSerializable,
+    MyAmReadWrite, MyAmReadOnly,
+    my_tx_opts_default,
+    begin_tx, begin_tx_with,
+    begin_tx_serializable, begin_tx_read_only,
+    commit_tx, rollback_tx,
+    savepoint, release_savepoint, rollback_to_savepoint,
+    with_transaction, with_transaction_serializable,
+};

@@ -1,0 +1,238 @@
+module core.database.mysql.transaction;
+
+// =============================================================================
+// mysql/transaction.vr — affine MysqlTransaction
+// =============================================================================
+// Layer: 2-3 (Spindle adapter façade)
+// Spec: database.md §4.1 + §5.5; SQLite L7 affine Transaction (8eb1a847)
+//       and Postgres affine PgTransaction (840fbcbd) for parity.
+//
+// MySQL flavour notes (vs Postgres):
+//
+//   * Default isolation level is REPEATABLE READ (Postgres is READ
+//     COMMITTED).  Both surface in `MyTxKind`.
+//
+//   * Setting isolation requires a separate statement BEFORE START
+//     TRANSACTION — `SET TRANSACTION ISOLATION LEVEL ...` is a
+//     session-scope or next-tx-only command.  We use the
+//     `START TRANSACTION ISOLATION LEVEL` shortcut introduced in
+//     MySQL 8.0 to keep it one round-trip.
+//
+//   * READ ONLY / READ WRITE clauses on START TRANSACTION are 8.0+.
+//
+//   * SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK TO SAVEPOINT match
+//     SQL standard exactly.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.connection.{MysqlConnection};
+
+// -----------------------------------------------------------------------------
+// MyTxKind / MyAccessMode
+// -----------------------------------------------------------------------------
+
+public type MyTxKind is
+      MyTkRepeatableRead    // server-default
+    | MyTkReadCommitted
+    | MyTkReadUncommitted
+    | MyTkSerializable;
+
+public type MyAccessMode is MyAmReadWrite | MyAmReadOnly;
+
+public type MyTxOpts is {
+    isolation: MyTxKind,
+    mode: MyAccessMode,
+};
+
+public fn my_tx_opts_default() -> MyTxOpts {
+    MyTxOpts {
+        isolation: MyTkRepeatableRead,
+        mode: MyAmReadWrite,
+    }
+}
+
+implement MyTxOpts {
+    public fn with_isolation(mut self, k: MyTxKind) -> MyTxOpts {
+        self.isolation = k; self
+    }
+    public fn with_mode(mut self, m: MyAccessMode) -> MyTxOpts {
+        self.mode = m; self
+    }
+
+    /// Render the SQL clause that follows `START TRANSACTION`.
+    pub fn render_sql(&self) -> Text {
+        let mut out: Text = Text.new();
+        match self.isolation {
+            MyTkRepeatableRead   => { out.push_str(" ISOLATION LEVEL REPEATABLE READ"); }
+            MyTkReadCommitted    => { out.push_str(" ISOLATION LEVEL READ COMMITTED"); }
+            MyTkReadUncommitted  => { out.push_str(" ISOLATION LEVEL READ UNCOMMITTED"); }
+            MyTkSerializable     => { out.push_str(" ISOLATION LEVEL SERIALIZABLE"); }
+        }
+        match self.mode {
+            MyAmReadWrite => { out.push_str(", READ WRITE"); }
+            MyAmReadOnly  => { out.push_str(", READ ONLY"); }
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MysqlTransaction — affine handle
+// -----------------------------------------------------------------------------
+
+public type affine MysqlTransaction is {
+    opts: MyTxOpts,
+}
+
+fn my_tx_make(opts: MyTxOpts) -> MysqlTransaction {
+    MysqlTransaction { opts: opts }
+}
+
+implement MysqlTransaction {
+    public fn opts_view(&self) -> &MyTxOpts { &self.opts }
+}
+
+// -----------------------------------------------------------------------------
+// Public surface
+// -----------------------------------------------------------------------------
+
+/// Begin a transaction with default opts (REPEATABLE READ READ WRITE).
+pub fn begin_tx(conn: &mut MysqlConnection) -> Result<MysqlTransaction, DbError> {
+    begin_tx_with(conn, my_tx_opts_default())
+}
+
+pub fn begin_tx_with(
+    conn: &mut MysqlConnection,
+    opts: MyTxOpts,
+) -> Result<MysqlTransaction, DbError> {
+    let mut sql: Text = "START TRANSACTION".clone();
+    sql.push_str(&opts.render_sql());
+    match conn.execute(&sql) {
+        Ok(_)  => Ok(my_tx_make(opts)),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn begin_tx_serializable(conn: &mut MysqlConnection)
+    -> Result<MysqlTransaction, DbError>
+{
+    begin_tx_with(conn, my_tx_opts_default()
+        .with_isolation(MyTkSerializable))
+}
+
+pub fn begin_tx_read_only(conn: &mut MysqlConnection)
+    -> Result<MysqlTransaction, DbError>
+{
+    begin_tx_with(conn, my_tx_opts_default()
+        .with_mode(MyAmReadOnly))
+}
+
+/// Consume the transaction handle and COMMIT.
+pub fn commit_tx(
+    conn: &mut MysqlConnection,
+    tx: MysqlTransaction,
+) -> Result<(), DbError> {
+    let _ = tx;
+    match conn.execute(&"COMMIT".clone()) {
+        Ok(_)  => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Consume the transaction handle and ROLLBACK.
+pub fn rollback_tx(
+    conn: &mut MysqlConnection,
+    tx: MysqlTransaction,
+) -> Result<(), DbError> {
+    let _ = tx;
+    match conn.execute(&"ROLLBACK".clone()) {
+        Ok(_)  => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Savepoint helpers
+// -----------------------------------------------------------------------------
+
+pub fn savepoint(conn: &mut MysqlConnection, name: &Text) -> Result<(), DbError> {
+    let mut sql: Text = "SAVEPOINT ".clone();
+    sql.push_str(name);
+    match conn.execute(&sql) {
+        Ok(_)  => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn release_savepoint(conn: &mut MysqlConnection, name: &Text)
+    -> Result<(), DbError>
+{
+    let mut sql: Text = "RELEASE SAVEPOINT ".clone();
+    sql.push_str(name);
+    match conn.execute(&sql) {
+        Ok(_)  => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn rollback_to_savepoint(conn: &mut MysqlConnection, name: &Text)
+    -> Result<(), DbError>
+{
+    let mut sql: Text = "ROLLBACK TO SAVEPOINT ".clone();
+    sql.push_str(name);
+    match conn.execute(&sql) {
+        Ok(_)  => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// `with_transaction` callback combinator
+// -----------------------------------------------------------------------------
+
+pub fn with_transaction<R>(
+    conn: &mut MysqlConnection,
+    body: fn(&mut MysqlConnection) -> Result<R, DbError>,
+) -> Result<R, DbError> {
+    let tx = match begin_tx(conn) { Ok(t)  => t, Err(e) => { return Err(e); } };
+    let body_result = body(conn);
+    match body_result {
+        Ok(r) => {
+            match commit_tx(conn, tx) {
+                Ok(_)  => Ok(r),
+                Err(e) => Err(e),
+            }
+        }
+        Err(body_err) => {
+            let _ = rollback_tx(conn, tx);
+            Err(body_err)
+        }
+    }
+}
+
+pub fn with_transaction_serializable<R>(
+    conn: &mut MysqlConnection,
+    body: fn(&mut MysqlConnection) -> Result<R, DbError>,
+) -> Result<R, DbError> {
+    let tx = match begin_tx_serializable(conn) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+    let body_result = body(conn);
+    match body_result {
+        Ok(r) => {
+            match commit_tx(conn, tx) {
+                Ok(_)  => Ok(r),
+                Err(e) => Err(e),
+            }
+        }
+        Err(body_err) => {
+            let _ = rollback_tx(conn, tx);
+            Err(body_err)
+        }
+    }
+}
