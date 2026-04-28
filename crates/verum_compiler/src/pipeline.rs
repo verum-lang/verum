@@ -647,6 +647,16 @@ pub struct CompilationPipeline<'s> {
     /// Meta registry for cross-file resolution
     meta_registry: MetaRegistry,
 
+    /// Captured version stamp (#20 / P7). Resolved once at pipeline
+    /// construction so the per-meta-call sites (`MetaContext::new()`
+    /// at expand_module / @const-block / per-meta-fn) hand back the
+    /// same git revision + build-time millisecond stamp without
+    /// invoking `git rev-parse HEAD` every time. `None` for either
+    /// component when capture failed (no git tree, missing binary,
+    /// reproducible-build mode); the `@version_stamp` builtin
+    /// substitutes its deterministic fallback in that case.
+    cached_version_stamp: (Option<verum_common::Text>, Option<u64>),
+
     /// Module loader for file system operations
     /// Loads modules from file system following the module-file mapping rules
     /// (foo.vr = module foo, foo/mod.vr = directory module, foo/bar.vr = child).
@@ -850,9 +860,36 @@ impl<'s> CompilationPipeline<'s> {
             // ModuleRegistry::get_by_path_aliased).
             install_canonical_module_aliases(&mut reg);
         }
+        // Capture git revision + build time once at pipeline
+        // construction so per-meta-eval sites don't fork `git
+        // rev-parse HEAD` every time. The capture's project-root
+        // input is the parent directory of the input source file
+        // (or cwd as fallback) — `capture_git_revision` already
+        // tolerates empty / nonexistent paths by returning None,
+        // which the `@version_stamp` builtin substitutes with the
+        // documented empty-string fallback.
+        let project_root_for_capture = session
+            .options()
+            .input
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
+            .unwrap_or_default();
+        let cached_version_stamp = (
+            crate::meta::subsystems::project_info::capture_git_revision(
+                &project_root_for_capture,
+            ),
+            crate::meta::subsystems::project_info::capture_build_time_unix_ms(),
+        );
+
         Self {
             session,
             meta_registry: MetaRegistry::new(),
+            cached_version_stamp,
             module_loader,
             lazy_resolver,
             modules: Map::new(),
@@ -940,9 +977,30 @@ impl<'s> CompilationPipeline<'s> {
             std::sync::Mutex::new(lazy_loader),
         );
 
+        // #20 / P7 — capture once for stdlib bootstrap path too;
+        // see `new()` for rationale.
+        let project_root_for_capture = session
+            .options()
+            .input
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
+            .unwrap_or_default();
+        let cached_version_stamp = (
+            crate::meta::subsystems::project_info::capture_git_revision(
+                &project_root_for_capture,
+            ),
+            crate::meta::subsystems::project_info::capture_build_time_unix_ms(),
+        );
+
         Self {
             session,
             meta_registry: MetaRegistry::new(),
+            cached_version_stamp,
             module_loader,
             lazy_resolver,
             modules: Map::new(),
@@ -4252,7 +4310,6 @@ impl<'s> CompilationPipeline<'s> {
     /// lowers them to MetaExpr, and evaluates them using the MetaContext. Errors during
     /// evaluation (e.g., division by zero, missing context) are reported as diagnostics.
     fn phase_meta_evaluation(&mut self, module: &Module, module_path: &Text) -> Result<()> {
-        use crate::meta::MetaContext;
         use crate::meta::MetaError;
         use verum_ast::decl::{FunctionBody, ItemKind};
         use verum_ast::expr::ExprKind;
@@ -4287,7 +4344,7 @@ impl<'s> CompilationPipeline<'s> {
                     Maybe::None => continue, // No body (declaration only)
                 };
 
-                let mut ctx = MetaContext::new()
+                let mut ctx = self.fresh_meta_ctx_with_version_stamp()
                     .with_registry(std::sync::Arc::new(self.meta_registry.clone()))
                     .with_current_module(module_path.clone());
 
@@ -4336,6 +4393,19 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         Ok(())
+    }
+
+    /// Build a [`MetaContext`] seeded with the pipeline's cached
+    /// version stamp (#20 / P7). Every per-meta-eval call site in
+    /// the pipeline funnels through this helper so the
+    /// `@version_stamp` family of meta builtins observes the same
+    /// `git_revision` + `build_time_unix_ms` data without
+    /// re-invoking `git rev-parse HEAD` on every call.
+    fn fresh_meta_ctx_with_version_stamp(&self) -> crate::meta::MetaContext {
+        let mut ctx = crate::meta::MetaContext::new();
+        ctx.project_info.git_revision = self.cached_version_stamp.0.clone();
+        ctx.project_info.build_time_unix_ms = self.cached_version_stamp.1;
+        ctx
     }
 
     /// Check if a meta error is a "real" error that should be reported,
@@ -4410,14 +4480,13 @@ impl<'s> CompilationPipeline<'s> {
         module_path: &Text,
         errors: &mut Vec<(String, crate::meta::MetaError)>,
     ) {
-        use crate::meta::MetaContext;
         use verum_ast::expr::ExprKind;
 
         match &expr.kind {
             ExprKind::MetaFunction { name, args } if name.as_str() == "const" => {
                 // @const { ... } block — evaluate arguments
                 for arg in args.iter() {
-                    let mut ctx = MetaContext::new()
+                    let mut ctx = self.fresh_meta_ctx_with_version_stamp()
                         .with_registry(std::sync::Arc::new(self.meta_registry.clone()))
                         .with_current_module(module_path.clone());
                     match ctx.ast_expr_to_meta_expr(arg) {
@@ -4468,14 +4537,13 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Expand macros in a module (Pass 2)
     fn expand_module(&mut self, path: &Text, module: &mut Module) -> Result<()> {
-        use crate::meta::MetaContext;
 
         debug!("Expanding macros in module: {}", path.as_str());
 
         // Create a macro expander visitor
         let mut expander = MacroExpander {
             registry: &self.meta_registry,
-            context: MetaContext::new(),
+            context: self.fresh_meta_ctx_with_version_stamp(),
             module_path: path.clone(),
             expansions: List::new(),
         };

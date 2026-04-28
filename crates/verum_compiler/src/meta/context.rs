@@ -369,6 +369,32 @@ impl MetaContext {
         self
     }
 
+    /// Builder: Replace the entire project info block.
+    ///
+    /// The pipeline driver typically constructs a `ProjectInfoData`
+    /// with captured `git_revision` + `build_time_unix_ms`
+    /// (`with_captured_version_stamp`) and attaches it via this
+    /// method so the `@version_stamp` family of meta builtins
+    /// (#20 / P7) returns real data instead of the deterministic
+    /// fallback (empty SHA + zero timestamp).
+    #[inline]
+    pub fn with_project_info(mut self, project_info: ProjectInfoData) -> Self {
+        self.project_info = project_info;
+        self
+    }
+
+    /// Builder: Capture git revision + build-time stamp from the
+    /// surrounding environment in-place (#20 / P7). Calls
+    /// [`ProjectInfoData::capture_version_stamp_in_place`] on the
+    /// existing `project_info`. Idempotent — safe to call before
+    /// or after [`Self::with_project_info`]; both fields are
+    /// `Option`-typed and overwritten unconditionally.
+    #[inline]
+    pub fn with_captured_version_stamp(mut self) -> Self {
+        self.project_info.capture_version_stamp_in_place();
+        self
+    }
+
     // ======== Subsystem Setters ========
 
     /// Set runtime info
