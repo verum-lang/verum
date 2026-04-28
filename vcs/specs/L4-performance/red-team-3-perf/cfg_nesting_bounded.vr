@@ -1,0 +1,84 @@
+// =============================================================================
+// L4-performance: Red-team Round 3 §5.2 — Deeply nested @cfg conditional
+// =============================================================================
+// @test: typecheck-pass
+// @tier: all
+// @level: L4
+// @tags: red-team, perf, cfg, attributes, red-team-3.5.2
+// @timeout: 30000
+// @expect: pass
+// =============================================================================
+//
+// Pins the @cfg-overlap walker scaling against deeply nested conditionals.
+// The walker must enumerate cfg-predicate satisfiability without SAT
+// blow-up; for K nested @cfg attributes the walker should be linear, not
+// 2^K (every cfg leaf is independent of others — independence is the
+// optimization the walker depends on).
+//
+// **Audit reference:** vcs/red-team/round-3-perf.md §5.2.
+//
+// **Invariant being pinned:** the cfg-overlap walker is conservative on
+// the `unix`/`linux`/`macos`/`windows` predicate family (per round-1
+// §4.1 audit), but more importantly: K independent @cfg attributes
+// produce K type registrations, not 2^K — each cfg-leaf participates
+// independently.
+
+// 8 functions, each gated on a distinct @cfg predicate. K = 8 is enough
+// to expose any 2^K cliff if the walker is wrong; 1024+ is the
+// fuzz-corpus territory.
+
+@cfg(target_os = "linux")
+fn cfg_lin1() -> Int { 1 }
+
+@cfg(target_os = "macos")
+fn cfg_mac1() -> Int { 2 }
+
+@cfg(target_os = "windows")
+fn cfg_win1() -> Int { 3 }
+
+@cfg(target_arch = "x86_64")
+fn cfg_x64() -> Int { 4 }
+
+@cfg(target_arch = "aarch64")
+fn cfg_aarch() -> Int { 5 }
+
+@cfg(feature = "async")
+fn cfg_async() -> Int { 6 }
+
+@cfg(feature = "tls")
+fn cfg_tls() -> Int { 7 }
+
+@cfg(debug_assertions)
+fn cfg_debug() -> Int { 8 }
+
+// Combined cfg via `any` / `all` — exercises the predicate-tree
+// expansion in the walker. This is where a naive walker would
+// SAT-explode if it expanded `any(A, B, C)` to `(A ∨ B ∨ C)` with
+// per-clause work.
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn cfg_unix_like() -> Int { 9 }
+
+@cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))
+fn cfg_x64_unix() -> Int { 10 }
+
+@cfg(not(target_os = "windows"))
+fn cfg_not_windows() -> Int { 11 }
+
+@cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))
+fn cfg_bsd_or_unix() -> Int { 12 }
+
+fn main() {
+    // Don't actually call the cfg-gated functions — their existence
+    // alone proves @cfg-walker acceptance. The compiler evaluates each
+    // predicate against the build target and prunes accordingly; the
+    // walker must remain bounded regardless of how many @cfg attributes
+    // appear.
+    print("L4-perf: red-team-3.5.2 @cfg nesting walker bounded");
+}
