@@ -273,9 +273,67 @@ public axiom msfs_refined_to_protocol_l_abs_bridge(w: &RefinedLAbsWitness) -> Bo
 /// driving Theorem 5.1's contradiction — the joint-membership
 /// witness of L_Abs immediately invokes Lemma 3.4 on its (F_S)
 /// component, placing X in S_S<S> and contradicting (Π_4).
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
 @framework(msfs, "MSFS §4 — (F_S) ⟹ formal S-definability (Lemma 3.4 hypothesis)")
 public axiom msfs_f_s_implies_formal_s_definable(
     cond: &ConditionFS,
 ) -> &FormallySDefinable
     requires cond.has_phi_X()
     ensures  true;
+
+// =============================================================================
+// Step-2 intermediate axiom for Theorem 5.1's structured proof body
+// =============================================================================
+//
+// Theorem 5.1's paper proof (paper §5, single paragraph):
+//
+//   Assume X satisfies (F_S) ∧ (Π_{4, S, n}). Then X ∈ S_S^global ⊆ S_S
+//   by Lemma 3.4, and id_X : X → X is an (∞, n)-equivalence onto its
+//   image with target in S_S, violating (Π_{4, S, n}).
+//
+// The proof has three logical steps:
+//
+//   Step 1 — apply Lemma 3.4 to (F_S) ⟹ SSMembership witness in S_S^global.
+//   Step 2 — the identity morphism id_X : X → X is an (∞, n)-equivalence
+//            onto its image; combined with the Step-1 SSMembership witness,
+//            the existence of (Y := X) ∈ S_S<S> + (F := id_X) :
+//            (∞, n)-equivalence onto image *contradicts* (Π_{4, S, n}).
+//   Step 3 — contradiction propagates to the joint conjunction.
+//
+// Steps 1 and 3 are mechanical apply / propositional unfolding. Step 2
+// is the (∞, n)-equivalence reasoning that requires kernel-V3 infra
+// (T0.1). For the M0.7 structured-proof phase, we capture step 2 as
+// the intermediate axiom below — when T0.1 lands, this axiom is
+// promoted to a `@theorem` with its own proof body and the chain
+// becomes fully machine-verified.
+
+/// **Step-2 intermediate** for Theorem 5.1's structured proof.
+///
+/// Given:
+///   * `candidate: &LAbsCandidate` satisfying (F_S) ∧ (Π_4) (the
+///     Theorem 5.1 hypotheses), and
+///   * `ss_witness: &SSMembership` placing the candidate's underlying
+///     X in S_S^global ⊆ S_S (the output of `msfs_lemma_3_4_s_definability`),
+///
+/// the identity morphism `id_X : X → X` is an `(∞, n)`-equivalence
+/// onto its image with target Y := X ∈ S_S<S>, *which is exactly the
+/// pattern that (Π_{4, S, n}) forbids*. Hence `false`.
+///
+/// **Soundness scope.** This axiom captures step 2 of the paper proof
+/// verbatim. The (∞, n)-equivalence reasoning is the kernel-V3
+/// infrastructure tracked under T0.1; once that lands, this axiom is
+/// promoted to a `@theorem` with a constructive proof body invoking
+/// the kernel's `(∞, n)`-equivalence introduction rule. Until then it
+/// is an honest paper-cited axiom — the inference Theorem 5.1
+/// reduces to "Lemma 3.4 + this axiom + propositional contradiction".
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS Theorem 5.1 step 2 — id_X is (∞,n)-equivalence onto image, violating (Π_4)")
+public axiom msfs_id_x_violates_pi_4(
+    candidate: &LAbsCandidate,
+    ss_witness: &FormallySDefinable,
+) -> Bool
+    requires candidate.cond_F_S().has_phi_X()
+          && candidate.cond_Pi_4().is_irreducible_in_s_s()
+    ensures false;
