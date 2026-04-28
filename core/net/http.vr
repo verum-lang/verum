@@ -344,11 +344,16 @@ implement Headers {
         Headers { entries: List.with_capacity(cap) }
     }
 
-    /// Get the first value for a header name (case-insensitive).
+    /// Get the first value for a header name (case-insensitive,
+    /// per RFC 7230 §3.2). Allocation-free: uses the ASCII-fast
+    /// `eq_ignore_case` comparator on the stored canonical-form
+    /// keys instead of allocating a fresh `name.to_lowercase()` per
+    /// call. HTTP server hot path runs this once per header lookup
+    /// per request — the previous impl allocated millions of
+    /// short-lived Texts on a busy server.
     public fn get(&self, name: &Text) -> Maybe<&Text> {
-        let lower = name.to_lowercase();
         for (k, v) in &self.entries {
-            if k == &lower {
+            if k.eq_ignore_case(name) {
                 return Some(v);
             }
         }
@@ -357,34 +362,34 @@ implement Headers {
 
     /// Get all values for a header name (case-insensitive).
     public fn get_all(&self, name: &Text) -> List<&Text> {
-        let lower = name.to_lowercase();
         let mut result = List.new();
         for (k, v) in &self.entries {
-            if k == &lower {
+            if k.eq_ignore_case(name) {
                 result.push(v);
             }
         }
         result
     }
 
-    /// Set a header value, replacing any existing values for this name.
+    /// Set a header value, replacing any existing values for this
+    /// name. Stores the name in lowercase canonical form so
+    /// subsequent lookups can match against any-case variants
+    /// without re-folding the stored keys.
     public fn set(&mut self, name: &Text, value: &Text) {
-        let lower = name.to_lowercase();
-        // Remove existing entries with this name
-        self.entries.retain(|(k, _)| k != &lower);
-        self.entries.push((lower, value.clone()));
+        // Remove existing entries case-insensitively without
+        // pre-allocating a lowercased name.
+        self.entries.retain(|(k, _)| !k.eq_ignore_case(name));
+        self.entries.push((name.to_lowercase(), value.clone()));
     }
 
     /// Append a header value without removing existing values.
     public fn append(&mut self, name: &Text, value: &Text) {
-        let lower = name.to_lowercase();
-        self.entries.push((lower, value.clone()));
+        self.entries.push((name.to_lowercase(), value.clone()));
     }
 
     /// Remove all values for a header name.
     public fn remove(&mut self, name: &Text) {
-        let lower = name.to_lowercase();
-        self.entries.retain(|(k, _)| k != &lower);
+        self.entries.retain(|(k, _)| !k.eq_ignore_case(name));
     }
 
     /// Check if a header exists.
