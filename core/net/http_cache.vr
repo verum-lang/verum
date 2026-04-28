@@ -75,12 +75,25 @@ public type CacheControlError is
 // Parser
 // =============================================================================
 
+/// Hard cap on Cache-Control directive count. RFC 9111 doesn't
+/// mandate a limit; common implementations cap at 32-64. 64 is
+/// generous: real-world Cache-Control headers carry ≤ 5 directives.
+public const MAX_CACHE_CONTROL_DIRECTIVES: Int = 64;
+
 /// Parse a `Cache-Control:` header value (sans the `Cache-Control:`
 /// prefix). Unknown directives are ignored per RFC 9111 §5.2.
 public fn parse(value: &Text) -> CacheControl {
     let mut cc = empty_cache_control();
     let b = value.as_bytes();
     let segs = split_commas(b);
+    // CVE-2011-3192-class hostile-input fan-out — peer sending
+    // `Cache-Control: no-store,no-store,...` with thousands of
+    // directives forces per-segment trim + apply_directive work
+    // even though most of them are duplicates / unknown. Reject
+    // at the parser boundary.
+    if segs.len() > MAX_CACHE_CONTROL_DIRECTIVES {
+        return cc;
+    }
     let mut i: Int = 0;
     while i < segs.len() {
         let seg = trim_ws(segs[i].as_slice());
