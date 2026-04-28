@@ -154,11 +154,18 @@ fn validate_path(path: &Text) -> Result<(), SpiffeIdError> {
 }
 
 fn starts_with_ci(haystack: &[Byte], needle: &[Byte]) -> Bool {
+    // Fold only A-Z to a-z. Naive `b | 0x20` folds non-letters too
+    // (`\r` | 0x20 = `-`, `@` | 0x20 = `` ` ``, etc.) producing
+    // false-positive equality across bit-5 pair-shifts. SPIFFE IDs
+    // can carry path segments with `-`, `.`, `_` — folding those
+    // bytes would make `spiffe:\r/...` match the spiffe:// prefix.
     if haystack.len() < needle.len() { return false; }
     let mut i = 0;
     while i < needle.len() {
-        let h = haystack[i] | 0x20;
-        let n = needle[i] | 0x20;
+        let rh = haystack[i];
+        let rn = needle[i];
+        let h = if rh >= 0x41_u8 && rh <= 0x5A_u8 { rh | 0x20_u8 } else { rh };
+        let n = if rn >= 0x41_u8 && rn <= 0x5A_u8 { rn | 0x20_u8 } else { rn };
         if h != n { return false; }
         i = i + 1;
     }
