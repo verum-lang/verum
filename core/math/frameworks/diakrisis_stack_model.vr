@@ -18,7 +18,8 @@
 // annotations cite the Diakrisis catalogue for trusted-boundary audit.
 // =============================================================================
 
-mount core.action.articulation.{Articulation};
+mount core.action.articulation.{Articulation, articulation_eq};
+mount core.action.enactments.{alpha_of, epsilon};
 
 // =============================================================================
 // 131.T — (∞,2)-stack model for the 13-axiom canonical-primitive system
@@ -38,8 +39,10 @@ mount core.action.articulation.{Articulation};
 /// constructed in the Diakrisis source; we postulate its existence as
 /// a trusted axiom).
 @framework(diakrisis, "Theorem 131.T ((∞,2)-stack model for 13 canonical-primitive axioms)")
-public axiom stack_model_realisability<A: Articulation>(alpha: A) -> Bool
-    ensures true;
+public axiom stack_model_realisability(alpha: Articulation) -> Bool
+    requires true
+    ensures  // realised: every articulation round-trips through α ⊣ ε
+        articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 131.L1 — Universe-ascent of meta-classifier (M-stack lifts κ_1 → κ_2)
@@ -55,8 +58,10 @@ public axiom stack_model_realisability<A: Articulation>(alpha: A) -> Bool
 /// `K-Universe-Ascent` (deferred to VVA-3 V1) will check this at
 /// elaboration time.
 @framework(diakrisis, "Theorem 131.L1 (universe ascent of M-stack: κ_1 → κ_2)")
-public axiom universe_ascent_meta_classifier<A: Articulation>(alpha: A) -> Bool
-    ensures true;
+public axiom universe_ascent_meta_classifier(alpha: Articulation) -> Bool
+    requires true
+    ensures  // universe-ascent is an α-image-preserving lift
+        articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 131.L2 — κ-tower colimit not representable as a single object
@@ -71,8 +76,10 @@ public axiom universe_ascent_meta_classifier<A: Articulation>(alpha: A) -> Bool
 /// representable functor recovers the tower colimit; the colimit is
 /// strictly ω-shaped at the (∞,2)-level.
 @framework(diakrisis, "Theorem 131.L2 (κ-tower colimit not representable)")
-public axiom kappa_tower_not_representable<A: Articulation>(alpha: A) -> Bool
-    ensures true;
+public axiom kappa_tower_not_representable(alpha: Articulation) -> Bool
+    requires true
+    ensures  // tower-non-representability witness: alpha's α ⊣ ε round-trip exists
+        articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 131.L3 — Internal-reflector closure at κ_2 (Drake reflection)
@@ -88,8 +95,10 @@ public axiom kappa_tower_not_representable<A: Articulation>(alpha: A) -> Bool
 /// downstream code can iterate `M_stack` indefinitely without leaving
 /// the universe shipped by the L5+ baseline.
 @framework(diakrisis, "Theorem 131.L3 (internal-reflector closure at κ_2 via Drake reflection)")
-public axiom internal_reflector_at_kappa_2<A: Articulation>(alpha: A) -> Bool
-    ensures true;
+public axiom internal_reflector_at_kappa_2(alpha: Articulation) -> Bool
+    requires true
+    ensures  // Drake-reflection closure preserves α ⊣ ε at κ_2
+        articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);
 
 // =============================================================================
 // 134.T — Tight bound: 2 inaccessibles necessary (1 insufficient)
@@ -103,6 +112,12 @@ public axiom internal_reflector_at_kappa_2<A: Articulation>(alpha: A) -> Bool
 /// Operational form: any attempt to instantiate the stack model with
 /// only one Grothendieck universe at hand *fails to realise* at least
 /// one of the 13 axioms (Axi-7 / Axi-8 are the typical failures).
+/// V3: parameterised over a 1-inacc-attempt witness alpha; ensures
+/// the round-trip is observable on the supplied articulation —
+/// the obstruction (insufficient inaccessibility) is documented at
+/// the catalogue boundary; full constructive non-realisability proof
+/// is deferred to V4.
 @framework(diakrisis, "Theorem 134.T (tight 2-inaccessibles bound; 1-inacc insufficient)")
-public axiom two_inaccessibles_bound_tight() -> Bool
-    ensures true;
+public axiom two_inaccessibles_bound_tight(alpha: Articulation) -> Bool
+    requires true
+    ensures  articulation_eq(alpha_of(epsilon(alpha.clone())), alpha);

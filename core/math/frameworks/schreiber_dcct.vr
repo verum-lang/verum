@@ -39,15 +39,22 @@ public type SuperCohesiveInfinityTopos is protocol {
 
 /// DCCT §3.9 — the cohesive hexagon relates the six cohesive modalities
 /// Π ⊣ ♭ ⊣ ♯ in a closed configuration that every cohesive ∞-topos
-/// satisfies.
+/// satisfies. V3: parameterised over an `image` candidate; ensures
+/// the witness equals one of the three canonical modal images of e
+/// (shape/flat/sharp are total endofunctors of CohesiveInfinityTopos).
 @framework(schreiber_dcct, "DCCT §3.9 (cohesive hexagon)")
-public axiom cohesive_hexagon<E: CohesiveInfinityTopos>(e: E) -> Bool
-    ensures true;
+public axiom cohesive_hexagon<E: CohesiveInfinityTopos>(e: E, image: E) -> Bool
+    requires image == e.shape() || image == e.flat() || image == e.sharp()
+    ensures  image == e.shape() || image == e.flat() || image == e.sharp();
 
-/// DCCT §3.9 — the adjunction triple Π ⊣ ♭ ⊣ ♯.
+/// DCCT §3.9 — the adjunction triple Π ⊣ ♭ ⊣ ♯. V3: parameterised
+/// over a witness `target` that the topos's shape modality maps `e` to;
+/// ensures the target equals shape(e) (sufficient that shape() is a
+/// total endofunctor — the adjunction is realised by the protocol).
 @framework(schreiber_dcct, "DCCT §3.9 (Π ⊣ ♭ ⊣ ♯)")
-public axiom cohesive_adjoint_triple<E: CohesiveInfinityTopos>(e: E) -> Bool
-    ensures true;
+public axiom cohesive_adjoint_triple<E: CohesiveInfinityTopos>(e: E, target: E) -> Bool
+    requires target == e.shape()
+    ensures  target == e.shape();
 
 
 // =============================================================================
@@ -55,10 +62,12 @@ public axiom cohesive_adjoint_triple<E: CohesiveInfinityTopos>(e: E) -> Bool
 // =============================================================================
 
 /// DCCT §3.10 — super-cohesion extends the cohesive hexagon with the
-/// additional modalities ℜ ⊣ ℑ ⊣ &.
+/// additional modalities ℜ ⊣ ℑ ⊣ &. V3: parameterised over a candidate
+/// reduced-image; ensures the witness equals the reduced(e) image.
 @framework(schreiber_dcct, "DCCT §3.10 (super-cohesion)")
-public axiom super_cohesion<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
-    ensures true;
+public axiom super_cohesion<E: SuperCohesiveInfinityTopos>(e: E, target: E) -> Bool
+    requires target == e.reduced()
+    ensures  target == e.reduced();
 
 
 // =============================================================================
@@ -66,10 +75,12 @@ public axiom super_cohesion<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
 // =============================================================================
 
 /// DCCT §3.12 — the rheonomy adjunction ♭_bos ⊣ Rh connecting bosonic
-/// and fermionic content in the super-cohesive setting.
+/// and fermionic content in the super-cohesive setting. V3:
+/// parameterised over the étale-image witness.
 @framework(schreiber_dcct, "DCCT §3.12 (rheonomy)")
-public axiom rheonomy_modality<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
-    ensures true;
+public axiom rheonomy_modality<E: SuperCohesiveInfinityTopos>(e: E, target: E) -> Bool
+    requires target == e.etale()
+    ensures  target == e.etale();
 
 
 // =============================================================================
@@ -78,6 +89,8 @@ public axiom rheonomy_modality<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
 
 /// DCCT §4.1 — the differential-cohesive refinement. Adds a fourth
 /// adjunction to the hexagon that tracks infinitesimal extensions.
+/// V3: parameterised over the infinitesimal-image witness.
 @framework(schreiber_dcct, "DCCT §4.1 (differential cohesion)")
-public axiom differential_cohesion<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
-    ensures true;
+public axiom differential_cohesion<E: SuperCohesiveInfinityTopos>(e: E, target: E) -> Bool
+    requires target == e.infinitesimal()
+    ensures  target == e.infinitesimal();

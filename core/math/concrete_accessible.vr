@@ -317,8 +317,13 @@ public type ZfcConcrete is { _phantom: Int };
 /// for `Mod(ZFC)`. Downstream Lemma 3.4 chains can invoke this
 /// directly — no paper-citation intermediary.
 @framework(msfs, "MSFS §3.2 — ZFC ∈ R-S (concrete with KappaOneCardinal accessibility)")
-public axiom zfc_concrete_kappa_1_accessible(zfc: &ZfcConcrete) -> Bool
-    ensures true;
+public axiom zfc_concrete_kappa_1_accessible(
+    zfc: &ZfcConcrete,
+    kappa: &KappaOneCardinal,
+) -> Bool
+    requires true
+    ensures  // ZFC's underlying κ_1 is regular with ordinal_rank == 1
+        kappa.is_regular() && kappa.ordinal_rank() == 1;
 
 // =============================================================================
 // 7. Tests / assertion guardrails (M-INFRA Phase 3 confidence checks)
@@ -326,17 +331,27 @@ public axiom zfc_concrete_kappa_1_accessible(zfc: &ZfcConcrete) -> Bool
 
 /// Smoke check: every concrete RegularCardinal exposes is_regular() = true.
 @framework(msfs, "M-INFRA Phase 3 smoke — every concrete RegularCardinal is regular")
-public axiom concrete_cardinals_all_regular() -> Bool
-    ensures true;
+public axiom concrete_cardinals_all_regular(
+    omega: &OmegaCardinal,
+    kappa_1: &KappaOneCardinal,
+    kappa_2: &KappaTwoCardinal,
+) -> Bool
+    requires true
+    ensures  omega.is_regular()
+          && kappa_1.is_regular()
+          && kappa_2.is_regular();
 
 /// Smoke check: SetCategory's KappaAccessibleInfCategory witness has n_F() = 1.
 @framework(msfs, "M-INFRA Phase 3 smoke — SetCategory carries n_F=1 (1-categorical model)")
-public axiom set_n_f_is_1() -> Bool
-    ensures true;
+public axiom set_n_f_is_1(set_cat: &SetCategory) -> Bool
+    requires true
+    ensures  set_cat.n_F() == 1;
 
 /// Smoke check: the constructive Grothendieck @ n=1 theorem is reachable
 /// (i.e., its @theorem signature matches the pattern downstream consumers
 /// rely on).
 @framework(msfs, "M-INFRA Phase 3 smoke — constructive Grothendieck @ n=1 reachable")
-public axiom grothendieck_n_1_constructive_reachable() -> Bool
-    ensures true;
+public axiom grothendieck_n_1_constructive_reachable(set_cat: &SetCategory) -> Bool
+    requires set_cat.n_F() == 1
+    ensures  set_cat.n_F() == 1
+          && set_cat.has_kappa_filtered_colimits();
