@@ -1,0 +1,315 @@
+module core.database.sqlite.native.l7_api.pragma_api;
+
+// =============================================================================
+// l7_api/pragma_api.vr — typed PRAGMA get / set surface
+// =============================================================================
+// Layer: 7 — public API.
+// Spec: sqlite-native.md §13 (typed pragma); §18 (PRAGMA catalogue).
+//
+// Until this commit the only way to read or change a SQLite PRAGMA
+// from user code was a raw SQL string:
+//
+//     db.execute("PRAGMA cache_size = 1000")?;       // write
+//     let row = db.query_first_row("PRAGMA cache_size")?;
+//     let n = match row[0] { RInt(n) => n, _ => 0 };
+//
+// That works but loses everything types are good at: the user has to
+// remember the pragma name (typo → silent SQLITE_OK because unknown
+// PRAGMAs are no-ops in SQLite C, which is famously a footgun);
+// the result must be hand-decoded; the value must be hand-encoded.
+//
+// This module exposes a typed surface that goes straight through the
+// existing `pragmas/dispatch.execute` runner without round-tripping
+// SQL:
+//
+//     pragma_get_int(&db, PCacheSize)         -> Result<Int64, DbError>
+//     pragma_set_int(&mut db, PCacheSize, 1000) -> Result<(), DbError>
+//
+//     pragma_get_text(&db, PJournalMode)      -> Result<Text,  DbError>
+//     pragma_set_text(&mut db, PJournalMode, "WAL") -> Result<(), DbError>
+//
+//     pragma_get_bool(&db, PForeignKeys)      -> Result<Bool,  DbError>
+//     pragma_set_bool(&mut db, PForeignKeys, true) -> Result<(), DbError>
+//
+// Plus a uniform `pragma_get` / `pragma_set` over a tagged
+// `PragmaValue` for callers that need to hold the value abstractly
+// (CLI driver, REPL, audit-log replay).
+//
+// Wrong-shape access (e.g. asking for an Int when the pragma returns
+// Text) is a runtime error rather than a compile error — the pragma
+// catalogue's value-shape is data-driven, not type-encoded.  The
+// per-pragma kind enum still gives the user a typo-proof name handle.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RText,
+};
+mount core.database.sqlite.native.pragmas.registry.{
+    PragmaKind, pragma_spec, pragma_from_name,
+};
+mount core.database.sqlite.native.pragmas.dispatch.{
+    PragmaResult, PrRow, PrRows, PrEmpty, PrError,
+    execute as pragma_dispatch,
+};
+mount core.database.sqlite.native.l7_api.database.{
+    Database, DbError,
+    DbMisuse, DbGeneric, DbReadonly,
+};
+
+// -----------------------------------------------------------------------------
+// PragmaValue — tagged union over the three pragma value shapes
+// -----------------------------------------------------------------------------
+
+/// Typed PRAGMA value.  The three variants cover every shape the
+/// SQLite catalogue produces or accepts:
+///
+///   * `PvInt`  — integer pragmas (cache_size, busy_timeout, …) and
+///                boolean-as-int pragmas (foreign_keys, query_only, …).
+///   * `PvText` — text pragmas (journal_mode, encoding, locking_mode, …).
+///   * `PvBool` — sugar variant; `pragma_set` converts to `PvInt(0|1)`
+///                before dispatch.  Lets callers write
+///                `pragma_set(db, PForeignKeys, PvBool(true))`
+///                without the false-friend `PvInt(1)`.
+public type PragmaValue is
+      PvNull
+    | PvInt(Int64)
+    | PvText(Text)
+    | PvBool(Bool);
+
+implement PragmaValue {
+    /// Best-effort coerce to Int64.  PvBool maps to 0/1; PvText
+    /// returns None (the caller should use pragma_get_text).
+    public fn as_int(&self) -> Maybe<Int64> {
+        match self {
+            PvNull       => None,
+            PvInt(n)     => Some(*n),
+            PvBool(b)    => Some(if *b { 1 as Int64 } else { 0 as Int64 }),
+            PvText(_)    => None,
+        }
+    }
+
+    public fn as_bool(&self) -> Maybe<Bool> {
+        match self {
+            PvNull    => None,
+            PvBool(b) => Some(*b),
+            PvInt(n)  => Some(*n != (0 as Int64)),
+            PvText(_) => None,
+        }
+    }
+
+    public fn as_text(&self) -> Maybe<Text> {
+        match self {
+            PvText(s) => Some(s.clone()),
+            _         => None,
+        }
+    }
+
+    public fn is_null(&self) -> Bool {
+        match self { PvNull => true, _ => false }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Internal: convert between Register / PragmaResult and PragmaValue
+// -----------------------------------------------------------------------------
+
+fn register_to_value(r: &Register) -> PragmaValue {
+    match r {
+        RNull    => PvNull,
+        RInt(n)  => PvInt(*n),
+        RText(s) => PvText(s.clone()),
+        _        => PvNull,
+    }
+}
+
+fn value_to_register(v: &PragmaValue) -> Register {
+    match v {
+        PvNull       => RNull,
+        PvInt(n)     => RInt(*n),
+        PvBool(b)    => RInt(if *b { 1 as Int64 } else { 0 as Int64 }),
+        PvText(s)    => RText(s.clone()),
+    }
+}
+
+fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, DbError> {
+    match result {
+        PrEmpty   => Ok(PvNull),
+        PrRow(row) => {
+            if row.len() == 0 { return Ok(PvNull); }
+            Ok(register_to_value(&row[0]))
+        }
+        PrRows(rows) => {
+            if rows.len() == 0 { return Ok(PvNull); }
+            let r0 = &rows[0];
+            if r0.len() == 0 { return Ok(PvNull); }
+            Ok(register_to_value(&r0[0]))
+        }
+        PrError(msg) => Err(DbGeneric(msg)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Public: pragma_get / pragma_set by typed kind
+// -----------------------------------------------------------------------------
+
+/// Read a PRAGMA by typed kind.  Routes through
+/// `pragmas.dispatch.execute` — same code path the SQL parser hits.
+/// Result is the first column of the first row, or `PvNull` for
+/// side-effect-only pragmas.
+public fn pragma_get(db: &mut Database, kind: PragmaKind) -> Result<PragmaValue, DbError> {
+    let name = pragma_kind_to_name(&kind);
+    let cfg = db.pragma_cfg_mut();
+    let result = pragma_dispatch(cfg, &name, None, None);
+    unwrap_single_row(result)
+}
+
+/// Write a PRAGMA by typed kind + value.  Uses the in-memory
+/// `PragmaConfig` writer — durable side-effects (journal_mode change
+/// rewriting WAL, page_size change rewriting header) are scheduled
+/// by the layers below the dispatcher.
+public fn pragma_set(
+    db: &mut Database,
+    kind: PragmaKind,
+    value: PragmaValue,
+) -> Result<(), DbError> {
+    let spec_v = pragma_spec(&kind);
+    if !spec_v.is_settable {
+        return Err(DbReadonly);
+    }
+    let name = pragma_kind_to_name(&kind);
+    let reg = value_to_register(&value);
+    let cfg = db.pragma_cfg_mut();
+    let result = pragma_dispatch(cfg, &name, Some(reg), None);
+    match result {
+        PrError(msg) => Err(DbGeneric(msg)),
+        _            => Ok(()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Public: typed-shape convenience accessors
+// -----------------------------------------------------------------------------
+
+/// Read an Int-shaped PRAGMA.  Errors if the pragma returns Text.
+public fn pragma_get_int(db: &mut Database, kind: PragmaKind) -> Result<Int64, DbError> {
+    let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
+    match v.as_int() {
+        Some(n) => Ok(n),
+        None    => Err(DbMisuse(
+            "pragma_get_int: pragma value is not an integer".clone(),
+        )),
+    }
+}
+
+public fn pragma_set_int(
+    db: &mut Database,
+    kind: PragmaKind,
+    value: Int64,
+) -> Result<(), DbError> {
+    pragma_set(db, kind, PvInt(value))
+}
+
+/// Read a Text-shaped PRAGMA (journal_mode, encoding, locking_mode).
+public fn pragma_get_text(db: &mut Database, kind: PragmaKind) -> Result<Text, DbError> {
+    let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
+    match v.as_text() {
+        Some(s) => Ok(s),
+        None    => Err(DbMisuse(
+            "pragma_get_text: pragma value is not text".clone(),
+        )),
+    }
+}
+
+public fn pragma_set_text(
+    db: &mut Database,
+    kind: PragmaKind,
+    value: Text,
+) -> Result<(), DbError> {
+    pragma_set(db, kind, PvText(value))
+}
+
+/// Read a boolean-shaped PRAGMA (foreign_keys, query_only,
+/// recursive_triggers, …).  Returns the integer interpretation
+/// (0 → false, non-zero → true).
+public fn pragma_get_bool(db: &mut Database, kind: PragmaKind) -> Result<Bool, DbError> {
+    let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
+    match v.as_bool() {
+        Some(b) => Ok(b),
+        None    => Err(DbMisuse(
+            "pragma_get_bool: pragma value is not coercible to bool".clone(),
+        )),
+    }
+}
+
+public fn pragma_set_bool(
+    db: &mut Database,
+    kind: PragmaKind,
+    value: Bool,
+) -> Result<(), DbError> {
+    pragma_set(db, kind, PvBool(value))
+}
+
+// -----------------------------------------------------------------------------
+// Public: name lookup helper — exposed for CLI / REPL drivers
+// -----------------------------------------------------------------------------
+
+/// Map `PragmaKind` back to its canonical SQL name (lowercase).  The
+/// inverse of `pragma_from_name`.  Used by the dispatcher path above
+/// and by tracing / error-message construction.
+public fn pragma_kind_to_name(k: &PragmaKind) -> Text {
+    match k {
+        PCacheSize         => "cache_size".clone(),
+        PPageSize          => "page_size".clone(),
+        PJournalMode       => "journal_mode".clone(),
+        PSynchronous       => "synchronous".clone(),
+        PForeignKeys       => "foreign_keys".clone(),
+        PRecursiveTriggers => "recursive_triggers".clone(),
+        PUserVersion       => "user_version".clone(),
+        PSchemaVersion     => "schema_version".clone(),
+        PApplicationId     => "application_id".clone(),
+        PJournalSizeLimit  => "journal_size_limit".clone(),
+        PAutoVacuum        => "auto_vacuum".clone(),
+        PIncrementalVacuum => "incremental_vacuum".clone(),
+        PBusyTimeout       => "busy_timeout".clone(),
+        PCaseSensitiveLike => "case_sensitive_like".clone(),
+        PEncoding          => "encoding".clone(),
+        PTempStore         => "temp_store".clone(),
+        PSecureDelete      => "secure_delete".clone(),
+        PWritableSchema    => "writable_schema".clone(),
+        PQueryOnly         => "query_only".clone(),
+        PLockingMode       => "locking_mode".clone(),
+        PMaxPageCount      => "max_page_count".clone(),
+        PMmapSize          => "mmap_size".clone(),
+        PThreads           => "threads".clone(),
+        PWalAutocheckpoint => "wal_autocheckpoint".clone(),
+        PWalCheckpoint     => "wal_checkpoint".clone(),
+        PDeferForeignKeys  => "defer_foreign_keys".clone(),
+        PIgnoreCheckConstraints => "ignore_check_constraints".clone(),
+        PCellSizeCheck     => "cell_size_check".clone(),
+        PTableInfo         => "table_info".clone(),
+        PTableXInfo        => "table_xinfo".clone(),
+        PIndexInfo         => "index_info".clone(),
+        PIndexXInfo        => "index_xinfo".clone(),
+        PIndexList         => "index_list".clone(),
+        PForeignKeyList    => "foreign_key_list".clone(),
+        PForeignKeyCheck   => "foreign_key_check".clone(),
+        PIntegrityCheck    => "integrity_check".clone(),
+        PQuickCheck        => "quick_check".clone(),
+        PStats             => "stats".clone(),
+        PDatabaseList      => "database_list".clone(),
+        PTableList         => "table_list".clone(),
+        PTriggerList       => "trigger_list".clone(),
+        PModuleList        => "module_list".clone(),
+        PFunctionList      => "function_list".clone(),
+        PPragmaList        => "pragma_list".clone(),
+        PCompileOptions    => "compile_options".clone(),
+        PCollationList     => "collation_list".clone(),
+        POptimize          => "optimize".clone(),
+        PShrinkMemory      => "shrink_memory".clone(),
+        PFreelistCount     => "freelist_count".clone(),
+        PPageCount         => "page_count".clone(),
+    }
+}

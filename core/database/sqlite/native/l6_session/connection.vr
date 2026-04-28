@@ -47,6 +47,9 @@ mount core.database.sqlite.native.ext.registry.{
 mount core.database.sqlite.native.ext.hooks.{
     CommitDecision, CdAllow, CdAbort,
 };
+mount core.database.sqlite.native.pragmas.config.{
+    PragmaConfig, pragma_config_default,
+};
 
 // -----------------------------------------------------------------------------
 // Mode
@@ -127,6 +130,12 @@ public type Connection is {
     /// authorizer / busy / progress / trace).  Last subscriber wins.
     /// See `core.database.sqlite.native.ext.registry`.
     registry: FnRegistry,
+    /// Per-connection PRAGMA state (cache_size, journal_mode,
+    /// synchronous, …).  Driven by `pragmas/dispatch.execute`; read
+    /// by every code path that wants to honour a PRAGMA the user has
+    /// set (foreign_keys gate in CHECK violation, query_only gate in
+    /// .execute, etc.).
+    pragma_cfg: PragmaConfig,
 };
 
 /// Open an in-memory connection with the given mode. All three modes
@@ -145,6 +154,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
         next_root_page: 2,
         table_store: Map.new(),
         registry: registry_new(),
+        pragma_cfg: pragma_config_default(),
     })
 }
 
@@ -182,6 +192,7 @@ public fn open_file(path: &Text, mode: ConnectionMode) -> Result<Connection, Con
         next_root_page: 2,
         table_store: Map.new(),
         registry: registry_new(),
+        pragma_cfg: pragma_config_default(),
     })
 }
 
@@ -265,6 +276,12 @@ implement Connection {
     /// expose `Database.set_*_hook` / `register_scalar` etc.
     public fn registry_view(&self) -> &FnRegistry { &self.registry }
     public fn registry_mut(&mut self) -> &mut FnRegistry { &mut self.registry }
+
+    /// Borrow the per-connection PRAGMA state.  Used by the L7 typed
+    /// pragma façade and by code paths that read pragma flags
+    /// (foreign_keys, query_only, etc.) inline during execution.
+    public fn pragma_cfg_view(&self) -> &PragmaConfig { &self.pragma_cfg }
+    public fn pragma_cfg_mut(&mut self) -> &mut PragmaConfig { &mut self.pragma_cfg }
 
     /// Savepoint push — increments depth without replacing `tx.mode`.
     /// Caller is responsible for issuing the SAVEPOINT VDBE opcode.
