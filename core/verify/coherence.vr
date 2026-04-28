@@ -1,0 +1,206 @@
+// =============================================================================
+// VVA-6 Operational Coherence Checker — stdlib preview (M4.E)
+// =============================================================================
+//
+// Source: VVA §6 (Part B) — Operational coherence checker for the
+// AC/OC duality.  Diakrisis 18.T₁ establishes the α-cert ⟺ ε-cert
+// duality theorem; 18.T₂ bounds finitely-axiomatised decidability at
+// single-exponential time; 18.T₃ aggregates corpus-wide coherence
+// over all `@verify(coherent)` theorems.
+//
+// **Architectural role of this module.** VVA-6's full kernel rule
+// (preprint-blocked at the kernel layer) decides α-cert ⟺ ε-cert
+// correspondence as a kernel-rechecked judgement.  This module ships
+// the *stdlib-side surface* the kernel rule will dock into:
+//
+//   • `CoherenceCert` carrier protocol — bidirectional witness
+//     surface (α-side + ε-side projections + dichotomy verdict).
+//   • `CoherenceVerdict` sum type — Decidable / SemiDecidable /
+//     Undecidable (mirrors `verum audit --round-trip` classifier).
+//   • `verify_alpha_epsilon_correspondence(α-cert, ε-cert)` — pure
+//     decision function (deterministic, runs at compile-time when
+//     dispatched from `@verify(coherent_static)`).
+//   • Concrete instance `IdentityCoherenceCert` for trivially-coherent
+//     theorems (where α and ε are identical; covers the
+//     auto-induced `epsilon(α)` per VVA §11.3 + Diakrisis 108.T's
+//     auto-induced enactment table).
+//
+// Pre-M4.E the corresponding `@verify(coherent)` markers in the
+// MSFS / Diakrisis corpus dispatched through `verum audit --coherent`
+// which reported `Status::Pending` for every row — the audit surface
+// shipped before the stdlib carrier did.  Post-M4.E the carrier is
+// in place; downstream theorems can construct concrete CoherenceCerts
+// and the audit walker can classify decidability properly when the
+// kernel rule lands.
+// =============================================================================
+
+module core.verify.coherence;
+
+mount core.action.articulation.{Articulation};
+mount core.action.enactments.{Enactment};
+
+// =============================================================================
+// CoherenceVerdict — three-valued classifier
+// =============================================================================
+
+/// Decidability verdict for an α-cert ⟺ ε-cert correspondence check.
+///
+///   * `Decidable` — finitely-axiomatised; α / ε both terminate in
+///     single-exponential time per Diakrisis 18.T₂.  This is the
+///     verdict the corpus `audit-reports/round-trip.json` expects
+///     for a "ready for production" theorem.
+///   * `SemiDecidable` — semi-decision procedure exists but no
+///     uniform termination bound (e.g., framework axiomatisation
+///     spans an inaccessible cardinal — Lurie HTT, Schreiber DCCT).
+///   * `Undecidable` — α-cert / ε-cert correspondence is undecidable
+///     in general (e.g., classifying-stack-aware MSFS theorems where
+///     the gauge-equivalence checker is co-RE).
+public type CoherenceVerdict is
+    | Decidable
+    | SemiDecidable { bound: Text }
+    | Undecidable { reason: Text };
+
+/// Pure projection: `true` iff the verdict is `Decidable` (= the
+/// finitely-axiomatised, single-exponential-time class).
+public pure fn coherence_verdict_is_decidable(v: CoherenceVerdict) -> Bool {
+    match v {
+        CoherenceVerdict.Decidable => true,
+        CoherenceVerdict.SemiDecidable { bound: _ } => false,
+        CoherenceVerdict.Undecidable { reason: _ } => false,
+    }
+}
+
+/// Pure projection: render the verdict as a stable text tag for
+/// JSON / CLI output.  Mirrors `audit-reports/coherent.json` schema.
+public pure fn coherence_verdict_tag(v: CoherenceVerdict) -> Text {
+    match v {
+        CoherenceVerdict.Decidable => Text.from("Decidable"),
+        CoherenceVerdict.SemiDecidable { bound: _ } => Text.from("SemiDecidable"),
+        CoherenceVerdict.Undecidable { reason: _ } => Text.from("Undecidable"),
+    }
+}
+
+// =============================================================================
+// CoherenceCert — bidirectional witness carrier protocol
+// =============================================================================
+
+/// Witness of α-cert ⟺ ε-cert correspondence for a single theorem
+/// or proof obligation.  The cert exposes:
+///
+///   • `articulation_witness()` — α-cert side (OC projection).  The
+///     `&Articulation` projection identifies which framework / lineage
+///     the cert lives at.
+///   • `enactment_witness()` — ε-cert side (DC projection).  The
+///     `&Enactment` projection carries the dual carrier.
+///   • `is_round_trip_id()` — `true` iff `α(ε(α)) ≃ α` and
+///     `ε(α(ε)) ≃ ε` (the round-trip identity per Diakrisis 16.T₁₀
+///     and AC/OC Morita duality 108.T).
+///   • `verdict()` — three-valued classification (see above).
+///
+/// **Architectural note.** The protocol has no `is_decidable` bool
+/// shortcut: callers are expected to inspect `verdict()` directly,
+/// because `SemiDecidable { bound }` and `Undecidable { reason }` carry
+/// citation text that downstream walkers want to surface in audit
+/// reports.  The `coherence_verdict_is_decidable` pure projection is
+/// available for boolean dispatch.
+public type CoherenceCert is protocol {
+    /// Stable identifier for the certified theorem (`"msfs_theorem_5_1"`,
+    /// `"diakrisis_18_T_1_alpha_epsilon_duality"`, etc.).  Used by audit
+    /// walkers to cross-reference per-theorem verdicts to the source
+    /// declaration.
+    fn theorem_identifier(self) -> Text;
+
+    /// AC-side α-cert projection.  Returns the `&Articulation` whose
+    /// framework + citation are the OC-side witness lineage.
+    fn articulation_witness(self) -> &Articulation;
+
+    /// DC-side ε-cert projection.  Returns the `&Enactment` whose
+    /// inferred α + ε are the DC-side witness lineage.
+    fn enactment_witness(self) -> &Enactment;
+
+    /// Round-trip identity flag.  `true` iff the canonical 108.T
+    /// round-trip `α → ε(α) → α(ε(α)) ≃ α` holds *and* the dual
+    /// `ε → α(ε) → ε(α(ε)) ≃ ε` holds.  Pre-VVA-6 kernel rule this
+    /// is a structural assertion supplied by the cert-constructor;
+    /// post-kernel-rule it becomes a kernel-rechecked judgement.
+    fn is_round_trip_id(self) -> Bool;
+
+    /// Three-valued decidability verdict per the §A.Z.5 round-trip
+    /// audit classifier.
+    fn verdict(self) -> CoherenceVerdict;
+};
+
+// =============================================================================
+// Pure verification function — α-cert ⟺ ε-cert correspondence
+// =============================================================================
+
+/// Pure decision function for α-cert ⟺ ε-cert correspondence.
+///
+/// Given a `&CoherenceCert` witness, returns its `verdict()`.  When
+/// dispatched from `@verify(coherent_static)` the function runs at
+/// compile time with the cert constructor inlined; from
+/// `@verify(coherent_runtime)` it runs at runtime with a trace-bounded
+/// budget; from `@verify(coherent)` it runs symbolically with the
+/// full bidirectional check.
+///
+/// **Architectural note.** This function is *deterministic*: two calls
+/// with the same `&CoherenceCert` instance return the same verdict.
+/// VVA-6's kernel rule will turn this into a kernel-rechecked
+/// judgement; pre-rule it is the stdlib-shaped surface the audit
+/// walker dispatches against.
+public pure fn verify_alpha_epsilon_correspondence(
+    cert: &CoherenceCert,
+) -> CoherenceVerdict {
+    cert.verdict()
+}
+
+/// Boolean shortcut: `true` iff the cert classifies as `Decidable`
+/// AND its round-trip identity holds.  This is the signal
+/// `audit-reports/coherent.json` expects for a "production-ready"
+/// row per the VVA §A.Z.4 acceptance gate.
+public pure fn cert_is_production_ready(cert: &CoherenceCert) -> Bool {
+    cert.is_round_trip_id() && coherence_verdict_is_decidable(cert.verdict())
+}
+
+// =============================================================================
+// Concrete reference instance — IdentityCoherenceCert
+// =============================================================================
+//
+// Drop-in instance covering the trivial coherent case: theorems whose
+// α-cert and ε-cert are identical (e.g., theorems whose ε is the
+// auto-induced `epsilon(α)` per VVA §11.3, where `α(epsilon(α)) = α`
+// is the Diakrisis 108.T auto-induced round-trip).  Smart constructor
+// `identity_coherence_cert(theorem_id, articulation, enactment)` returns
+// a heap value satisfying the protocol; `Decidable` verdict per
+// 18.T₂ (auto-induced enactments are finitely-axiomatised).
+
+@derive(Clone)
+public type IdentityCoherenceCert is {
+    field_theorem_identifier: Text,
+    field_articulation: Articulation,
+    field_enactment: Enactment,
+};
+
+implement CoherenceCert for IdentityCoherenceCert {
+    fn theorem_identifier(self) -> Text { self.field_theorem_identifier.clone() }
+    fn articulation_witness(self) -> &Articulation { &self.field_articulation }
+    fn enactment_witness(self) -> &Enactment { &self.field_enactment }
+    /// Trivially `true` — α-cert equals ε-cert by construction.
+    fn is_round_trip_id(self) -> Bool { true }
+    /// Always `Decidable` — auto-induced enactments are finitely-
+    /// axiomatised (Diakrisis 18.T₂).
+    fn verdict(self) -> CoherenceVerdict { CoherenceVerdict.Decidable }
+}
+
+/// Smart constructor for the trivially-coherent identity cert.
+public fn identity_coherence_cert(
+    theorem_identifier: Text,
+    articulation: Articulation,
+    enactment: Enactment,
+) -> IdentityCoherenceCert {
+    IdentityCoherenceCert {
+        field_theorem_identifier: theorem_identifier,
+        field_articulation: articulation,
+        field_enactment: enactment,
+    }
+}

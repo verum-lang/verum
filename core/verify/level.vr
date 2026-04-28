@@ -37,16 +37,26 @@ mount core.{Maybe, Text};
 /// The verification level (a.k.a. discharge strategy) at which a
 /// function or theorem is compiled. Variants are listed in
 /// monotone-ν order; `nu_ordinal` projects each to its ν per VVA §2.3.
+///
+/// **Coherent variants (M4.E)** mirror the Rust-side
+/// `verum_ast::attr::VerificationMode::{Coherent, CoherentStatic,
+/// CoherentRuntime}` introduced for VVA-6 (operational coherence
+/// checker). Pre-M4.E the stdlib `VerificationLevel` had only the
+/// 9 base strategies; the Coherent triple lived only on the Rust
+/// side, creating a stdlib drift. Post-M4.E both sides agree.
 public type VerificationLevel is
-    | Runtime         // ν = 0     — dynamic check
-    | Static          // ν = 1     — dataflow / CBGR / const fold
-    | Fast            // ν = 2     — bounded single-solver SMT
-    | Formal          // ν = ω     — full SMT portfolio
-    | Proof           // ν = ω+1   — tactic proof + kernel re-check
-    | Thorough        // ν = ω·2   — formal + invariant obligations
-    | Reliable        // ν = ω·2+1 — thorough + cross-solver agreement
-    | Certified       // ν = ω·2+2 — reliable + certificate export
-    | Synthesize;     // ν ≤ ω·3+1 — inverse search across 𝔐
+    | Runtime          // ν = 0     — dynamic check
+    | Static           // ν = 1     — dataflow / CBGR / const fold
+    | Fast             // ν = 2     — bounded single-solver SMT
+    | Formal           // ν = ω     — full SMT portfolio
+    | Proof            // ν = ω+1   — tactic proof + kernel re-check
+    | Thorough         // ν = ω·2   — formal + invariant obligations
+    | Reliable         // ν = ω·2+1 — thorough + cross-solver agreement
+    | Certified        // ν = ω·2+2 — reliable + certificate export
+    | CoherentStatic   // ν = ω·2+3 — α-cert + symbolic ε-claim (Coherent weak)
+    | CoherentRuntime  // ν = ω·2+4 — α-cert + runtime ε-monitor (Coherent hybrid)
+    | Coherent         // ν = ω·2+5 — α/ε bidirectional check (Coherent strict)
+    | Synthesize;      // ν ≤ ω·3+1 — inverse search across 𝔐
 
 // =============================================================================
 // String round-trip
@@ -74,6 +84,12 @@ public fn parse_level(annotation: Text) -> Maybe<VerificationLevel> {
         Maybe.Some(VerificationLevel.Reliable)
     } else if annotation == "certified" {
         Maybe.Some(VerificationLevel.Certified)
+    } else if annotation == "coherent_static" {
+        Maybe.Some(VerificationLevel.CoherentStatic)
+    } else if annotation == "coherent_runtime" {
+        Maybe.Some(VerificationLevel.CoherentRuntime)
+    } else if annotation == "coherent" {
+        Maybe.Some(VerificationLevel.Coherent)
     } else if annotation == "synthesize" {
         Maybe.Some(VerificationLevel.Synthesize)
     } else {
@@ -84,15 +100,18 @@ public fn parse_level(annotation: Text) -> Maybe<VerificationLevel> {
 /// Canonical string form per VVA §2.3.
 public fn to_annotation(level: VerificationLevel) -> Text {
     match level {
-        VerificationLevel.Runtime    => "runtime",
-        VerificationLevel.Static     => "static",
-        VerificationLevel.Fast       => "fast",
-        VerificationLevel.Formal     => "formal",
-        VerificationLevel.Proof      => "proof",
-        VerificationLevel.Thorough   => "thorough",
-        VerificationLevel.Reliable   => "reliable",
-        VerificationLevel.Certified  => "certified",
-        VerificationLevel.Synthesize => "synthesize",
+        VerificationLevel.Runtime         => "runtime",
+        VerificationLevel.Static          => "static",
+        VerificationLevel.Fast            => "fast",
+        VerificationLevel.Formal          => "formal",
+        VerificationLevel.Proof           => "proof",
+        VerificationLevel.Thorough        => "thorough",
+        VerificationLevel.Reliable        => "reliable",
+        VerificationLevel.Certified       => "certified",
+        VerificationLevel.CoherentStatic  => "coherent_static",
+        VerificationLevel.CoherentRuntime => "coherent_runtime",
+        VerificationLevel.Coherent        => "coherent",
+        VerificationLevel.Synthesize      => "synthesize",
     }
 }
 
@@ -107,15 +126,18 @@ public fn to_annotation(level: VerificationLevel) -> Text {
 /// to the witness-strategy's ν per VVA §2.3 footnote).
 public fn nu_omega_coeff(level: VerificationLevel) -> Int {
     match level {
-        VerificationLevel.Runtime    => 0,
-        VerificationLevel.Static     => 0,
-        VerificationLevel.Fast       => 0,
-        VerificationLevel.Formal     => 1,
-        VerificationLevel.Proof      => 1,
-        VerificationLevel.Thorough   => 2,
-        VerificationLevel.Reliable   => 2,
-        VerificationLevel.Certified  => 2,
-        VerificationLevel.Synthesize => 3,
+        VerificationLevel.Runtime         => 0,
+        VerificationLevel.Static          => 0,
+        VerificationLevel.Fast            => 0,
+        VerificationLevel.Formal          => 1,
+        VerificationLevel.Proof           => 1,
+        VerificationLevel.Thorough        => 2,
+        VerificationLevel.Reliable        => 2,
+        VerificationLevel.Certified       => 2,
+        VerificationLevel.CoherentStatic  => 2,
+        VerificationLevel.CoherentRuntime => 2,
+        VerificationLevel.Coherent        => 2,
+        VerificationLevel.Synthesize      => 3,
     }
 }
 
@@ -123,15 +145,18 @@ public fn nu_omega_coeff(level: VerificationLevel) -> Int {
 /// `nu_omega_coeff` reproduces the VVA §2.3 ν exactly.
 public fn nu_finite_offset(level: VerificationLevel) -> Int {
     match level {
-        VerificationLevel.Runtime    => 0,
-        VerificationLevel.Static     => 1,
-        VerificationLevel.Fast       => 2,
-        VerificationLevel.Formal     => 0,
-        VerificationLevel.Proof      => 1,
-        VerificationLevel.Thorough   => 0,
-        VerificationLevel.Reliable   => 1,
-        VerificationLevel.Certified  => 2,
-        VerificationLevel.Synthesize => 1,
+        VerificationLevel.Runtime         => 0,
+        VerificationLevel.Static          => 1,
+        VerificationLevel.Fast            => 2,
+        VerificationLevel.Formal          => 0,
+        VerificationLevel.Proof           => 1,
+        VerificationLevel.Thorough        => 0,
+        VerificationLevel.Reliable        => 1,
+        VerificationLevel.Certified       => 2,
+        VerificationLevel.CoherentStatic  => 3,
+        VerificationLevel.CoherentRuntime => 4,
+        VerificationLevel.Coherent        => 5,
+        VerificationLevel.Synthesize      => 1,
     }
 }
 
@@ -188,13 +213,31 @@ public fn allows_runtime_fallback(level: VerificationLevel) -> Bool {
 /// produce certificates; `Formal / Thorough` produce SMT verdicts
 /// without certificate materialisation; `Runtime / Static / Fast`
 /// have no certificate path.
+///
+/// **Coherent variants (M4.E):** `Coherent` emits a CoherenceCert
+/// (α-cert ⟺ ε-cert correspondence witness); `CoherentStatic` /
+/// `CoherentRuntime` produce SMT or trace-bounded verdicts without
+/// the full bidirectional certificate.
 public fn emits_certificate(level: VerificationLevel) -> Bool {
     match level {
         VerificationLevel.Proof      => true,
         VerificationLevel.Reliable   => true,
         VerificationLevel.Certified  => true,
+        VerificationLevel.Coherent   => true,
         VerificationLevel.Synthesize => true,
         _                            => false,
+    }
+}
+
+/// True iff the level requires the operational-coherence checker
+/// (VVA-6 stdlib preview). Mirrors the Rust-side dispatch fork in
+/// `verum_smt::coherence` for the three Coherent strategies.
+public fn requires_coherence_checker(level: VerificationLevel) -> Bool {
+    match level {
+        VerificationLevel.CoherentStatic  => true,
+        VerificationLevel.CoherentRuntime => true,
+        VerificationLevel.Coherent        => true,
+        _                                 => false,
     }
 }
 

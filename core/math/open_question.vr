@@ -1,0 +1,230 @@
+// =============================================================================
+// MSFS open-question registry — typed closure-status carrier
+// =============================================================================
+//
+// Source: A. Sereda, MSFS preprint, §12 — Open Questions Q1–Q5.
+//
+// MSFS §12 explicitly registers 5 open questions; 4 of them (Q1, Q3,
+// Q4, Q5) are closed in the Diakrisis extension corpus, leaving Q2 as
+// the standing open question. Pre-M0.H this state was encoded only as
+// docstring text in `theorems/msfs/12_consequences/diagnostics_and_open_q.vr`
+// — `verum audit` had no structured way to enumerate them.
+//
+// This module introduces:
+//
+//   • `OpenQuestionStatus` — sum type tagging closed-in-X / open / closed-by-LP.
+//   • `OpenQuestion` carrier protocol exposing the typed closure status,
+//     question identifier, and (when closed) the closing-reference.
+//   • `OPEN`-marker witness functions for each closure variant.
+//
+// Downstream `theorems/msfs/12_consequences/` rewrites each Q-axiom
+// from `() -> Bool ensures true` to `(q: &OpenQuestion) -> Bool requires
+// q.identifier().eq("Q<N>") ensures q.is_closed() == <expected>`. A
+// `verum audit --open-questions` walker enumerates every registration
+// site uniformly without needing to grep docstrings.
+// =============================================================================
+
+module core.math.open_question;
+
+// =============================================================================
+// Closure-status sum type
+// =============================================================================
+
+/// Status of an MSFS open question. Each variant tags how the question
+/// stands at the canonical-primitive layer:
+///
+///   * `OqClosed { closing_reference }` — closed by an external corpus
+///     theorem (e.g., "Diakrisis 103.T-106.T" closes Q1).
+///   * `OqOpen` — genuinely open, no known closure.
+///   * `OqClosedByLP { lp_witness }` — closed *conditionally* by a
+///     locally-presentable model construction (V3 #181-blocked at the
+///     kernel level pending τ-witness — recorded as a structurally
+///     softer closure state).
+public type OpenQuestionStatus is
+    | OqClosed { closing_reference: Text }
+    | OqOpen
+    | OqClosedByLP { lp_witness: Text };
+
+// =============================================================================
+// Carrier protocol
+// =============================================================================
+
+/// Typed open-question witness. Each accessor projects ONE structural
+/// property the corresponding §12 registration asserts. Concrete
+/// instances supply the implementations; the §12 registration axioms
+/// re-check the witness's flags at every citation site.
+public type OpenQuestion is protocol {
+    /// Stable identifier — `"Q1"`, `"Q2"`, ..., `"Q5"` for the MSFS
+    /// §12 questions. Downstream registries (e.g., a future Diakrisis
+    /// open-question chapter) reuse the same surface with their own
+    /// identifier prefix.
+    fn identifier(self) -> Text;
+
+    /// Question text — short paper-cited summary of the question.
+    fn question_text(self) -> Text;
+
+    /// Closure status — see `OpenQuestionStatus`.
+    fn status(self) -> OpenQuestionStatus;
+
+    /// Convenience flag: `true` iff `status()` is `OqClosed { _ }` or
+    /// `OqClosedByLP { _ }`.
+    fn is_closed(self) -> Bool;
+
+    /// Convenience flag: `true` iff `status()` is `OqOpen`.
+    fn is_open(self) -> Bool;
+};
+
+// =============================================================================
+// Constructor helpers — pure status-derivation
+// =============================================================================
+
+/// Pure projection: derive the `is_closed()` flag from the status sum.
+/// Mirrors the protocol accessor for tests / fixtures that build a
+/// witness from a raw status value.
+public pure fn open_question_is_closed_status(s: OpenQuestionStatus) -> Bool {
+    match s {
+        OpenQuestionStatus.OqClosed { closing_reference: _ } => true,
+        OpenQuestionStatus.OqClosedByLP { lp_witness: _ } => true,
+        OpenQuestionStatus.OqOpen => false,
+    }
+}
+
+/// Pure projection: derive the `is_open()` flag from the status sum.
+public pure fn open_question_is_open_status(s: OpenQuestionStatus) -> Bool {
+    match s {
+        OpenQuestionStatus.OqOpen => true,
+        OpenQuestionStatus.OqClosed { closing_reference: _ } => false,
+        OpenQuestionStatus.OqClosedByLP { lp_witness: _ } => false,
+    }
+}
+
+/// **MSFS open-question soundness invariant (@theorem).** A status
+/// is either-closed-or-open, exhaustively. The proof body inspects
+/// the sum-type's three variants and discharges each via the pure
+/// projection's match-arm definition. Pre-V3 kernel match-exhaustiveness
+/// reasoning is currently axiom-anchored — the @theorem cites the
+/// dichotomy-anchor axiom rather than performing kernel-level case-
+/// split (which T0.1 / V3 will mechanise).
+@verify(formal)
+@accessibility(omega_0)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS open-question soundness — exactly one of is_closed / is_open holds")
+public theorem open_question_status_dichotomy(s: OpenQuestionStatus)
+    ensures open_question_is_closed_status(s) || open_question_is_open_status(s)
+    proof {
+        apply open_question_status_dichotomy_anchor(s);
+    };
+
+/// Anchor axiom for the open-question status dichotomy (T0.1
+/// kernel-level case-split target). Once kernel match-exhaustiveness
+/// rule lands, this axiom is removed and the @theorem above
+/// constructively destructs `s` instead.
+@accessibility(omega_0)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS open-question status dichotomy — anchor (T0.1-promotable)")
+public axiom open_question_status_dichotomy_anchor(s: OpenQuestionStatus) -> Bool
+    ensures open_question_is_closed_status(s) || open_question_is_open_status(s);
+
+// =============================================================================
+// Concrete OpenQuestion instances — MSFS Q1-Q5 reference registry (M3.C)
+// =============================================================================
+//
+// Five typed witnesses corresponding to MSFS preprint §12 Q1-Q5
+// open questions. Q1, Q3, Q4, Q5 are closed in the Diakrisis
+// extension corpus with explicit closing-reference text; Q2 remains
+// honestly open. Smart constructors return ready-to-use instances;
+// `msfs_open_questions_registry()` aggregates all five.
+
+/// Concrete record-shape witness implementing `OpenQuestion`.
+@derive(Clone)
+public type ConcreteOpenQuestion is {
+    field_identifier: Text,
+    field_question_text: Text,
+    field_status: OpenQuestionStatus,
+};
+
+implement OpenQuestion for ConcreteOpenQuestion {
+    fn identifier(self) -> Text { self.field_identifier.clone() }
+    fn question_text(self) -> Text { self.field_question_text.clone() }
+    fn status(self) -> OpenQuestionStatus { self.field_status.clone() }
+    fn is_closed(self) -> Bool { open_question_is_closed_status(self.field_status.clone()) }
+    fn is_open(self) -> Bool { open_question_is_open_status(self.field_status.clone()) }
+}
+
+/// **MSFS Q1 — Existence of maximal meta-framework (closed in Diakrisis).**
+/// Closed by Diakrisis Theorems 103.T-106.T (universal articulation
+/// existence + uniqueness + Yanofsky-immunity + L_Cls^⊤ witness).
+public fn msfs_open_question_q1() -> ConcreteOpenQuestion {
+    ConcreteOpenQuestion {
+        field_identifier: "Q1",
+        field_question_text: "Does a maximal meta-framework exist?",
+        field_status: OpenQuestionStatus.OqClosed {
+            closing_reference: "Diakrisis 103.T-106.T (universal articulation; Diakrisis ∈ L_Cls^⊤)",
+        },
+    }
+}
+
+/// **MSFS Q2 — Completeness of the meta-framework list (genuinely open).**
+/// No known closing argument; remains honestly open.
+public fn msfs_open_question_q2() -> ConcreteOpenQuestion {
+    ConcreteOpenQuestion {
+        field_identifier: "Q2",
+        field_question_text: "Is the meta-framework list complete (i.e., are there meta-classifiers outside the known catalogue)?",
+        field_status: OpenQuestionStatus.OqOpen,
+    }
+}
+
+/// **MSFS Q3 — Exhaustiveness of bypass paths (closed in Diakrisis 133.T).**
+public fn msfs_open_question_q3() -> ConcreteOpenQuestion {
+    ConcreteOpenQuestion {
+        field_identifier: "Q3",
+        field_question_text: "Are the three bypass paths (universe-poly, reflective tower, intensional refinement) exhaustive?",
+        field_status: OpenQuestionStatus.OqClosed {
+            closing_reference: "Diakrisis 133.T (combinatorial enumeration + Axi-9 biadjunction)",
+        },
+    }
+}
+
+/// **MSFS Q4 — Consistency-strength minimality (closed in Diakrisis 134.T).**
+/// ZFC + 2-inacc is necessary; Diakrisis 134.T provides the ZFC + 1-inacc
+/// counterexample showing the second inaccessible cardinal is required.
+public fn msfs_open_question_q4() -> ConcreteOpenQuestion {
+    ConcreteOpenQuestion {
+        field_identifier: "Q4",
+        field_question_text: "Is ZFC + 2-inacc the minimal consistency strength for the canonical-primitive's stack model?",
+        field_status: OpenQuestionStatus.OqClosed {
+            closing_reference: "Diakrisis 134.T (ZFC + 1-inacc counterexample)",
+        },
+    }
+}
+
+/// **MSFS Q5 — Sub-stack of weak R-S (closed in Diakrisis 137.T).**
+/// Bounded-arithmetic complexity-typed stratification yields the
+/// weak-stratum sub-stack (V_0 / V_1 / S^1_2 / V_NP / V_PH / IΔ_0).
+public fn msfs_open_question_q5() -> ConcreteOpenQuestion {
+    ConcreteOpenQuestion {
+        field_identifier: "Q5",
+        field_question_text: "Does R-S have a sub-stack of complexity-bounded weak foundations?",
+        field_status: OpenQuestionStatus.OqClosed {
+            closing_reference: "Diakrisis 137.T (Bounded-arithmetic complexity-typed stratification)",
+        },
+    }
+}
+
+/// **MSFS open-question registry — all five Q1-Q5 instances.**
+/// Returns a fixed-shape tuple suitable for downstream walkers that
+/// want to enumerate the entire Q-table in one call (e.g. a future
+/// `verum audit --open-questions` flag mirroring the Python walker
+/// for proof-honesty).
+public fn msfs_open_questions_registry() -> (
+    ConcreteOpenQuestion, ConcreteOpenQuestion, ConcreteOpenQuestion,
+    ConcreteOpenQuestion, ConcreteOpenQuestion,
+) {
+    (
+        msfs_open_question_q1(),
+        msfs_open_question_q2(),
+        msfs_open_question_q3(),
+        msfs_open_question_q4(),
+        msfs_open_question_q5(),
+    )
+}

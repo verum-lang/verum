@@ -21,6 +21,7 @@ module core.math.s_definable;
 
 mount core.math.s_definable.class_s_s.{
     SSMembership,
+    RefinedSSMembership,
     msfs_s_s_local_base,
     msfs_s_s_closed_under_kan_extensions,
     msfs_s_s_closed_under_grothendieck,
@@ -32,6 +33,9 @@ mount core.math.s_definable.class_s_s.{
     msfs_s_s_global_u_2_small,
     msfs_s_s_local_subset_global,
     msfs_s_s_equals_global,
+    msfs_ss_local_implies_global,
+    msfs_ss_either_flag_implies_global,
+    msfs_refined_ss_depth_nonneg,
 };
 
 mount core.math.s_definable.lemma_3_4.{

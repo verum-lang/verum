@@ -37,3 +37,4 @@
 mount core.verify.level.*;
 mount core.verify.attempt.*;
 mount core.verify.certificate.*;
+mount core.verify.coherence.*;
