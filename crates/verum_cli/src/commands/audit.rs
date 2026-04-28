@@ -1082,15 +1082,15 @@ fn print_accessibility_report_json(
     println!("{}", out);
 }
 
-/// Enumerate the 18 primitive inference rules implemented by
-/// `verum_kernel`, corresponding to the rule table in
-/// `docs/verification/trusted-kernel.md`.
+/// Enumerate the kernel's primitive inference rules, corresponding
+/// to the rule tables in `docs/verification/trusted-kernel.md` +
+/// VVA §4.4 / §4.4a.
 ///
-/// This is a static list of documented rules — the auditor can
-/// cross-reference it against the kernel's rule files to verify
-/// that every documented rule has an implementation and vice
-/// versa. The kernel itself does not carry a dynamic
-/// enumeration API today (see task #64 follow-up).
+/// The audit is a static cross-reference: every entry has a
+/// `crates/verum_kernel/src/<file>.rs` implementation and at least
+/// one regression test under `crates/verum_kernel/tests/`. External
+/// auditors verify the trusted-base by walking this list and
+/// reading the cited implementations.
 pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
     /// One rule entry.
     struct Rule {
@@ -1100,26 +1100,37 @@ pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
         signature: &'static str,
     }
 
-    // Corresponds to trusted-kernel.md §4.1-§4.5.
+    // Corresponds to trusted-kernel.md §4.1–§4.5 + VVA §4.4 / §4.4a.
+    // Refinement / framework / coherent / depth-omega rules added per
+    // task #70 — the pre-V8 list listed only 18 rules but the kernel
+    // ships more (depth.rs / eps_mu.rs / cert.rs all carry rules
+    // that hadn't been surfaced to the audit display).
     const RULES: &[Rule] = &[
-        Rule { number:  1, family: "structural", name: "Var",          signature: "Γ, x:A ⊢ x : A" },
-        Rule { number:  2, family: "structural", name: "Lam",          signature: "Γ,x:A ⊢ t:B  ⟹  Γ ⊢ λx:A.t : Π x:A.B" },
-        Rule { number:  3, family: "structural", name: "App",          signature: "Γ ⊢ f:Π x:A.B, Γ ⊢ a:A  ⟹  Γ ⊢ f a : B[x↦a]" },
-        Rule { number:  4, family: "structural", name: "Pi-Form",      signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Π x:A.B : U_max" },
-        Rule { number:  5, family: "inductive",  name: "Ind-Form",     signature: "strict positivity over constructor list" },
-        Rule { number:  6, family: "inductive",  name: "Ind-Intro",    signature: "Ctor(args) well-typed vs declared signature" },
-        Rule { number:  7, family: "inductive",  name: "Ind-Elim",     signature: "exhaustive pattern-match, arm typed in motive" },
-        Rule { number:  8, family: "equality",   name: "Refl",         signature: "Refl(t) : Eq(A, t, t)" },
-        Rule { number:  9, family: "equality",   name: "Eq-Elim (J)",  signature: "Martin-Löf J" },
-        Rule { number: 10, family: "equality",   name: "UIP-Free",     signature: "reject any axiom reducing to UIP" },
-        Rule { number: 11, family: "cubical",    name: "PathTy-Form",  signature: "PathTy(A, a, b) : U" },
-        Rule { number: 12, family: "cubical",    name: "HComp",        signature: "homogeneous composition" },
-        Rule { number: 13, family: "cubical",    name: "Transp",       signature: "transport along a path of types" },
-        Rule { number: 14, family: "cubical",    name: "Glue",         signature: "glue at face φ — univalence-enabling" },
-        Rule { number: 15, family: "cubical",    name: "Univalence",   signature: "ua : Equiv(A,B) → Path(U, A, B)  (via Glue)" },
-        Rule { number: 16, family: "axiom",      name: "Axiom-Intro",  signature: "admit registered CoreTerm::Axiom" },
-        Rule { number: 17, family: "smt",        name: "SmtProof-Replay", signature: "trust-tag replay of SmtCertificate" },
-        Rule { number: 18, family: "structural", name: "Universe-Cumul", signature: "Γ ⊢ A:U_i  ⟹  Γ ⊢ A:U_{i+1}" },
+        Rule { number:  1, family: "structural", name: "K-Var",            signature: "Γ, x:A ⊢ x : A" },
+        Rule { number:  2, family: "structural", name: "K-Lam",            signature: "Γ,x:A ⊢ t:B  ⟹  Γ ⊢ λx:A.t : Π x:A.B" },
+        Rule { number:  3, family: "structural", name: "K-App",            signature: "Γ ⊢ f:Π x:A.B, Γ ⊢ a:A  ⟹  Γ ⊢ f a : B[x↦a]" },
+        Rule { number:  4, family: "structural", name: "K-Pi-Form",        signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Π x:A.B : U_max" },
+        Rule { number:  5, family: "structural", name: "K-Universe-Cumul", signature: "Γ ⊢ A:U_i  ⟹  Γ ⊢ A:U_{i+1}" },
+        Rule { number:  6, family: "structural", name: "K-Sigma-Form",     signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Σ x:A.B : U_max" },
+        Rule { number:  7, family: "inductive",  name: "K-Ind-Form",       signature: "well-formed mutual-inductive declaration" },
+        Rule { number:  8, family: "inductive",  name: "K-Pos",            signature: "strict positivity walker (depth.rs::check_strict_positivity)" },
+        Rule { number:  9, family: "inductive",  name: "K-Ind-Intro",      signature: "Ctor(args) well-typed vs declared signature" },
+        Rule { number: 10, family: "inductive",  name: "K-Ind-Elim",       signature: "exhaustive pattern-match, arm typed in motive" },
+        Rule { number: 11, family: "equality",   name: "K-Refl",           signature: "Refl(t) : Eq(A, t, t)" },
+        Rule { number: 12, family: "equality",   name: "K-Eq-Elim (J)",    signature: "Martin-Löf J" },
+        Rule { number: 13, family: "equality",   name: "K-UIP-Free",       signature: "reject any axiom reducing to UIP without @uip framework" },
+        Rule { number: 14, family: "cubical",    name: "K-PathTy-Form",    signature: "PathTy(A, a, b) : U" },
+        Rule { number: 15, family: "cubical",    name: "K-HComp",          signature: "CCHM homogeneous composition" },
+        Rule { number: 16, family: "cubical",    name: "K-Transp",         signature: "transport along a path of types" },
+        Rule { number: 17, family: "cubical",    name: "K-Glue",           signature: "glue at face φ — univalence-enabling" },
+        Rule { number: 18, family: "cubical",    name: "K-Univalence",     signature: "ua : Equiv(A,B) → Path(U, A, B)  (via Glue)" },
+        Rule { number: 19, family: "refinement", name: "K-Refine",         signature: "Γ ⊢ Refined(A,x,P) : Type_n  iff  dp(P) < dp(A)+1  (VVA §4.4)" },
+        Rule { number: 20, family: "refinement", name: "K-RefineIntro",    signature: "Γ ⊢ a:A, proof:P[a/x]  ⟹  Γ ⊢ ⟨a|proof⟩ : Refined(A,x,P)" },
+        Rule { number: 21, family: "refinement", name: "K-RefineErase",    signature: "Γ ⊢ r : Refined(A,x,P)  ⟹  Γ ⊢ r.value : A" },
+        Rule { number: 22, family: "refinement", name: "K-Refine-omega",   signature: "ordinal-valued depth (depth.rs::m_depth_omega) — opt-in via @require_extension(vfe_7)" },
+        Rule { number: 23, family: "framework",  name: "K-FwAx",           signature: "admit FrameworkAxiom(name,citation,body) — body:Prop + subsingleton" },
+        Rule { number: 24, family: "framework",  name: "K-Eps-Mu",         signature: "ε∘M ≃ A∘ε naturality witness (eps_mu.rs::check_eps_mu_coherence) — Diakrisis Prop 5.1" },
+        Rule { number: 25, family: "smt",        name: "K-Smt",            signature: "SmtCertificate(query, backend, witness) re-check via support.rs::replay_smt_cert_with_obligation" },
     ];
 
     match format {
@@ -1139,14 +1150,17 @@ pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
             }
             println!();
             println!(
-                "  Total: {} rules across 5 families (structural / inductive /",
+                "  Total: {} rules across 8 families (structural / inductive /",
                 RULES.len()
             );
             println!(
-                "  equality / cubical / axiom+smt). See docs/verification/trusted-"
+                "  equality / cubical / refinement / framework / smt). See"
             );
             println!(
-                "  kernel.md §4 for the full semantics and the LCF context."
+                "  docs/architecture/verum-verification-architecture.md §4.4 +"
+            );
+            println!(
+                "  §4.4a for the full semantics and the LCF context."
             );
         }
         AuditFormat::Json => {
