@@ -221,13 +221,10 @@ public fn issue_ticket(
     ).map_err(|_| TicketError.SealFailure)?;
 
     // Assemble wire: key_id || nonce || sealed.
-    let mut out: List<Byte> = [];
-    let mut i: Int = 0;
-    while i < 8  { out.push(stek.key_id[i]); i = i + 1; }
-    let mut j: Int = 0;
-    while j < 12 { out.push(nonce[j]); j = j + 1; }
-    let mut k: Int = 0;
-    while k < sealed.len() { out.push(sealed[k]); k = k + 1; }
+    let mut out: List<Byte> = List.with_capacity(8 + 12 + sealed.len());
+    out.extend_from_slice(&stek.key_id[..]);
+    out.extend_from_slice(&nonce[..]);
+    out.extend_from_slice(sealed.as_slice());
     Ok(out)
 }
 
@@ -252,9 +249,8 @@ public fn decrypt_ticket(
     let ct_start = 20;
 
     // Collect ciphertext + tag slice.
-    let mut ct: List<Byte> = [];
-    let mut k: Int = ct_start;
-    while k < wire.len() { ct.push(wire[k]); k = k + 1; }
+    let mut ct: List<Byte> = List.with_capacity(wire.len() - ct_start);
+    ct.extend_from_slice(&wire[ct_start..]);
 
     let mut pt: List<Byte> = [];
     aes128_gcm_open(&stek.key, &nonce, &stek.key_id, ct.as_slice(), &mut pt)
@@ -295,16 +291,10 @@ fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
     let rs_len = pt.resumption_secret.len() as UInt16;
     out.push(((rs_len >> 8) & 0xFF_u16) as Byte);
     out.push((rs_len & 0xFF_u16) as Byte);
-    let mut i: Int = 0;
-    while i < pt.resumption_secret.len() {
-        out.push(pt.resumption_secret[i]); i = i + 1;
-    }
+    out.extend_from_slice(pt.resumption_secret.as_slice());
     // ticket_nonce (u8 length prefix — RFC 8446 allows up to 255 bytes).
     out.push(pt.ticket_nonce.len() as Byte);
-    let mut n: Int = 0;
-    while n < pt.ticket_nonce.len() {
-        out.push(pt.ticket_nonce[n]); n = n + 1;
-    }
+    out.extend_from_slice(pt.ticket_nonce.as_slice());
     let m = pt.max_early_data_size;
     out.push(((m >> 24) & 0xFF_u32) as Byte);
     out.push(((m >> 16) & 0xFF_u32) as Byte);
@@ -320,8 +310,7 @@ fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
     out.push(((t >>  8) & 0xFF_u64) as Byte);
     out.push((t & 0xFF_u64) as Byte);
     out.push(pt.alpn.len() as Byte);
-    let mut j: Int = 0;
-    while j < pt.alpn.len() { out.push(pt.alpn[j]); j = j + 1; }
+    out.extend_from_slice(pt.alpn.as_slice());
     out
 }
 
@@ -336,9 +325,8 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
     let rs_len: Int = (((buf[3] as UInt16) << 8) | (buf[4] as UInt16)) as Int;
     let rs_end = 5 + rs_len;
     if rs_end > buf.len() { return Err(TicketError.MalformedTicket); }
-    let mut rs: List<Byte> = [];
-    let mut i: Int = 5;
-    while i < rs_end { rs.push(buf[i]); i = i + 1; }
+    let mut rs: List<Byte> = List.with_capacity(rs_len);
+    rs.extend_from_slice(&buf[5..rs_end]);
 
     // Version-gated ticket_nonce (v2 only).
     let mut ticket_nonce: List<Byte> = [];
@@ -348,8 +336,8 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
         let n_len = buf[rs_end] as Int;
         let n_end = rs_end + 1 + n_len;
         if n_end > buf.len() { return Err(TicketError.MalformedTicket); }
-        let mut nn: Int = rs_end + 1;
-        while nn < n_end { ticket_nonce.push(buf[nn]); nn = nn + 1; }
+        ticket_nonce = List.with_capacity(n_len);
+        ticket_nonce.extend_from_slice(&buf[rs_end + 1..n_end]);
         post_nonce = n_end;
     }
 
@@ -373,9 +361,8 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
     let alpn_len = buf[alpn_base] as Int;
     let alpn_end = alpn_base + 1 + alpn_len;
     if alpn_end > buf.len() { return Err(TicketError.MalformedTicket); }
-    let mut alpn: List<Byte> = [];
-    let mut k: Int = alpn_base + 1;
-    while k < alpn_end { alpn.push(buf[k]); k = k + 1; }
+    let mut alpn: List<Byte> = List.with_capacity(alpn_len);
+    alpn.extend_from_slice(&buf[alpn_base + 1..alpn_end]);
 
     Ok(ServerTicketPlaintext {
         cipher_suite:        cipher,
