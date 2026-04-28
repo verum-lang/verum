@@ -65,6 +65,51 @@ public type OtpError is
     | UnsupportedHash
     | Base32Decode;
 
+// Display + Debug + Eq for OtpError — standard stdlib
+// protocol impls.
+
+implement Display for OtpError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OtpError.InvalidSecret =>
+                f.write_str("OTP secret is empty or malformed"),
+            OtpError.InvalidDigits(n) =>
+                f.write_str(f"OTP digit count {n} outside permitted range".as_str()),
+            OtpError.InvalidStep =>
+                f.write_str("TOTP time-step must be > 0"),
+            OtpError.UnsupportedHash =>
+                f.write_str("OTP hash algorithm not supported"),
+            OtpError.Base32Decode =>
+                f.write_str("OTP base32 secret decode failure"),
+        }
+    }
+}
+
+implement Debug for OtpError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OtpError.InvalidSecret    => f.write_str("InvalidSecret"),
+            OtpError.InvalidDigits(n) => f.write_str(f"InvalidDigits({n})".as_str()),
+            OtpError.InvalidStep      => f.write_str("InvalidStep"),
+            OtpError.UnsupportedHash  => f.write_str("UnsupportedHash"),
+            OtpError.Base32Decode     => f.write_str("Base32Decode"),
+        }
+    }
+}
+
+implement Eq for OtpError {
+    fn eq(&self, other: &OtpError) -> Bool {
+        match (self, other) {
+            (OtpError.InvalidSecret,    OtpError.InvalidSecret)    => true,
+            (OtpError.InvalidDigits(a), OtpError.InvalidDigits(b)) => a == b,
+            (OtpError.InvalidStep,      OtpError.InvalidStep)      => true,
+            (OtpError.UnsupportedHash,  OtpError.UnsupportedHash)  => true,
+            (OtpError.Base32Decode,     OtpError.Base32Decode)     => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Constants
 // =============================================================================
