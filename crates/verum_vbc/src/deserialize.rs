@@ -49,9 +49,45 @@ struct ExtensionsData {
 }
 
 /// Deserializes a VBC module from binary data.
+///
+/// **Trust model**: this entry point assumes the input was produced
+/// by a trusted compiler / source.  It performs structural decoding
+/// only — no per-instruction cross-reference validation.  Use
+/// [`deserialize_module_validated`] for loads from any other source
+/// (archives shared across processes, network-loaded modules, files
+/// edited by hand).
 pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
     let mut deserializer = Deserializer::new(data);
     deserializer.deserialize()
+}
+
+/// Deserializes a VBC module from binary data **and** runs the
+/// per-instruction bytecode validator before returning.
+///
+/// This is the architectural defense for loading bytecode that may
+/// not have come from a trusted source — it walks every function's
+/// instruction stream and rejects:
+///
+///   * Out-of-range `FunctionId` in `Call` / `TailCall` / `CallG` /
+///     `NewClosure`.
+///   * Register references past the function's `register_count`.
+///   * Branch offsets (`Jmp` / `JmpIf` / `JmpNot` / `JmpCmp` /
+///     `Switch` / `TryBegin`) that fall outside the function's
+///     bytecode region or land mid-instruction.
+///   * Out-of-range `ConstId` in `LoadK`.
+///   * Out-of-range `StringId` (CallM's method_id, Panic's message_id).
+///   * Decoder failures mid-stream.
+///
+/// Catches at LOAD time what the interpreter would otherwise catch
+/// on execution-reach (best case) or silent state corruption (worst
+/// case).  Cost is O(N) in total instruction count; use when the
+/// bytecode source is not the in-process compiler.
+///
+/// Closes round-1 §3.1 + round-2 §3.1 of the red-team review.
+pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
+    let module = deserialize_module(data)?;
+    crate::validate::validate_module(&module)?;
+    Ok(module)
 }
 
 /// VBC module deserializer.

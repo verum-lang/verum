@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{VbcError, VbcResult};
 use crate::module::VbcModule;
 use crate::serialize::serialize_module;
-use crate::deserialize::deserialize_module;
+use crate::deserialize::{deserialize_module, deserialize_module_validated};
 
 // ============================================================================
 // Compression Support (VBC Optimization Audit Phase 3)
@@ -485,6 +485,35 @@ impl VbcArchive {
         };
 
         deserialize_module(&decompressed)
+    }
+
+    /// Loads a module from the archive **and** validates the
+    /// per-instruction bytecode cross-references before returning.
+    ///
+    /// Use this when the archive comes from any non-trusted source:
+    /// a download, a shared cache, a file edited by hand.  Catches
+    /// hand-crafted-bytecode attacks (out-of-range FunctionId,
+    /// register-bounds violations, branch offsets landing mid-
+    /// instruction, etc.) at load time instead of execution-reach.
+    ///
+    /// See [`deserialize_module_validated`] for the full list of
+    /// invariants checked.  Cost is O(N) in total instruction count
+    /// across all functions in the module.
+    pub fn load_module_validated(&self, name: &str) -> VbcResult<VbcModule> {
+        let entry_idx = self.get_entry_index(name)
+            .ok_or_else(|| VbcError::ArchiveError(format!("Module not found: {}", name)))?;
+
+        let data = self.get_module_data(entry_idx)
+            .ok_or_else(|| VbcError::ArchiveError(format!("Module data not found: {}", name)))?;
+
+        let decompressed = if self.header.flags.contains(ArchiveFlags::COMPRESSED) {
+            decompress_data(data)
+                .map_err(|e| VbcError::ArchiveError(format!("Decompression error: {}", e)))?
+        } else {
+            data.to_vec()
+        };
+
+        deserialize_module_validated(&decompressed)
     }
 
     /// Returns whether this archive uses compression.
