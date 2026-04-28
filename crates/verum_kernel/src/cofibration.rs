@@ -66,12 +66,15 @@ impl FaceLit {
 /// The empty clause represents `⊤` (no constraints, always-true).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Clause {
+    /// Conjunction of face literals.  Empty set ≡ `⊤`.
     pub lits: BTreeSet<FaceLit>,
 }
 
 impl Clause {
+    /// The empty clause `⊤` — no face constraints.
     pub fn empty() -> Self { Self::default() }
 
+    /// A clause containing exactly one face literal.
     pub fn singleton(lit: FaceLit) -> Self {
         let mut lits = BTreeSet::new();
         lits.insert(lit);
@@ -117,6 +120,8 @@ impl Clause {
 /// Invariant: no clause subsumes another (canonical / minimal DNF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaceFormula {
+    /// Disjunction of conjunctive clauses.  Canonical DNF — no
+    /// clause subsumes another.
     pub clauses: Vec<Clause>,
 }
 
