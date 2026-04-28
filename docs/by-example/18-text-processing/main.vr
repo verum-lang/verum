@@ -1,0 +1,46 @@
+// docs/by-example/18-text-processing/main.vr
+// Text processing: UTF-8-native, slices, builders, format literals.
+
+mount core.text.builder.TextBuilder;
+mount core.io.println;
+
+fn main() {
+    let greeting: Text = "Hello, World!";
+
+    // Length is byte-length (`len()`), not char count. UTF-8 is the
+    // implicit encoding; `chars()` walks code points correctly.
+    println(f"byte len:  {greeting.len()}");
+    println(f"char count: {greeting.chars().count()}");
+
+    // Slicing is byte-indexed. Indexing a string by byte offset is
+    // safe in Verum — the slicer panics if the offset doesn't land
+    // on a UTF-8 boundary, but you can't get torn-codepoint corruption.
+    let prefix: Text = greeting.slice(0, 5);
+    println(f"prefix: '{prefix}'");
+
+    // Searching: case-sensitive equality, case-insensitive equality,
+    // substring search. All UTF-8-native.
+    println(f"contains 'World': {greeting.contains(&'World')}");
+    println(f"starts with 'Hello': {greeting.starts_with(&'Hello')}");
+
+    // Format literals — f"..." interpolates expressions.
+    let name = "alice";
+    let age = 30;
+    let line: Text = f"{name} is {age:03} years old";   // 03 = pad to 3 digits
+    println(line);
+
+    // TextBuilder for incremental construction. Single growing
+    // buffer, amortised O(1) per push. Use this instead of
+    // repeated `+ &` concatenation, which copies on every step.
+    let mut b = TextBuilder.new();
+    for word in ["the", "quick", "brown", "fox"].iter() {
+        if !b.is_empty() { b.push(&" "); }
+        b.push_str(word);
+    }
+    let sentence: Text = b.into_text();
+    println(f"sentence: '{sentence}'");
+
+    // Hex / debug formatting for binary data.
+    let n: Int = 255;
+    println(f"decimal: {n}, hex: 0x{n:x}, binary: 0b{n:b}");
+}

@@ -1,0 +1,46 @@
+// docs/by-example/16-context-system/main.vr
+// Context system: explicit dependency injection without globals.
+
+mount core.context.{provide, using};
+mount core.io.println;
+
+type Logger is { prefix: Text };
+type Database is { url: Text };
+
+implement Logger {
+    public fn log(&self, msg: &Text) {
+        println(f"[{self.prefix}] {msg}");
+    }
+}
+
+implement Database {
+    public fn query(&self, sql: &Text) -> Text {
+        f"({self.url}) -> {sql}"
+    }
+}
+
+// `using` declares the function's context dependencies — explicit,
+// not pulled from a global registry. Callers must `provide` matching
+// values within the call's scope.
+fn process_request using [Logger, Database](id: Int) -> Text {
+    Logger.log(&f"processing {id}");
+    let row = Database.query(&f"SELECT * FROM users WHERE id = {id}");
+    Logger.log(&f"got: {row}");
+    row
+}
+
+fn main() {
+    let logger = Logger { prefix: "demo".clone() };
+    let db = Database { url: "sqlite://local.db".clone() };
+
+    // `provide` binds context values for the dynamic scope of the
+    // block. The `process_request` call resolves `Logger` and
+    // `Database` from this scope at compile time.
+    provide logger, db {
+        let result = process_request(42);
+        println(f"final result: {result}");
+    }
+
+    // Outside the `provide` block, `process_request(42)` would be
+    // a compile error — its `using` declaration is unsatisfied.
+}
