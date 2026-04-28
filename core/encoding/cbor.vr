@@ -71,6 +71,52 @@ public type CborError is
     | MapTooLarge
     | TrailingBytes(Int);
 
+implement Display for CborError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated(off)        => f.write_str(f"CBOR: truncated at offset {off}".as_str()),
+            InvalidHeader(b)      => f.write_str(f"CBOR: invalid header byte 0x{b:x}".as_str()),
+            InvalidUtf8           => f.write_str("CBOR: invalid UTF-8 in text string"),
+            InvalidIndefinite     => f.write_str("CBOR: invalid indefinite-length encoding"),
+            NestingTooDeep        => f.write_str("CBOR: nesting too deep"),
+            ArrayTooLarge         => f.write_str("CBOR: array too large"),
+            MapTooLarge           => f.write_str("CBOR: map too large"),
+            TrailingBytes(n)      => f.write_str(f"CBOR: {n} trailing bytes after value".as_str()),
+        }
+    }
+}
+
+implement Debug for CborError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated(off)        => f.write_str(f"Truncated({off})".as_str()),
+            InvalidHeader(b)      => f.write_str(f"InvalidHeader(0x{b:x})".as_str()),
+            InvalidUtf8           => f.write_str("InvalidUtf8"),
+            InvalidIndefinite     => f.write_str("InvalidIndefinite"),
+            NestingTooDeep        => f.write_str("NestingTooDeep"),
+            ArrayTooLarge         => f.write_str("ArrayTooLarge"),
+            MapTooLarge           => f.write_str("MapTooLarge"),
+            TrailingBytes(n)      => f.write_str(f"TrailingBytes({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for CborError {
+    fn eq(&self, other: &CborError) -> Bool {
+        match (self, other) {
+            (Truncated(a),       Truncated(b))       => a == b,
+            (InvalidHeader(a),   InvalidHeader(b))   => a == b,
+            (InvalidUtf8,        InvalidUtf8)        => true,
+            (InvalidIndefinite,  InvalidIndefinite)  => true,
+            (NestingTooDeep,     NestingTooDeep)     => true,
+            (ArrayTooLarge,      ArrayTooLarge)      => true,
+            (MapTooLarge,        MapTooLarge)        => true,
+            (TrailingBytes(a),   TrailingBytes(b))   => a == b,
+            _ => false,
+        }
+    }
+}
+
 public const MAX_CBOR_NESTING: Int = 128;
 
 // Maximum number of items in a single CBOR array.  CBOR's wire format

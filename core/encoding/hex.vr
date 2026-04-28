@@ -32,6 +32,54 @@ public type HexErrorKind is
       InvalidChar
     | InvalidLength;
 
+implement Display for HexErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            InvalidChar    => "InvalidChar",
+            InvalidLength  => "InvalidLength",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for HexErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            InvalidChar    => "InvalidChar",
+            InvalidLength  => "InvalidLength",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for HexErrorKind {
+    fn eq(&self, other: &HexErrorKind) -> Bool {
+        match (self, other) {
+            (InvalidChar,   InvalidChar)   => true,
+            (InvalidLength, InvalidLength) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for HexError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"hex {self.kind} at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for HexError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"HexError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for HexError {
+    fn eq(&self, other: &HexError) -> Bool {
+        self.kind == other.kind && self.position == other.position && self.message == other.message
+    }
+}
+
 // Encode using lowercase hex digits ('0'-'9', 'a'-'f').
 public fn encode(input: &[Byte]) -> Text {
     encode_with(input, false)

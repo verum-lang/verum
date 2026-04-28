@@ -94,6 +94,49 @@ public type HpkeError is
     | SequenceOverflow
     | BadEncapsulation;
 
+// All HPKE failure modes are unit variants — RFC 9180 §9.7
+// recommends value-blind error reporting at the HPKE boundary
+// to avoid AEAD/KDF oracle attacks against ECH / MLS / ODoH.
+
+implement Display for HpkeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            KemFailure         => "HPKE: KEM operation failed",
+            KdfFailure         => "HPKE: KDF derivation failed",
+            AeadFailure        => "HPKE: AEAD seal/open failed",
+            SequenceOverflow   => "HPKE: sequence-number overflow",
+            BadEncapsulation   => "HPKE: bad encapsulation blob",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for HpkeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            KemFailure         => "KemFailure",
+            KdfFailure         => "KdfFailure",
+            AeadFailure        => "AeadFailure",
+            SequenceOverflow   => "SequenceOverflow",
+            BadEncapsulation   => "BadEncapsulation",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for HpkeError {
+    fn eq(&self, other: &HpkeError) -> Bool {
+        match (self, other) {
+            (KemFailure,         KemFailure)         => true,
+            (KdfFailure,         KdfFailure)         => true,
+            (AeadFailure,        AeadFailure)        => true,
+            (SequenceOverflow,   SequenceOverflow)   => true,
+            (BadEncapsulation,   BadEncapsulation)   => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Encapsulation (the `enc` wire blob) — X25519 public key of the sender
 // =============================================================================

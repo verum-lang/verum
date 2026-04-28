@@ -67,6 +67,34 @@ public type JcsError is
       JsonParseFailed(JsonError)
     | UnsupportedValue(Text);      // NaN / Inf / custom — JSON can't represent
 
+implement Display for JcsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            JsonParseFailed(e)  => f.write_str(f"JCS canonicalisation: {e}".as_str()),
+            UnsupportedValue(s) => f.write_str(f"JCS canonicalisation: unsupported value ({s})".as_str()),
+        }
+    }
+}
+
+implement Debug for JcsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            JsonParseFailed(e)  => f.write_str(f"JsonParseFailed({e:?})".as_str()),
+            UnsupportedValue(s) => f.write_str(f"UnsupportedValue({s})".as_str()),
+        }
+    }
+}
+
+implement Eq for JcsError {
+    fn eq(&self, other: &JcsError) -> Bool {
+        match (self, other) {
+            (JsonParseFailed(a),  JsonParseFailed(b))  => a == b,
+            (UnsupportedValue(a), UnsupportedValue(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Canonicalise a JsonValue
 // =============================================================================

@@ -63,6 +63,37 @@ public type JsonPointerError is
     | InvalidEscape(Text)
     | PointerTooLong { limit_bytes: Int };
 
+implement Display for JsonPointerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)             => f.write_str(f"JSON pointer: malformed ({reason})".as_str()),
+            InvalidEscape(reason)         => f.write_str(f"JSON pointer: invalid escape ({reason})".as_str()),
+            PointerTooLong { limit_bytes }=> f.write_str(f"JSON pointer: exceeds {limit_bytes} bytes".as_str()),
+        }
+    }
+}
+
+implement Debug for JsonPointerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)             => f.write_str(f"Malformed({reason})".as_str()),
+            InvalidEscape(reason)         => f.write_str(f"InvalidEscape({reason})".as_str()),
+            PointerTooLong { limit_bytes }=> f.write_str(f"PointerTooLong {{ limit_bytes: {limit_bytes} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for JsonPointerError {
+    fn eq(&self, other: &JsonPointerError) -> Bool {
+        match (self, other) {
+            (Malformed(a),     Malformed(b))     => a == b,
+            (InvalidEscape(a), InvalidEscape(b)) => a == b,
+            (PointerTooLong { limit_bytes: a }, PointerTooLong { limit_bytes: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Maximum permitted JSON Pointer string length in bytes.  RFC 6901
 /// places no upper bound — hostile callers can construct multi-MB
 /// pointers that pin the parser walking byte-by-byte through the

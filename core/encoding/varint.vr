@@ -70,6 +70,54 @@ public type VarintErrorKind is
       Truncated            // buffer ran out before the varint did
     | Overflow;            // value would not fit in an Int64
 
+implement Display for VarintErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated => "Truncated",
+            Overflow  => "Overflow",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for VarintErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated => "Truncated",
+            Overflow  => "Overflow",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for VarintErrorKind {
+    fn eq(&self, other: &VarintErrorKind) -> Bool {
+        match (self, other) {
+            (Truncated, Truncated) => true,
+            (Overflow,  Overflow)  => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for VarintError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"varint {self.kind} at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for VarintError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"VarintError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for VarintError {
+    fn eq(&self, other: &VarintError) -> Bool {
+        self.kind == other.kind && self.position == other.position && self.message == other.message
+    }
+}
+
 // =============================================================================
 // SQLite varint — encoding
 // =============================================================================
