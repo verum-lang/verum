@@ -1,0 +1,42 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, null-safety, raw-pointer, method-dispatch, regression
+// @timeout: 5000
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Regression guardrail for #201.
+//
+// Pins the codegen-level fix that routes `is_null()` on raw-pointer
+// receivers (`&unsafe T`, `*const T`, `*mut T`) directly to the
+// `ptr_is_null` intrinsic instead of CallM-dispatching by bare name.
+//
+// Pre-fix: codegen emitted `CallM` keyed by the bare name `is_null`.
+// The runtime resolved that to the user-defined `FatRef.is_null`
+// function (registered when `core/mem/fat_ref.vr` was processed),
+// which reads `self.generation` at offset 0.  A raw pointer has no
+// generation field, so its u64 address was reinterpreted as a
+// generation counter and the runtime panicked with a null-pointer
+// dereference at pc=0 inside `FatRef.is_null` — the entire
+// `List.try_with_capacity` / `List.with_capacity` allocator surface
+// was therefore non-functional.
+//
+// Fix: `compile_cast` now marks the result register of any cast to
+// `&unsafe T` / `*const T` / `*mut T` as a raw pointer, the flag
+// propagates through `compile_pattern_bind`'s Mov, and
+// `compile_method_call` intercepts `is_null` on raw-pointer
+// receivers and emits `Instruction::Call` to the registered
+// stdlib-intrinsic function `is_null` (mapped to `ptr_is_null`
+// at codegen/mod.rs:1656).
+//
+// This test exercises the fix end-to-end: a successful
+// `List.try_with_capacity(8)` call must reach the `Ok(...)` branch
+// of `ptr.is_null()`, NOT panic at FatRef.is_null pc=0.
+
+fn main() {
+    let r: Result<List<Int>, AllocError> = List.try_with_capacity(8);
+    match r {
+        Ok(_) => print("ok"),
+        Err(_) => print("err"),
+    }
+}
