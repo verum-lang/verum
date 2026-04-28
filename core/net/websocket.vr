@@ -415,11 +415,17 @@ public fn validate_server_handshake(headers: &Headers) -> Maybe<Text> {
 // =============================================================================
 
 fn ascii_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
+    // Fold only A-Z to a-z; naive `b | 0x20` mutates non-letters too
+    // (e.g. `\r` | 0x20 = `-`) and produces false-positive equality
+    // for byte pairs that differ only in bit 5. See sibling fix in
+    // core/net/http_parser.vr / core/tracing/propagation.vr.
     if a.len() != b.len() { return false; }
     let mut i = 0;
     while i < a.len() {
-        let ca = a[i] | 0x20;
-        let cb = b[i] | 0x20;
+        let ra = a[i];
+        let rb = b[i];
+        let ca = if ra >= 0x41_u8 && ra <= 0x5A_u8 { ra | 0x20_u8 } else { ra };
+        let cb = if rb >= 0x41_u8 && rb <= 0x5A_u8 { rb | 0x20_u8 } else { rb };
         if ca != cb { return false; }
         i = i + 1;
     }

@@ -644,12 +644,22 @@ fn parse_decimal_u32(bytes: &[Byte]) -> Maybe<UInt32> {
 /// ASCII case-insensitive equality. HTTP header names are
 /// case-insensitive per RFC 7230 §3.2; the SIMD-scan does the lookup
 /// cheaply because we tolower both sides during compare.
+///
+/// Folds only when the byte is in the A-Z range. Naively OR'ing 0x20
+/// into every byte folds non-letter ASCII too — `\r` (0x0D) | 0x20 ==
+/// `-` (0x2D), `@` (0x40) | 0x20 == `` ` `` (0x60), etc. — producing
+/// false-positive matches across pair-shifts that differ only in bit 5.
+/// Header-name token grammar (RFC 7230 §3.2.6) excludes those chars,
+/// so a strict tokeniser ahead of this call rules out exploit paths;
+/// nevertheless, the comparator's own contract should be tight.
 fn ascii_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
     if a.len() != b.len() { return false; }
     let mut i = 0;
     while i < a.len() {
-        let ac = a[i] | 0x20;   // force-lowercase any ASCII letter
-        let bc = b[i] | 0x20;
+        let ra = a[i];
+        let rb = b[i];
+        let ac = if ra >= 0x41_u8 && ra <= 0x5A_u8 { ra | 0x20_u8 } else { ra };
+        let bc = if rb >= 0x41_u8 && rb <= 0x5A_u8 { rb | 0x20_u8 } else { rb };
         if ac != bc { return false; }
         i = i + 1;
     }
