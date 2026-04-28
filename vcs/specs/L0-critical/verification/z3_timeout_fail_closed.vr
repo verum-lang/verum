@@ -1,0 +1,43 @@
+// @test: verify-fail
+// @tier: 0
+// @level: L0
+// @tags: verification, smt, timeout, soundness, red-team-1.5
+// @timeout: 50
+// @expected-error: verification-timeout
+//
+// Red-team round 1 vector 5.1/5.2 — fail-closed guardrail (L0-critical).
+//
+// Invariant being pinned: when Z3 cannot decide a refinement obligation
+// within the configured timeout (here 50ms), the verifier MUST reject
+// the program. Acceptance under SMT-Unknown verdict would be unsound
+// (silently lifts a refinement obligation the solver could not discharge).
+//
+// Audit trail: vcs/red-team/round-1-architecture.md §5.1 documents
+// the 9 SatResult::Unknown consumer sites; this guardrail pins the
+// surface-level invariant they jointly enforce.
+//
+// Companion tests:
+//   - L1-core/refinement/smt/proof_timeout.vr           (broader L1 surface)
+//   - crates/verum_smt/tests/timeout_fail_closed_invariant.rs (Rust-level)
+
+// A predicate Z3 cannot decide in 50ms: nonlinear arithmetic over
+// arbitrary integers with deeply nested arithmetic. Z3's default
+// arithmetic tactic is incomplete on nonlinear quantified formulas.
+@verify(formal)
+fn z3_unknown_witness(a: Int, b: Int, c: Int, d: Int)
+    requires a > 0 && b > 0 && c > 0 && d > 0
+    requires a < 1_000_000 && b < 1_000_000 && c < 1_000_000 && d < 1_000_000
+    ensures  a * a * a * b * b - c * c * c * d * d != 0
+                || (a == 0 && b == 0 && c == 0 && d == 0)
+{
+    // Body deliberately empty — the obligation is `ensures` itself.
+    // Z3 in 50ms cannot decide nonlinear quartic identities over
+    // 4 unbounded Ints, so the verifier MUST return verification-timeout.
+    // If the verifier silently passes (fail-open), this test PASSES the
+    // typecheck phase and our `@test: verify-fail` expectation is violated
+    // — that would be a soundness defect.
+}
+
+fn main() {
+    print("L0-critical: red-team-1.5 fail-closed guardrail");
+}
