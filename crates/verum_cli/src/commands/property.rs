@@ -565,17 +565,15 @@ pub fn run_property(
     interp.state.config.timeout_ms = 0;
 
     let total_runs = if cfg.pinned_seed { 1 } else { cfg.runs };
-    let mut seed = cfg.seed;
 
     for i in 0..total_runs {
         // Fresh generator streams per iteration, independent of other iters.
-        let iter_seed = if cfg.pinned_seed { cfg.seed } else { {
+        let seed = if cfg.pinned_seed { cfg.seed } else { {
             // Mix seed + iteration so each run gets a distinct yet
             // deterministic starting point.
             let (a, _) = split(Seed(cfg.seed.0 ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
             a
         }};
-        seed = iter_seed;
 
         // Derive per-parameter streams from the iteration seed.
         let (mut left, mut right) = split(seed);
