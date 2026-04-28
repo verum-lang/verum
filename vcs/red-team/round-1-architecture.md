@@ -403,7 +403,7 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 3.2 MakeVariant overflow | DEFECT | #167 |
 | 3.3 Lenient SKIP | PARTIAL | #176 |
 | 4.1 Same-name @cfg types | DEFENSE | — |
-| 4.2 Deep super | DEFENSE | — |
+| 4.2 Deep super | **DEFENSE CONFIRMED** | guardrail (2026-04-28) |
 | 4.3 Mount alias shadow | **DEFENSE CONFIRMED** | guardrail (2026-04-28) |
 | 5.1 Z3 timeout policy | **DEFENSE CONFIRMED** | 9-site audit + 3 guardrails (2026-04-28) |
 | 5.2 Always-timeout | **DEFENSE CONFIRMED** | guardrails pin fail-closed (2026-04-28) |
@@ -412,9 +412,9 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 7.1 Tier-0 vs Tier-1 | **DEFENSE CONFIRMED** | #196 + RT-1.7.2 + RT-2.2.2/2.3.3 cross-coverage (2026-04-28) |
 | 7.2 Hash determinism | **DEFENSE CONFIRMED** | full audit + 7 L0 guardrails (2026-04-28) |
 
-**13 vectors confirmed defended (full or partial), 5 pending** (post 2026-04-28
+**14 vectors confirmed defended (was 13), 4 pending** (post 2026-04-28
 RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 + RT-1.6.2 + RT-1.6.1 + RT-1.7.1
-closures). Round 1 success condition: every PENDING entry has either a
++ RT-1.4.2 closures). Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.

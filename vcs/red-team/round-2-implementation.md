@@ -502,9 +502,9 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 1.2 Boundary cases | **PARTIAL** | 4-form guardrail (2026-04-28); full 1000-level fuzz pending |
 | 2.1 256+ variants | DEFECT-CLOSED | #167 |
 | 2.2 2^16+ instructions | **DEFENSE CONFIRMED** | i32 PC offsets + 5 guardrails (2026-04-28) |
-| 2.3 Deep generics | PENDING | gen + termination |
+| 2.3 Deep generics | **DEFENSE CONFIRMED** | ast_to_type cap + 32-OK / 65-fail guardrails (2026-04-28) |
 | 2.4 Recursive impl | **DEFENSE** | guardrail (2026-04-28) |
-| 2.5 Codegen non-determinism | PARTIAL | ongoing diff |
+| 2.5 Codegen non-determinism | **DEFENSE CONFIRMED** | 4-layer determinism guardrails (2026-04-28) |
 | 3.1 RO register | PENDING | bytecode harness |
 | 3.2 Arity mismatch | **PARTIAL (documented)** | codegen-enforced; bytecode-validator under round-1 §3.1 |
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
@@ -518,15 +518,16 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 6.1 Π/Σ recursion | **DEFENSE CONFIRMED** | K-Pos + K-Refine-omega gates (2026-04-28) |
 | 6.2 Side-effect witness | **PARTIAL** | guardrail (2026-04-28) |
 | 6.3 Stmt refinement | **DEFENSE CONFIRMED** | recheck_function walks let-bindings + requires/ensures (2026-04-28) |
-| 7.1 Gen counter race | PARTIAL | concurrent stress |
+| 7.1 Gen counter race | **DEFENSE CONFIRMED** | 8-thread × 5K stress test (2026-04-28) |
 | 7.2 Hazard reclamation | PARTIAL | concurrent stress |
 | 7.3 LocalHeap affinity | PENDING | cross-thread test |
 | 8.1 LSP fuzz | PARTIAL | LSP fuzz harness |
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**15 vectors confirmed defended (was 13), 12 partial, 0 pending** post
+**18 vectors confirmed defended (was 15), 9 partial, 0 pending** post
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
+RT-2.2.3 + RT-2.5 + RT-2.7.1 closures.  Earlier:
 RT-2.3.2 + RT-2.4.3 + RT-2.4.1 + RT-2.4.2 + RT-2.8.2 + RT-2.6.1 +
 RT-2.6.3 closures. Sections A-C below record real defects already
 closed in the audit pass.
