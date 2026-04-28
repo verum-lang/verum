@@ -265,18 +265,18 @@ fn sort_keys_utf16(keys: &mut List<Text>) {
         i = i + 1;
     }
 
-    // Insertion sort by UTF-16 lex.
-    let mut x: Int = 1;
-    while x < pairs.len() {
-        let mut y: Int = x;
-        while y > 0 && utf16_lt(&pairs[y].0, &pairs[y - 1].0) {
-            let tmp_u = clone_u16_vec(&pairs[y].0);
-            let tmp_t = pairs[y].1.clone();
-            pairs[y] = (clone_u16_vec(&pairs[y - 1].0), pairs[y - 1].1.clone());
-            pairs[y - 1] = (tmp_u, tmp_t);
-            y = y - 1;
-        }
-        x = x + 1;
+    // Bottom-up merge sort — O(n log n) instead of the previous
+    // insertion sort's O(n²). JCS is consumed at the JSON-Sign /
+    // JWS-on-JSON / VC / Matrix-event boundary; keys come from a
+    // user-supplied JSON object that's already capped at
+    // MAX_JSON_OBJECT_KEYS=1M (#203 sibling). 1M² = 10^12 element
+    // compares is hours of CPU per request — a CPU-DoS amplifier
+    // even when the JSON parser correctly bounded the input. With
+    // O(n log n) the same 1M-key request takes ~20× the unsorted
+    // walk: minutes vs hours.
+    let n = pairs.len();
+    if n > 1 {
+        merge_sort_pairs(&mut pairs, 0, n);
     }
 
     // Rebuild `keys` in the sorted order.
@@ -287,6 +287,54 @@ fn sort_keys_utf16(keys: &mut List<Text>) {
         j = j + 1;
     }
     *keys = out;
+}
+
+// Top-down merge sort over `pairs[start..end]` by UTF-16 key order.
+fn merge_sort_pairs(pairs: &mut List<(List<UInt16>, Text)>, start: Int, end: Int) {
+    if end - start <= 1 { return; }
+    let mid = start + (end - start) / 2;
+    merge_sort_pairs(pairs, start, mid);
+    merge_sort_pairs(pairs, mid, end);
+    merge_pairs(pairs, start, mid, end);
+}
+
+fn merge_pairs(pairs: &mut List<(List<UInt16>, Text)>, start: Int, mid: Int, end: Int) {
+    // Materialise the two halves into scratch lists so the merge can
+    // overwrite `pairs[start..end]` left-to-right without aliasing.
+    let mut left: List<(List<UInt16>, Text)> = [];
+    let mut right: List<(List<UInt16>, Text)> = [];
+    let mut i: Int = start;
+    while i < mid {
+        left.push((clone_u16_vec(&pairs[i].0), pairs[i].1.clone()));
+        i = i + 1;
+    }
+    while i < end {
+        right.push((clone_u16_vec(&pairs[i].0), pairs[i].1.clone()));
+        i = i + 1;
+    }
+    let mut li: Int = 0;
+    let mut ri: Int = 0;
+    let mut wi: Int = start;
+    while li < left.len() && ri < right.len() {
+        if utf16_lt(&right[ri].0, &left[li].0) {
+            pairs[wi] = (clone_u16_vec(&right[ri].0), right[ri].1.clone());
+            ri = ri + 1;
+        } else {
+            pairs[wi] = (clone_u16_vec(&left[li].0), left[li].1.clone());
+            li = li + 1;
+        }
+        wi = wi + 1;
+    }
+    while li < left.len() {
+        pairs[wi] = (clone_u16_vec(&left[li].0), left[li].1.clone());
+        li = li + 1;
+        wi = wi + 1;
+    }
+    while ri < right.len() {
+        pairs[wi] = (clone_u16_vec(&right[ri].0), right[ri].1.clone());
+        ri = ri + 1;
+        wi = wi + 1;
+    }
 }
 
 fn clone_u16_vec(src: &List<UInt16>) -> List<UInt16> {
