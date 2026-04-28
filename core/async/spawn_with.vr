@@ -13,6 +13,7 @@
 module spawn_with;
 
 mount super.spawn_config.{SpawnConfig, RecoveryStrategy, RetryConfig, CircuitBreakerConfig, RestartPolicy};
+mount core.intrinsics.runtime.time.{monotonic_nanos};
 
 // =============================================================================
 // Retry Execution
@@ -123,19 +124,46 @@ implement CircuitBreaker {
     }
 
     /// Record a failed call — increments failure count, may open circuit.
+    /// Updates `last_failure_time_ms` so the Open→HalfOpen transition
+    /// in `is_call_allowed` has a baseline to measure reset_timeout
+    /// against. Earlier impl never wrote this field, so the breaker
+    /// stayed Open forever once tripped — defeated the entire purpose
+    /// of the circuit-breaker pattern.
     public fn record_failure(&mut self) {
         self.failure_count = self.failure_count + 1;
+        self.last_failure_time_ms = (monotonic_nanos() / 1_000_000_u64) as Int;
         if self.failure_count >= self.config.failure_threshold {
             self.state = Open;
         }
     }
 
     /// Check whether a call is currently allowed.
-    public fn is_call_allowed(&self) -> Bool {
+    ///
+    /// Drives the Open → HalfOpen transition based on the
+    /// `reset_timeout_ms` elapsed since the last recorded failure —
+    /// exactly the contract the docstring promises. Takes `&mut self`
+    /// because the time-based transition is a state mutation; an
+    /// `&self` view of the breaker would be a snapshot that's already
+    /// stale by the time the caller acts on it.
+    ///
+    /// Without this transition the breaker was stuck Open forever
+    /// once tripped (a real outage) — a dishonest implementation of
+    /// the documented "after reset_timeout, allow limited trial
+    /// calls" semantics.
+    public fn is_call_allowed(&mut self) -> Bool {
         match self.state {
             Closed => true,
             HalfOpen => true,
-            Open => false,
+            Open => {
+                let now_ms = (monotonic_nanos() / 1_000_000_u64) as Int;
+                if now_ms - self.last_failure_time_ms >= self.config.reset_timeout_ms {
+                    // Cool-down elapsed — admit limited trial traffic.
+                    self.state = HalfOpen;
+                    true
+                } else {
+                    false
+                }
+            },
         }
     }
 }
