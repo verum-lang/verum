@@ -197,6 +197,18 @@ public type TaskHandle<T> is {
     task_id: Int,
     /// Whether the task has been awaited.
     awaited: Bool,
+    /// Shared back-reference so the handle can bump
+    /// `completed_count` and append to `errors` on terminal poll.
+    /// Without this hook the previous TaskHandle.poll observed
+    /// terminal state but never told the nursery, leaving
+    /// `pending_count() = spawned - completed = spawned - 0 = spawned`
+    /// forever — `wait_tasks()` busy-spun on `yield_now()` and
+    /// never exited.
+    nursery: Shared<NurseryState>,
+    /// Idempotency guard: completion bookkeeping fires exactly once
+    /// even if the future is polled-after-Ready (the executor isn't
+    /// guaranteed to drop it on the first Ready return).
+    completed: Bool,
 };
 
 implement<T> TaskHandle<T> {
@@ -215,6 +227,22 @@ implement<T> TaskHandle<T> {
     public fn abort(&self) {
         self.inner.abort()
     }
+
+    /// Bump nursery accounting at terminal poll. Idempotent via the
+    /// `completed` flag — multiple Ready observations don't double-
+    /// count.
+    fn record_completion(&mut self, error: Maybe<Heap<Error>>) {
+        if self.completed { return; }
+        self.completed = true;
+        self.nursery.completed_count.fetch_add(1, MemoryOrdering.Release);
+        match error {
+            Some(e) => {
+                let mut errs = self.nursery.errors.lock().unwrap_or_else(|p| p.into_inner());
+                errs.push(e);
+            },
+            None => {},
+        }
+    }
 }
 
 implement<T> Future for TaskHandle<T> {
@@ -222,13 +250,24 @@ implement<T> Future for TaskHandle<T> {
 
     async fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
         match self.inner.poll(cx) {
-            Poll.Ready(Ok(value)) => Poll.Ready(Ok(value)),
-            Poll.Ready(Err(e)) if e.is_panic() =>
-                Poll.Ready(Err(NurseryError.Panic(f"{e}"))),
-            Poll.Ready(Err(e)) if e.is_cancelled() =>
-                Poll.Ready(Err(NurseryError.Cancelled)),
-            Poll.Ready(Err(e)) =>
-                Poll.Ready(Err(NurseryError.Single(Heap.new(e)))),
+            Poll.Ready(Ok(value)) => {
+                self.record_completion(None);
+                Poll.Ready(Ok(value))
+            },
+            Poll.Ready(Err(e)) if e.is_panic() => {
+                let msg = f"{e}";
+                self.record_completion(Some(Heap.new(e)));
+                Poll.Ready(Err(NurseryError.Panic(msg)))
+            },
+            Poll.Ready(Err(e)) if e.is_cancelled() => {
+                self.record_completion(Some(Heap.new(e)));
+                Poll.Ready(Err(NurseryError.Cancelled))
+            },
+            Poll.Ready(Err(e)) => {
+                let h = Heap.new(e);
+                self.record_completion(Some(h.clone()));
+                Poll.Ready(Err(NurseryError.Single(h)))
+            },
             Poll.Pending => Poll.Pending,
         }
     }
@@ -304,7 +343,7 @@ implement Nursery {
     /// Returns a `TaskHandle` that can be used to await the result.
     public fn spawn<T: Send, F: Future<Output = T> + Send>(&mut self, future: F) -> TaskHandle<T> {
         let task_id = self.state.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
-        self.state.spawned_count.fetch_add(1, MemoryOrdering.Relaxed);
+        self.state.spawned_count.fetch_add(1, MemoryOrdering.Release);
 
         let handle = super.task.spawn(future);
 
@@ -312,6 +351,8 @@ implement Nursery {
             inner: handle,
             task_id: task_id,
             awaited: false,
+            nursery: self.state.clone(),
+            completed: false,
         }
     }
 
