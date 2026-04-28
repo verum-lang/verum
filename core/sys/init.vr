@@ -94,6 +94,39 @@ implement InitError {
     }
 }
 
+implement Display for InitError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for InitError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InitError.TlsFailed { reason }          => f.write_str(f"TlsFailed {{ reason: {reason} }}".as_str()),
+            InitError.ContextFailed { reason }      => f.write_str(f"ContextFailed {{ reason: {reason} }}".as_str()),
+            InitError.AllocatorFailed { reason }    => f.write_str(f"AllocatorFailed {{ reason: {reason} }}".as_str()),
+            InitError.PanicHandlerFailed { reason } => f.write_str(f"PanicHandlerFailed {{ reason: {reason} }}".as_str()),
+            InitError.AlreadyInitialized            => f.write_str("AlreadyInitialized"),
+            InitError.NotInitialized                => f.write_str("NotInitialized"),
+        }
+    }
+}
+
+implement Eq for InitError {
+    fn eq(&self, other: &InitError) -> Bool {
+        match (self, other) {
+            (InitError.TlsFailed { reason: a },          InitError.TlsFailed { reason: b })          => a == b,
+            (InitError.ContextFailed { reason: a },      InitError.ContextFailed { reason: b })      => a == b,
+            (InitError.AllocatorFailed { reason: a },    InitError.AllocatorFailed { reason: b })    => a == b,
+            (InitError.PanicHandlerFailed { reason: a }, InitError.PanicHandlerFailed { reason: b }) => a == b,
+            (InitError.AlreadyInitialized,               InitError.AlreadyInitialized)               => true,
+            (InitError.NotInitialized,                   InitError.NotInitialized)                   => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Main Initialization Entry Point
 // =============================================================================

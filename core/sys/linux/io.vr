@@ -250,6 +250,58 @@ public type LinuxIoDriverError is
     | Timeout
     ;
 
+implement Display for LinuxIoDriverError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UringSetupFailed { code }   => f.write_str(f"Linux io: io_uring setup failed (code {code})".as_str()),
+            MmapFailed { code }         => f.write_str(f"Linux io: mmap failed (code {code})".as_str()),
+            SubmitFailed { code }       => f.write_str(f"Linux io: io_uring_enter submit failed (code {code})".as_str()),
+            WaitFailed { code }         => f.write_str(f"Linux io: io_uring_enter wait failed (code {code})".as_str()),
+            RegisterFailed { errno }    => f.write_str(f"Linux io: io_uring_register failed (errno {errno})".as_str()),
+            QueueFull                   => f.write_str("Linux io: submission queue full"),
+            Unsupported                 => f.write_str("Linux io: io_uring unsupported"),
+            EpollFailed { code }        => f.write_str(f"Linux io: epoll failed (code {code})".as_str()),
+            Cancelled                   => f.write_str("Linux io: cancelled"),
+            Timeout                     => f.write_str("Linux io: timed out"),
+        }
+    }
+}
+
+implement Debug for LinuxIoDriverError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UringSetupFailed { code }   => f.write_str(f"UringSetupFailed {{ code: {code} }}".as_str()),
+            MmapFailed { code }         => f.write_str(f"MmapFailed {{ code: {code} }}".as_str()),
+            SubmitFailed { code }       => f.write_str(f"SubmitFailed {{ code: {code} }}".as_str()),
+            WaitFailed { code }         => f.write_str(f"WaitFailed {{ code: {code} }}".as_str()),
+            RegisterFailed { errno }    => f.write_str(f"RegisterFailed {{ errno: {errno} }}".as_str()),
+            QueueFull                   => f.write_str("QueueFull"),
+            Unsupported                 => f.write_str("Unsupported"),
+            EpollFailed { code }        => f.write_str(f"EpollFailed {{ code: {code} }}".as_str()),
+            Cancelled                   => f.write_str("Cancelled"),
+            Timeout                     => f.write_str("Timeout"),
+        }
+    }
+}
+
+implement Eq for LinuxIoDriverError {
+    fn eq(&self, other: &LinuxIoDriverError) -> Bool {
+        match (self, other) {
+            (UringSetupFailed { code: a }, UringSetupFailed { code: b }) => a == b,
+            (MmapFailed { code: a },       MmapFailed { code: b })       => a == b,
+            (SubmitFailed { code: a },     SubmitFailed { code: b })     => a == b,
+            (WaitFailed { code: a },       WaitFailed { code: b })       => a == b,
+            (RegisterFailed { errno: a },  RegisterFailed { errno: b })  => a == b,
+            (QueueFull,                    QueueFull)                    => true,
+            (Unsupported,                  Unsupported)                  => true,
+            (EpollFailed { code: a },      EpollFailed { code: b })      => a == b,
+            (Cancelled,                    Cancelled)                    => true,
+            (Timeout,                      Timeout)                      => true,
+            _ => false,
+        }
+    }
+}
+
 implement IoUringDriver {
     /// Create a new io_uring driver.
     ///
