@@ -151,6 +151,30 @@ implement SchemaCache {
         self.tables.contains_key(key)
     }
 
+    /// Reverse lookup: locate the table whose B-tree root is
+    /// `root_page`.  Used by the L6 writeback bridge (and by anything
+    /// downstream that has a cursor's root_page in hand and needs to
+    /// produce the (schema, name) pair — update_hooks, audit logs,
+    /// pgoutput-style replication events).  Linear scan over the
+    /// table set; the catalogue rarely exceeds 100 tables in practice
+    /// and the call site fires at most once per mutated cursor per
+    /// statement, so the O(N) cost is well below the cost of the
+    /// underlying I/O.
+    public fn lookup_table_by_root(&self, root_page: Int) -> Maybe<TableMeta> {
+        if root_page < 1 { return None; }
+        let keys = self.tables.keys();
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let k = keys[i].clone();
+            let meta = &self.tables.get(k);
+            if meta.root_page == root_page {
+                return Some(clone_table_meta(meta));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
     // -------------------------------------------------------------------------
     // DDL hooks
     // -------------------------------------------------------------------------

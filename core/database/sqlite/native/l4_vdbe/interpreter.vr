@@ -46,6 +46,22 @@ public type StepResult is
     | Yield
     | ExecError(code: Int, msg: Text);
 
+/// Row-mutation kind — layer-neutral dual of `ext.hooks.ExtUpdateOp`.
+/// Kept here so L4 (interpreter) doesn't have to pull in L7's hook
+/// surface; the L6 writeback bridge converts to `ExtUpdateOp` when it
+/// fires user-visible update_hook callbacks.
+public type RowMutationKind is RmkInsert | RmkUpdate | RmkDelete;
+
+/// One row-level mutation observed during a single VDBE program run.
+/// The bridge replays these in original order, resolves
+/// `cursor_id` → `(schema, table)` via `Connection.schema`, and
+/// invokes the per-connection `update_hook` (when set).
+public type RowMutation is {
+    kind: RowMutationKind,
+    cursor_id: Int,
+    rowid: Int64,
+};
+
 /// Mutable interpreter state held across calls to `step`.
 public type affine VdbeState is {
     pc: Int,
@@ -54,6 +70,10 @@ public type affine VdbeState is {
     once_fired: List<Int>,       // instruction indices of Once ops that fired
     halted: Bool,
     cursors: CursorTable,        // live cursor pipeline (opened lazily)
+    /// Mutation log — captured by Insert/Delete/UpdateRow opcodes,
+    /// drained by the L6 writeback bridge to fire update_hook
+    /// callbacks.  Empty for read-only programs.
+    mutations: List<RowMutation>,
 };
 
 public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
@@ -64,6 +84,7 @@ public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
         once_fired: List.new(),
         halted: false,
         cursors: cursor_table_new(program.cursor_count(), 4096, 0),
+        mutations: List.new(),
     }
 }
 
@@ -74,6 +95,17 @@ implement VdbeState {
     public fn set_reg(&mut self, i: Int, v: Register) { self.regs.set(i, v); }
     public fn cursor_table_mut(&mut self) -> &mut CursorTable { &mut self.cursors }
     public fn cursor_table_ref(&self) -> &CursorTable { &self.cursors }
+    /// Borrow the mutation log — bridge consumers call this to fire
+    /// update_hooks.
+    public fn mutations_ref(&self) -> &List<RowMutation> { &self.mutations }
+    /// Drain the mutation log.  Bridge calls this to consume + fire
+    /// hooks, leaving the state ready for a fresh program (re-run on
+    /// the same statement).
+    public fn drain_mutations(&mut self) -> List<RowMutation> {
+        let out = self.mutations.clone();
+        self.mutations = List.new();
+        out
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -476,14 +508,14 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             // preceding Column-like setup wrote n_cols registers
             // starting at `data_reg`; we read them all. This matches
             // what the current codegen emits for PnValues INSERT.
-            let _ = key_reg;
-            // Snapshot n_cols from the cursor metadata at open time.
+            // The `key_reg` carries the rowid the row will receive
+            // (autoincrement or user-supplied) — used to populate the
+            // update_hook payload.
             let slot_kind = state.cursors.kind(cursor_id);
             match slot_kind {
                 CskClosed => { state.pc = state.pc + 1; return Yield; }
                 _ => {}
             }
-            // Pull n_cols from the slot.
             let n_cols = state.cursors.n_cols_of(cursor_id);
             let mut row: List<Register> = List.new();
             let mut i: Int = 0;
@@ -492,12 +524,34 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 i = i + 1;
             }
             let _ = state.cursors.append_row(cursor_id, row);
+            // Record the mutation for the update_hook.  rowid
+            // resolution: prefer the `key_reg` content if it's an
+            // RInt/RRowId; fall back to the cursor's most-recent
+            // assigned rowid (1-based — matches NewRowid emission).
+            let rowid: Int64 = match state.regs.get(key_reg) {
+                RInt(n)   => n,
+                RRowId(n) => n,
+                _         => state.cursors.peek_next_rowid(cursor_id) - 1_i64,
+            };
+            state.mutations.push(RowMutation {
+                kind: RmkInsert,
+                cursor_id: cursor_id,
+                rowid: rowid,
+            });
             state.pc = state.pc + 1;
             Yield
         }
 
         Delete(cursor_id) => {
+            // Capture rowid BEFORE delete so the update_hook payload
+            // points at the row that just disappeared.
+            let rowid = state.cursors.current_rowid(cursor_id);
             let _ = state.cursors.delete_current(cursor_id);
+            state.mutations.push(RowMutation {
+                kind: RmkDelete,
+                cursor_id: cursor_id,
+                rowid: rowid,
+            });
             state.pc = state.pc + 1;
             Yield
         }
@@ -506,6 +560,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             // Read n_cols registers starting at data_reg, overwrite
             // the row at current pos. Mirrors the Insert pattern but
             // replaces instead of appending.
+            let rowid = state.cursors.current_rowid(cursor_id);
             let n_cols = state.cursors.n_cols_of(cursor_id);
             let mut row: List<Register> = List.new();
             let mut i: Int = 0;
@@ -514,6 +569,11 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                 i = i + 1;
             }
             let _ = state.cursors.replace_current_row(cursor_id, row);
+            state.mutations.push(RowMutation {
+                kind: RmkUpdate,
+                cursor_id: cursor_id,
+                rowid: rowid,
+            });
             state.pc = state.pc + 1;
             Yield
         }
