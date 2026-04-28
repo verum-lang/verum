@@ -216,49 +216,157 @@ implement ShmSegment for InMemoryShm {
 }
 
 // -----------------------------------------------------------------------------
-// MappedFileShm — mmap-backed production implementation (skeleton)
+// MappedFileShm — file-path-tagged shm with process-local backing
 // -----------------------------------------------------------------------------
 //
-// Shape of the mmap-backed backend. Full mmap wiring lands with the L1
-// WAL-index consumer (§8.3), which is the only caller that needs
-// cross-process coherency. Right now this backend returns
-// `Unsupported` for every call — an honest placeholder the pager can
-// feature-detect against.
+// Backend that records the shm path and stores region blobs in a
+// process-local Map.  Functionally equivalent to `InMemoryShm` for
+// single-process deployments; the path tag lets process-local actors
+// rendezvous on the same backing structure when a higher level routes
+// them through the same Vfs instance.
+//
+// Cross-process mmap(MAP_SHARED, fd) coherency is not yet wired — the
+// runtime needs a file-backed mmap intrinsic that returns a `&[Byte]`
+// view into kernel-managed memory.  Until then this backend behaves
+// like `InMemoryShm` for the WAL-index consumer; the protocol shape +
+// path-tracking surface stays stable so callers don't need to change
+// when real mmap lands.
+//
+// Contract differences from InMemoryShm: same lock semantics
+// (process-local fcntl emulation via slot counters), same map
+// semantics (zero-on-extend, error if !extend && !present), but
+// MappedFileShm carries the on-disk path which lets the surrounding
+// VFS clean up the file on `unmap(delete_flag=true)`.
 
 public type MappedFileShm is {
     path: Text,
-    // Region index → mapping handle (future work: real pointer + length).
-    // Kept as a blob-view map to stay symmetric with InMemoryShm.
     regions: Map<Int, List<Byte>>,
+    slot_locks: List<Int>,
+    deleted: Bool,
 };
 
 public fn mapped_file_shm(path: &Text) -> MappedFileShm {
+    let mut slots: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < SHM_NLOCK {
+        slots.push(0);
+        i = i + 1;
+    }
     MappedFileShm {
         path: path.clone(),
         regions: Map.new(),
+        slot_locks: slots,
+        deleted: false,
     }
 }
 
 implement ShmSegment for MappedFileShm {
-    fn map(&mut self, _region_index: Int, _size: Int, _extend: Bool)
+    fn map(&mut self, region_index: Int, size: Int, extend: Bool)
         -> Result<List<Byte>, VfsError>
     {
-        Err(VfsError {
-            kind: Unsupported,
-            message: "MappedFileShm.map pending mmap wiring",
-        })
+        if size != SHM_REGION_SIZE {
+            return Err(VfsError {
+                kind: InvalidArgument,
+                message: "MappedFileShm requires SHM_REGION_SIZE",
+            });
+        }
+        if self.deleted {
+            return Err(VfsError { kind: Closed, message: "shm deleted" });
+        }
+        if self.regions.contains_key(region_index) {
+            return Ok(self.regions.get(region_index));
+        }
+        if !extend {
+            return Err(VfsError {
+                kind: NotFound,
+                message: "shm region not present (extend=false)",
+            });
+        }
+        let mut zeros: List<Byte> = List.with_capacity(size);
+        let mut i: Int = 0;
+        while i < size {
+            zeros.push(0 as Byte);
+            i = i + 1;
+        }
+        let _ = self.regions.insert(region_index, zeros);
+        Ok(self.regions.get(region_index))
     }
 
-    fn lock(&mut self, _start: Int, _count: Int, _flags: ShmLockFlags)
+    fn lock(&mut self, start: Int, count: Int, flags: ShmLockFlags)
         -> Result<(), VfsError>
     {
-        Err(VfsError {
-            kind: Unsupported,
-            message: "MappedFileShm.lock pending fcntl wiring",
-        })
+        if start < 0 || count <= 0 || start + count > SHM_NLOCK {
+            return Err(VfsError {
+                kind: InvalidArgument,
+                message: "shm_lock: slot range out of bounds",
+            });
+        }
+        let mut i: Int = start;
+        if flags.lock {
+            if flags.exclusive {
+                let mut j: Int = start;
+                while j < start + count {
+                    if self.slot_locks[j] != 0 {
+                        return Err(VfsError {
+                            kind: LockConflict,
+                            message: "shm_lock: slot busy",
+                        });
+                    }
+                    j = j + 1;
+                }
+                while i < start + count {
+                    self.slot_locks[i] = -1;
+                    i = i + 1;
+                }
+            } else {
+                let mut j: Int = start;
+                while j < start + count {
+                    if self.slot_locks[j] < 0 {
+                        return Err(VfsError {
+                            kind: LockConflict,
+                            message: "shm_lock: exclusive held",
+                        });
+                    }
+                    j = j + 1;
+                }
+                while i < start + count {
+                    self.slot_locks[i] = self.slot_locks[i] + 1;
+                    i = i + 1;
+                }
+            }
+        } else {
+            if flags.exclusive {
+                while i < start + count {
+                    self.slot_locks[i] = 0;
+                    i = i + 1;
+                }
+            } else {
+                while i < start + count {
+                    if self.slot_locks[i] > 0 {
+                        self.slot_locks[i] = self.slot_locks[i] - 1;
+                    }
+                    i = i + 1;
+                }
+            }
+        }
+        Ok(())
     }
 
-    fn barrier(&self) {}
+    fn barrier(&self) {
+        // Process-local backing — every cross-thread pair already shares
+        // the same address space, so the next acquire-load on this
+        // process sees the most recent release-store.  When file-backed
+        // mmap lands, this becomes an `mfence` / acquire-release fence.
+    }
 
-    fn unmap(&mut self, _delete_flag: Bool) {}
+    fn unmap(&mut self, delete_flag: Bool) {
+        if delete_flag {
+            self.regions = Map.new();
+            self.deleted = true;
+            // When the file-backed mmap path is wired, this is also
+            // where `unlink(self.path)` happens.  Process-local backing
+            // has no on-disk artefact to remove.
+            let _ = self.path;
+        }
+    }
 }
