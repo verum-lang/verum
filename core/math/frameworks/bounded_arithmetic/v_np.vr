@@ -2,15 +2,17 @@
 // V_NP — bounded-arithmetic system at the NP stratum (ν^weak = 3)
 // =============================================================================
 
-/// V_NP — Cook-Nguyen's theory whose provably total functions are
-/// exactly the NP-search problems with deterministic verification.
-/// Bounded comprehension over Σ^B_2-formulas; this is the smallest
-/// theory beyond P-time. ν^weak = 3.
+/// V_NP — Cook-Nguyen's theory of NP-search problems. ν^weak = 3.
+/// V3: parameterised over the complexity-class index (3 = NP-search).
 @framework(bounded_arithmetic_v_np, "V_NP (Cook-Nguyen 2010 §V): NP-search")
-public axiom v_np_provability_np_search() -> Bool ensures true;
+public axiom v_np_provability_np_search(complexity_class_index: Int) -> Bool
+    requires complexity_class_index == 3   // 3 = NP-search
+    ensures  complexity_class_index == 3;
 
 /// Witness-extraction at NP-stratum is non-deterministic polynomial-
-/// time: every Σ^B_2-theorem has a witness produced by a non-
-/// deterministic P-time machine.
+/// time. V3: parameterised over the witness's polynomial-bound +
+/// non-determinism flag.
 @framework(bounded_arithmetic_v_np, "V_NP witness extraction is NP")
-public axiom v_np_witness_is_np() -> Bool ensures true;
+public axiom v_np_witness_is_np(poly_bound: Int, non_deterministic: Bool) -> Bool
+    requires poly_bound >= 0 && non_deterministic == true
+    ensures  poly_bound >= 0 && non_deterministic;

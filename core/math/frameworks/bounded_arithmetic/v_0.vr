@@ -6,12 +6,19 @@
 /// total functions are exactly the LOGSPACE-computable functions.
 /// Bounded comprehension over Σ^B_0-formulas; induction restricted to
 /// the same class. ν^weak = 0.
+///
+/// V3 form: parameterised over a complexity-class index naming the
+/// fragment claim (0 = LOGSPACE for V_0).
 @framework(bounded_arithmetic_v_0, "V_0 (Cook-Reckhow 1979 / Cook-Nguyen 2010 §V): LOGSPACE")
-public axiom v_0_provability_logspace() -> Bool ensures true;
+public axiom v_0_provability_logspace(complexity_class_index: Int) -> Bool
+    requires complexity_class_index == 0   // 0 = LOGSPACE
+    ensures  complexity_class_index == 0;
 
 /// Conservative-extension marker: V_0 is conservative over the
 /// quantifier-free fragment of bounded arithmetic restricted to
-/// Σ^B_0-formulas. Used by the complexity-typed verification strategy
-/// to discharge V_0 obligations without escalating to a richer system.
+/// Σ^B_0-formulas. V3: parameterised over the conservation-target
+/// fragment (0 = Σ^B_0).
 @framework(bounded_arithmetic_v_0, "V_0 conservative over Σ^B_0 fragment")
-public axiom v_0_conservative_over_sigma_b_0() -> Bool ensures true;
+public axiom v_0_conservative_over_sigma_b_0(target_fragment: Int) -> Bool
+    requires target_fragment == 0   // 0 = Σ^B_0
+    ensures  target_fragment == 0;

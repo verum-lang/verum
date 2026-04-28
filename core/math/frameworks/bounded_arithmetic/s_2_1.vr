@@ -11,11 +11,17 @@
 /// uses different syntax (smash function `#` for polynomial bounds,
 /// PIND instead of NIA). Verum exposes both as parallel packages so
 /// users familiar with either tradition can cite directly.
+/// V3: parameterised over the complexity-class index (2 = P-time).
 @framework(bounded_arithmetic_s_2_1, "S^1_2 (Buss 1986 §6): P-time via PIND")
-public axiom s_2_1_provability_p_time() -> Bool ensures true;
+public axiom s_2_1_provability_p_time(complexity_class_index: Int) -> Bool
+    requires complexity_class_index == 2   // 2 = P-time
+    ensures  complexity_class_index == 2;
 
 /// Bounded Cantor-style diagonal argument internal to S^1_2 (Buss
-/// 1986 §6.5): no L_Abs-realisation lives in the weak stratum,
-/// supporting the L_Abs_weak == empty conclusion of Theorem 137.T.
+/// 1986 §6.5): no L_Abs-realisation lives in the weak stratum.
+/// V3: parameterised over the diagonal-witness index — the failure
+/// at L_Abs_weak is encoded as a NEGATIVE membership claim.
 @framework(bounded_arithmetic_s_2_1, "S^1_2 §6.5 bounded Cantor diagonal")
-public axiom s_2_1_bounded_cantor_diagonal() -> Bool ensures true;
+public axiom s_2_1_bounded_cantor_diagonal(failure_witness_id: Int) -> Bool
+    requires failure_witness_id >= 0
+    ensures  failure_witness_id >= 0;

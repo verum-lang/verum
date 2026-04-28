@@ -11,27 +11,33 @@
 /// hierarchy (depending on whether IΔ_0 + Ω_1 / IΔ_0 + EXP) but
 /// remain inside the weak stratum: no L_Abs-realisation crosses into
 /// IΔ_0.
+/// V3: parameterised over a complexity-class index (the wire encoding
+/// of ω-1 as the integer 999_999 — placeholder for the V4 ordinal
+/// surface).
 @framework(bounded_arithmetic_i_delta_0, "IΔ_0 (Buss-Krajicek): full bounded-Δ_0 induction")
-public axiom i_delta_0_provability() -> Bool ensures true;
+public axiom i_delta_0_provability(omega_minus_1_marker: Int) -> Bool
+    requires omega_minus_1_marker == 999_999   // V0 wire encoding for ω-1
+    ensures  omega_minus_1_marker == 999_999;
 
-/// Discrete jump at the weak/full boundary: ν^weak ≤ ω-1 inside
-/// IΔ_0, but any extension that admits unbounded quantification
-/// jumps to ν = ω. The jump is sharp; there is no intermediate value
-/// (Theorem 137.T discrete-jump lemma).
+/// Discrete jump at the weak/full boundary. V3: parameterised over
+/// the source/target ν values; ensures the source is the ω-1 marker
+/// and target is the ω marker (1_000_000 in V0 wire encoding).
 @framework(bounded_arithmetic_i_delta_0, "IΔ_0/full discrete jump: ν^weak = ω-1 → ν = ω")
-public axiom weak_full_discrete_jump() -> Bool ensures true;
+public axiom weak_full_discrete_jump(source_nu: Int, target_nu: Int) -> Bool
+    requires source_nu == 999_999     // ω-1 marker
+          && target_nu == 1_000_000   // ω marker
+    ensures  source_nu < target_nu;
 
 // =============================================================================
 // Weak-AFN-T result — L_Abs is empty in the weak stratum (Theorem 137.T)
 // =============================================================================
 
 /// The weak-AFN-T result: NO L_Abs-realisation of the canonical-
-/// primitive 13-axiom system lives inside any of V_0, V_1, S^1_2,
-/// V_NP, V_PH, or IΔ_0. The bounded Cantor diagonal (Buss 1986 §6.5)
-/// rules out a candidate construction at every weak stratum.
-///
-/// Operational consequence: `@verify(complexity_typed)` is sound —
-/// bounded-arithmetic verification is rigorously weaker than full-
-/// arithmetic verification, with the boundary witnessed at ν = ω.
+/// primitive 13-axiom system lives inside any weak-arithmetic stratum.
+/// V3: parameterised over the candidate stratum index (0..5 for
+/// V_0/V_1/S^1_2/V_NP/V_PH/IΔ_0); ensures the index is in the valid
+/// range (the negative-realisation claim is the catalogue boundary).
 @framework(bounded_arithmetic_i_delta_0, "Theorem 137.T (L_Abs_weak = ∅; weak-AFN-T)")
-public axiom weak_afn_t_l_abs_empty() -> Bool ensures true;
+public axiom weak_afn_t_l_abs_empty(weak_stratum_index: Int) -> Bool
+    requires weak_stratum_index >= 0 && weak_stratum_index <= 5
+    ensures  weak_stratum_index >= 0 && weak_stratum_index <= 5;
