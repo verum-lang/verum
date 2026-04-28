@@ -119,6 +119,13 @@ public type ThreadJoinHandle<T> is {
     platform: PlatformThread,
     /// Result storage (set when thread completes)
     result: Shared<Maybe<T>>,
+    /// Spawned-thread ID, captured inside the spawn wrapper before
+    /// the user function runs. Stored as 0 until the wrapper runs;
+    /// `id()` returns 0 in that pre-start window. The previous
+    /// implementation hardcoded 0 forever — every spawned thread
+    /// collided on the same ID, breaking any caller that used
+    /// `handle.id()` as a map key or unpark target.
+    tid: Shared<UInt64>,
     /// Thread name (for debugging)
     name: Maybe<Text>,
 };
@@ -159,9 +166,12 @@ implement ThreadJoinHandle<T> {
         self.name.as_ref()
     }
 
-    /// Get the thread's ID.
+    /// Get the spawned thread's ID. Returns `ThreadId { id: 0 }` in
+    /// the narrow window between `spawn()` returning the handle and
+    /// the wrapper running its first instruction; once the wrapper
+    /// captures `sys.get_thread_id()` the real value is visible.
     public fn id(&self) -> ThreadId {
-        ThreadId { id: 0 } // Platform thread ID
+        ThreadId { id: *self.tid.get_ref() }
     }
 
     /// Check if the thread has finished.
@@ -215,8 +225,15 @@ implement ThreadBuilder {
     public fn spawn<T: Send>(self, f: fn() -> T) -> Result<ThreadJoinHandle<T>, ThreadError> {
         let result_storage = Shared.new(None);
         let result_ref = result_storage.clone();
+        // Pre-publish a tid cell that the spawned thread fills in
+        // with its own kernel TID before running the user function.
+        // Caller-side `handle.id()` reads this cell — non-zero once
+        // the wrapper has executed at least one instruction.
+        let tid_storage: Shared<UInt64> = Shared.new(0_u64);
+        let tid_ref = tid_storage.clone();
 
         let wrapper = fn() {
+            *tid_ref.get_mut() = sys.get_thread_id();
             let value = f();
             *result_ref.get_mut() = Some(value);
         };
@@ -227,6 +244,7 @@ implement ThreadBuilder {
         Ok(ThreadJoinHandle {
             platform: platform_thread,
             result: result_storage,
+            tid: tid_storage,
             name: self.name,
         })
     }
