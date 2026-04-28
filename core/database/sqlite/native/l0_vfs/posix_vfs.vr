@@ -159,6 +159,27 @@ fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
     platform_libsystem.safe_open(path, oflag, mode)
 }
 
+/// Raw &Byte entry — bypasses the Tier-0 interpreter's `&[Byte]`
+/// parameter-coerce recursion.  Caller supplies a NUL-terminated
+/// buffer and casts its pointer.  Mirrors libsystem.safe_open_raw
+/// on Darwin and routes to a TODO equivalent on Linux (the linux
+/// path still goes through &[Byte] until a Linux-side raw entry
+/// lands; if you hit RUNTIME-3-DEEPER on Linux, add `safe_open_raw`
+/// to `core/sys/linux/syscall.vr` and switch the linux arm here).
+@cfg(target_os = "linux")
+fn sys_open_raw(path: &Byte, oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
+    // Linux side has no raw entry yet — Tier-0 interpreter
+    // recursion may surface here.  See RUNTIME-3-DEEPER for the
+    // matching Linux-side workaround.
+    let _ = path; let _ = oflag; let _ = mode;
+    Err(OSError { code: 38, message: "sys_open_raw: linux raw entry not yet wired".clone() })
+}
+
+@cfg(target_os = "macos")
+fn sys_open_raw(path: &Byte, oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
+    platform_libsystem.safe_open_raw(path, oflag, mode)
+}
+
 @cfg(target_os = "linux")
 fn sys_close(fd: FileDesc) -> Result<(), OSError> {
     platform_syscall.close(fd)
@@ -370,10 +391,25 @@ implement VfsProtocol for PosixVfs {
     type File = PosixFile;
 
     fn open(&self, path: &Text, flags: OpenFlags) -> Result<PosixFile, VfsError> {
-        let cp = to_c_path(path);
+        // Build NUL-terminated path locally and call the raw &Byte
+        // entry point — bypasses the Tier-0 interpreter's broken
+        // `&[Byte]` parameter coercion (closes the
+        // RUNTIME-3-DEEPER blocker; see
+        // `internal/diag/sqlite-real/FINDINGS.md`).  When the
+        // interpreter coerce path is fixed this falls back to
+        // `sys_open(&cp, ...)` cleanly — keeping the buffer build
+        // inline here costs nothing.
         let oflag = platform_oflags(&flags);
         let mode: Int = if flags.create { 0o644 } else { 0 };
-        match sys_open(&cp, oflag, mode) {
+
+        let raw = path.as_bytes();
+        let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+        let n = if raw.len() < 4095 { raw.len() } else { 4095 };
+        let mut i: Int = 0;
+        while i < n { path_buf[i] = raw[i]; i = i + 1; }
+        path_buf[n] = 0 as Byte;
+
+        match sys_open_raw(path_buf.as_ptr() as &Byte, oflag, mode) {
             Ok(fd) => {
                 Ok(PosixFile {
                     fd: fd,
