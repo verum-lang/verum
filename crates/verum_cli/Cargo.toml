@@ -69,6 +69,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # For compilation
 verum_compiler = { workspace = true }
+verum_modules = { workspace = true }
 # Direct dep on verum_llvm_sys ensures LLVM link directives reach the binary
 # (MSVC linker needs libraries visible at the final link step)
 verum_llvm_sys = { workspace = true }
