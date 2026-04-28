@@ -112,6 +112,8 @@ predicates = "3.1"
 tempfile = "3.14"
 serial_test = "3.2.0"
 criterion = { workspace = true }
+verum_fast_parser = { workspace = true }
+verum_ast = { workspace = true }
 
 [[bench]]
 name = "lint_throughput"

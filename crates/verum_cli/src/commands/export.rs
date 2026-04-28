@@ -166,6 +166,20 @@ struct Declaration {
     /// emitters can produce real per-target tactic invocations
     /// rather than `:= sorry`.
     proof_body: Option<SimpleProofBody>,
+    /// V2 (M-EXPORT V2): structural CoreTerm lifted from the AST
+    /// proof body via `verum_verification::lift_expr_to_core`. When
+    /// present, the per-target emitters lower this through the V1
+    /// `verum_codegen::proof_export::<format>::lower_term` pipeline,
+    /// producing a real Lean / Coq / Agda / Dedukti / Metamath term
+    /// instead of the static admitted scaffold.
+    ///
+    /// Populated whenever the proof body is `ProofBody::Term(expr)`
+    /// or a structured proof with an extractable conclusion expression.
+    /// `None` for axioms, for `ProofBody::Tactic(Apply{...})` (the
+    /// SimpleApply path takes precedence — its lemma-name dispatch is
+    /// closer to the user's intent than a structural CoreTerm lift),
+    /// and for tactic shapes the lifter doesn't yet handle.
+    core_proof: Option<verum_kernel::CoreTerm>,
 }
 
 /// Options for the `verum export` command.
@@ -474,6 +488,20 @@ fn collect_declaration(
         _ => None,
     };
 
+    // V2 (M-EXPORT V2): structurally lift the proof body to a
+    // CoreTerm so the per-target emitters can call into the V1
+    // proof_export lowerers. The SimpleApply path above takes
+    // precedence on tactic-shaped proofs because its lemma-name
+    // dispatch matches the user's source intent; CoreTerm lifting
+    // catches Term-shaped proofs and structured-proof conclusions
+    // that the simple-apply matcher doesn't recognise.
+    let core_proof = match &item.kind {
+        ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+            extract_core_proof_term(&decl.proof)
+        }
+        _ => None,
+    };
+
     Some(Declaration {
         kind,
         name,
@@ -481,7 +509,55 @@ fn collect_declaration(
         framework,
         certificate,
         proof_body,
+        core_proof,
     })
+}
+
+/// V2: lift a Verum-side proof body to a `verum_kernel::CoreTerm`
+/// via `verum_verification::lift_expr_to_core`. Returns `None` for
+/// axioms / missing proof bodies, and falls through structured
+/// proofs that don't have an extractable conclusion expression.
+///
+/// The lift is conservative: variants the lifter doesn't recognise
+/// surface as `CoreTerm::Var("<unsupported-expr>")`, which the
+/// proof_export lowerers in turn render as `sorry` / `Admitted` /
+/// `?` — i.e. a graceful degradation, not a panic.
+fn extract_core_proof_term(
+    body: &Maybe<verum_ast::ProofBody>,
+) -> Option<verum_kernel::CoreTerm> {
+    use verum_ast::ProofBody;
+    let body = match body {
+        Maybe::Some(b) => b,
+        Maybe::None => return None,
+    };
+    match body {
+        ProofBody::Term(expr) => {
+            Some(verum_verification::kernel_recheck::lift_expr_to_core(expr.as_ref()))
+        }
+        ProofBody::Structured(s) => {
+            // Try the conclusion's tactic-target if it's a Have / Show /
+            // Suffices step — those carry an Expr proposition that
+            // represents the conclusion. We pick the LAST step's
+            // proposition as the closest to the structural conclusion.
+            use verum_ast::ProofStepKind;
+            let last_step_expr = s.steps.iter().rev().find_map(|step| match &step.kind {
+                ProofStepKind::Have { proposition, .. }
+                | ProofStepKind::Show { proposition, .. }
+                | ProofStepKind::Suffices { proposition, .. } => {
+                    Some(proposition.as_ref())
+                }
+                _ => None,
+            });
+            last_step_expr
+                .map(verum_verification::kernel_recheck::lift_expr_to_core)
+        }
+        // Tactic-only and ByMethod proofs don't carry a structural
+        // CoreTerm — they're imperative scripts. The SimpleApply
+        // path in extract_simple_proof_body already handles the
+        // `apply X(args)` case; everything else falls through to
+        // the admitted scaffold.
+        _ => None,
+    }
 }
 
 /// Recognise the M0.A `proof { apply <name>(<args>); }` shape and
@@ -598,6 +674,171 @@ fn coq_body_for_proof(proof: &Option<SimpleProofBody>) -> String {
         }
         _ => String::from("Admitted."),
     }
+}
+
+// -----------------------------------------------------------------------------
+// V2 (M-EXPORT V2): CoreTerm-driven body emitters. Each per-target helper
+// runs the V1 `verum_codegen::proof_export::<format>::lower_term` on the
+// captured proof CoreTerm, returning a target-specific body string. The
+// `_for_decl` family is the canonical surface called by emit_<format> —
+// it consults SimpleApply first (M0.D shape; closer to user intent),
+// then the CoreTerm path (V2), then admitted fallback.
+// -----------------------------------------------------------------------------
+
+fn lean_body_for_decl(d: &Declaration) -> String {
+    if let Some(body) = lean_body_from_simple(&d.proof_body) {
+        return body;
+    }
+    if let Some(t) = &d.core_proof {
+        let lowered = verum_codegen::proof_export::lean::lower_term(t);
+        // CoreTerm lifter returns `<unsupported-expr>` / `<lit>` /
+        // `<empty-block>` / `<empty-match>` for unrecognised AST
+        // shapes; fall through to sorry rather than emit those.
+        if !is_lifter_placeholder(&lowered) {
+            return format!(":= {}", lowered);
+        }
+    }
+    String::from(":= sorry")
+}
+
+fn coq_body_for_decl(d: &Declaration) -> String {
+    if let Some(body) = coq_body_from_simple(&d.proof_body) {
+        return body;
+    }
+    if let Some(t) = &d.core_proof {
+        let lowered = verum_codegen::proof_export::coq::lower_term(t);
+        if !is_lifter_placeholder(&lowered) {
+            // Coq term-mode definition — fits the Theorem/Definition surface.
+            return format!("Proof. exact ({}). Qed.", lowered);
+        }
+    }
+    String::from("Admitted.")
+}
+
+fn agda_body_for_decl(d: &Declaration) -> String {
+    if let Some(body) = agda_body_from_simple(&d.proof_body) {
+        return body;
+    }
+    if let Some(t) = &d.core_proof {
+        let lowered = verum_codegen::proof_export::agda::lower_term(t);
+        if !is_lifter_placeholder(&lowered) {
+            return format!("= {}", lowered);
+        }
+    }
+    String::from("= ?")
+}
+
+fn dedukti_body_for_decl(d: &Declaration) -> String {
+    if let Some(body) = dedukti_body_from_simple(&d.proof_body) {
+        return body;
+    }
+    if let Some(t) = &d.core_proof {
+        let lowered = verum_codegen::proof_export::dedukti::lower_term(t);
+        if !is_lifter_placeholder(&lowered) {
+            // Dedukti uses `:=` for definitions ending with `.`.
+            return format!(":= {}", lowered);
+        }
+    }
+    // No body — caller emits the bare statement form `<name> : <ty>.`
+    String::new()
+}
+
+fn metamath_body_for_decl(d: &Declaration) -> String {
+    if let Some(body) = metamath_body_from_simple(&d.proof_body) {
+        return body;
+    }
+    if let Some(t) = &d.core_proof {
+        let lowered = verum_codegen::proof_export::metamath::lower_term(t);
+        if !is_lifter_placeholder(&lowered) {
+            // Metamath proof block: comment-form pinning the
+            // label-form CoreTerm body. V2: full $p ... $. proof
+            // chains land via the substitution-graph emitter.
+            return format!("$( label-form: {} $)", lowered);
+        }
+    }
+    String::new()
+}
+
+/// SimpleApply → Lean body (extracted from `lean_body_for_proof` so
+/// it can be composed with the V2 CoreTerm path). Returns `None`
+/// when SimpleApply isn't applicable.
+fn lean_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
+        let mut s = String::from(":= ");
+        s.push_str(lemma.as_str());
+        for a in args {
+            s.push(' ');
+            s.push_str(a.as_str());
+        }
+        return Some(s);
+    }
+    None
+}
+
+fn coq_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
+        let mut s = String::from("Proof. apply ");
+        s.push_str(lemma.as_str());
+        for a in args {
+            s.push(' ');
+            s.push_str(a.as_str());
+        }
+        s.push_str(". Qed.");
+        return Some(s);
+    }
+    None
+}
+
+fn agda_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
+        let mut s = String::from("= ");
+        s.push_str(lemma.as_str());
+        for a in args {
+            s.push(' ');
+            s.push_str(a.as_str());
+        }
+        return Some(s);
+    }
+    None
+}
+
+fn dedukti_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
+        // Dedukti term-mode application: lemma applied to args.
+        let mut s = String::from(":= ");
+        s.push_str(lemma.as_str());
+        for a in args {
+            s.push(' ');
+            s.push_str(a.as_str());
+        }
+        return Some(s);
+    }
+    None
+}
+
+fn metamath_body_from_simple(proof: &Option<SimpleProofBody>) -> Option<String> {
+    if let Some(SimpleProofBody::SimpleApply { lemma, args }) = proof {
+        let mut s = String::from("$( apply: ");
+        s.push_str(lemma.as_str());
+        for a in args {
+            s.push(' ');
+            s.push_str(a.as_str());
+        }
+        s.push_str(" $)");
+        return Some(s);
+    }
+    None
+}
+
+/// `lift_expr_to_core` returns `<unsupported-expr>` etc. as a
+/// placeholder Var when the AST shape isn't recognised. Detecting
+/// these lets the V2 CoreTerm path fall through to the admitted
+/// scaffold rather than emit a meaningless term.
+fn is_lifter_placeholder(s: &str) -> bool {
+    s.contains("<unsupported")
+        || s.contains("<empty-")
+        || s.contains("<lit>")
+        || s.contains("<path>")
 }
 
 /// apply the proof-replay
@@ -857,6 +1098,10 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
                     out.push_str(&format!("{} : Prop.\n\n", mangle(&d.name)));
                 }
                 _ => {
+                    // V2 decision tree:
+                    //   1. SMT-replay via DeduktiProofReplay (cert-loaded)
+                    //   2. SimpleApply (M0.D) → CoreTerm lower (M-EXPORT V2)
+                    //   3. Admitted comment marker.
                     let proof = replay_or_admitted(
                         replay_registry,
                         "dedukti",
@@ -864,13 +1109,21 @@ fn emit_dedukti(decls: &[Declaration], replay_registry: &verum_smt::proof_replay
                         "(; admitted ;)",
                     );
                     if proof.starts_with("(;") {
-                        // Admitted fallback — keep the legacy
-                        // axiom-form so the file stays valid.
-                        out.push_str(&format!(
-                            "{} : Prop. {}\n\n",
-                            mangle(&d.name),
-                            proof
-                        ));
+                        // No replay hit; try V2 decl-aware path.
+                        let v2_body = dedukti_body_for_decl(d);
+                        if v2_body.is_empty() {
+                            out.push_str(&format!(
+                                "{} : Prop. {}\n\n",
+                                mangle(&d.name),
+                                proof
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "def {} : Prop {}.\n\n",
+                                mangle(&d.name),
+                                v2_body
+                            ));
+                        }
                     } else {
                         // Lowered λΠ-term — emit as a `def`.
                         out.push_str(&format!(
@@ -976,7 +1229,7 @@ fn emit_coq(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::Pr
                     let proof_body = if replayed != "Proof. Admitted." {
                         replayed
                     } else {
-                        coq_body_for_proof(&d.proof_body)
+                        coq_body_for_decl(d)
                     };
                     out.push_str(&format!(
                         "Theorem {} : Prop.\n{}\n\n",
@@ -1056,21 +1309,34 @@ fn emit_metamath(decls: &[Declaration], replay_registry: &verum_smt::proof_repla
                     ));
                 }
                 _ => {
-                    // Metamath theorem-step
-                    // body. MetamathProofReplay produces the body
-                    // including the `$= ... $.` framing; we splice
-                    // the rendered body after the `wff` head.
+                    // Metamath theorem-step body. Decision tree:
+                    //   1. SMT-replay via MetamathProofReplay (cert-loaded)
+                    //   2. SimpleApply (M0.D) / CoreTerm (M-EXPORT V2)
+                    //   3. `$= ? $.` placeholder accepted by mmverify.py.
                     let proof = replay_or_admitted(
                         replay_registry,
                         "metamath",
                         d,
                         "$= ? $.",
                     );
+                    let body = if proof != "$= ? $." {
+                        proof
+                    } else {
+                        let v2_body = metamath_body_for_decl(d);
+                        if v2_body.is_empty() {
+                            String::from("$= ? $.")
+                        } else {
+                            // Append the $= ? $. proof-step placeholder
+                            // after the V2 label-form comment so the
+                            // file remains valid for `metamath verify`.
+                            format!("{} $= ? $.", v2_body)
+                        }
+                    };
                     out.push_str(&format!(
                         "th-{} $p wff {} {}\n\n",
                         mangle(&d.name),
                         mangle(&d.name),
-                        proof
+                        body
                     ));
                 }
             }
@@ -1166,9 +1432,10 @@ fn emit_lean(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                         // Replay produced a non-default term — use as-is.
                         proof
                     } else {
-                        // No cert; project the verum-side proof body
-                        // through the M0.D simple-apply translator.
-                        lean_body_for_proof(&d.proof_body)
+                        // No cert; route through the V2 decl-aware
+                        // body emitter — SimpleApply (M0.D) → CoreTerm
+                        // lower (M-EXPORT V2) → `:= sorry`.
+                        lean_body_for_decl(d)
                     };
                     out.push_str(&format!(
                         "theorem {} : Prop {}\n\n",
@@ -1292,16 +1559,24 @@ fn emit_agda(decls: &[Declaration], replay_registry: &verum_smt::proof_replay::P
                         d,
                         "{!!}",
                     );
+                    let body = if proof != "{!!}" {
+                        // Replay produced a real term; use as-is.
+                        format!("= {}", proof)
+                    } else {
+                        // V2 decl-aware: SimpleApply (M0.D) → CoreTerm
+                        // lower (M-EXPORT V2) → `= ?` hole fallback.
+                        agda_body_for_decl(d)
+                    };
                     // Term-style definition. The `: Set` annotation
                     // is the placeholder type — the V12.1 elaborator
                     // hand-off (§8.6) replaces it with the real type
                     // once the proof-term layer surfaces lifted Verum
                     // types.
                     out.push_str(&format!(
-                        "{} : Set\n{} = {}\n\n",
+                        "{} : Set\n{} {}\n\n",
                         agda_mangle(&d.name),
                         agda_mangle(&d.name),
-                        proof
+                        body
                     ));
                 }
             }
@@ -1764,6 +2039,7 @@ mod format_tests {
             framework: Maybe::None,
             certificate: None,
             proof_body: None,
+            core_proof: None,
         }];
         let registry = verum_smt::proof_replay::default_registry();
         let out = emit_agda(&decls, &registry);
@@ -1865,5 +2141,155 @@ mod format_tests {
         // not panic. Emitters rely on this for fall-through.
         assert!(lineage_import("does_not_exist").is_none());
         assert!(lineage_import("").is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // M-EXPORT V2: CoreTerm-driven body emit
+    // -------------------------------------------------------------------------
+
+    fn id_lam_core() -> verum_kernel::CoreTerm {
+        use verum_common::{Heap, Text as KText};
+        verum_kernel::CoreTerm::Lam {
+            binder: KText::from("x"),
+            domain: Heap::new(verum_kernel::CoreTerm::Var(KText::from("Nat"))),
+            body: Heap::new(verum_kernel::CoreTerm::Var(KText::from("x"))),
+        }
+    }
+
+    fn decl_with_core_proof() -> Declaration {
+        Declaration {
+            kind: "theorem",
+            name: Text::from("vm_id_nat"),
+            source: PathBuf::from("src/lib.vr"),
+            framework: Maybe::None,
+            certificate: None,
+            proof_body: None,
+            core_proof: Some(id_lam_core()),
+        }
+    }
+
+    #[test]
+    fn lean_body_for_decl_uses_core_proof_when_simple_apply_absent() {
+        let d = decl_with_core_proof();
+        let body = lean_body_for_decl(&d);
+        // V2 path: lower the CoreTerm via proof_export::lean.
+        assert!(
+            body.contains("fun (x : Nat) => x"),
+            "lean V2 body must contain lowered lambda; got {body:?}"
+        );
+        assert!(body.starts_with(":= "));
+    }
+
+    #[test]
+    fn coq_body_for_decl_uses_core_proof_when_simple_apply_absent() {
+        let d = decl_with_core_proof();
+        let body = coq_body_for_decl(&d);
+        assert!(
+            body.contains("fun (x : Nat) => x"),
+            "coq V2 body must contain lowered lambda; got {body:?}"
+        );
+        assert!(body.starts_with("Proof. exact"));
+        assert!(body.ends_with(". Qed."));
+    }
+
+    #[test]
+    fn agda_body_for_decl_uses_core_proof_when_simple_apply_absent() {
+        let d = decl_with_core_proof();
+        let body = agda_body_for_decl(&d);
+        // Agda uses the unicode lambda symbol.
+        assert!(
+            body.contains("λ (x : Nat) → x"),
+            "agda V2 body must contain unicode-lambda lowered term; got {body:?}"
+        );
+        assert!(body.starts_with("= "));
+    }
+
+    #[test]
+    fn dedukti_body_for_decl_uses_core_proof_when_simple_apply_absent() {
+        let d = decl_with_core_proof();
+        let body = dedukti_body_for_decl(&d);
+        assert!(
+            body.contains("x : Nat => x"),
+            "dedukti V2 body must contain λΠ-form lowered term; got {body:?}"
+        );
+        assert!(body.starts_with(":= "));
+    }
+
+    #[test]
+    fn metamath_body_for_decl_uses_core_proof_when_simple_apply_absent() {
+        let d = decl_with_core_proof();
+        let body = metamath_body_for_decl(&d);
+        assert!(
+            body.contains("( wlam x Nat x )"),
+            "metamath V2 body must contain wlam label-form; got {body:?}"
+        );
+        // The body is wrapped in a metamath comment marker so the
+        // surrounding $p ... $. block stays valid.
+        assert!(body.starts_with("$( label-form:"));
+        assert!(body.ends_with("$)"));
+    }
+
+    #[test]
+    fn lean_body_for_decl_falls_back_when_no_proof() {
+        let d = Declaration {
+            kind: "theorem",
+            name: Text::from("foo"),
+            source: PathBuf::from("src/lib.vr"),
+            framework: Maybe::None,
+            certificate: None,
+            proof_body: None,
+            core_proof: None,
+        };
+        assert_eq!(lean_body_for_decl(&d), ":= sorry");
+        assert_eq!(coq_body_for_decl(&d), "Admitted.");
+        assert_eq!(agda_body_for_decl(&d), "= ?");
+        assert_eq!(dedukti_body_for_decl(&d), "");
+        assert_eq!(metamath_body_for_decl(&d), "");
+    }
+
+    #[test]
+    fn simple_apply_takes_precedence_over_core_proof() {
+        // M0.D path matches user intent better than V2 structural lift —
+        // when BOTH are populated, SimpleApply wins.
+        let d = Declaration {
+            kind: "theorem",
+            name: Text::from("foo"),
+            source: PathBuf::from("src/lib.vr"),
+            framework: Maybe::None,
+            certificate: None,
+            proof_body: Some(SimpleProofBody::SimpleApply {
+                lemma: Text::from("trivial"),
+                args: vec![],
+            }),
+            core_proof: Some(id_lam_core()),
+        };
+        let body = lean_body_for_decl(&d);
+        assert_eq!(body, ":= trivial");
+        // Make sure the V2 lambda did NOT leak through.
+        assert!(!body.contains("fun"));
+    }
+
+    #[test]
+    fn lifter_placeholder_falls_through_to_admit() {
+        // CoreTerm::Var("<unsupported-expr>") (the lifter's catch-all)
+        // must NOT reach the target file as a literal — it would
+        // typecheck as a free variable. Detected by is_lifter_placeholder.
+        use verum_common::Text as KText;
+        let d = Declaration {
+            kind: "theorem",
+            name: Text::from("foo"),
+            source: PathBuf::from("src/lib.vr"),
+            framework: Maybe::None,
+            certificate: None,
+            proof_body: None,
+            core_proof: Some(verum_kernel::CoreTerm::Var(KText::from(
+                "<unsupported-expr>",
+            ))),
+        };
+        assert_eq!(lean_body_for_decl(&d), ":= sorry");
+        assert_eq!(coq_body_for_decl(&d), "Admitted.");
+        assert_eq!(agda_body_for_decl(&d), "= ?");
+        assert_eq!(dedukti_body_for_decl(&d), "");
+        assert_eq!(metamath_body_for_decl(&d), "");
     }
 }
