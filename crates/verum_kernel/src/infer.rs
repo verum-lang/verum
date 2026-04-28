@@ -8,7 +8,7 @@ use verum_common::{Heap, List, Maybe, Text};
 
 use crate::axiom::AxiomRegistry;
 use crate::depth::m_depth;
-use crate::support::{replay_smt_cert, shape_of, structural_eq, substitute};
+use crate::support::{replay_smt_cert, shape_of, substitute};
 use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 
 /// Infer the type of a [`CoreTerm`], returning the full type as a
@@ -649,12 +649,19 @@ fn infer_inner_with_coord(
         // codomain[binder := scrutinee] when required. Per-case
         // exhaustiveness + typing remains the dedicated Elim-rule
         // pass's job.
+        //
+        // M-VVA Sub-2.3 (definitional_eq lifting, 2026-04-28): use
+        // β-/ι-/δ-aware `definitional_eq_with_axioms` instead of
+        // `structural_eq` so an Elim whose scrutinee type is a β-redex
+        // is accepted when its normal form matches the motive's
+        // domain. structural_eq misses (λx.T) y vs T[y/x]; the lift is
+        // monotone (only widens the accept set) per support.rs:579-582.
         CoreTerm::Elim { scrutinee, motive, .. } => {
             let motive_ty = infer_inner(ctx,motive, axioms, inductives)?;
             match motive_ty {
                 CoreTerm::Pi { domain, .. } => {
                     let scrut_ty = infer_inner(ctx,scrutinee, axioms, inductives)?;
-                    if !structural_eq(&scrut_ty, &domain) {
+                    if !crate::support::definitional_eq_with_axioms(&scrut_ty, &domain, axioms) {
                         return Err(KernelError::TypeMismatch {
                             expected: shape_of(&domain),
                             actual: shape_of(&scrut_ty),
@@ -772,9 +779,17 @@ pub fn check(
     Ok(shape_of(&infer(ctx, term, axioms)?))
 }
 
-/// Verify that `term` inhabits `expected` under full structural
-/// comparison of the two types (not shape-head). This is the
-/// LCF-style verification gate that downstream crates call.
+/// Verify that `term` inhabits `expected` under full β-/ι-/δ-aware
+/// definitional comparison of the two types (not shape-head). This is
+/// the LCF-style verification gate that downstream crates call.
+///
+/// **M-VVA Sub-2.3 (2026-04-28):** uses `definitional_eq_with_axioms`
+/// instead of `structural_eq`. Lifting is monotone — every pair
+/// admitted by `structural_eq` is admitted by `definitional_eq` per
+/// the SN-fragment uniqueness invariant in support.rs:579-582 — and
+/// closes a soundness-completeness gap where downstream crates produced
+/// a β-reducible `actual` type that `structural_eq` rejected even
+/// though its β-normal form matched `expected`.
 pub fn verify_full(
     ctx: &Context,
     term: &CoreTerm,
@@ -782,7 +797,7 @@ pub fn verify_full(
     axioms: &AxiomRegistry,
 ) -> Result<(), KernelError> {
     let actual = infer(ctx, term, axioms)?;
-    if structural_eq(&actual, expected) {
+    if crate::support::definitional_eq_with_axioms(&actual, expected, axioms) {
         Ok(())
     } else {
         Err(KernelError::TypeMismatch {
