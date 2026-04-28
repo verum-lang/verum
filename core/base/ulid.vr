@@ -51,7 +51,7 @@ module core.base.ulid;
 mount core.*;
 mount core.collections.List;
 mount core.sys.common.random_bytes as sys_random_bytes;
-mount core.time.instant;
+mount core.time.system_time.{SystemTime};
 
 // CSPRNG-backed entropy fill. The historical `core.base.random.fill`
 // import resolved to nothing, so every ULID emitted by this stdlib
@@ -95,8 +95,16 @@ public type Ulid is {
 
 implement Ulid {
     /// Generate a fresh ULID — 48-bit unix-ms + 80-bit CSPRNG.
+    ///
+    /// Pre-fix bug: the timestamp came from a non-existent
+    /// `core.time.instant.unix_millis()` (the monotonic-clock
+    /// surface doesn't expose unix-ms). Lenient codegen silently
+    /// no-op'd the call, so every ULID's 48-bit timestamp prefix
+    /// was zero — defeating the time-sortable invariant. Source
+    /// from `SystemTime` (wall-clock, clock_gettime(CLOCK_REALTIME)
+    /// on Unix) instead.
     public fn new() -> Ulid {
-        let ts = instant.unix_millis() as UInt64;
+        let ts = SystemTime.now().timestamp_millis() as UInt64;
         let mut buf: [Byte; 10] = [0_u8; 10];
         fill_random(&mut buf);
         pack(ts, &buf)

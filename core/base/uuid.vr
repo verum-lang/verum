@@ -43,8 +43,18 @@ public type UuidError is {
 
 // External primitives supplied by the runtime. The stdlib does not
 // implement time or entropy itself — those come from the platform.
+//
+// Pre-fix bug: `core.time.instant.unix_millis()` does not exist —
+// `core.time.instant` exposes a monotonic-clock `Instant` API, not
+// a wall-clock unix-ms helper. Lenient codegen silently no-op'd
+// the call, so every Uuid.new_v7() carried a zero timestamp prefix
+// — defeating v7's time-ordering guarantee and turning every v7
+// UUID issued before this fix into a v4-equivalent at half the
+// entropy. The right source is wall-clock time via SystemTime,
+// which routes to clock_gettime(CLOCK_REALTIME) on Linux/macOS
+// and GetSystemTimePreciseAsFileTime on Windows.
 fn unix_millis() -> Int {
-    core.time.instant.unix_millis()
+    core.time.system_time.SystemTime.now().timestamp_millis()
 }
 
 // CSPRNG-backed entropy. UUID identity rests on this returning real
