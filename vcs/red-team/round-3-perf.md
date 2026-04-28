@@ -266,17 +266,17 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 3.1 False sharing | PENDING | pinned multi-thread |
 | 3.2 Atomic contention | PENDING | N-thread counter |
 | 3.3 GPU adversarial | PENDING | out-of-scope |
-| 4.1 Dispatch worst case | PENDING | synthetic bc |
+| 4.1 Dispatch worst case | **DEFENSE CONFIRMED** | 100K Mov round-trip (2026-04-28) |
 | 4.2 Anti-LLVM | PENDING | IR inspection |
 | 5.1 1000-module load | PENDING | synthetic gen |
-| 5.2 Deep cfg | **PARTIAL** | 12-cfg guardrail (2026-04-28); 1024+ fuzz pending |
+| 5.2 Deep cfg | **DEFENSE CONFIRMED** | 78-predicate walker linearity (2026-04-28) |
 
-**3 vectors confirmed defended (channel backlog, 10^6 tasks, SMT exponential),
-5 partial defences (alloc pressure, deep-generic compilation, module
-fan-out, deep-cfg, plus ~170+ wire-frame sites swept), 6 pending** post
-2026-04-28 RT-3.1.1 / RT-3.1.3 / RT-3.5.2 / RT-3.2.4 / RT-3.2.3 / RT-3.1.2
-closures. Sections A-C above document performance-class invariants already
-upheld through the closed audit.
+**5 vectors confirmed defended (channel backlog, 10^6 tasks, SMT exponential,
+dispatch worst case, deep cfg), 4 partial defences (alloc pressure,
+deep-generic compilation, module fan-out, plus ~170+ wire-frame sites
+swept), 5 pending** post 2026-04-28 closures.  Sections A-C above
+document performance-class invariants already upheld through the closed
+audit.
 
 The wire-frame and crypto hot paths now have allocation-free bulk-copy
 primitives in place; further work is in the synthetic-input adversarial
