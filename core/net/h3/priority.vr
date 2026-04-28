@@ -94,6 +94,34 @@ public type PriorityParseError is
       Malformed
     | UrgencyOutOfRange(Int);
 
+implement Display for PriorityParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed             => f.write_str("HTTP priority: malformed structured-field value"),
+            UrgencyOutOfRange(u)  => f.write_str(f"HTTP priority: urgency {u} out of range 0..=7".as_str()),
+        }
+    }
+}
+
+implement Debug for PriorityParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed             => f.write_str("Malformed"),
+            UrgencyOutOfRange(u)  => f.write_str(f"UrgencyOutOfRange({u})".as_str()),
+        }
+    }
+}
+
+implement Eq for PriorityParseError {
+    fn eq(&self, other: &PriorityParseError) -> Bool {
+        match (self, other) {
+            (Malformed,           Malformed)           => true,
+            (UrgencyOutOfRange(a),UrgencyOutOfRange(b))=> a == b,
+            _ => false,
+        }
+    }
+}
+
 public fn parse_header(value: &[Byte]) -> Result<H3Priority, PriorityParseError> {
     let mut pr = H3Priority.default();
     // Split on ',' — each segment is either `u=<digit>` or

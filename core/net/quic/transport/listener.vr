@@ -70,6 +70,48 @@ public type ListenerError is
     | Transport(TransportError)
     | Closed;
 
+implement Display for ListenerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ListenerError.Bind(e) =>
+                f.write_str(f"QUIC listener bind failed: {e}".as_str()),
+            ListenerError.TooManyConnections(n) =>
+                f.write_str(f"QUIC listener: too many connections ({n})".as_str()),
+            ListenerError.MalformedInitial(reason) =>
+                f.write_str(f"QUIC listener: malformed Initial packet ({reason})".as_str()),
+            ListenerError.Transport(e) =>
+                f.write_str(f"QUIC listener transport: {e}".as_str()),
+            ListenerError.Closed =>
+                f.write_str("QUIC listener closed"),
+        }
+    }
+}
+
+implement Debug for ListenerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ListenerError.Bind(e)                  => f.write_str(f"Bind({e:?})".as_str()),
+            ListenerError.TooManyConnections(n)    => f.write_str(f"TooManyConnections({n})".as_str()),
+            ListenerError.MalformedInitial(reason) => f.write_str(f"MalformedInitial({reason})".as_str()),
+            ListenerError.Transport(e)             => f.write_str(f"Transport({e:?})".as_str()),
+            ListenerError.Closed                   => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for ListenerError {
+    fn eq(&self, other: &ListenerError) -> Bool {
+        match (self, other) {
+            (ListenerError.Bind(a),                 ListenerError.Bind(b))                 => a == b,
+            (ListenerError.TooManyConnections(a),   ListenerError.TooManyConnections(b))   => a == b,
+            (ListenerError.MalformedInitial(a),     ListenerError.MalformedInitial(b))     => a == b,
+            (ListenerError.Transport(a),            ListenerError.Transport(b))            => a == b,
+            (ListenerError.Closed,                  ListenerError.Closed)                  => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Accepted connection handle — what user code gets from `accept()`
 // =============================================================================
