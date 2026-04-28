@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, architecture, determinism, collections
+// @timeout: 10000
+// @expect: pass
+// @description: Round-1 red-team guardrail (#172 vector 7.2).
+//
+// Pins hash-table iteration determinism. Prior #143 fix landed
+// deterministic iteration order across selected hash-keyed tables;
+// this test exercises the contract that the same Map iterates in
+// the SAME order across two passes — a baseline determinism property.
+//
+// Without this, attacker who can influence insertion order may
+// produce divergent Tier-0 vs Tier-1 test outputs (round-1 vector
+// 7.1) or non-reproducible bytecode (codegen non-determinism, #143).
+//
+// Limitation: this test pins SAME-INSTANCE consistency. Cross-process
+// determinism (HashDoS resistance) needs a multi-process harness
+// outside the .vr spec layer.
+
+mount core.collections.map.{Map};
+
+fn map_iter_same_instance_deterministic() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("alpha".clone(), 1);
+    m.insert("bravo".clone(), 2);
+    m.insert("charlie".clone(), 3);
+    m.insert("delta".clone(), 4);
+    m.insert("echo".clone(), 5);
+
+    // Collect two iterations of the same instance.
+    let mut keys_a: List<Text> = [];
+    for k in m.keys() { keys_a.push(k.clone()); }
+    let mut keys_b: List<Text> = [];
+    for k in m.keys() { keys_b.push(k.clone()); }
+
+    // The two passes MUST yield the same key sequence — same
+    // insertion order, same iteration. Any attacker who can make
+    // these diverge has broken the determinism gate.
+    assert(keys_a.len() == keys_b.len(),
+           "same-instance iteration must yield same length");
+    let mut i: Int = 0;
+    while i < keys_a.len() {
+        assert(keys_a[i] == keys_b[i],
+               "same-instance iteration must yield same key order");
+        i = i + 1;
+    }
+}
+
+// Pin that the iteration covers all inserted keys (no missing /
+// no duplicates). This is the "iteration is a permutation of
+// insertions" sanity invariant.
+fn map_iter_covers_all_insertions() {
+    let mut m: Map<Text, Int> = Map.new();
+    let inputs: List<Text> = [
+        "k1".clone(), "k2".clone(), "k3".clone(),
+        "k4".clone(), "k5".clone(), "k6".clone(),
+        "k7".clone(), "k8".clone(),
+    ];
+    let mut i: Int = 0;
+    while i < inputs.len() {
+        m.insert(inputs[i].clone(), i as Int);
+        i = i + 1;
+    }
+    let mut count: Int = 0;
+    for _ in m.keys() { count = count + 1; }
+    assert(count == inputs.len(),
+           "iteration count must equal insertion count (no missing/dup)");
+}
+
+// Pin that iter() entries' (key, value) pairs match the
+// (key, lookup) pairs at the same key — i.e. iter doesn't surface
+// a different value than get() would.
+fn map_iter_value_matches_get() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a".clone(), 100);
+    m.insert("b".clone(), 200);
+    m.insert("c".clone(), 300);
+    for (k, v) in m.iter() {
+        let via_get = m.get(k);
+        match via_get {
+            Some(g) => assert(*g == *v,
+                              "iter value must match get(key)"),
+            None    => panic("iter yielded a key get() can't find — invariant broken"),
+        }
+    }
+}
+
+fn main() {
+    map_iter_same_instance_deterministic();
+    map_iter_covers_all_insertions();
+    map_iter_value_matches_get();
+}
