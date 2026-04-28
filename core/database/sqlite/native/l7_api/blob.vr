@@ -1,0 +1,442 @@
+module core.database.sqlite.native.l7_api.blob;
+
+// =============================================================================
+// l7_api/blob.vr — incremental BLOB I/O (sqlite-native.md §13.5)
+// =============================================================================
+// Layer: 7 — public API.
+// Spec: sqlite-native.md §13.5; SQLite C API:
+//        sqlite3_blob_open / _read / _write / _bytes / _reopen / _close.
+//
+// Use case: read or write a BLOB column WITHOUT materialising the
+// entire payload into memory.  Useful for large binaries — images,
+// audio, ML weights, file blobs persisted in SQLite via the typed
+// columnar surface.
+//
+// Design.
+//
+// The bookkeeping layer is `core.database.sqlite.native.incrblob.engine`
+// — a per-connection table of `BlobHandle` records with stable
+// `handle_id`s.  This module hosts the high-level surface that:
+//
+//   1. Resolves (schema, table, column, rowid) to a concrete row +
+//      column slot via the schema cache + table store.
+//   2. Captures the cell's current byte size so `bytes()` is O(1).
+//   3. Drives the four operational primitives (read / write / reopen
+//      / close) by mutating the underlying RBlob register in the
+//      connection's table store.
+//
+// Constraints.
+//
+//   * Only RBlob and RText columns are addressable — RInt / RReal
+//     reject with `BeNotABlob`.  RText is treated as its UTF-8 byte
+//     view for read; write on RText reinterprets the new bytes as
+//     blob storage (the cell becomes RBlob after a successful write —
+//     SQLite's behaviour).
+//
+//   * Write extends the BLOB only up to the original byte_size that
+//     the handle was opened with — matches SQLite, which forbids
+//     resizing through an open handle.  Use `zeroblob(N)` + UPDATE +
+//     re-open to grow.
+//
+//   * Cross-row reuse is via `blob_reopen(handle_id, new_rowid)` —
+//     same column, different row.  Faster than close + open because
+//     the bookkeeping slot is reused.
+//
+// Affine.
+//
+// `BlobReader` / `BlobWriter` aren't separate affine values in this
+// implementation — the handle is identified by `Int64 handle_id` and
+// the engine refuses operations after `close`.  This matches SQLite C
+// API semantics and avoids the protocol-level complexity of an
+// affine handle holding `&mut Database`.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RText, RBlob,
+};
+mount core.database.sqlite.native.incrblob.flags.{
+    BlobOpenMode, BomReadOnly, BomReadWrite,
+};
+mount core.database.sqlite.native.incrblob.error.{
+    BlobError, BeNoRow, BeNotABlob, BeReadOnly, BeOutOfRange, BeAborted,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    SchemaCache, TableMeta, ColumnMeta,
+};
+mount core.database.sqlite.native.l7_api.database.{
+    Database, DbError,
+    DbGeneric, DbReadonly, DbCorrupt, DbCannotOpen, DbBindRange,
+};
+
+// -----------------------------------------------------------------------------
+// Internal — resolve (schema, table, column, rowid) to a (root_page,
+// row_index, col_index, byte_size) tuple
+// -----------------------------------------------------------------------------
+
+/// Located cell coordinates.  All fields needed to read or write the
+/// BLOB without re-traversing the schema.
+type BlobLocation is {
+    root_page: Int,
+    row_index: Int,
+    col_index: Int,
+    byte_size: Int,
+};
+
+fn resolve_location(
+    db: &Database,
+    schema: &Text,
+    table: &Text,
+    column: &Text,
+    rowid: Int64,
+) -> Result<BlobLocation, DbError> {
+    let cache: &SchemaCache = db.conn_view_for_blob().schema();
+    let meta = match cache.lookup_table(schema, table) {
+        Ok(m)  => m,
+        Err(_) => { return Err(DbCannotOpen(
+            f"blob_open: table '{table.clone()}' not found in schema '{schema.clone()}'".clone())); }
+    };
+
+    // Column lookup — case-sensitive match on the declared name.
+    let mut col_index: Int = -1;
+    let mut i: Int = 0;
+    while i < meta.columns.len() {
+        if meta.columns[i].name == column.clone() {
+            col_index = i;
+            break;
+        }
+        i = i + 1;
+    }
+    if col_index < 0 {
+        return Err(DbCannotOpen(
+            f"blob_open: column '{column.clone()}' not found in table '{table.clone()}'".clone()));
+    }
+
+    // Row lookup — rowid is 1-based, row_index is 0-based; we follow
+    // the convention from cursor_table.append_row that pos == rowid - 1.
+    let row_index: Int = (rowid as Int) - 1;
+    if row_index < 0 {
+        return Err(DbBindRange(rowid as Int));
+    }
+    let conn = db.conn_view_for_blob();
+    if !conn.has_table_at(meta.root_page) {
+        return Err(DbCannotOpen("blob_open: table has no rows".clone()));
+    }
+    if row_index >= conn.row_count_at(meta.root_page) {
+        return Err(DbBindRange(rowid as Int));
+    }
+
+    // Probe cell to capture current byte_size.
+    let rows = conn.rows_at(meta.root_page);
+    let row = &rows[row_index];
+    if col_index >= row.len() {
+        return Err(DbCorrupt(
+            "blob_open: row column count smaller than schema".clone()));
+    }
+    let cell = &row[col_index];
+    let size: Int = match cell {
+        RBlob(b) => b.len(),
+        RText(s) => s.as_bytes().len(),
+        RNull    => 0,
+        _        => { return Err(DbGeneric(
+            "blob_open: column does not hold a BLOB or TEXT".clone())); }
+    };
+
+    Ok(BlobLocation {
+        root_page: meta.root_page,
+        row_index: row_index,
+        col_index: col_index,
+        byte_size: size,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Public surface
+// -----------------------------------------------------------------------------
+
+/// Open an incremental BLOB handle on `(schema, table, column, rowid)`.
+/// Returns the engine-assigned `handle_id`.  Pass it back to every
+/// subsequent `blob_*` call.
+pub fn blob_open(
+    db: &mut Database,
+    schema: &Text,
+    table: &Text,
+    column: &Text,
+    rowid: Int64,
+    write_mode: Bool,
+) -> Result<Int64, DbError> {
+    let loc = match resolve_location(db, schema, table, column, rowid) {
+        Ok(l)  => l,
+        Err(e) => { return Err(e); }
+    };
+    let mode: BlobOpenMode = if write_mode { BomReadWrite } else { BomReadOnly };
+    let engine = db.conn_mut_for_blob().blob_engine_mut();
+    let id = engine.open(
+        schema.clone(), table.clone(), column.clone(),
+        rowid, mode, loc.byte_size,
+    );
+    // Stash the resolved coordinates alongside the handle.  We hold
+    // them in a side-table inside the engine so subsequent read /
+    // write don't have to re-traverse the schema.  v1 keeps this
+    // simple by embedding the lookup in the get_row/set_row path
+    // below — re-resolving each call is O(table-count + column-count)
+    // which is fine for typical schemas.  A future commit can cache
+    // the BlobLocation in the BlobHandle if it becomes a hot path.
+    let _ = loc;
+    Ok(id)
+}
+
+/// Total size in bytes of the BLOB the handle was opened against.
+/// O(1) — answered from the cached size at open time.
+pub fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, DbError> {
+    let engine = db.conn_view_for_blob().blob_engine_view();
+    match engine.lookup_size(handle_id) {
+        Some(n) => Ok(n),
+        None    => Err(DbCannotOpen("blob_bytes: handle not open".clone())),
+    }
+}
+
+/// Read `length` bytes starting at `offset`.  Bounds-checked against
+/// the size captured at open; out-of-range reads return `DbBindRange`.
+pub fn blob_read(
+    db: &Database,
+    handle_id: Int64,
+    offset: Int,
+    length: Int,
+) -> Result<List<Byte>, DbError> {
+    if offset < 0 || length < 0 {
+        return Err(DbBindRange(offset));
+    }
+    if length == 0 {
+        return Ok(List.new());
+    }
+
+    let engine = db.conn_view_for_blob().blob_engine_view();
+    match engine.validate_read(handle_id, offset, length) {
+        Ok(_)  => {}
+        Err(_) => { return Err(DbBindRange(offset)); }
+    }
+
+    let h = match engine_handle(engine, handle_id) {
+        Some(meta) => meta,
+        None       => { return Err(DbCannotOpen("blob_read: handle not open".clone())); }
+    };
+
+    let conn = db.conn_view_for_blob();
+    let cache: &SchemaCache = conn.schema();
+    let meta = match cache.lookup_table(&h.0, &h.1) {
+        Ok(m)  => m,
+        Err(_) => { return Err(DbCorrupt("blob_read: table dropped under open handle".clone())); }
+    };
+    let row_index = (h.3 as Int) - 1;
+    let col_index = match find_col(&meta, &h.2) {
+        Some(i) => i,
+        None    => { return Err(DbCorrupt("blob_read: column dropped under open handle".clone())); }
+    };
+    let rows = conn.rows_at(meta.root_page);
+    if row_index < 0 || row_index >= rows.len() {
+        return Err(DbBindRange(row_index));
+    }
+    let row = &rows[row_index];
+    let cell = &row[col_index];
+    let bytes: List<Byte> = match cell {
+        RBlob(b) => slice_bytes(b, offset, length),
+        RText(s) => slice_bytes_from_text(s, offset, length),
+        _        => List.new(),
+    };
+    Ok(bytes)
+}
+
+/// Write `data` into the BLOB starting at `offset`.  Cannot grow the
+/// BLOB beyond its original size at open — matches SQLite.  Returns
+/// `DbReadonly` if the handle was opened read-only.
+pub fn blob_write(
+    db: &mut Database,
+    handle_id: Int64,
+    offset: Int,
+    data: &[Byte],
+) -> Result<(), DbError> {
+    if offset < 0 {
+        return Err(DbBindRange(offset));
+    }
+    let length = data.len();
+    if length == 0 { return Ok(()); }
+
+    let engine = db.conn_view_for_blob().blob_engine_view();
+    match engine.validate_write(handle_id, offset, length) {
+        Ok(_)  => {}
+        Err(BeReadOnly) => { return Err(DbReadonly); }
+        Err(_) => { return Err(DbBindRange(offset)); }
+    }
+
+    let h = match engine_handle(engine, handle_id) {
+        Some(meta) => meta,
+        None       => { return Err(DbCannotOpen("blob_write: handle not open".clone())); }
+    };
+
+    // Resolve coordinates again (cheap; could cache in the BlobHandle).
+    let conn = db.conn_view_for_blob();
+    let cache: &SchemaCache = conn.schema();
+    let meta = match cache.lookup_table(&h.0, &h.1) {
+        Ok(m)  => m,
+        Err(_) => { return Err(DbCorrupt("blob_write: table dropped under open handle".clone())); }
+    };
+    let row_index = (h.3 as Int) - 1;
+    let col_index = match find_col(&meta, &h.2) {
+        Some(i) => i,
+        None    => { return Err(DbCorrupt("blob_write: column dropped under open handle".clone())); }
+    };
+
+    let conn_mut = db.conn_mut_for_blob();
+    let mut rows = conn_mut.rows_at(meta.root_page);
+    if row_index < 0 || row_index >= rows.len() {
+        return Err(DbBindRange(row_index));
+    }
+    let mut row = rows[row_index].clone();
+    let cell = &row[col_index];
+    let mut bytes: List<Byte> = match cell {
+        RBlob(b) => clone_bytes(b),
+        RText(s) => text_to_bytes(s),
+        _        => List.new(),
+    };
+    let mut k: Int = 0;
+    while k < length {
+        let dst = offset + k;
+        if dst >= bytes.len() {
+            // Validate already enforced length ≤ byte_size; if we get
+            // here we hit a non-blob cell, return clean error.
+            return Err(DbCorrupt("blob_write: cell shrunk under handle".clone()));
+        }
+        bytes[dst] = data[k];
+        k = k + 1;
+    }
+    row[col_index] = RBlob(bytes);
+    rows[row_index] = row;
+    conn_mut.set_rows_at(meta.root_page, rows);
+    Ok(())
+}
+
+/// Reopen the handle on a different rowid.  Faster than close + open
+/// because the engine slot is reused.  The new row must lie in the
+/// same (schema, table, column) — switching column requires a fresh
+/// `blob_open`.
+pub fn blob_reopen(
+    db: &mut Database,
+    handle_id: Int64,
+    new_rowid: Int64,
+) -> Result<(), DbError> {
+    let h = match engine_handle(db.conn_view_for_blob().blob_engine_view(), handle_id) {
+        Some(meta) => meta,
+        None       => { return Err(DbCannotOpen("blob_reopen: handle not open".clone())); }
+    };
+    let loc = match resolve_location(db, &h.0, &h.1, &h.2, new_rowid) {
+        Ok(l)  => l,
+        Err(e) => { return Err(e); }
+    };
+    let engine = db.conn_mut_for_blob().blob_engine_mut();
+    match engine.reopen(handle_id, new_rowid, loc.byte_size) {
+        Ok(_)  => Ok(()),
+        Err(_) => Err(DbCannotOpen("blob_reopen: engine refused".clone())),
+    }
+}
+
+/// Close the handle.  Subsequent operations on `handle_id` return
+/// `DbCannotOpen`.  Closing an already-closed handle is a no-op.
+pub fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), DbError> {
+    let engine = db.conn_mut_for_blob().blob_engine_mut();
+    let _ = engine.close(handle_id);
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Internal helpers — resolve handle metadata + bytes manipulation
+// -----------------------------------------------------------------------------
+
+/// Pull (schema, table, column, rowid) from the engine without
+/// dragging the BlobHandle struct definition into this module's
+/// public surface.  Returns None if the handle isn't open.
+fn engine_handle(
+    engine: &core.database.sqlite.native.incrblob.engine.BlobEngine,
+    handle_id: Int64,
+) -> Maybe<(Text, Text, Text, Int64)> {
+    let n = engine.handles.len();
+    let mut i: Int = 0;
+    while i < n {
+        let h = &engine.handles[i];
+        if h.handle_id == handle_id && h.is_open() {
+            return Some((
+                h.schema_name.clone(),
+                h.table_name.clone(),
+                h.column_name.clone(),
+                h.rowid,
+            ));
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn find_col(meta: &TableMeta, name: &Text) -> Maybe<Int> {
+    let mut i: Int = 0;
+    while i < meta.columns.len() {
+        if meta.columns[i].name == name.clone() {
+            return Some(i);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn slice_bytes(b: &List<Byte>, offset: Int, length: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(length);
+    let mut i: Int = 0;
+    while i < length {
+        let src = offset + i;
+        if src < b.len() {
+            out.push(b[src]);
+        } else {
+            out.push(0 as Byte);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn slice_bytes_from_text(s: &Text, offset: Int, length: Int) -> List<Byte> {
+    let raw = s.as_bytes();
+    let mut out: List<Byte> = List.with_capacity(length);
+    let mut i: Int = 0;
+    while i < length {
+        let src = offset + i;
+        if src < raw.len() {
+            out.push(raw[src]);
+        } else {
+            out.push(0 as Byte);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_bytes(b: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.with_capacity(b.len());
+    let mut i: Int = 0;
+    while i < b.len() {
+        out.push(b[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn text_to_bytes(s: &Text) -> List<Byte> {
+    let raw = s.as_bytes();
+    let mut out: List<Byte> = List.with_capacity(raw.len());
+    let mut i: Int = 0;
+    while i < raw.len() {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    out
+}
