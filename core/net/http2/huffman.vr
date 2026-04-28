@@ -25,6 +25,34 @@ public type DecodeError is
     | Invalid
     | OutputTooLarge { limit: Int };
 
+implement Display for DecodeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Invalid                  => f.write_str("HPACK Huffman: invalid encoding"),
+            OutputTooLarge { limit } => f.write_str(f"HPACK Huffman: output exceeds limit {limit}".as_str()),
+        }
+    }
+}
+
+implement Debug for DecodeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Invalid                  => f.write_str("Invalid"),
+            OutputTooLarge { limit } => f.write_str(f"OutputTooLarge {{ limit: {limit} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for DecodeError {
+    fn eq(&self, other: &DecodeError) -> Bool {
+        match (self, other) {
+            (Invalid,                    Invalid)                    => true,
+            (OutputTooLarge { limit: a }, OutputTooLarge { limit: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Encode `input` with the HPACK Huffman code. The result is appended
 /// to `out` with the standard all-ones padding on the trailing byte.
 public fn encode(input: &[Byte], out: &mut List<Byte>) {

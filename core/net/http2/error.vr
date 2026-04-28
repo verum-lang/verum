@@ -66,3 +66,81 @@ public fn stream_error(stream_id: UInt32, code: UInt32, reason: &Text) -> Http2E
         reason: reason.clone(),
     }
 }
+
+implement Display for ErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"0x{self.code:x}".as_str())
+    }
+}
+
+implement Debug for ErrorCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ErrorCode(0x{self.code:x})".as_str())
+    }
+}
+
+implement Eq for ErrorCode {
+    fn eq(&self, other: &ErrorCode) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Display for Http2Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Http2Error.ConnectionError { code, reason } =>
+                f.write_str(f"HTTP/2 connection error {code}: {reason}".as_str()),
+            Http2Error.StreamError { stream_id, code, reason } =>
+                f.write_str(f"HTTP/2 stream {stream_id} error {code}: {reason}".as_str()),
+            Http2Error.NeedMore =>
+                f.write_str("HTTP/2 wire buffer needs more bytes"),
+            Http2Error.BadClientPreface =>
+                f.write_str("HTTP/2 invalid client preface"),
+            Http2Error.MalformedFrame(reason) =>
+                f.write_str(f"HTTP/2 malformed frame: {reason}".as_str()),
+            Http2Error.HpackError(reason) =>
+                f.write_str(f"HTTP/2 HPACK decode failed: {reason}".as_str()),
+            Http2Error.FrameSizeExceeded { size, limit } =>
+                f.write_str(f"HTTP/2 frame size {size} exceeds limit {limit}".as_str()),
+        }
+    }
+}
+
+implement Debug for Http2Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Http2Error.ConnectionError { code, reason } =>
+                f.write_str(f"ConnectionError {{ code: {code:?}, reason: {reason} }}".as_str()),
+            Http2Error.StreamError { stream_id, code, reason } =>
+                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code:?}, reason: {reason} }}".as_str()),
+            Http2Error.NeedMore =>
+                f.write_str("NeedMore"),
+            Http2Error.BadClientPreface =>
+                f.write_str("BadClientPreface"),
+            Http2Error.MalformedFrame(reason) =>
+                f.write_str(f"MalformedFrame({reason})".as_str()),
+            Http2Error.HpackError(reason) =>
+                f.write_str(f"HpackError({reason})".as_str()),
+            Http2Error.FrameSizeExceeded { size, limit } =>
+                f.write_str(f"FrameSizeExceeded {{ size: {size}, limit: {limit} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for Http2Error {
+    fn eq(&self, other: &Http2Error) -> Bool {
+        match (self, other) {
+            (Http2Error.ConnectionError { code: ca, reason: ra },
+             Http2Error.ConnectionError { code: cb, reason: rb }) => ca == cb && ra == rb,
+            (Http2Error.StreamError { stream_id: sa, code: ca, reason: ra },
+             Http2Error.StreamError { stream_id: sb, code: cb, reason: rb }) => sa == sb && ca == cb && ra == rb,
+            (Http2Error.NeedMore,             Http2Error.NeedMore)             => true,
+            (Http2Error.BadClientPreface,     Http2Error.BadClientPreface)     => true,
+            (Http2Error.MalformedFrame(a),    Http2Error.MalformedFrame(b))    => a == b,
+            (Http2Error.HpackError(a),        Http2Error.HpackError(b))        => a == b,
+            (Http2Error.FrameSizeExceeded { size: sa, limit: la },
+             Http2Error.FrameSizeExceeded { size: sb, limit: lb })             => sa == sb && la == lb,
+            _ => false,
+        }
+    }
+}

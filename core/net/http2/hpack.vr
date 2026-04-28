@@ -200,6 +200,46 @@ public type HpackError is
     | InvalidRepresentation(UInt8)
     | DynamicTableSizeExceedsSettings;
 
+implement Display for HpackError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                       => f.write_str("HPACK: truncated input"),
+            IntegerOverflow                 => f.write_str("HPACK: integer overflow"),
+            InvalidIndex(i)                 => f.write_str(f"HPACK: invalid index {i}".as_str()),
+            InvalidHuffman                  => f.write_str("HPACK: invalid Huffman encoding"),
+            InvalidRepresentation(b)        => f.write_str(f"HPACK: invalid representation byte {b}".as_str()),
+            DynamicTableSizeExceedsSettings => f.write_str("HPACK: dynamic table size exceeds peer SETTINGS"),
+        }
+    }
+}
+
+implement Debug for HpackError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                       => f.write_str("Truncated"),
+            IntegerOverflow                 => f.write_str("IntegerOverflow"),
+            InvalidIndex(i)                 => f.write_str(f"InvalidIndex({i})".as_str()),
+            InvalidHuffman                  => f.write_str("InvalidHuffman"),
+            InvalidRepresentation(b)        => f.write_str(f"InvalidRepresentation({b})".as_str()),
+            DynamicTableSizeExceedsSettings => f.write_str("DynamicTableSizeExceedsSettings"),
+        }
+    }
+}
+
+implement Eq for HpackError {
+    fn eq(&self, other: &HpackError) -> Bool {
+        match (self, other) {
+            (Truncated,                       Truncated)                       => true,
+            (IntegerOverflow,                 IntegerOverflow)                 => true,
+            (InvalidIndex(a),                 InvalidIndex(b))                 => a == b,
+            (InvalidHuffman,                  InvalidHuffman)                  => true,
+            (InvalidRepresentation(a),        InvalidRepresentation(b))        => a == b,
+            (DynamicTableSizeExceedsSettings, DynamicTableSizeExceedsSettings) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // String literal codec — §5.2
 // =============================================================================
