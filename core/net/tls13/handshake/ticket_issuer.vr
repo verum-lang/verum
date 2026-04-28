@@ -76,6 +76,30 @@ implement IssueOptions {
 public type IssueError is
       Ticket(TicketError);
 
+implement Display for IssueError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Ticket(e) => f.write_str(f"TLS 1.3 ticket issue: {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for IssueError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Ticket(e) => f.write_str(f"Ticket({e:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for IssueError {
+    fn eq(&self, other: &IssueError) -> Bool {
+        match (self, other) {
+            (Ticket(a), Ticket(b)) => a == b,
+        }
+    }
+}
+
 // =============================================================================
 // Issuance
 // =============================================================================

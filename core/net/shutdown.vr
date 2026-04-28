@@ -103,6 +103,32 @@ implement Drop for ConnectionGuard {
 public type ShutdownError is
     | DrainTimeout { remaining: Int };
 
+implement Display for ShutdownError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DrainTimeout { remaining } =>
+                f.write_str(f"shutdown drain timeout: {remaining} connections still active".as_str()),
+        }
+    }
+}
+
+implement Debug for ShutdownError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DrainTimeout { remaining } =>
+                f.write_str(f"DrainTimeout {{ remaining: {remaining} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for ShutdownError {
+    fn eq(&self, other: &ShutdownError) -> Bool {
+        match (self, other) {
+            (DrainTimeout { remaining: a }, DrainTimeout { remaining: b }) => a == b,
+        }
+    }
+}
+
 // =============================================================================
 // GracefulShutdown — controller
 // =============================================================================
@@ -225,6 +251,44 @@ public type ListenFdsError is
     | NoSocketActivation
     | WrongPid { expected: Int, actual: Int }
     | ParseError(Text);
+
+implement Display for ListenFdsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoSocketActivation =>
+                f.write_str("LISTEN_FDS: no socket-activation environment"),
+            WrongPid { expected, actual } =>
+                f.write_str(f"LISTEN_FDS: PID mismatch (expected {expected}, actual {actual})".as_str()),
+            ParseError(reason) =>
+                f.write_str(f"LISTEN_FDS: parse error ({reason})".as_str()),
+        }
+    }
+}
+
+implement Debug for ListenFdsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoSocketActivation =>
+                f.write_str("NoSocketActivation"),
+            WrongPid { expected, actual } =>
+                f.write_str(f"WrongPid {{ expected: {expected}, actual: {actual} }}".as_str()),
+            ParseError(reason) =>
+                f.write_str(f"ParseError({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for ListenFdsError {
+    fn eq(&self, other: &ListenFdsError) -> Bool {
+        match (self, other) {
+            (NoSocketActivation, NoSocketActivation) => true,
+            (WrongPid { expected: ea, actual: aa },
+             WrongPid { expected: eb, actual: ab }) => ea == eb && aa == ab,
+            (ParseError(a), ParseError(b)) => a == b,
+            _ => false,
+        }
+    }
+}
 
 public fn listen_fds() -> Result<Int, ListenFdsError> {
     @intrinsic("verum.net.listen_fds")

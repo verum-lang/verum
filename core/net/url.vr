@@ -58,6 +58,61 @@ public type UrlErrorKind is
     | InvalidPercentEscape
     | UrlTooLong;
 
+fn url_error_kind_name(k: &UrlErrorKind) -> Text {
+    match k {
+        MissingScheme         => "MissingScheme".clone(),
+        InvalidScheme         => "InvalidScheme".clone(),
+        InvalidAuthority      => "InvalidAuthority".clone(),
+        InvalidPort           => "InvalidPort".clone(),
+        InvalidPercentEscape  => "InvalidPercentEscape".clone(),
+        UrlTooLong            => "UrlTooLong".clone(),
+    }
+}
+
+fn url_error_kind_tag(k: &UrlErrorKind) -> Int {
+    match k {
+        MissingScheme         => 0,  InvalidScheme        => 1,
+        InvalidAuthority      => 2,  InvalidPort          => 3,
+        InvalidPercentEscape  => 4,  UrlTooLong           => 5,
+    }
+}
+
+implement Display for UrlErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(url_error_kind_name(self).as_str())
+    }
+}
+
+implement Debug for UrlErrorKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(url_error_kind_name(self).as_str())
+    }
+}
+
+implement Eq for UrlErrorKind {
+    fn eq(&self, other: &UrlErrorKind) -> Bool {
+        url_error_kind_tag(self) == url_error_kind_tag(other)
+    }
+}
+
+implement Display for UrlError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"URL {self.kind} at position {self.position}: {self.message}".as_str())
+    }
+}
+
+implement Debug for UrlError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"UrlError {{ kind: {self.kind:?}, position: {self.position}, message: {self.message} }}".as_str())
+    }
+}
+
+implement Eq for UrlError {
+    fn eq(&self, other: &UrlError) -> Bool {
+        self.kind == other.kind && self.position == other.position && self.message == other.message
+    }
+}
+
 // Maximum permitted URL length in bytes.  Hostile inputs with multi-
 // megabyte URLs would otherwise pin the parser doing per-byte scans.
 // 64 KiB is generous compared to industry norms (IE 2083, nginx 8192,

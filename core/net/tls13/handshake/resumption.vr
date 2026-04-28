@@ -200,6 +200,53 @@ public type TicketError is
     | Expired
     | HkdfFailure;
 
+// Display + Debug + Eq for TicketError.  SealFailure /
+// OpenFailure / HkdfFailure surface no detail — TLS 1.3
+// session-ticket AEAD opens MUST be value-blind (RFC 8446
+// §4.6.1) to avoid an oracle for STEK material.
+
+implement Display for TicketError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            SealFailure       => "TLS 1.3 ticket: AEAD seal failed",
+            OpenFailure       => "TLS 1.3 ticket: AEAD open failed",
+            WrongKeyId        => "TLS 1.3 ticket: wrong STEK key id",
+            MalformedTicket   => "TLS 1.3 ticket: malformed",
+            Expired           => "TLS 1.3 ticket: expired",
+            HkdfFailure       => "TLS 1.3 ticket: HKDF derivation failed",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for TicketError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            SealFailure       => "SealFailure",
+            OpenFailure       => "OpenFailure",
+            WrongKeyId        => "WrongKeyId",
+            MalformedTicket   => "MalformedTicket",
+            Expired           => "Expired",
+            HkdfFailure       => "HkdfFailure",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for TicketError {
+    fn eq(&self, other: &TicketError) -> Bool {
+        match (self, other) {
+            (SealFailure,     SealFailure)     => true,
+            (OpenFailure,     OpenFailure)     => true,
+            (WrongKeyId,      WrongKeyId)      => true,
+            (MalformedTicket, MalformedTicket) => true,
+            (Expired,         Expired)         => true,
+            (HkdfFailure,     HkdfFailure)     => true,
+            _ => false,
+        }
+    }
+}
+
 public fn issue_ticket(
     stek: &SessionTicketKey,
     plaintext: &ServerTicketPlaintext,
