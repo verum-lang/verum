@@ -101,6 +101,77 @@ public type JwtError is
     | WrongKeyKind                   // JwtKey variant doesn't match algorithm
     | SigningFailure;
 
+// Display + Debug + Eq for JwtError.  SignatureMismatch
+// Display deliberately surfaces no detail — RFC 7515
+// requires constant-time, value-blind verification
+// failure (oracle-attack surface for HMAC keys).
+
+implement Display for JwtError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            JwtError.MalformedToken     => "JWT malformed (segment count / format)",
+            JwtError.TokenTooLong       => "JWT exceeds maximum permitted length",
+            JwtError.Base64Decode       => "JWT base64 decode failure",
+            JwtError.JsonDecode         => "JWT JSON decode failure",
+            JwtError.AlgorithmMismatch  => "JWT alg header not in permitted list",
+            JwtError.AlgNone            => "JWT alg=none rejected",
+            JwtError.SignatureMismatch  => "JWT signature verification failed",
+            JwtError.Expired            => "JWT expired (exp claim in the past)",
+            JwtError.NotYetValid        => "JWT not yet valid (nbf claim in the future)",
+            JwtError.IssuerMismatch     => "JWT issuer mismatch (iss claim)",
+            JwtError.AudienceMismatch   => "JWT audience mismatch (aud claim)",
+            JwtError.WrongKeyKind       => "JWT key kind incompatible with algorithm",
+            JwtError.SigningFailure     => "JWT signing operation failed",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for JwtError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            JwtError.MalformedToken     => "MalformedToken",
+            JwtError.TokenTooLong       => "TokenTooLong",
+            JwtError.Base64Decode       => "Base64Decode",
+            JwtError.JsonDecode         => "JsonDecode",
+            JwtError.AlgorithmMismatch  => "AlgorithmMismatch",
+            JwtError.AlgNone            => "AlgNone",
+            JwtError.SignatureMismatch  => "SignatureMismatch",
+            JwtError.Expired            => "Expired",
+            JwtError.NotYetValid        => "NotYetValid",
+            JwtError.IssuerMismatch     => "IssuerMismatch",
+            JwtError.AudienceMismatch   => "AudienceMismatch",
+            JwtError.WrongKeyKind       => "WrongKeyKind",
+            JwtError.SigningFailure     => "SigningFailure",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for JwtError {
+    fn eq(&self, other: &JwtError) -> Bool {
+        // All variants are unit — structural equality reduces to
+        // discriminant equality, expressed via the (self, other)
+        // pattern match.
+        match (self, other) {
+            (JwtError.MalformedToken,     JwtError.MalformedToken)     => true,
+            (JwtError.TokenTooLong,       JwtError.TokenTooLong)       => true,
+            (JwtError.Base64Decode,       JwtError.Base64Decode)       => true,
+            (JwtError.JsonDecode,         JwtError.JsonDecode)         => true,
+            (JwtError.AlgorithmMismatch,  JwtError.AlgorithmMismatch)  => true,
+            (JwtError.AlgNone,            JwtError.AlgNone)            => true,
+            (JwtError.SignatureMismatch,  JwtError.SignatureMismatch)  => true,
+            (JwtError.Expired,            JwtError.Expired)            => true,
+            (JwtError.NotYetValid,        JwtError.NotYetValid)        => true,
+            (JwtError.IssuerMismatch,     JwtError.IssuerMismatch)     => true,
+            (JwtError.AudienceMismatch,   JwtError.AudienceMismatch)   => true,
+            (JwtError.WrongKeyKind,       JwtError.WrongKeyKind)       => true,
+            (JwtError.SigningFailure,     JwtError.SigningFailure)     => true,
+            _ => false,
+        }
+    }
+}
+
 // Maximum permitted JWT compact-form token length in bytes.  Hostile
 // inputs with multi-megabyte tokens would force the verifier to do
 // expensive base64-decode + HMAC/signature work on attacker-supplied
