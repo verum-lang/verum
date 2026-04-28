@@ -89,17 +89,19 @@ implement Algorithm {
     }
 
     /// Parse an HTTP Content-Encoding token. Returns None for unknown.
+    /// Allocation-free: uses ASCII-fast eq_ignore_case (#88) on the
+    /// borrowed token instead of materialising a fresh lowercase Text.
+    /// Called once per HTTP response decode — common-case is "gzip"
+    /// or "br" so the early-match short-circuit also skips the rest
+    /// of the table.
     public fn from_content_encoding(token: &Text) -> Maybe<Algorithm> {
-        let t = token.to_lowercase();
-        match t.as_str() {
-            "gzip" => Some(Algorithm.Gzip),
-            "deflate" => Some(Algorithm.Deflate),
-            "br" => Some(Algorithm.Brotli),
-            "zstd" => Some(Algorithm.Zstd),
-            "lz4" => Some(Algorithm.Lz4),
-            "identity" => Some(Algorithm.Identity),
-            _ => None,
-        }
+        if token.eq_ignore_case(&"gzip") { return Some(Algorithm.Gzip); }
+        if token.eq_ignore_case(&"deflate") { return Some(Algorithm.Deflate); }
+        if token.eq_ignore_case(&"br") { return Some(Algorithm.Brotli); }
+        if token.eq_ignore_case(&"zstd") { return Some(Algorithm.Zstd); }
+        if token.eq_ignore_case(&"lz4") { return Some(Algorithm.Lz4); }
+        if token.eq_ignore_case(&"identity") { return Some(Algorithm.Identity); }
+        None
     }
 }
 
