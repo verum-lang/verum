@@ -215,6 +215,36 @@ fn arith_mul(a: &Register, b: &Register) -> Register {
     }
 }
 
+fn arith_rem(a: &Register, b: &Register) -> Register {
+    // SQLite OP_Remainder: integer modulo with 0-protection (`x % 0 == NULL`).
+    // For Int.MIN % -1 the C-spec result is 0 (mathematically a*b+r=a, r=0)
+    // but x86 raises #DE for the *quotient*'s overflow before reaching the
+    // remainder unit; aarch64 returns 0 directly. Detect explicitly so both
+    // hosts return the spec-defined 0.
+    match (a, b) {
+        (RReal(_), _) | (_, RReal(_)) => {
+            let bx = to_real(b);
+            if bx == 0.0 { RNull } else {
+                // Float modulo via truncation: a - trunc(a/b) * b.
+                let ax = to_real(a);
+                let q = (ax / bx) as Int64 as Float64;
+                RReal(ax - q * bx)
+            }
+        }
+        _ => {
+            let ai = to_int64(a);
+            let bi = to_int64(b);
+            if bi == 0_i64 {
+                RNull
+            } else if ai == -9_223_372_036_854_775_808_i64 && bi == -1_i64 {
+                RInt(0_i64)
+            } else {
+                RInt(ai % bi)
+            }
+        }
+    }
+}
+
 fn arith_div(a: &Register, b: &Register) -> Register {
     // SQLite divides as REAL for REAL operands, INT otherwise with 0
     // protection (0 / 0 = NULL). Two integer-overflow edge cases:
@@ -421,6 +451,14 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             let va = state.regs.get(a);
             let vb = state.regs.get(b);
             state.regs.set(d, arith_div(&va, &vb));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Remainder(a, b, d) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            state.regs.set(d, arith_rem(&va, &vb));
             state.pc = state.pc + 1;
             Yield
         }
