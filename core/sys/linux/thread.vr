@@ -144,6 +144,40 @@ public type LinuxThreadError is
     | AlreadyJoined
     ;
 
+implement Display for LinuxThreadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            StackAllocationFailed { code } => f.write_str(f"Linux thread: stack allocation failed (code {code})".as_str()),
+            TlsAllocationFailed { code }   => f.write_str(f"Linux thread: TLS allocation failed (code {code})".as_str()),
+            CloneFailed { code }           => f.write_str(f"Linux thread: clone() failed (code {code})".as_str()),
+            AlreadyJoined                  => f.write_str("Linux thread: already joined"),
+        }
+    }
+}
+
+implement Debug for LinuxThreadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            StackAllocationFailed { code } => f.write_str(f"StackAllocationFailed {{ code: {code} }}".as_str()),
+            TlsAllocationFailed { code }   => f.write_str(f"TlsAllocationFailed {{ code: {code} }}".as_str()),
+            CloneFailed { code }           => f.write_str(f"CloneFailed {{ code: {code} }}".as_str()),
+            AlreadyJoined                  => f.write_str("AlreadyJoined"),
+        }
+    }
+}
+
+implement Eq for LinuxThreadError {
+    fn eq(&self, other: &LinuxThreadError) -> Bool {
+        match (self, other) {
+            (StackAllocationFailed { code: a }, StackAllocationFailed { code: b }) => a == b,
+            (TlsAllocationFailed { code: a },   TlsAllocationFailed { code: b })   => a == b,
+            (CloneFailed { code: a },           CloneFailed { code: b })           => a == b,
+            (AlreadyJoined,                     AlreadyJoined)                     => true,
+            _ => false,
+        }
+    }
+}
+
 /// Default stack size (2 MB)
 public const DEFAULT_STACK_SIZE: USize = 2 * 1024 * 1024;
 

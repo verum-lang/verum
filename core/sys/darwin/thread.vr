@@ -77,6 +77,47 @@ implement DarwinThreadError {
     }
 }
 
+implement Display for DarwinThreadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.message().as_str())
+    }
+}
+
+implement Debug for DarwinThreadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CreateFailed { code }     => f.write_str(f"CreateFailed {{ code: {code} }}".as_str()),
+            JoinFailed { code }       => f.write_str(f"JoinFailed {{ code: {code} }}".as_str()),
+            DetachFailed { code }     => f.write_str(f"DetachFailed {{ code: {code} }}".as_str()),
+            MutexInitFailed { code }  => f.write_str(f"MutexInitFailed {{ code: {code} }}".as_str()),
+            MutexLockFailed { code }  => f.write_str(f"MutexLockFailed {{ code: {code} }}".as_str()),
+            CondInitFailed { code }   => f.write_str(f"CondInitFailed {{ code: {code} }}".as_str()),
+            CondWaitFailed { code }   => f.write_str(f"CondWaitFailed {{ code: {code} }}".as_str()),
+            TlsInitFailed             => f.write_str("TlsInitFailed"),
+            AlreadyJoined             => f.write_str("AlreadyJoined"),
+            AlreadyDetached           => f.write_str("AlreadyDetached"),
+        }
+    }
+}
+
+implement Eq for DarwinThreadError {
+    fn eq(&self, other: &DarwinThreadError) -> Bool {
+        match (self, other) {
+            (CreateFailed { code: a },     CreateFailed { code: b })     => a == b,
+            (JoinFailed { code: a },       JoinFailed { code: b })       => a == b,
+            (DetachFailed { code: a },     DetachFailed { code: b })     => a == b,
+            (MutexInitFailed { code: a },  MutexInitFailed { code: b })  => a == b,
+            (MutexLockFailed { code: a },  MutexLockFailed { code: b })  => a == b,
+            (CondInitFailed { code: a },   CondInitFailed { code: b })   => a == b,
+            (CondWaitFailed { code: a },   CondWaitFailed { code: b })   => a == b,
+            (TlsInitFailed,                TlsInitFailed)                => true,
+            (AlreadyJoined,                AlreadyJoined)                => true,
+            (AlreadyDetached,              AlreadyDetached)              => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // DarwinThread Type
 // =============================================================================

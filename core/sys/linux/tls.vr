@@ -163,6 +163,40 @@ public type ThreadLocalError is
     | InvalidSize { size: USize }
     ;
 
+implement Display for ThreadLocalError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MmapFailed { code }       => f.write_str(f"Linux TLS: mmap failed (code {code})".as_str()),
+            ArchPrctlFailed { code }  => f.write_str(f"Linux TLS: arch_prctl failed (code {code})".as_str()),
+            AlreadyInitialized        => f.write_str("Linux TLS: already initialized"),
+            InvalidSize { size }      => f.write_str(f"Linux TLS: invalid size {size}".as_str()),
+        }
+    }
+}
+
+implement Debug for ThreadLocalError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MmapFailed { code }       => f.write_str(f"MmapFailed {{ code: {code} }}".as_str()),
+            ArchPrctlFailed { code }  => f.write_str(f"ArchPrctlFailed {{ code: {code} }}".as_str()),
+            AlreadyInitialized        => f.write_str("AlreadyInitialized"),
+            InvalidSize { size }      => f.write_str(f"InvalidSize {{ size: {size} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for ThreadLocalError {
+    fn eq(&self, other: &ThreadLocalError) -> Bool {
+        match (self, other) {
+            (MmapFailed { code: a },      MmapFailed { code: b })      => a == b,
+            (ArchPrctlFailed { code: a }, ArchPrctlFailed { code: b }) => a == b,
+            (AlreadyInitialized,          AlreadyInitialized)          => true,
+            (InvalidSize { size: a },     InvalidSize { size: b })     => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // TLS Initialization
 // =============================================================================
