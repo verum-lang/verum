@@ -74,6 +74,21 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
             "(Text) -> Bytes",
         ),
     );
+    // P7 (#20) — `@embed(path)` is the attribute-form alias for
+    // `include_bytes(path)`. Both surface the same `meta_include_bytes`
+    // dispatcher; the only difference is the @ macro-call syntax
+    // accepted at expression positions outside a `meta fn`. Registered
+    // under the bare name `embed` so the macro expander resolves
+    // `@embed("…")` through the standard builtin lookup path.
+    map.insert(
+        Text::from("embed"),
+        BuiltinInfo::build_assets(
+            meta_include_bytes,
+            "Embed a file's bytes at compile time (alias for include_bytes; \
+             usable as an `@embed(\"path\")` macro call)",
+            "(Text) -> Bytes",
+        ),
+    );
 
     // ========================================================================
     // File System Operations (Tier 1 - BuildAssets)
@@ -363,5 +378,66 @@ mod tests {
         if let Err(MetaError::Other(msg)) = result {
             assert!(msg.contains("Absolute paths"));
         }
+    }
+
+    /// #20 / P7 — `@embed("path")` registers as a builtin alias for
+    /// `include_bytes`, dispatching through the same
+    /// `meta_include_bytes` function. Verifies the registry wiring
+    /// and that the same path-traversal sandbox applies. The macro-
+    /// expansion side that translates the `@`-prefixed form into a
+    /// builtin call uses the registry's name lookup, so registering
+    /// the alias is sufficient at this layer; the parser-side
+    /// recognition rides the existing `@<ident>(args)` macro-call
+    /// grammar that `include_bytes` already exercises in
+    /// `vcs/specs/meta-system/success/builtins/build_assets/file_loading.vr`.
+    #[test]
+    fn test_embed_alias_registered_for_include_bytes() {
+        let mut map = BuiltinRegistry::new();
+        register_builtins(&mut map);
+        // Both the original name and the alias resolve to a builtin.
+        assert!(
+            map.get(&Text::from("include_bytes")).is_some(),
+            "include_bytes must remain registered"
+        );
+        let embed = map
+            .get(&Text::from("embed"))
+            .expect("embed alias must be registered for the @embed macro form");
+        // Signature mirrors include_bytes.
+        assert_eq!(embed.signature, "(Text) -> Bytes");
+    }
+
+    #[test]
+    fn test_embed_loads_bytes_like_include_bytes() {
+        let (mut ctx, temp_dir) = create_test_context();
+        let file_path = temp_dir.path().join("asset.bin");
+        std::fs::write(&file_path, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
+
+        // Resolve the embed alias from the registry and dispatch.
+        let mut map = BuiltinRegistry::new();
+        register_builtins(&mut map);
+        let info = map.get(&Text::from("embed")).expect("embed registered").clone();
+        let args = List::from(vec![ConstValue::Text(Text::from("asset.bin"))]);
+        let result = (info.function)(&mut ctx, args).unwrap();
+
+        match result {
+            ConstValue::Bytes(bytes) => assert_eq!(bytes, vec![0xDE, 0xAD, 0xBE, 0xEF]),
+            other => panic!("expected Bytes, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_embed_blocks_path_traversal() {
+        // The alias inherits the same sandbox as include_bytes.
+        let (mut ctx, _temp_dir) = create_test_context();
+
+        let mut map = BuiltinRegistry::new();
+        register_builtins(&mut map);
+        let info = map.get(&Text::from("embed")).expect("embed registered").clone();
+        let args = List::from(vec![ConstValue::Text(Text::from("../etc/passwd"))]);
+        let result = (info.function)(&mut ctx, args);
+        assert!(
+            result.is_err(),
+            "@embed must reject `..` traversal — same sandbox as include_bytes"
+        );
     }
 }
