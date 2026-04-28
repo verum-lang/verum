@@ -54,6 +54,44 @@ public type PushError is
     /// stream — client no longer accepts new push_ids.
     | ClientGoneAway;
 
+implement Display for PushError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BudgetExhausted { requested, limit } =>
+                f.write_str(f"HTTP/3 push: push_id {requested} exceeds MAX_PUSH_ID {limit}".as_str()),
+            AlreadyCancelled(id) =>
+                f.write_str(f"HTTP/3 push: push_id {id} was already cancelled".as_str()),
+            ClientGoneAway =>
+                f.write_str("HTTP/3 push: client sent GOAWAY"),
+        }
+    }
+}
+
+implement Debug for PushError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BudgetExhausted { requested, limit } =>
+                f.write_str(f"BudgetExhausted {{ requested: {requested}, limit: {limit} }}".as_str()),
+            AlreadyCancelled(id) =>
+                f.write_str(f"AlreadyCancelled({id})".as_str()),
+            ClientGoneAway =>
+                f.write_str("ClientGoneAway"),
+        }
+    }
+}
+
+implement Eq for PushError {
+    fn eq(&self, other: &PushError) -> Bool {
+        match (self, other) {
+            (BudgetExhausted { requested: ra, limit: la },
+             BudgetExhausted { requested: rb, limit: lb }) => ra == rb && la == lb,
+            (AlreadyCancelled(a), AlreadyCancelled(b))     => a == b,
+            (ClientGoneAway,      ClientGoneAway)          => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // PushEmitter — server-side allocator + budget tracker
 // =============================================================================

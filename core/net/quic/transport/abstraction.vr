@@ -42,6 +42,40 @@ public type TransportError is
     | Io(Text)
     | WouldBlock;
 
+implement Display for TransportError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed       => f.write_str("QUIC transport closed"),
+            TooLarge(n)  => f.write_str(f"QUIC transport datagram too large ({n} bytes)".as_str()),
+            Io(reason)   => f.write_str(f"QUIC transport I/O error: {reason}".as_str()),
+            WouldBlock   => f.write_str("QUIC transport would block"),
+        }
+    }
+}
+
+implement Debug for TransportError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed       => f.write_str("Closed"),
+            TooLarge(n)  => f.write_str(f"TooLarge({n})".as_str()),
+            Io(reason)   => f.write_str(f"Io({reason})".as_str()),
+            WouldBlock   => f.write_str("WouldBlock"),
+        }
+    }
+}
+
+implement Eq for TransportError {
+    fn eq(&self, other: &TransportError) -> Bool {
+        match (self, other) {
+            (Closed,      Closed)      => true,
+            (TooLarge(a), TooLarge(b)) => a == b,
+            (Io(a),       Io(b))       => a == b,
+            (WouldBlock,  WouldBlock)  => true,
+            _ => false,
+        }
+    }
+}
+
 public type InboundDatagram is {
     data:      List<Byte>,
     peer_addr: SocketAddr,

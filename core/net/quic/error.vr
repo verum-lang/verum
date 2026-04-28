@@ -70,3 +70,104 @@ public type QuicError is
     | VersionMismatch
     | InvalidTransportParameter(Text)
     | Closed;
+
+implement Display for TransportErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"0x{self.code:x}".as_str())
+    }
+}
+
+implement Debug for TransportErrorCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"TransportErrorCode(0x{self.code:x})".as_str())
+    }
+}
+
+implement Eq for TransportErrorCode {
+    fn eq(&self, other: &TransportErrorCode) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Display for ApplicationErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"0x{self.code:x}".as_str())
+    }
+}
+
+implement Debug for ApplicationErrorCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ApplicationErrorCode(0x{self.code:x})".as_str())
+    }
+}
+
+implement Eq for ApplicationErrorCode {
+    fn eq(&self, other: &ApplicationErrorCode) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Display for QuicError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicError.ConnectionRefused(reason) =>
+                f.write_str(f"QUIC connection refused: {reason}".as_str()),
+            QuicError.HandshakeFailed(reason) =>
+                f.write_str(f"QUIC handshake failed: {reason}".as_str()),
+            QuicError.TransportError { code, frame_type, reason } =>
+                f.write_str(f"QUIC transport error {code} (frame_type 0x{frame_type:x}): {reason}".as_str()),
+            QuicError.ApplicationError { code, reason } =>
+                f.write_str(f"QUIC application error {code}: {reason}".as_str()),
+            QuicError.StreamReset { stream_id, code } =>
+                f.write_str(f"QUIC stream {stream_id} reset with code {code}".as_str()),
+            QuicError.IdleTimeout                       => f.write_str("QUIC idle timeout"),
+            QuicError.StatelessReset                    => f.write_str("QUIC stateless reset received"),
+            QuicError.VersionMismatch                   => f.write_str("QUIC version mismatch"),
+            QuicError.InvalidTransportParameter(reason) => f.write_str(f"QUIC invalid transport parameter: {reason}".as_str()),
+            QuicError.Closed                            => f.write_str("QUIC connection closed"),
+        }
+    }
+}
+
+implement Debug for QuicError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicError.ConnectionRefused(reason) =>
+                f.write_str(f"ConnectionRefused({reason})".as_str()),
+            QuicError.HandshakeFailed(reason) =>
+                f.write_str(f"HandshakeFailed({reason})".as_str()),
+            QuicError.TransportError { code, frame_type, reason } =>
+                f.write_str(f"TransportError {{ code: {code:?}, frame_type: 0x{frame_type:x}, reason: {reason} }}".as_str()),
+            QuicError.ApplicationError { code, reason } =>
+                f.write_str(f"ApplicationError {{ code: {code:?}, reason: {reason} }}".as_str()),
+            QuicError.StreamReset { stream_id, code } =>
+                f.write_str(f"StreamReset {{ stream_id: {stream_id}, code: {code:?} }}".as_str()),
+            QuicError.IdleTimeout                       => f.write_str("IdleTimeout"),
+            QuicError.StatelessReset                    => f.write_str("StatelessReset"),
+            QuicError.VersionMismatch                   => f.write_str("VersionMismatch"),
+            QuicError.InvalidTransportParameter(reason) => f.write_str(f"InvalidTransportParameter({reason})".as_str()),
+            QuicError.Closed                            => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for QuicError {
+    fn eq(&self, other: &QuicError) -> Bool {
+        match (self, other) {
+            (QuicError.ConnectionRefused(a),  QuicError.ConnectionRefused(b))  => a == b,
+            (QuicError.HandshakeFailed(a),    QuicError.HandshakeFailed(b))    => a == b,
+            (QuicError.TransportError { code: ca, frame_type: fa, reason: ra },
+             QuicError.TransportError { code: cb, frame_type: fb, reason: rb }) => ca == cb && fa == fb && ra == rb,
+            (QuicError.ApplicationError { code: ca, reason: ra },
+             QuicError.ApplicationError { code: cb, reason: rb }) => ca == cb && ra == rb,
+            (QuicError.StreamReset { stream_id: sa, code: ca },
+             QuicError.StreamReset { stream_id: sb, code: cb }) => sa == sb && ca == cb,
+            (QuicError.IdleTimeout,                  QuicError.IdleTimeout)                  => true,
+            (QuicError.StatelessReset,               QuicError.StatelessReset)               => true,
+            (QuicError.VersionMismatch,              QuicError.VersionMismatch)              => true,
+            (QuicError.InvalidTransportParameter(a), QuicError.InvalidTransportParameter(b)) => a == b,
+            (QuicError.Closed,                       QuicError.Closed)                       => true,
+            _ => false,
+        }
+    }
+}

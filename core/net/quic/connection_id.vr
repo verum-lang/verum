@@ -31,6 +31,30 @@ public const MAX_CID_LEN: Int = 20;
 public type CidError is
       TooLong(Int);
 
+implement Display for CidError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TooLong(n) => f.write_str(f"QUIC connection ID too long: {n} bytes (RFC 9000 §5.1 limit 20)".as_str()),
+        }
+    }
+}
+
+implement Debug for CidError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TooLong(n) => f.write_str(f"TooLong({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for CidError {
+    fn eq(&self, other: &CidError) -> Bool {
+        match (self, other) {
+            (TooLong(a), TooLong(b)) => a == b,
+        }
+    }
+}
+
 public type ConnectionId is {
     bytes: List<Byte>,
 };

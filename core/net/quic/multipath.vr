@@ -409,3 +409,52 @@ public type MultipathError is
     | NotNegotiated
     | AmplificationLimited(PathId)
     | NoSendablePath;
+
+implement Display for PathId {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"path:{self.value}".as_str())
+    }
+}
+
+implement Debug for PathId {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"PathId({self.value})".as_str())
+    }
+}
+
+implement Display for MultipathError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnknownPathId(p)        => f.write_str(f"QUIC multipath: unknown {p}".as_str()),
+            DuplicatePathId(p)      => f.write_str(f"QUIC multipath: duplicate {p}".as_str()),
+            NotNegotiated           => f.write_str("QUIC multipath: extension not negotiated"),
+            AmplificationLimited(p) => f.write_str(f"QUIC multipath: amplification limit on {p}".as_str()),
+            NoSendablePath          => f.write_str("QUIC multipath: no path is currently sendable"),
+        }
+    }
+}
+
+implement Debug for MultipathError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnknownPathId(p)        => f.write_str(f"UnknownPathId({p:?})".as_str()),
+            DuplicatePathId(p)      => f.write_str(f"DuplicatePathId({p:?})".as_str()),
+            NotNegotiated           => f.write_str("NotNegotiated"),
+            AmplificationLimited(p) => f.write_str(f"AmplificationLimited({p:?})".as_str()),
+            NoSendablePath          => f.write_str("NoSendablePath"),
+        }
+    }
+}
+
+implement Eq for MultipathError {
+    fn eq(&self, other: &MultipathError) -> Bool {
+        match (self, other) {
+            (UnknownPathId(a),        UnknownPathId(b))        => a.eq(b),
+            (DuplicatePathId(a),      DuplicatePathId(b))      => a.eq(b),
+            (NotNegotiated,           NotNegotiated)           => true,
+            (AmplificationLimited(a), AmplificationLimited(b)) => a.eq(b),
+            (NoSendablePath,          NoSendablePath)          => true,
+            _ => false,
+        }
+    }
+}
