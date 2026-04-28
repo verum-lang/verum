@@ -40,6 +40,7 @@ public mount .connection.{
     SqliteConnection, SqliteValue, SqliteCapability,
     SvNull, SvInt, SvReal, SvText, SvBlob,
     ScRead, ScReadWrite, ScAdmin,
+    Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
 };
 public mount .error.dberr_from_loom;
 public mount .pool.SqlitePool;

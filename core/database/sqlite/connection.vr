@@ -41,6 +41,7 @@ mount core.database.sqlite.error.dberr_from_loom;
 // reach for it via the full path inside `dberr_from_loom`.
 mount core.database.sqlite.native.l7_api.{
     Database as LoomDatabase,
+    Transaction, TxKind, TkDeferred, TkImmediate, TkExclusive,
     open_memory_db, open_readonly, open_readwrite, open_admin,
     open_path, open_path_readonly, open_path_readwrite, open_path_admin,
 };
@@ -248,33 +249,46 @@ implement SqliteConnection {
     }
 
     // -------------------------------------------------------------------------
-    // Transaction sugar
+    // Transaction — affine handle API (database.md §4.1+§5.5)
     // -------------------------------------------------------------------------
+    //
+    // Spindle façade forwards directly to the loom L7 affine surface.
+    // `Transaction` is exposed under the same name; commit_tx/rollback_tx
+    // consume it; `with_transaction(body)` wraps both.
 
-    public fn begin(&mut self) -> Result<(), DbError> {
-        match self.inner.begin() {
-            Ok(_) => Ok(()),
+    /// Begin a deferred transaction.  Returns the affine handle the
+    /// caller MUST consume via `commit_tx` / `rollback_tx`.
+    public fn begin_tx(&mut self) -> Result<Transaction, DbError> {
+        match self.inner.begin_tx() {
+            Ok(t)  => Ok(t),
             Err(e) => Err(dberr_from_loom(e)),
         }
     }
 
-    public fn begin_immediate(&mut self) -> Result<(), DbError> {
-        match self.inner.begin_immediate() {
-            Ok(_) => Ok(()),
+    public fn begin_tx_immediate(&mut self) -> Result<Transaction, DbError> {
+        match self.inner.begin_tx_immediate() {
+            Ok(t)  => Ok(t),
             Err(e) => Err(dberr_from_loom(e)),
         }
     }
 
-    public fn commit(&mut self) -> Result<(), DbError> {
-        match self.inner.commit() {
-            Ok(_) => Ok(()),
+    public fn begin_tx_exclusive(&mut self) -> Result<Transaction, DbError> {
+        match self.inner.begin_tx_exclusive() {
+            Ok(t)  => Ok(t),
             Err(e) => Err(dberr_from_loom(e)),
         }
     }
 
-    public fn rollback(&mut self) -> Result<(), DbError> {
-        match self.inner.rollback() {
-            Ok(_) => Ok(()),
+    public fn commit_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
+        match self.inner.commit_tx(tx) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(dberr_from_loom(e)),
+        }
+    }
+
+    public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
+        match self.inner.rollback_tx(tx) {
+            Ok(_)  => Ok(()),
             Err(e) => Err(dberr_from_loom(e)),
         }
     }
