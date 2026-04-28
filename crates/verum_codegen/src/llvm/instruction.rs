@@ -14583,7 +14583,27 @@ fn lower_mem_extended<'ctx>(
             ctx.set_register(dst, result);
             Ok(())
         }
-        0x04 => { // Swap — swap two register values (caller handles)
+        0x04 => { // Swap: operands = [a_ptr, b_ptr] — exchange the i64 values at *a and *b
+            // Mirrors interpreter handler at log_extended.rs:256 (core::ptr::swap on u64).
+            // Was a no-op stub; that left core::base::memory::swap silently dropped at AOT.
+            if operands.len() < 2 { return Ok(()); }
+            let a_raw = ctx.get_register(operands[0] as u16)?;
+            let b_raw = ctx.get_register(operands[1] as u16)?;
+            let a_ptr = as_ptr(ctx, a_raw, "swap_a_ptr")?;
+            let b_ptr = as_ptr(ctx, b_raw, "swap_b_ptr")?;
+            let i64_ty = ctx.types().i64_type();
+            let a_val = ctx.builder()
+                .build_load(i64_ty, a_ptr, "swap_a_val")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let b_val = ctx.builder()
+                .build_load(i64_ty, b_ptr, "swap_b_val")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.builder()
+                .build_store(a_ptr, b_val)
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.builder()
+                .build_store(b_ptr, a_val)
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             Ok(())
         }
         0x05 => { // Replace — replace value and return old
