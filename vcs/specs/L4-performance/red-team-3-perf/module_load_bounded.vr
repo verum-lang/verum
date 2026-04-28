@@ -1,0 +1,288 @@
+// =============================================================================
+// L4-performance: Red-team Round 3 §5.1 — 1000-module load (256-module guardrail)
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L4
+// @tags: red-team, perf, modules, module-resolver, red-team-3.5.1
+// @timeout: 60000
+// @expect: pass
+// =============================================================================
+//
+// Pins module-resolver scaling at 256 modules — 16x the existing module_fanout_bounded.vr
+// guardrail (16 leaves), and the largest synthetic module count to date.  Production
+// scale is 1000+ modules each mounting core.*; here we exercise 256 modules each
+// declaring one type + one function, sufficient to expose super-linear cliffs in
+// the symbol-table interning, mount-resolution graph walk, or per-module type-check
+// driver without overshooting CI timeout (60s).
+//
+// **Audit reference:** vcs/red-team/round-3-perf.md §5.1.
+//
+// **Invariant being pinned:** the module resolver must scale linearly in module
+// count.  Each module contributes one symbol-table entry + one type-check pass;
+// resolver visits each entry once.  256 modules with no cross-mounts (independent)
+// catches any per-module quadratic lookup.
+
+module bulk_mod_001 { pub type T001 is { v: Int }; pub fn make_001(x: Int) -> T001 { T001 { v: x } } }
+module bulk_mod_002 { pub type T002 is { v: Int }; pub fn make_002(x: Int) -> T002 { T002 { v: x } } }
+module bulk_mod_003 { pub type T003 is { v: Int }; pub fn make_003(x: Int) -> T003 { T003 { v: x } } }
+module bulk_mod_004 { pub type T004 is { v: Int }; pub fn make_004(x: Int) -> T004 { T004 { v: x } } }
+module bulk_mod_005 { pub type T005 is { v: Int }; pub fn make_005(x: Int) -> T005 { T005 { v: x } } }
+module bulk_mod_006 { pub type T006 is { v: Int }; pub fn make_006(x: Int) -> T006 { T006 { v: x } } }
+module bulk_mod_007 { pub type T007 is { v: Int }; pub fn make_007(x: Int) -> T007 { T007 { v: x } } }
+module bulk_mod_008 { pub type T008 is { v: Int }; pub fn make_008(x: Int) -> T008 { T008 { v: x } } }
+module bulk_mod_009 { pub type T009 is { v: Int }; pub fn make_009(x: Int) -> T009 { T009 { v: x } } }
+module bulk_mod_010 { pub type T010 is { v: Int }; pub fn make_010(x: Int) -> T010 { T010 { v: x } } }
+module bulk_mod_011 { pub type T011 is { v: Int }; pub fn make_011(x: Int) -> T011 { T011 { v: x } } }
+module bulk_mod_012 { pub type T012 is { v: Int }; pub fn make_012(x: Int) -> T012 { T012 { v: x } } }
+module bulk_mod_013 { pub type T013 is { v: Int }; pub fn make_013(x: Int) -> T013 { T013 { v: x } } }
+module bulk_mod_014 { pub type T014 is { v: Int }; pub fn make_014(x: Int) -> T014 { T014 { v: x } } }
+module bulk_mod_015 { pub type T015 is { v: Int }; pub fn make_015(x: Int) -> T015 { T015 { v: x } } }
+module bulk_mod_016 { pub type T016 is { v: Int }; pub fn make_016(x: Int) -> T016 { T016 { v: x } } }
+module bulk_mod_017 { pub type T017 is { v: Int }; pub fn make_017(x: Int) -> T017 { T017 { v: x } } }
+module bulk_mod_018 { pub type T018 is { v: Int }; pub fn make_018(x: Int) -> T018 { T018 { v: x } } }
+module bulk_mod_019 { pub type T019 is { v: Int }; pub fn make_019(x: Int) -> T019 { T019 { v: x } } }
+module bulk_mod_020 { pub type T020 is { v: Int }; pub fn make_020(x: Int) -> T020 { T020 { v: x } } }
+module bulk_mod_021 { pub type T021 is { v: Int }; pub fn make_021(x: Int) -> T021 { T021 { v: x } } }
+module bulk_mod_022 { pub type T022 is { v: Int }; pub fn make_022(x: Int) -> T022 { T022 { v: x } } }
+module bulk_mod_023 { pub type T023 is { v: Int }; pub fn make_023(x: Int) -> T023 { T023 { v: x } } }
+module bulk_mod_024 { pub type T024 is { v: Int }; pub fn make_024(x: Int) -> T024 { T024 { v: x } } }
+module bulk_mod_025 { pub type T025 is { v: Int }; pub fn make_025(x: Int) -> T025 { T025 { v: x } } }
+module bulk_mod_026 { pub type T026 is { v: Int }; pub fn make_026(x: Int) -> T026 { T026 { v: x } } }
+module bulk_mod_027 { pub type T027 is { v: Int }; pub fn make_027(x: Int) -> T027 { T027 { v: x } } }
+module bulk_mod_028 { pub type T028 is { v: Int }; pub fn make_028(x: Int) -> T028 { T028 { v: x } } }
+module bulk_mod_029 { pub type T029 is { v: Int }; pub fn make_029(x: Int) -> T029 { T029 { v: x } } }
+module bulk_mod_030 { pub type T030 is { v: Int }; pub fn make_030(x: Int) -> T030 { T030 { v: x } } }
+module bulk_mod_031 { pub type T031 is { v: Int }; pub fn make_031(x: Int) -> T031 { T031 { v: x } } }
+module bulk_mod_032 { pub type T032 is { v: Int }; pub fn make_032(x: Int) -> T032 { T032 { v: x } } }
+module bulk_mod_033 { pub type T033 is { v: Int }; pub fn make_033(x: Int) -> T033 { T033 { v: x } } }
+module bulk_mod_034 { pub type T034 is { v: Int }; pub fn make_034(x: Int) -> T034 { T034 { v: x } } }
+module bulk_mod_035 { pub type T035 is { v: Int }; pub fn make_035(x: Int) -> T035 { T035 { v: x } } }
+module bulk_mod_036 { pub type T036 is { v: Int }; pub fn make_036(x: Int) -> T036 { T036 { v: x } } }
+module bulk_mod_037 { pub type T037 is { v: Int }; pub fn make_037(x: Int) -> T037 { T037 { v: x } } }
+module bulk_mod_038 { pub type T038 is { v: Int }; pub fn make_038(x: Int) -> T038 { T038 { v: x } } }
+module bulk_mod_039 { pub type T039 is { v: Int }; pub fn make_039(x: Int) -> T039 { T039 { v: x } } }
+module bulk_mod_040 { pub type T040 is { v: Int }; pub fn make_040(x: Int) -> T040 { T040 { v: x } } }
+module bulk_mod_041 { pub type T041 is { v: Int }; pub fn make_041(x: Int) -> T041 { T041 { v: x } } }
+module bulk_mod_042 { pub type T042 is { v: Int }; pub fn make_042(x: Int) -> T042 { T042 { v: x } } }
+module bulk_mod_043 { pub type T043 is { v: Int }; pub fn make_043(x: Int) -> T043 { T043 { v: x } } }
+module bulk_mod_044 { pub type T044 is { v: Int }; pub fn make_044(x: Int) -> T044 { T044 { v: x } } }
+module bulk_mod_045 { pub type T045 is { v: Int }; pub fn make_045(x: Int) -> T045 { T045 { v: x } } }
+module bulk_mod_046 { pub type T046 is { v: Int }; pub fn make_046(x: Int) -> T046 { T046 { v: x } } }
+module bulk_mod_047 { pub type T047 is { v: Int }; pub fn make_047(x: Int) -> T047 { T047 { v: x } } }
+module bulk_mod_048 { pub type T048 is { v: Int }; pub fn make_048(x: Int) -> T048 { T048 { v: x } } }
+module bulk_mod_049 { pub type T049 is { v: Int }; pub fn make_049(x: Int) -> T049 { T049 { v: x } } }
+module bulk_mod_050 { pub type T050 is { v: Int }; pub fn make_050(x: Int) -> T050 { T050 { v: x } } }
+module bulk_mod_051 { pub type T051 is { v: Int }; pub fn make_051(x: Int) -> T051 { T051 { v: x } } }
+module bulk_mod_052 { pub type T052 is { v: Int }; pub fn make_052(x: Int) -> T052 { T052 { v: x } } }
+module bulk_mod_053 { pub type T053 is { v: Int }; pub fn make_053(x: Int) -> T053 { T053 { v: x } } }
+module bulk_mod_054 { pub type T054 is { v: Int }; pub fn make_054(x: Int) -> T054 { T054 { v: x } } }
+module bulk_mod_055 { pub type T055 is { v: Int }; pub fn make_055(x: Int) -> T055 { T055 { v: x } } }
+module bulk_mod_056 { pub type T056 is { v: Int }; pub fn make_056(x: Int) -> T056 { T056 { v: x } } }
+module bulk_mod_057 { pub type T057 is { v: Int }; pub fn make_057(x: Int) -> T057 { T057 { v: x } } }
+module bulk_mod_058 { pub type T058 is { v: Int }; pub fn make_058(x: Int) -> T058 { T058 { v: x } } }
+module bulk_mod_059 { pub type T059 is { v: Int }; pub fn make_059(x: Int) -> T059 { T059 { v: x } } }
+module bulk_mod_060 { pub type T060 is { v: Int }; pub fn make_060(x: Int) -> T060 { T060 { v: x } } }
+module bulk_mod_061 { pub type T061 is { v: Int }; pub fn make_061(x: Int) -> T061 { T061 { v: x } } }
+module bulk_mod_062 { pub type T062 is { v: Int }; pub fn make_062(x: Int) -> T062 { T062 { v: x } } }
+module bulk_mod_063 { pub type T063 is { v: Int }; pub fn make_063(x: Int) -> T063 { T063 { v: x } } }
+module bulk_mod_064 { pub type T064 is { v: Int }; pub fn make_064(x: Int) -> T064 { T064 { v: x } } }
+module bulk_mod_065 { pub type T065 is { v: Int }; pub fn make_065(x: Int) -> T065 { T065 { v: x } } }
+module bulk_mod_066 { pub type T066 is { v: Int }; pub fn make_066(x: Int) -> T066 { T066 { v: x } } }
+module bulk_mod_067 { pub type T067 is { v: Int }; pub fn make_067(x: Int) -> T067 { T067 { v: x } } }
+module bulk_mod_068 { pub type T068 is { v: Int }; pub fn make_068(x: Int) -> T068 { T068 { v: x } } }
+module bulk_mod_069 { pub type T069 is { v: Int }; pub fn make_069(x: Int) -> T069 { T069 { v: x } } }
+module bulk_mod_070 { pub type T070 is { v: Int }; pub fn make_070(x: Int) -> T070 { T070 { v: x } } }
+module bulk_mod_071 { pub type T071 is { v: Int }; pub fn make_071(x: Int) -> T071 { T071 { v: x } } }
+module bulk_mod_072 { pub type T072 is { v: Int }; pub fn make_072(x: Int) -> T072 { T072 { v: x } } }
+module bulk_mod_073 { pub type T073 is { v: Int }; pub fn make_073(x: Int) -> T073 { T073 { v: x } } }
+module bulk_mod_074 { pub type T074 is { v: Int }; pub fn make_074(x: Int) -> T074 { T074 { v: x } } }
+module bulk_mod_075 { pub type T075 is { v: Int }; pub fn make_075(x: Int) -> T075 { T075 { v: x } } }
+module bulk_mod_076 { pub type T076 is { v: Int }; pub fn make_076(x: Int) -> T076 { T076 { v: x } } }
+module bulk_mod_077 { pub type T077 is { v: Int }; pub fn make_077(x: Int) -> T077 { T077 { v: x } } }
+module bulk_mod_078 { pub type T078 is { v: Int }; pub fn make_078(x: Int) -> T078 { T078 { v: x } } }
+module bulk_mod_079 { pub type T079 is { v: Int }; pub fn make_079(x: Int) -> T079 { T079 { v: x } } }
+module bulk_mod_080 { pub type T080 is { v: Int }; pub fn make_080(x: Int) -> T080 { T080 { v: x } } }
+module bulk_mod_081 { pub type T081 is { v: Int }; pub fn make_081(x: Int) -> T081 { T081 { v: x } } }
+module bulk_mod_082 { pub type T082 is { v: Int }; pub fn make_082(x: Int) -> T082 { T082 { v: x } } }
+module bulk_mod_083 { pub type T083 is { v: Int }; pub fn make_083(x: Int) -> T083 { T083 { v: x } } }
+module bulk_mod_084 { pub type T084 is { v: Int }; pub fn make_084(x: Int) -> T084 { T084 { v: x } } }
+module bulk_mod_085 { pub type T085 is { v: Int }; pub fn make_085(x: Int) -> T085 { T085 { v: x } } }
+module bulk_mod_086 { pub type T086 is { v: Int }; pub fn make_086(x: Int) -> T086 { T086 { v: x } } }
+module bulk_mod_087 { pub type T087 is { v: Int }; pub fn make_087(x: Int) -> T087 { T087 { v: x } } }
+module bulk_mod_088 { pub type T088 is { v: Int }; pub fn make_088(x: Int) -> T088 { T088 { v: x } } }
+module bulk_mod_089 { pub type T089 is { v: Int }; pub fn make_089(x: Int) -> T089 { T089 { v: x } } }
+module bulk_mod_090 { pub type T090 is { v: Int }; pub fn make_090(x: Int) -> T090 { T090 { v: x } } }
+module bulk_mod_091 { pub type T091 is { v: Int }; pub fn make_091(x: Int) -> T091 { T091 { v: x } } }
+module bulk_mod_092 { pub type T092 is { v: Int }; pub fn make_092(x: Int) -> T092 { T092 { v: x } } }
+module bulk_mod_093 { pub type T093 is { v: Int }; pub fn make_093(x: Int) -> T093 { T093 { v: x } } }
+module bulk_mod_094 { pub type T094 is { v: Int }; pub fn make_094(x: Int) -> T094 { T094 { v: x } } }
+module bulk_mod_095 { pub type T095 is { v: Int }; pub fn make_095(x: Int) -> T095 { T095 { v: x } } }
+module bulk_mod_096 { pub type T096 is { v: Int }; pub fn make_096(x: Int) -> T096 { T096 { v: x } } }
+module bulk_mod_097 { pub type T097 is { v: Int }; pub fn make_097(x: Int) -> T097 { T097 { v: x } } }
+module bulk_mod_098 { pub type T098 is { v: Int }; pub fn make_098(x: Int) -> T098 { T098 { v: x } } }
+module bulk_mod_099 { pub type T099 is { v: Int }; pub fn make_099(x: Int) -> T099 { T099 { v: x } } }
+module bulk_mod_100 { pub type T100 is { v: Int }; pub fn make_100(x: Int) -> T100 { T100 { v: x } } }
+module bulk_mod_101 { pub type T101 is { v: Int }; pub fn make_101(x: Int) -> T101 { T101 { v: x } } }
+module bulk_mod_102 { pub type T102 is { v: Int }; pub fn make_102(x: Int) -> T102 { T102 { v: x } } }
+module bulk_mod_103 { pub type T103 is { v: Int }; pub fn make_103(x: Int) -> T103 { T103 { v: x } } }
+module bulk_mod_104 { pub type T104 is { v: Int }; pub fn make_104(x: Int) -> T104 { T104 { v: x } } }
+module bulk_mod_105 { pub type T105 is { v: Int }; pub fn make_105(x: Int) -> T105 { T105 { v: x } } }
+module bulk_mod_106 { pub type T106 is { v: Int }; pub fn make_106(x: Int) -> T106 { T106 { v: x } } }
+module bulk_mod_107 { pub type T107 is { v: Int }; pub fn make_107(x: Int) -> T107 { T107 { v: x } } }
+module bulk_mod_108 { pub type T108 is { v: Int }; pub fn make_108(x: Int) -> T108 { T108 { v: x } } }
+module bulk_mod_109 { pub type T109 is { v: Int }; pub fn make_109(x: Int) -> T109 { T109 { v: x } } }
+module bulk_mod_110 { pub type T110 is { v: Int }; pub fn make_110(x: Int) -> T110 { T110 { v: x } } }
+module bulk_mod_111 { pub type T111 is { v: Int }; pub fn make_111(x: Int) -> T111 { T111 { v: x } } }
+module bulk_mod_112 { pub type T112 is { v: Int }; pub fn make_112(x: Int) -> T112 { T112 { v: x } } }
+module bulk_mod_113 { pub type T113 is { v: Int }; pub fn make_113(x: Int) -> T113 { T113 { v: x } } }
+module bulk_mod_114 { pub type T114 is { v: Int }; pub fn make_114(x: Int) -> T114 { T114 { v: x } } }
+module bulk_mod_115 { pub type T115 is { v: Int }; pub fn make_115(x: Int) -> T115 { T115 { v: x } } }
+module bulk_mod_116 { pub type T116 is { v: Int }; pub fn make_116(x: Int) -> T116 { T116 { v: x } } }
+module bulk_mod_117 { pub type T117 is { v: Int }; pub fn make_117(x: Int) -> T117 { T117 { v: x } } }
+module bulk_mod_118 { pub type T118 is { v: Int }; pub fn make_118(x: Int) -> T118 { T118 { v: x } } }
+module bulk_mod_119 { pub type T119 is { v: Int }; pub fn make_119(x: Int) -> T119 { T119 { v: x } } }
+module bulk_mod_120 { pub type T120 is { v: Int }; pub fn make_120(x: Int) -> T120 { T120 { v: x } } }
+module bulk_mod_121 { pub type T121 is { v: Int }; pub fn make_121(x: Int) -> T121 { T121 { v: x } } }
+module bulk_mod_122 { pub type T122 is { v: Int }; pub fn make_122(x: Int) -> T122 { T122 { v: x } } }
+module bulk_mod_123 { pub type T123 is { v: Int }; pub fn make_123(x: Int) -> T123 { T123 { v: x } } }
+module bulk_mod_124 { pub type T124 is { v: Int }; pub fn make_124(x: Int) -> T124 { T124 { v: x } } }
+module bulk_mod_125 { pub type T125 is { v: Int }; pub fn make_125(x: Int) -> T125 { T125 { v: x } } }
+module bulk_mod_126 { pub type T126 is { v: Int }; pub fn make_126(x: Int) -> T126 { T126 { v: x } } }
+module bulk_mod_127 { pub type T127 is { v: Int }; pub fn make_127(x: Int) -> T127 { T127 { v: x } } }
+module bulk_mod_128 { pub type T128 is { v: Int }; pub fn make_128(x: Int) -> T128 { T128 { v: x } } }
+module bulk_mod_129 { pub type T129 is { v: Int }; pub fn make_129(x: Int) -> T129 { T129 { v: x } } }
+module bulk_mod_130 { pub type T130 is { v: Int }; pub fn make_130(x: Int) -> T130 { T130 { v: x } } }
+module bulk_mod_131 { pub type T131 is { v: Int }; pub fn make_131(x: Int) -> T131 { T131 { v: x } } }
+module bulk_mod_132 { pub type T132 is { v: Int }; pub fn make_132(x: Int) -> T132 { T132 { v: x } } }
+module bulk_mod_133 { pub type T133 is { v: Int }; pub fn make_133(x: Int) -> T133 { T133 { v: x } } }
+module bulk_mod_134 { pub type T134 is { v: Int }; pub fn make_134(x: Int) -> T134 { T134 { v: x } } }
+module bulk_mod_135 { pub type T135 is { v: Int }; pub fn make_135(x: Int) -> T135 { T135 { v: x } } }
+module bulk_mod_136 { pub type T136 is { v: Int }; pub fn make_136(x: Int) -> T136 { T136 { v: x } } }
+module bulk_mod_137 { pub type T137 is { v: Int }; pub fn make_137(x: Int) -> T137 { T137 { v: x } } }
+module bulk_mod_138 { pub type T138 is { v: Int }; pub fn make_138(x: Int) -> T138 { T138 { v: x } } }
+module bulk_mod_139 { pub type T139 is { v: Int }; pub fn make_139(x: Int) -> T139 { T139 { v: x } } }
+module bulk_mod_140 { pub type T140 is { v: Int }; pub fn make_140(x: Int) -> T140 { T140 { v: x } } }
+module bulk_mod_141 { pub type T141 is { v: Int }; pub fn make_141(x: Int) -> T141 { T141 { v: x } } }
+module bulk_mod_142 { pub type T142 is { v: Int }; pub fn make_142(x: Int) -> T142 { T142 { v: x } } }
+module bulk_mod_143 { pub type T143 is { v: Int }; pub fn make_143(x: Int) -> T143 { T143 { v: x } } }
+module bulk_mod_144 { pub type T144 is { v: Int }; pub fn make_144(x: Int) -> T144 { T144 { v: x } } }
+module bulk_mod_145 { pub type T145 is { v: Int }; pub fn make_145(x: Int) -> T145 { T145 { v: x } } }
+module bulk_mod_146 { pub type T146 is { v: Int }; pub fn make_146(x: Int) -> T146 { T146 { v: x } } }
+module bulk_mod_147 { pub type T147 is { v: Int }; pub fn make_147(x: Int) -> T147 { T147 { v: x } } }
+module bulk_mod_148 { pub type T148 is { v: Int }; pub fn make_148(x: Int) -> T148 { T148 { v: x } } }
+module bulk_mod_149 { pub type T149 is { v: Int }; pub fn make_149(x: Int) -> T149 { T149 { v: x } } }
+module bulk_mod_150 { pub type T150 is { v: Int }; pub fn make_150(x: Int) -> T150 { T150 { v: x } } }
+module bulk_mod_151 { pub type T151 is { v: Int }; pub fn make_151(x: Int) -> T151 { T151 { v: x } } }
+module bulk_mod_152 { pub type T152 is { v: Int }; pub fn make_152(x: Int) -> T152 { T152 { v: x } } }
+module bulk_mod_153 { pub type T153 is { v: Int }; pub fn make_153(x: Int) -> T153 { T153 { v: x } } }
+module bulk_mod_154 { pub type T154 is { v: Int }; pub fn make_154(x: Int) -> T154 { T154 { v: x } } }
+module bulk_mod_155 { pub type T155 is { v: Int }; pub fn make_155(x: Int) -> T155 { T155 { v: x } } }
+module bulk_mod_156 { pub type T156 is { v: Int }; pub fn make_156(x: Int) -> T156 { T156 { v: x } } }
+module bulk_mod_157 { pub type T157 is { v: Int }; pub fn make_157(x: Int) -> T157 { T157 { v: x } } }
+module bulk_mod_158 { pub type T158 is { v: Int }; pub fn make_158(x: Int) -> T158 { T158 { v: x } } }
+module bulk_mod_159 { pub type T159 is { v: Int }; pub fn make_159(x: Int) -> T159 { T159 { v: x } } }
+module bulk_mod_160 { pub type T160 is { v: Int }; pub fn make_160(x: Int) -> T160 { T160 { v: x } } }
+module bulk_mod_161 { pub type T161 is { v: Int }; pub fn make_161(x: Int) -> T161 { T161 { v: x } } }
+module bulk_mod_162 { pub type T162 is { v: Int }; pub fn make_162(x: Int) -> T162 { T162 { v: x } } }
+module bulk_mod_163 { pub type T163 is { v: Int }; pub fn make_163(x: Int) -> T163 { T163 { v: x } } }
+module bulk_mod_164 { pub type T164 is { v: Int }; pub fn make_164(x: Int) -> T164 { T164 { v: x } } }
+module bulk_mod_165 { pub type T165 is { v: Int }; pub fn make_165(x: Int) -> T165 { T165 { v: x } } }
+module bulk_mod_166 { pub type T166 is { v: Int }; pub fn make_166(x: Int) -> T166 { T166 { v: x } } }
+module bulk_mod_167 { pub type T167 is { v: Int }; pub fn make_167(x: Int) -> T167 { T167 { v: x } } }
+module bulk_mod_168 { pub type T168 is { v: Int }; pub fn make_168(x: Int) -> T168 { T168 { v: x } } }
+module bulk_mod_169 { pub type T169 is { v: Int }; pub fn make_169(x: Int) -> T169 { T169 { v: x } } }
+module bulk_mod_170 { pub type T170 is { v: Int }; pub fn make_170(x: Int) -> T170 { T170 { v: x } } }
+module bulk_mod_171 { pub type T171 is { v: Int }; pub fn make_171(x: Int) -> T171 { T171 { v: x } } }
+module bulk_mod_172 { pub type T172 is { v: Int }; pub fn make_172(x: Int) -> T172 { T172 { v: x } } }
+module bulk_mod_173 { pub type T173 is { v: Int }; pub fn make_173(x: Int) -> T173 { T173 { v: x } } }
+module bulk_mod_174 { pub type T174 is { v: Int }; pub fn make_174(x: Int) -> T174 { T174 { v: x } } }
+module bulk_mod_175 { pub type T175 is { v: Int }; pub fn make_175(x: Int) -> T175 { T175 { v: x } } }
+module bulk_mod_176 { pub type T176 is { v: Int }; pub fn make_176(x: Int) -> T176 { T176 { v: x } } }
+module bulk_mod_177 { pub type T177 is { v: Int }; pub fn make_177(x: Int) -> T177 { T177 { v: x } } }
+module bulk_mod_178 { pub type T178 is { v: Int }; pub fn make_178(x: Int) -> T178 { T178 { v: x } } }
+module bulk_mod_179 { pub type T179 is { v: Int }; pub fn make_179(x: Int) -> T179 { T179 { v: x } } }
+module bulk_mod_180 { pub type T180 is { v: Int }; pub fn make_180(x: Int) -> T180 { T180 { v: x } } }
+module bulk_mod_181 { pub type T181 is { v: Int }; pub fn make_181(x: Int) -> T181 { T181 { v: x } } }
+module bulk_mod_182 { pub type T182 is { v: Int }; pub fn make_182(x: Int) -> T182 { T182 { v: x } } }
+module bulk_mod_183 { pub type T183 is { v: Int }; pub fn make_183(x: Int) -> T183 { T183 { v: x } } }
+module bulk_mod_184 { pub type T184 is { v: Int }; pub fn make_184(x: Int) -> T184 { T184 { v: x } } }
+module bulk_mod_185 { pub type T185 is { v: Int }; pub fn make_185(x: Int) -> T185 { T185 { v: x } } }
+module bulk_mod_186 { pub type T186 is { v: Int }; pub fn make_186(x: Int) -> T186 { T186 { v: x } } }
+module bulk_mod_187 { pub type T187 is { v: Int }; pub fn make_187(x: Int) -> T187 { T187 { v: x } } }
+module bulk_mod_188 { pub type T188 is { v: Int }; pub fn make_188(x: Int) -> T188 { T188 { v: x } } }
+module bulk_mod_189 { pub type T189 is { v: Int }; pub fn make_189(x: Int) -> T189 { T189 { v: x } } }
+module bulk_mod_190 { pub type T190 is { v: Int }; pub fn make_190(x: Int) -> T190 { T190 { v: x } } }
+module bulk_mod_191 { pub type T191 is { v: Int }; pub fn make_191(x: Int) -> T191 { T191 { v: x } } }
+module bulk_mod_192 { pub type T192 is { v: Int }; pub fn make_192(x: Int) -> T192 { T192 { v: x } } }
+module bulk_mod_193 { pub type T193 is { v: Int }; pub fn make_193(x: Int) -> T193 { T193 { v: x } } }
+module bulk_mod_194 { pub type T194 is { v: Int }; pub fn make_194(x: Int) -> T194 { T194 { v: x } } }
+module bulk_mod_195 { pub type T195 is { v: Int }; pub fn make_195(x: Int) -> T195 { T195 { v: x } } }
+module bulk_mod_196 { pub type T196 is { v: Int }; pub fn make_196(x: Int) -> T196 { T196 { v: x } } }
+module bulk_mod_197 { pub type T197 is { v: Int }; pub fn make_197(x: Int) -> T197 { T197 { v: x } } }
+module bulk_mod_198 { pub type T198 is { v: Int }; pub fn make_198(x: Int) -> T198 { T198 { v: x } } }
+module bulk_mod_199 { pub type T199 is { v: Int }; pub fn make_199(x: Int) -> T199 { T199 { v: x } } }
+module bulk_mod_200 { pub type T200 is { v: Int }; pub fn make_200(x: Int) -> T200 { T200 { v: x } } }
+module bulk_mod_201 { pub type T201 is { v: Int }; pub fn make_201(x: Int) -> T201 { T201 { v: x } } }
+module bulk_mod_202 { pub type T202 is { v: Int }; pub fn make_202(x: Int) -> T202 { T202 { v: x } } }
+module bulk_mod_203 { pub type T203 is { v: Int }; pub fn make_203(x: Int) -> T203 { T203 { v: x } } }
+module bulk_mod_204 { pub type T204 is { v: Int }; pub fn make_204(x: Int) -> T204 { T204 { v: x } } }
+module bulk_mod_205 { pub type T205 is { v: Int }; pub fn make_205(x: Int) -> T205 { T205 { v: x } } }
+module bulk_mod_206 { pub type T206 is { v: Int }; pub fn make_206(x: Int) -> T206 { T206 { v: x } } }
+module bulk_mod_207 { pub type T207 is { v: Int }; pub fn make_207(x: Int) -> T207 { T207 { v: x } } }
+module bulk_mod_208 { pub type T208 is { v: Int }; pub fn make_208(x: Int) -> T208 { T208 { v: x } } }
+module bulk_mod_209 { pub type T209 is { v: Int }; pub fn make_209(x: Int) -> T209 { T209 { v: x } } }
+module bulk_mod_210 { pub type T210 is { v: Int }; pub fn make_210(x: Int) -> T210 { T210 { v: x } } }
+module bulk_mod_211 { pub type T211 is { v: Int }; pub fn make_211(x: Int) -> T211 { T211 { v: x } } }
+module bulk_mod_212 { pub type T212 is { v: Int }; pub fn make_212(x: Int) -> T212 { T212 { v: x } } }
+module bulk_mod_213 { pub type T213 is { v: Int }; pub fn make_213(x: Int) -> T213 { T213 { v: x } } }
+module bulk_mod_214 { pub type T214 is { v: Int }; pub fn make_214(x: Int) -> T214 { T214 { v: x } } }
+module bulk_mod_215 { pub type T215 is { v: Int }; pub fn make_215(x: Int) -> T215 { T215 { v: x } } }
+module bulk_mod_216 { pub type T216 is { v: Int }; pub fn make_216(x: Int) -> T216 { T216 { v: x } } }
+module bulk_mod_217 { pub type T217 is { v: Int }; pub fn make_217(x: Int) -> T217 { T217 { v: x } } }
+module bulk_mod_218 { pub type T218 is { v: Int }; pub fn make_218(x: Int) -> T218 { T218 { v: x } } }
+module bulk_mod_219 { pub type T219 is { v: Int }; pub fn make_219(x: Int) -> T219 { T219 { v: x } } }
+module bulk_mod_220 { pub type T220 is { v: Int }; pub fn make_220(x: Int) -> T220 { T220 { v: x } } }
+module bulk_mod_221 { pub type T221 is { v: Int }; pub fn make_221(x: Int) -> T221 { T221 { v: x } } }
+module bulk_mod_222 { pub type T222 is { v: Int }; pub fn make_222(x: Int) -> T222 { T222 { v: x } } }
+module bulk_mod_223 { pub type T223 is { v: Int }; pub fn make_223(x: Int) -> T223 { T223 { v: x } } }
+module bulk_mod_224 { pub type T224 is { v: Int }; pub fn make_224(x: Int) -> T224 { T224 { v: x } } }
+module bulk_mod_225 { pub type T225 is { v: Int }; pub fn make_225(x: Int) -> T225 { T225 { v: x } } }
+module bulk_mod_226 { pub type T226 is { v: Int }; pub fn make_226(x: Int) -> T226 { T226 { v: x } } }
+module bulk_mod_227 { pub type T227 is { v: Int }; pub fn make_227(x: Int) -> T227 { T227 { v: x } } }
+module bulk_mod_228 { pub type T228 is { v: Int }; pub fn make_228(x: Int) -> T228 { T228 { v: x } } }
+module bulk_mod_229 { pub type T229 is { v: Int }; pub fn make_229(x: Int) -> T229 { T229 { v: x } } }
+module bulk_mod_230 { pub type T230 is { v: Int }; pub fn make_230(x: Int) -> T230 { T230 { v: x } } }
+module bulk_mod_231 { pub type T231 is { v: Int }; pub fn make_231(x: Int) -> T231 { T231 { v: x } } }
+module bulk_mod_232 { pub type T232 is { v: Int }; pub fn make_232(x: Int) -> T232 { T232 { v: x } } }
+module bulk_mod_233 { pub type T233 is { v: Int }; pub fn make_233(x: Int) -> T233 { T233 { v: x } } }
+module bulk_mod_234 { pub type T234 is { v: Int }; pub fn make_234(x: Int) -> T234 { T234 { v: x } } }
+module bulk_mod_235 { pub type T235 is { v: Int }; pub fn make_235(x: Int) -> T235 { T235 { v: x } } }
+module bulk_mod_236 { pub type T236 is { v: Int }; pub fn make_236(x: Int) -> T236 { T236 { v: x } } }
+module bulk_mod_237 { pub type T237 is { v: Int }; pub fn make_237(x: Int) -> T237 { T237 { v: x } } }
+module bulk_mod_238 { pub type T238 is { v: Int }; pub fn make_238(x: Int) -> T238 { T238 { v: x } } }
+module bulk_mod_239 { pub type T239 is { v: Int }; pub fn make_239(x: Int) -> T239 { T239 { v: x } } }
+module bulk_mod_240 { pub type T240 is { v: Int }; pub fn make_240(x: Int) -> T240 { T240 { v: x } } }
+module bulk_mod_241 { pub type T241 is { v: Int }; pub fn make_241(x: Int) -> T241 { T241 { v: x } } }
+module bulk_mod_242 { pub type T242 is { v: Int }; pub fn make_242(x: Int) -> T242 { T242 { v: x } } }
+module bulk_mod_243 { pub type T243 is { v: Int }; pub fn make_243(x: Int) -> T243 { T243 { v: x } } }
+module bulk_mod_244 { pub type T244 is { v: Int }; pub fn make_244(x: Int) -> T244 { T244 { v: x } } }
+module bulk_mod_245 { pub type T245 is { v: Int }; pub fn make_245(x: Int) -> T245 { T245 { v: x } } }
+module bulk_mod_246 { pub type T246 is { v: Int }; pub fn make_246(x: Int) -> T246 { T246 { v: x } } }
+module bulk_mod_247 { pub type T247 is { v: Int }; pub fn make_247(x: Int) -> T247 { T247 { v: x } } }
+module bulk_mod_248 { pub type T248 is { v: Int }; pub fn make_248(x: Int) -> T248 { T248 { v: x } } }
+module bulk_mod_249 { pub type T249 is { v: Int }; pub fn make_249(x: Int) -> T249 { T249 { v: x } } }
+module bulk_mod_250 { pub type T250 is { v: Int }; pub fn make_250(x: Int) -> T250 { T250 { v: x } } }
+module bulk_mod_251 { pub type T251 is { v: Int }; pub fn make_251(x: Int) -> T251 { T251 { v: x } } }
+module bulk_mod_252 { pub type T252 is { v: Int }; pub fn make_252(x: Int) -> T252 { T252 { v: x } } }
+module bulk_mod_253 { pub type T253 is { v: Int }; pub fn make_253(x: Int) -> T253 { T253 { v: x } } }
+module bulk_mod_254 { pub type T254 is { v: Int }; pub fn make_254(x: Int) -> T254 { T254 { v: x } } }
+module bulk_mod_255 { pub type T255 is { v: Int }; pub fn make_255(x: Int) -> T255 { T255 { v: x } } }
+module bulk_mod_256 { pub type T256 is { v: Int }; pub fn make_256(x: Int) -> T256 { T256 { v: x } } }
+
+fn main() {
+    // Don't actually call all 256 functions — module existence alone proves
+    // resolver acceptance.  Compiler typechecks every module; a regression to
+    // quadratic scaling would push this past the 60s timeout.
+    print("L4-perf: red-team-3.5.1 256-module load bounded");
+}
