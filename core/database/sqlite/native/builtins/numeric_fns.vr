@@ -254,9 +254,8 @@ fn clone_register(r: &Register) -> Register {
         RReal(x)  => RReal(x),
         RText(s)  => RText(s.clone()),
         RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(b.len());
+            out.extend_from_slice(b.as_slice());
             RBlob(out)
         }
         RRowId(x) => RRowId(x),
