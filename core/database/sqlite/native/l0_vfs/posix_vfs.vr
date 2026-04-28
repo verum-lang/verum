@@ -168,11 +168,7 @@ fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
 /// to `core/sys/linux/syscall.vr` and switch the linux arm here).
 @cfg(target_os = "linux")
 fn sys_open_raw(path: &Byte, oflag: Int, mode: Int) -> Result<FileDesc, OSError> {
-    // Linux side has no raw entry yet — Tier-0 interpreter
-    // recursion may surface here.  See RUNTIME-3-DEEPER for the
-    // matching Linux-side workaround.
-    let _ = path; let _ = oflag; let _ = mode;
-    Err(OSError { code: 38, message: "sys_open_raw: linux raw entry not yet wired".clone() })
+    platform_syscall.open_raw(path, oflag, mode)
 }
 
 @cfg(target_os = "macos")
