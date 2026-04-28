@@ -519,17 +519,16 @@ fn canonicalise(v: &CborValue) -> CborValue {
                 tagged.push((enc, clone_value(k), canonicalise(vv)));
                 i = i + 1;
             }
-            // Insertion sort (map size ≤ few thousand for most COSE shapes).
-            let mut x: Int = 1;
-            while x < tagged.len() {
-                let mut y: Int = x;
-                while y > 0 && bytes_lt(&tagged[y].0, &tagged[y - 1].0) {
-                    let tmp = clone_tagged(&tagged[y]);
-                    tagged[y] = clone_tagged(&tagged[y - 1]);
-                    tagged[y - 1] = tmp;
-                    y = y - 1;
-                }
-                x = x + 1;
+            // Merge sort by encoded-key byte order. Previously
+            // insertion sort, which under the parser's
+            // MAX_CBOR_MAP_ENTRIES=1M cap could spend hours of CPU
+            // on a single hostile request — same DoS class as the
+            // jcs.sort_keys_utf16 fix (7a2ab0dc). O(n log n) brings
+            // worst-case 1M-entry canonicalisation back into the
+            // surrounding crypto operation's per-request budget.
+            let n = tagged.len();
+            if n > 1 {
+                merge_sort_tagged(&mut tagged, 0, n);
             }
             let mut out_entries: List<(CborValue, CborValue)> = [];
             let mut z: Int = 0;
@@ -589,4 +588,45 @@ fn bytes_lt(a: &List<Byte>, b: &List<Byte>) -> Bool {
         i = i + 1;
     }
     a.len() < b.len()
+}
+
+// Top-down merge sort for canonical-CBOR map ordering.
+// O(n log n) replacement for the previous insertion sort.
+fn merge_sort_tagged(arr: &mut List<(List<Byte>, CborValue, CborValue)>, start: Int, end: Int) {
+    if end - start <= 1 { return; }
+    let mid = start + (end - start) / 2;
+    merge_sort_tagged(arr, start, mid);
+    merge_sort_tagged(arr, mid, end);
+    merge_tagged(arr, start, mid, end);
+}
+
+fn merge_tagged(arr: &mut List<(List<Byte>, CborValue, CborValue)>, start: Int, mid: Int, end: Int) {
+    let mut left: List<(List<Byte>, CborValue, CborValue)> = [];
+    let mut right: List<(List<Byte>, CborValue, CborValue)> = [];
+    let mut i: Int = start;
+    while i < mid { left.push(clone_tagged(&arr[i])); i = i + 1; }
+    while i < end { right.push(clone_tagged(&arr[i])); i = i + 1; }
+    let mut li: Int = 0;
+    let mut ri: Int = 0;
+    let mut wi: Int = start;
+    while li < left.len() && ri < right.len() {
+        if bytes_lt(&right[ri].0, &left[li].0) {
+            arr[wi] = clone_tagged(&right[ri]);
+            ri = ri + 1;
+        } else {
+            arr[wi] = clone_tagged(&left[li]);
+            li = li + 1;
+        }
+        wi = wi + 1;
+    }
+    while li < left.len() {
+        arr[wi] = clone_tagged(&left[li]);
+        li = li + 1;
+        wi = wi + 1;
+    }
+    while ri < right.len() {
+        arr[wi] = clone_tagged(&right[ri]);
+        ri = ri + 1;
+        wi = wi + 1;
+    }
 }
