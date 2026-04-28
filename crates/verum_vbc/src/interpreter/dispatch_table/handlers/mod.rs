@@ -80,3 +80,4 @@ pub(super) mod gpu;
 pub(super) mod cubical;
 pub(super) mod tensor_extended;
 pub(super) mod ml_extended;
+pub(super) mod extended;

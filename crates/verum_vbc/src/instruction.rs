@@ -153,8 +153,17 @@ pub enum Opcode {
     IntArith1D = 0x1D,
     /// Reserved integer arithmetic.
     IntArith1E = 0x1E,
-    /// Reserved integer arithmetic.
-    IntArith1F = 0x1F,
+    /// General-purpose extension opcode (#167 Part A).
+    ///
+    /// Encoded as `[0x1F] [sub_op:u8] [operands...]`.  The sub-op byte
+    /// selects the extended-instruction kind, giving us a clean
+    /// 256-entry sub-op space carved out of the previously-reserved
+    /// `IntArith1F` slot.  Used as the home for new first-class
+    /// instructions that don't fit any existing extension namespace
+    /// (Math/Tensor/Cbgr/Ffi/etc.) — first occupant is
+    /// `MakeVariantTyped` (#146 Phase 3, Extended sub-op `0x01`).
+    /// Sub-op `0x00` is reserved as a no-op for forward-compat.
+    Extended = 0x1F,
 
     // ========================================================================
     // Float Arithmetic (0x20-0x2F)
@@ -7893,6 +7902,46 @@ const _: () = {
     assert!(std::mem::size_of::<Opcode>() == 1, "Opcode must be repr(u8) and 1 byte");
 };
 
+/// Sub-opcodes for the general-purpose `Opcode::Extended` (`0x1F`) instruction
+/// (#167 Part A).
+///
+/// Each sub-op carves out one of 256 entries in the secondary opcode space.
+/// `Reserved` (`0x00`) is a forward-compat anchor — encoders must never emit
+/// it; decoders accept and skip the (length-prefixed) operand block.  Future
+/// first-class instructions land here as they're wired through codegen /
+/// interpreter / LLVM (see #167 Part B for `MakeVariantTyped` 0x01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum ExtendedSubOpcode {
+    /// Reserved no-op — forward-compat anchor.  Always sub-op `0x00`.
+    /// Encoders must not emit this; decoders must accept and skip its
+    /// (length-prefixed) operand block.
+    Reserved = 0x00,
+}
+
+impl ExtendedSubOpcode {
+    /// Creates an extension sub-opcode from a byte, or `None` if the byte
+    /// is not a known sub-op.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0x00 => Some(Self::Reserved),
+            _ => None,
+        }
+    }
+
+    /// Returns the byte value of this extension sub-opcode.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// Returns the mnemonic string for this extension sub-opcode.
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            Self::Reserved => "EXT_RESERVED",
+        }
+    }
+}
+
 impl Opcode {
     /// Creates an opcode from a byte value.
     ///
@@ -8151,6 +8200,7 @@ impl Opcode {
             Opcode::GpuAlloc => "GPU_ALLOC",
             Opcode::TensorExtended => "TENSOR_EXTENDED",
             Opcode::MlExtended => "ML_EXTENDED",
+            Opcode::Extended => "EXTENDED",
             _ => "RESERVED",
         }
     }
@@ -11160,6 +11210,31 @@ pub enum Instruction {
         /// FFI sub-opcode.
         sub_op: u8,
         /// Operand bytes (decoded by interpreter).
+        operands: Vec<u8>,
+    },
+
+    // ========================================================================
+    // Generic Extended (#167 Part A)
+    // ========================================================================
+    /// General-purpose extension instruction.
+    ///
+    /// Encoded as `[0x1F (Opcode::Extended)] [sub_op:u8] [operand_len:u8]
+    /// [operands...]`.  The `sub_op` byte selects the extended-instruction
+    /// kind from the 256-entry sub-op space carved out of what was
+    /// previously the reserved `IntArith1F` opcode slot.  This is the
+    /// home for new first-class instructions that don't fit any
+    /// existing extension namespace (Math/Tensor/Cbgr/Ffi/etc.).
+    ///
+    /// Defined sub-ops:
+    /// - 0x00 — reserved no-op (forward-compat anchor; encoder must
+    ///          never emit, decoder accepts and skips its operands).
+    ///
+    /// Future sub-ops (#167 Part B + later work) will land here as
+    /// they're wired through codegen / interpreter / LLVM.
+    Extended {
+        /// Extension sub-opcode (`ExtendedSubOpcode`).
+        sub_op: u8,
+        /// Operand bytes (length-prefixed; decoded by handler).
         operands: Vec<u8>,
     },
 
