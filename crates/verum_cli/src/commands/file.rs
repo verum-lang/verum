@@ -258,7 +258,22 @@ pub fn run_with_tier(
 
     match tier_num {
         0 => {
-            // Tier 0: Direct interpretation via pipeline
+            // Tier 0: Direct interpretation via pipeline.
+            //
+            // Mode policy (Verum execution-mode contract):
+            //   1. Interpreter — `.vr` file declares `fn main()`; run via VBC.
+            //   2. AOT (Tier 1) — same but compiled to native via LLVM.
+            //   3. Script — `.vr` file MUST start with a `#!` shebang line;
+            //      top-level statements are then folded into a synthesised
+            //      `__verum_script_main` wrapper. Files without shebang AND
+            //      without `fn main()` are rejected at entry-detection time
+            //      with a help message pointing at both options.
+            //
+            // The single-file CLI entry intentionally does NOT force
+            // `script_mode = true`; the pipeline's `should_parse_as_script`
+            // helper drives mode selection from the file's content (shebang
+            // byte-prefix). Stdin and inline-`-e` sources without a path
+            // opt the flag on explicitly when those entry points land.
             let options = CompilerOptions {
                 input: input.clone(),
                 verify_mode: if skip_verify {
@@ -281,7 +296,9 @@ pub fn run_with_tier(
             }
         }
         1 => {
-            // Tier 1: AOT compilation to native binary then execute
+            // Tier 1: AOT compilation to native binary then execute.
+            // Mode is content-driven (shebang autodetect, no flag) — see
+            // Tier-0 comment.
             let verify_mode = if skip_verify {
                 VerifyMode::Runtime
             } else {

@@ -143,16 +143,30 @@ pub fn rewrite_argv_for_script_mode(argv: Vec<OsString>) -> Vec<OsString> {
 /// True iff `arg` should trigger a script-mode rewrite. The check is
 /// deliberately strict: false positives would shadow legitimate subcommands.
 ///
+/// **Verum execution-mode contract.** The no-`run` shorthand
+/// (`verum ./script.vr`) is reserved for **scripts**, not arbitrary
+/// `.vr` files. A script is identified by a `#!` shebang line at byte 0
+/// (BOM-tolerant). Files that lack a shebang — even if they end in
+/// `.vr` — must be invoked through the explicit `verum run file.vr`
+/// form. This makes the three execution modes unambiguous from argv
+/// alone:
+///
+/// | Mode        | Invocation                        | Required signal           |
+/// |-------------|-----------------------------------|---------------------------|
+/// | Interpreter | `verum run file.vr`               | `fn main()` in source     |
+/// | AOT         | `verum run --aot file.vr`         | `fn main()` in source     |
+/// | Script      | `verum file.vr` or `./file.vr`    | `#!` shebang at byte 0    |
+///
 /// Conditions, AND-joined:
 /// - Not a flag (does not start with `-`).
 /// - Not a known subcommand name (UTF-8 only — every Verum subcommand
 ///   spells its name in ASCII, so a non-UTF-8 OsString cannot collide).
 /// - Names an existing file (regular file, accessible).
-/// - File has `.vr` extension OR begins with a `#!` shebang.
+/// - **Begins with `#!` shebang** (BOM-tolerant: `EF BB BF #!` accepted).
 ///
 /// **Encoding contract:** flag detection and the file-existence /
-/// extension / shebang checks all operate on the raw `OsStr` so non-UTF-8
-/// paths (Windows legacy paths, macOS broken-encoding test fixtures,
+/// shebang checks all operate on the raw `OsStr` so non-UTF-8 paths
+/// (Windows legacy paths, macOS broken-encoding test fixtures,
 /// deliberate Unix paths with non-UTF-8 bytes) still trigger script-mode
 /// dispatch. Only the subcommand-name match requires UTF-8, and a
 /// non-UTF-8 string can't match an ASCII subcommand anyway, so we skip
@@ -179,15 +193,9 @@ fn looks_like_script_invocation(arg: &OsString) -> bool {
     if !path.is_file() {
         return false;
     }
-    let has_vr_ext = path
-        .extension()
-        .map(|e| e.eq_ignore_ascii_case("vr"))
-        .unwrap_or(false);
-    if has_vr_ext {
-        return true;
-    }
-    // Even without a `.vr` extension, a file whose first bytes are `#!`
-    // (after an optional UTF-8 BOM) counts as a Verum script.
+    // Shebang is the sole script signal — the `.vr` extension is no
+    // longer sufficient. Without a shebang, the file is a library /
+    // binary source that must be run via `verum run file.vr`.
     has_shebang(path)
 }
 
@@ -227,6 +235,58 @@ fn has_shebang(path: &Path) -> bool {
 /// active without consuming argv.
 pub fn is_script_invocation(argv: &[OsString]) -> bool {
     argv.len() >= 2 && looks_like_script_invocation(&argv[1])
+}
+
+/// Productivity helper for the `verum file.vr` (no `run`) form. Returns a
+/// precise advisory message when `argv[1]` looks like a *would-be* script
+/// (existing `.vr` file) but lacks the mandatory `#!` shebang.
+///
+/// The Verum execution-mode contract reserves the no-`run` shorthand for
+/// shebang scripts; without one, clap would surface the generic "unknown
+/// subcommand" error which gives the user no actionable next step. By
+/// detecting the misuse pre-clap we can point them at the exact fix
+/// (`verum run file.vr` for non-script files, or add a shebang).
+///
+/// Returns `Some(message)` only for the `.vr`-extension-without-shebang
+/// case; every other shape (subcommands, flags, non-existent files, files
+/// with unrelated extensions) returns `None` to stay out of clap's way.
+pub fn missing_shebang_advisory(argv: &[OsString]) -> Option<String> {
+    if argv.len() < 2 {
+        return None;
+    }
+    let arg = &argv[1];
+    if os_starts_with_dash(arg) {
+        return None;
+    }
+    if let Some(s) = arg.to_str() {
+        if KNOWN_SUBCOMMANDS.binary_search(&s).is_ok() {
+            return None;
+        }
+    }
+    let path = Path::new(arg);
+    if !path.is_file() {
+        return None;
+    }
+    let has_vr_ext = path
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("vr"))
+        .unwrap_or(false);
+    if !has_vr_ext {
+        return None;
+    }
+    if has_shebang(path) {
+        return None; // Properly shaped script — no advisory.
+    }
+    let display = arg.to_string_lossy();
+    Some(format!(
+        "`{display}` looks like a Verum source file but is missing a `#!` shebang line.\n\
+         \n\
+         The bare `verum {display}` shorthand is reserved for **scripts**, which must \
+         declare a shebang at byte 0 (e.g. `#!/usr/bin/env verum`). Choose one of:\n\
+         \n  \
+         • Run as a library/binary entry point:  verum run {display}\n  \
+         • Convert to a script:                  add `#!/usr/bin/env verum` as the first line"
+    ))
 }
 
 /// Validation invariant for `KNOWN_SUBCOMMANDS`: the array must be sorted.
@@ -306,8 +366,10 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_for_vr_extension_file() {
-        let p = write_temp("script.vr", "fn main() {}\n");
+    fn rewrite_for_shebang_vr_file() {
+        // `.vr` extension is no longer sufficient — the file MUST start
+        // with a shebang to qualify as a script. Pin the new contract.
+        let p = write_temp("script.vr", "#!/usr/bin/env verum\nprint(1);\n");
         let a = argv(&["verum", p.to_str().unwrap()]);
         let r = rewrite_argv_for_script_mode(a.clone());
         assert_eq!(r.len(), 3);
@@ -318,9 +380,20 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_for_vr_extension_with_explicit_separator() {
+    fn no_rewrite_for_vr_file_without_shebang() {
+        // The Verum execution-mode contract reserves the no-`run`
+        // shorthand for shebang scripts. A `.vr` file without a shebang
+        // is library/binary code and must be invoked via `verum run`.
+        let p = write_temp("non_script.vr", "fn main() { print(1) }\n");
+        let a = argv(&["verum", p.to_str().unwrap()]);
+        assert_eq!(rewrite_argv_for_script_mode(a.clone()), a);
+        let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn rewrite_for_shebang_vr_with_explicit_separator() {
         // The user already wrote `--`; we must not double it.
-        let p = write_temp("greet.vr", "fn main() {}\n");
+        let p = write_temp("greet.vr", "#!/usr/bin/env verum\nprint(1);\n");
         let a = argv(&["verum", p.to_str().unwrap(), "--", "alice", "bob"]);
         let r = rewrite_argv_for_script_mode(a);
         assert_eq!(r.len(), 6);
@@ -336,7 +409,7 @@ mod tests {
         // The shebang case: `./hello.vr foo bar` arrives as
         // ["verum", "hello.vr", "foo", "bar"]; we must rewrite so `foo bar`
         // are unambiguous trailing-args, not parsed as verum flags.
-        let p = write_temp("greet3.vr", "fn main() {}\n");
+        let p = write_temp("greet3.vr", "#!/usr/bin/env verum\nprint(1);\n");
         let a = argv(&["verum", p.to_str().unwrap(), "foo", "bar"]);
         let r = rewrite_argv_for_script_mode(a);
         assert_eq!(r.len(), 6);
@@ -350,7 +423,7 @@ mod tests {
     #[test]
     fn rewrite_no_separator_if_no_script_args() {
         // Plain `verum hello.vr` — no trailing args, no `--` needed.
-        let p = write_temp("greet4.vr", "fn main() {}\n");
+        let p = write_temp("greet4.vr", "#!/usr/bin/env verum\nprint(1);\n");
         let a = argv(&["verum", p.to_str().unwrap()]);
         let r = rewrite_argv_for_script_mode(a);
         assert_eq!(r.len(), 3);
@@ -393,7 +466,7 @@ mod tests {
     // the platforms where the scenario is reachable.
     #[cfg(target_os = "linux")]
     #[test]
-    fn rewrite_for_non_utf8_path_with_vr_extension() {
+    fn rewrite_for_non_utf8_path_with_shebang() {
         use std::os::unix::ffi::{OsStrExt, OsStringExt};
         let dir = std::env::temp_dir().join(format!(
             "verum_script_nonutf8_{}_{}",
@@ -408,7 +481,8 @@ mod tests {
         name_bytes.push(0xFF);
         name_bytes.extend_from_slice(b".vr");
         let p = dir.join(std::ffi::OsString::from_vec(name_bytes));
-        fs::write(&p, "fn main() {}\n").unwrap();
+        // Shebang qualifies the file as a script regardless of path encoding.
+        fs::write(&p, "#!/usr/bin/env verum\nprint(1);\n").unwrap();
         let arg = std::ffi::OsString::from_vec(p.as_os_str().as_bytes().to_vec());
         assert!(arg.to_str().is_none(), "fixture must be non-UTF-8");
         let argv = vec![OsString::from("verum"), arg];
@@ -460,11 +534,57 @@ mod tests {
 
     #[test]
     fn is_script_invocation_matches_rewrite() {
-        let p = write_temp("s.vr", "fn main() {}\n");
+        let p = write_temp("s.vr", "#!/usr/bin/env verum\nprint(1);\n");
         let a = argv(&["verum", p.to_str().unwrap()]);
         assert!(is_script_invocation(&a));
         let b = argv(&["verum", "build"]);
         assert!(!is_script_invocation(&b));
         let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn missing_shebang_advisory_for_vr_extension() {
+        // Productivity: when the user types `verum file.vr` for a file
+        // that LOOKS like a script (has `.vr` extension) but lacks the
+        // mandatory shebang, surface a precise advisory pointing them
+        // at `verum run`. Prevents the bare clap "unknown subcommand"
+        // failure mode.
+        let p = write_temp("nope.vr", "fn main() {}\n");
+        let a = argv(&["verum", p.to_str().unwrap()]);
+        let advisory = missing_shebang_advisory(&a)
+            .expect("vr-extension file without shebang must produce an advisory");
+        assert!(
+            advisory.contains("verum run"),
+            "advisory must redirect the user to `verum run`, got: {}",
+            advisory
+        );
+        assert!(
+            advisory.contains("shebang"),
+            "advisory must mention the shebang requirement, got: {}",
+            advisory
+        );
+        let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn no_advisory_for_proper_shebang_script() {
+        let p = write_temp("good.vr", "#!/usr/bin/env verum\nprint(1);\n");
+        let a = argv(&["verum", p.to_str().unwrap()]);
+        assert!(missing_shebang_advisory(&a).is_none());
+        let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn no_advisory_for_non_vr_file() {
+        let p = write_temp("notes.txt", "just text\n");
+        let a = argv(&["verum", p.to_str().unwrap()]);
+        assert!(missing_shebang_advisory(&a).is_none());
+        let _ = fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn no_advisory_for_subcommand() {
+        let a = argv(&["verum", "build"]);
+        assert!(missing_shebang_advisory(&a).is_none());
     }
 }
