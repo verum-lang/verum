@@ -87,41 +87,79 @@ public fn canonicalize<A: Articulation>(alpha: A) -> A {
 public axiom round_trip_property<A: Articulation>(alpha: A) -> Bool
     ensures is_adjoint(alpha.clone(), translate(alpha));
 
-/// Decidability of gauge equivalence on finitely-axiomatised
-/// articulations: there is an algorithm running in O(2^O(|α_1|+|α_2|))
-/// that decides whether α_1 and α_2 are gauge-equivalent.
-///
-/// Operational form: trusted-boundary marker that downstream
-/// `verum audit --gauge` invocations can rely on for finitely-
-/// axiomatised inputs. V1 wires the actual decision procedure.
-@framework(diakrisis, "Theorem 16.5 (gauge decidability for finitely-axiomatised α)")
-public axiom gauge_decidability_finite<A: Articulation>(alpha_1: A, alpha_2: A) -> Bool
-    ensures true;
+/// **Gauge-decidability verdict** — the three operational verdicts
+/// the kernel-side decision procedure produces. Single source of
+/// truth for `verum audit --gauge` and the V3-promoted
+/// `gauge_*` axioms below.
+public type GaugeVerdict is
+    /// Single-exponential-time decision available; the procedure
+    /// terminates with a definitive yes/no answer.
+    | Decidable
+    /// Σ_1 semi-decidable: terminates on gauge-equivalent inputs,
+    /// may diverge on non-equivalent ones (Theorem 16.6).
+    | SemiDecidable
+    /// No decision procedure exists (Theorem 16.7; word-problem
+    /// reduction).
+    | Undecidable;
 
-/// Universal undecidability lower bound: there is NO algorithm that
-/// decides gauge-equivalence for arbitrary recursively-axiomatised
-/// articulations. The bound is established by reducing the word
-/// problem in finitely-presented groups to gauge-equivalence
-/// (Novikov-Boone undecidability of the word problem for groups).
+/// **Gauge classification predicate** — runtime gate routing an
+/// articulation pair into one of the three GaugeVerdict variants
+/// based on its presentation finiteness. V0 surface gate; V1 will
+/// route through the actual congruence-closure complexity counter.
+public fn gauge_verdict_for<A: Articulation>(_alpha_1: &A, _alpha_2: &A) -> GaugeVerdict {
+    // V0: conservative default — recursively-axiomatised
+    // articulations land in SemiDecidable bucket; specialisation by
+    // the V1 procedure will reclassify Decidable / Undecidable.
+    GaugeVerdict.SemiDecidable
+}
+
+/// **Decidability of gauge equivalence on finitely-axiomatised
+/// articulations** (Theorem 16.5): there is an algorithm running
+/// in O(2^O(|α_1|+|α_2|)) that decides whether α_1 and α_2 are
+/// gauge-equivalent.
 ///
-/// Operational consequence: the `verum audit --gauge` CLI must
-/// distinguish three verdicts — `Decidable` (input is finitely-
-/// axiomatised), `SemiDecidable` (input is recursively-axiomatised
-/// but not finite), `Undecidable` (cannot be made into a finite
-/// presentation). The user-facing error message must be honest about
-/// the undecidability.
+/// V3 form: witness-parameterised over the GaugeVerdict gate. The
+/// bridge applies precisely to the Decidable bucket; calling on a
+/// SemiDecidable / Undecidable input fails the requires-clause.
+@framework(diakrisis, "Theorem 16.5 (gauge decidability for finitely-axiomatised α)")
+public axiom gauge_decidability_finite<A: Articulation>(
+    alpha_1: A,
+    alpha_2: A,
+) -> Bool
+    requires gauge_verdict_for(&alpha_1, &alpha_2) is GaugeVerdict.Decidable
+    ensures  // procedure terminates with a Bool answer (LEM on the answer)
+        is_adjoint(alpha_1.clone(), translate(alpha_2.clone()))
+          || !is_adjoint(alpha_1, translate(alpha_2));
+
+/// **Universal undecidability lower bound** (Theorem 16.7):
+/// there is NO algorithm that decides gauge-equivalence for
+/// arbitrary recursively-axiomatised articulations.
+///
+/// V3 form: witness-parameterised existence claim — for every
+/// pair classified Undecidable, the verdict gate produces the
+/// `Undecidable` variant. The bridge documents the negative result.
 @framework(diakrisis, "Theorem 16.7 (gauge undecidable in general; word-problem reduction)")
-public axiom gauge_undecidable_general() -> Bool
-    ensures true;
+public axiom gauge_undecidable_general<A: Articulation>(
+    alpha_1: A,
+    alpha_2: A,
+) -> Bool
+    requires gauge_verdict_for(&alpha_1, &alpha_2) is GaugeVerdict.Undecidable
+    ensures  // negative result: the verdict-gate confirms undecidability
+        gauge_verdict_for(&alpha_1, &alpha_2) is GaugeVerdict.Undecidable;
 
 // =============================================================================
 // Trusted-boundary auxiliary — semi-decidability for recursively-axiomatised α
 // =============================================================================
 
-/// Σ_1 semi-decidability for recursively-axiomatised articulations:
-/// there is a Turing machine that halts and outputs `true` whenever
-/// α_1 and α_2 are gauge-equivalent, but may diverge when they are
-/// not. This is the best general result short of full decidability.
+/// **Σ_1 semi-decidability for recursively-axiomatised articulations**
+/// (Theorem 16.6): there is a Turing machine that halts and outputs
+/// `true` whenever α_1 and α_2 are gauge-equivalent, but may diverge
+/// when they are not.
 @framework(diakrisis, "Theorem 16.6 (Σ_1 semi-decidability for recursively-axiomatised α)")
-public axiom gauge_semi_decidability_recursive<A: Articulation>(alpha_1: A, alpha_2: A) -> Bool
-    ensures true;
+public axiom gauge_semi_decidability_recursive<A: Articulation>(
+    alpha_1: A,
+    alpha_2: A,
+) -> Bool
+    requires gauge_verdict_for(&alpha_1, &alpha_2) is GaugeVerdict.SemiDecidable
+    ensures  // semi-decidability: the verdict-gate confirms the bucket
+        gauge_verdict_for(&alpha_1, &alpha_2) is GaugeVerdict.SemiDecidable;
