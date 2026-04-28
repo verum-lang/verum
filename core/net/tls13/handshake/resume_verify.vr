@@ -60,6 +60,54 @@ public type ResumeVerifyError is
     | KdfFailure(HkdfError)
     | CipherSuiteMismatch;
 
+// Display + Debug + Eq for ResumeVerifyError.  BinderMismatch
+// + TicketDecryptFailure surface no detail — TLS 1.3
+// session-resumption auth MUST be value-blind (RFC 8446
+// §4.6.1) to avoid an oracle for the resumption secret.
+
+implement Display for ResumeVerifyError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoAcceptableIdentity     => f.write_str("TLS 1.3 resumption: no acceptable PSK identity"),
+            TicketDecryptFailure(_)  => f.write_str("TLS 1.3 resumption: ticket decrypt failed"),
+            TicketExpired            => f.write_str("TLS 1.3 resumption: ticket expired"),
+            AgeOutOfWindow           => f.write_str("TLS 1.3 resumption: obfuscated_age outside freshness window"),
+            BinderMismatch           => f.write_str("TLS 1.3 resumption: binder mismatch"),
+            KdfFailure(_)            => f.write_str("TLS 1.3 resumption: HKDF derivation failed"),
+            CipherSuiteMismatch      => f.write_str("TLS 1.3 resumption: cipher suite mismatch"),
+        }
+    }
+}
+
+implement Debug for ResumeVerifyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoAcceptableIdentity     => f.write_str("NoAcceptableIdentity"),
+            TicketDecryptFailure(e)  => f.write_str(f"TicketDecryptFailure({e:?})".as_str()),
+            TicketExpired            => f.write_str("TicketExpired"),
+            AgeOutOfWindow           => f.write_str("AgeOutOfWindow"),
+            BinderMismatch           => f.write_str("BinderMismatch"),
+            KdfFailure(e)            => f.write_str(f"KdfFailure({e:?})".as_str()),
+            CipherSuiteMismatch      => f.write_str("CipherSuiteMismatch"),
+        }
+    }
+}
+
+implement Eq for ResumeVerifyError {
+    fn eq(&self, other: &ResumeVerifyError) -> Bool {
+        match (self, other) {
+            (NoAcceptableIdentity,    NoAcceptableIdentity)    => true,
+            (TicketDecryptFailure(a), TicketDecryptFailure(b)) => a == b,
+            (TicketExpired,           TicketExpired)           => true,
+            (AgeOutOfWindow,          AgeOutOfWindow)          => true,
+            (BinderMismatch,          BinderMismatch)          => true,
+            (KdfFailure(a),           KdfFailure(b))           => a == b,
+            (CipherSuiteMismatch,     CipherSuiteMismatch)     => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // ResumedSession — output of a successful resumption verify
 // =============================================================================

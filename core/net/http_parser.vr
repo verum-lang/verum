@@ -122,6 +122,76 @@ public type HttpParseError is
     | ConflictingContentLength
     | IncompleteFrame;
 
+implement Display for HttpParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidMethod(m)                => f.write_str(f"HTTP/1.1 invalid method: {m}".as_str()),
+            InvalidVersion(v)               => f.write_str(f"HTTP/1.1 invalid version: {v}".as_str()),
+            InvalidStatusCode(c)            => f.write_str(f"HTTP/1.1 invalid status code: {c}".as_str()),
+            InvalidHeaderName(n)            => f.write_str(f"HTTP/1.1 invalid header name: {n}".as_str()),
+            InvalidHeaderValue(v)           => f.write_str(f"HTTP/1.1 invalid header value: {v}".as_str()),
+            HeaderTooLong { limit }         => f.write_str(f"HTTP/1.1 header exceeds limit {limit}".as_str()),
+            TooManyHeaders { limit }        => f.write_str(f"HTTP/1.1 too many headers (limit {limit})".as_str()),
+            RequestLineTooLong { limit }    => f.write_str(f"HTTP/1.1 request line exceeds limit {limit}".as_str()),
+            BadRequestLine(reason)          => f.write_str(f"HTTP/1.1 bad request line: {reason}".as_str()),
+            InvalidChunkSize(s)             => f.write_str(f"HTTP/1.1 invalid chunk size: {s}".as_str()),
+            InvalidTrailer(t)               => f.write_str(f"HTTP/1.1 invalid trailer: {t}".as_str()),
+            InvalidContentLength(c)         => f.write_str(f"HTTP/1.1 invalid Content-Length: {c}".as_str()),
+            ContentLengthTooLarge { length, limit } =>
+                f.write_str(f"HTTP/1.1 Content-Length {length} exceeds limit {limit}".as_str()),
+            ConflictingContentLength        => f.write_str("HTTP/1.1 conflicting Content-Length headers"),
+            IncompleteFrame                 => f.write_str("HTTP/1.1 incomplete frame"),
+        }
+    }
+}
+
+implement Debug for HttpParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidMethod(m)                => f.write_str(f"InvalidMethod({m})".as_str()),
+            InvalidVersion(v)               => f.write_str(f"InvalidVersion({v})".as_str()),
+            InvalidStatusCode(c)            => f.write_str(f"InvalidStatusCode({c})".as_str()),
+            InvalidHeaderName(n)            => f.write_str(f"InvalidHeaderName({n})".as_str()),
+            InvalidHeaderValue(v)           => f.write_str(f"InvalidHeaderValue({v})".as_str()),
+            HeaderTooLong { limit }         => f.write_str(f"HeaderTooLong {{ limit: {limit} }}".as_str()),
+            TooManyHeaders { limit }        => f.write_str(f"TooManyHeaders {{ limit: {limit} }}".as_str()),
+            RequestLineTooLong { limit }    => f.write_str(f"RequestLineTooLong {{ limit: {limit} }}".as_str()),
+            BadRequestLine(reason)          => f.write_str(f"BadRequestLine({reason})".as_str()),
+            InvalidChunkSize(s)             => f.write_str(f"InvalidChunkSize({s})".as_str()),
+            InvalidTrailer(t)               => f.write_str(f"InvalidTrailer({t})".as_str()),
+            InvalidContentLength(c)         => f.write_str(f"InvalidContentLength({c})".as_str()),
+            ContentLengthTooLarge { length, limit } =>
+                f.write_str(f"ContentLengthTooLarge {{ length: {length}, limit: {limit} }}".as_str()),
+            ConflictingContentLength        => f.write_str("ConflictingContentLength"),
+            IncompleteFrame                 => f.write_str("IncompleteFrame"),
+        }
+    }
+}
+
+implement Eq for HttpParseError {
+    fn eq(&self, other: &HttpParseError) -> Bool {
+        match (self, other) {
+            (InvalidMethod(a),                  InvalidMethod(b))                  => a == b,
+            (InvalidVersion(a),                 InvalidVersion(b))                 => a == b,
+            (InvalidStatusCode(a),              InvalidStatusCode(b))              => a == b,
+            (InvalidHeaderName(a),              InvalidHeaderName(b))              => a == b,
+            (InvalidHeaderValue(a),             InvalidHeaderValue(b))             => a == b,
+            (HeaderTooLong { limit: a },        HeaderTooLong { limit: b })        => a == b,
+            (TooManyHeaders { limit: a },       TooManyHeaders { limit: b })       => a == b,
+            (RequestLineTooLong { limit: a },   RequestLineTooLong { limit: b })   => a == b,
+            (BadRequestLine(a),                 BadRequestLine(b))                 => a == b,
+            (InvalidChunkSize(a),               InvalidChunkSize(b))               => a == b,
+            (InvalidTrailer(a),                 InvalidTrailer(b))                 => a == b,
+            (InvalidContentLength(a),           InvalidContentLength(b))           => a == b,
+            (ContentLengthTooLarge { length: la, limit: lia },
+             ContentLengthTooLarge { length: lb, limit: lib })                     => la == lb && lia == lib,
+            (ConflictingContentLength,          ConflictingContentLength)          => true,
+            (IncompleteFrame,                   IncompleteFrame)                   => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // ParseProgress — state after a `feed()` call
 // =============================================================================

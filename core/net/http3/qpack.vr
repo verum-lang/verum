@@ -30,6 +30,46 @@ public type QpackError is
     | DecoderStreamError(Text)
     | BlockedStreamLimitExceeded;
 
+implement Display for QpackError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EncodeError(reason)         => f.write_str(f"QPACK encode error: {reason}".as_str()),
+            DecodeError(reason)         => f.write_str(f"QPACK decode error: {reason}".as_str()),
+            TableSizeError              => f.write_str("QPACK dynamic table size error"),
+            EncoderStreamError(reason)  => f.write_str(f"QPACK encoder stream error: {reason}".as_str()),
+            DecoderStreamError(reason)  => f.write_str(f"QPACK decoder stream error: {reason}".as_str()),
+            BlockedStreamLimitExceeded  => f.write_str("QPACK blocked-stream limit exceeded"),
+        }
+    }
+}
+
+implement Debug for QpackError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EncodeError(reason)         => f.write_str(f"EncodeError({reason})".as_str()),
+            DecodeError(reason)         => f.write_str(f"DecodeError({reason})".as_str()),
+            TableSizeError              => f.write_str("TableSizeError"),
+            EncoderStreamError(reason)  => f.write_str(f"EncoderStreamError({reason})".as_str()),
+            DecoderStreamError(reason)  => f.write_str(f"DecoderStreamError({reason})".as_str()),
+            BlockedStreamLimitExceeded  => f.write_str("BlockedStreamLimitExceeded"),
+        }
+    }
+}
+
+implement Eq for QpackError {
+    fn eq(&self, other: &QpackError) -> Bool {
+        match (self, other) {
+            (EncodeError(a),            EncodeError(b))            => a == b,
+            (DecodeError(a),            DecodeError(b))            => a == b,
+            (TableSizeError,            TableSizeError)            => true,
+            (EncoderStreamError(a),     EncoderStreamError(b))     => a == b,
+            (DecoderStreamError(a),     DecoderStreamError(b))     => a == b,
+            (BlockedStreamLimitExceeded,BlockedStreamLimitExceeded)=> true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // QpackEncoder
 // =============================================================================

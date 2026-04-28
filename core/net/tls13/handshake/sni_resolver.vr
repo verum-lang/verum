@@ -50,6 +50,34 @@ public type SniResolveError is
       NoMatch(Text)                 // SNI present but no identity configured for it
     | NoSniProvided;                // client offered no server_name — caller may pick a default
 
+implement Display for SniResolveError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoMatch(name)  => f.write_str(f"TLS 1.3 SNI: no identity configured for {name}".as_str()),
+            NoSniProvided  => f.write_str("TLS 1.3 SNI: client offered no server_name extension"),
+        }
+    }
+}
+
+implement Debug for SniResolveError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoMatch(name)  => f.write_str(f"NoMatch({name})".as_str()),
+            NoSniProvided  => f.write_str("NoSniProvided"),
+        }
+    }
+}
+
+implement Eq for SniResolveError {
+    fn eq(&self, other: &SniResolveError) -> Bool {
+        match (self, other) {
+            (NoMatch(a),     NoMatch(b))     => a == b,
+            (NoSniProvided,  NoSniProvided)  => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Resolved identity
 // =============================================================================

@@ -58,6 +58,32 @@ implement TlsPlaintext {
 public type RecordEncodeError is
       FragmentTooLarge(Int);
 
+implement Display for RecordEncodeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            RecordEncodeError.FragmentTooLarge(n) =>
+                f.write_str(f"TLS 1.3 record fragment {n} bytes exceeds 2^14".as_str()),
+        }
+    }
+}
+
+implement Debug for RecordEncodeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            RecordEncodeError.FragmentTooLarge(n) =>
+                f.write_str(f"FragmentTooLarge({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for RecordEncodeError {
+    fn eq(&self, other: &RecordEncodeError) -> Bool {
+        match (self, other) {
+            (RecordEncodeError.FragmentTooLarge(a), RecordEncodeError.FragmentTooLarge(b)) => a == b,
+        }
+    }
+}
+
 // =============================================================================
 // TLSInnerPlaintext — the encrypted payload structure
 // =============================================================================
@@ -124,3 +150,33 @@ public fn parse_inner_plaintext(inner: &[Byte]) -> Result<(ContentType, List<Byt
 public type RecordDecodeError is
       NoContentType
     | InvalidInnerType;
+
+implement Display for RecordDecodeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            RecordDecodeError.NoContentType    => "TLS 1.3 record: no inner content_type byte",
+            RecordDecodeError.InvalidInnerType => "TLS 1.3 record: invalid inner content_type",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for RecordDecodeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            RecordDecodeError.NoContentType    => "NoContentType",
+            RecordDecodeError.InvalidInnerType => "InvalidInnerType",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for RecordDecodeError {
+    fn eq(&self, other: &RecordDecodeError) -> Bool {
+        match (self, other) {
+            (RecordDecodeError.NoContentType,    RecordDecodeError.NoContentType)    => true,
+            (RecordDecodeError.InvalidInnerType, RecordDecodeError.InvalidInnerType) => true,
+            _ => false,
+        }
+    }
+}

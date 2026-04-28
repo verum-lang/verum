@@ -56,6 +56,37 @@ public type CidrError is
     | InvalidPrefixLen(Int)
     | AddrParseFailed(AddrParseError);
 
+implement Display for CidrError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)    => f.write_str(f"CIDR malformed: {reason}".as_str()),
+            InvalidPrefixLen(n)  => f.write_str(f"CIDR invalid prefix length {n}".as_str()),
+            AddrParseFailed(e)   => f.write_str(f"CIDR address parse failed: {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for CidrError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)    => f.write_str(f"Malformed({reason})".as_str()),
+            InvalidPrefixLen(n)  => f.write_str(f"InvalidPrefixLen({n})".as_str()),
+            AddrParseFailed(e)   => f.write_str(f"AddrParseFailed({e:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for CidrError {
+    fn eq(&self, other: &CidrError) -> Bool {
+        match (self, other) {
+            (Malformed(a),       Malformed(b))       => a == b,
+            (InvalidPrefixLen(a),InvalidPrefixLen(b))=> a == b,
+            (AddrParseFailed(a), AddrParseFailed(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parser
 // =============================================================================

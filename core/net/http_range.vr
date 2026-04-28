@@ -68,6 +68,40 @@ public type RangeError is
     | UnsatisfiableRange
     | TooManyRanges { declared: Int, limit: Int };
 
+implement Display for RangeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)         => f.write_str(f"HTTP Range malformed: {reason}".as_str()),
+            UnsatisfiableRange        => f.write_str("HTTP Range unsatisfiable (RFC 9110 §14.1.2)"),
+            TooManyRanges { declared, limit } =>
+                f.write_str(f"HTTP Range count {declared} exceeds limit {limit}".as_str()),
+        }
+    }
+}
+
+implement Debug for RangeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason)         => f.write_str(f"Malformed({reason})".as_str()),
+            UnsatisfiableRange        => f.write_str("UnsatisfiableRange"),
+            TooManyRanges { declared, limit } =>
+                f.write_str(f"TooManyRanges {{ declared: {declared}, limit: {limit} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for RangeError {
+    fn eq(&self, other: &RangeError) -> Bool {
+        match (self, other) {
+            (Malformed(a),         Malformed(b))         => a == b,
+            (UnsatisfiableRange,   UnsatisfiableRange)   => true,
+            (TooManyRanges { declared: da, limit: la },
+             TooManyRanges { declared: db, limit: lb }) => da == db && la == lb,
+            _ => false,
+        }
+    }
+}
+
 /// Hard cap on the number of byte ranges in a single `Range:` header.
 /// Apache CVE-2011-3192 ("killapache") demonstrated the DoS vector:
 /// a peer sending a Range header with thousands of overlapping ranges

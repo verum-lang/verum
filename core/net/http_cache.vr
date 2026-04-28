@@ -71,6 +71,30 @@ public type CacheControl is {
 public type CacheControlError is
       Malformed(Text);
 
+implement Display for CacheControlError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason) => f.write_str(f"Cache-Control malformed: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for CacheControlError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Malformed(reason) => f.write_str(f"Malformed({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for CacheControlError {
+    fn eq(&self, other: &CacheControlError) -> Bool {
+        match (self, other) {
+            (Malformed(a), Malformed(b)) => a == b,
+        }
+    }
+}
+
 // =============================================================================
 // Parser
 // =============================================================================
