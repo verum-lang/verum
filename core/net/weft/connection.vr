@@ -14,7 +14,8 @@ mount core.time.instant.{Instant};
 mount core.net.weft.transport.{WeftTransport};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.net.http_parser.{
-    HttpParser, ParseProgress, HeaderView, ParseError,
+    HttpParser, ParseProgress, HeaderView,
+    HttpParseError as ParseError,
     ChunkedDecoder, ChunkProgress,
 };
 mount core.async.cancellation.{CancellationToken};
@@ -58,6 +59,49 @@ public type ConnError is
     | TooLarge
     | UnsupportedTransferEncoding(Text)
     | HandlerError(WeftError);
+
+implement Display for ConnError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ClientClosed                       => f.write_str("connection: client closed"),
+            Cancelled                          => f.write_str("connection: cancelled"),
+            Io(reason)                         => f.write_str(f"connection I/O error: {reason}".as_str()),
+            Parse(e)                           => f.write_str(f"connection: {e}".as_str()),
+            TooLarge                           => f.write_str("connection: request too large"),
+            UnsupportedTransferEncoding(t)     => f.write_str(f"connection: unsupported Transfer-Encoding ({t})".as_str()),
+            HandlerError(e)                    => f.write_str(f"connection handler: {e}".as_str()),
+        }
+    }
+}
+
+implement Debug for ConnError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ClientClosed                       => f.write_str("ClientClosed"),
+            Cancelled                          => f.write_str("Cancelled"),
+            Io(reason)                         => f.write_str(f"Io({reason})".as_str()),
+            Parse(e)                           => f.write_str(f"Parse({e:?})".as_str()),
+            TooLarge                           => f.write_str("TooLarge"),
+            UnsupportedTransferEncoding(t)     => f.write_str(f"UnsupportedTransferEncoding({t})".as_str()),
+            HandlerError(e)                    => f.write_str(f"HandlerError({e:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for ConnError {
+    fn eq(&self, other: &ConnError) -> Bool {
+        match (self, other) {
+            (ClientClosed,                     ClientClosed)                     => true,
+            (Cancelled,                        Cancelled)                        => true,
+            (Io(a),                            Io(b))                            => a == b,
+            (Parse(a),                         Parse(b))                         => a == b,
+            (TooLarge,                         TooLarge)                         => true,
+            (UnsupportedTransferEncoding(a),   UnsupportedTransferEncoding(b))   => a == b,
+            (HandlerError(a),                  HandlerError(b))                  => a == b,
+            _ => false,
+        }
+    }
+}
 
 type KeepAlive is
     | Continue

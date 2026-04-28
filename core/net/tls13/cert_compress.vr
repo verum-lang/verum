@@ -94,6 +94,36 @@ public type CompressCertificateError is
       Truncated
     | BadAlgorithmListLength;
 
+implement Display for CompressCertificateError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated              => "TLS 1.3 compress_certificate: truncated",
+            BadAlgorithmListLength => "TLS 1.3 compress_certificate: bad algorithm list length",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for CompressCertificateError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Truncated              => "Truncated",
+            BadAlgorithmListLength => "BadAlgorithmListLength",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for CompressCertificateError {
+    fn eq(&self, other: &CompressCertificateError) -> Bool {
+        match (self, other) {
+            (Truncated,              Truncated)              => true,
+            (BadAlgorithmListLength, BadAlgorithmListLength) => true,
+            _ => false,
+        }
+    }
+}
+
 pub fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<Byte>)
     -> Result<(), CompressCertificateError>
 {

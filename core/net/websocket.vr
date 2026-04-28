@@ -274,6 +274,52 @@ public type WebSocketDecodeError is
     | ExpectedMasked
     | UnexpectedlyMasked;
 
+implement Display for WebSocketDecodeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            IncompleteFrame             => f.write_str("WebSocket: incomplete frame"),
+            InvalidOpcode(b)            => f.write_str(f"WebSocket: invalid opcode {b}".as_str()),
+            ControlFrameFragmented      => f.write_str("WebSocket: control frame fragmented"),
+            ControlFramePayloadTooLong  => f.write_str("WebSocket: control frame payload exceeds 125 bytes"),
+            ReservedBitsSet             => f.write_str("WebSocket: reserved bits set"),
+            PayloadTooLong { limit }    => f.write_str(f"WebSocket: payload exceeds limit {limit}".as_str()),
+            ExpectedMasked              => f.write_str("WebSocket: client frame must be masked"),
+            UnexpectedlyMasked          => f.write_str("WebSocket: server frame must not be masked"),
+        }
+    }
+}
+
+implement Debug for WebSocketDecodeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            IncompleteFrame             => f.write_str("IncompleteFrame"),
+            InvalidOpcode(b)            => f.write_str(f"InvalidOpcode({b})".as_str()),
+            ControlFrameFragmented      => f.write_str("ControlFrameFragmented"),
+            ControlFramePayloadTooLong  => f.write_str("ControlFramePayloadTooLong"),
+            ReservedBitsSet             => f.write_str("ReservedBitsSet"),
+            PayloadTooLong { limit }    => f.write_str(f"PayloadTooLong {{ limit: {limit} }}".as_str()),
+            ExpectedMasked              => f.write_str("ExpectedMasked"),
+            UnexpectedlyMasked          => f.write_str("UnexpectedlyMasked"),
+        }
+    }
+}
+
+implement Eq for WebSocketDecodeError {
+    fn eq(&self, other: &WebSocketDecodeError) -> Bool {
+        match (self, other) {
+            (IncompleteFrame,             IncompleteFrame)             => true,
+            (InvalidOpcode(a),            InvalidOpcode(b))            => a == b,
+            (ControlFrameFragmented,      ControlFrameFragmented)      => true,
+            (ControlFramePayloadTooLong,  ControlFramePayloadTooLong)  => true,
+            (ReservedBitsSet,             ReservedBitsSet)             => true,
+            (PayloadTooLong { limit: a }, PayloadTooLong { limit: b }) => a == b,
+            (ExpectedMasked,              ExpectedMasked)              => true,
+            (UnexpectedlyMasked,          UnexpectedlyMasked)          => true,
+            _ => false,
+        }
+    }
+}
+
 public type WebSocketDecodeResult is
     | Decoded { frame: WsFrame, consumed: Int }
     | NeedMore

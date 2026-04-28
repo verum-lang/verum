@@ -60,6 +60,63 @@ public type JsonExtractError is
     /// Produces 422, not 400.
     | RefinementViolation { reason: Text, path: Text };
 
+implement Display for JsonExtractError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MissingContentType =>
+                f.write_str("JSON extractor: missing Content-Type"),
+            WrongContentType { actual } =>
+                f.write_str(f"JSON extractor: wrong Content-Type ({actual})".as_str()),
+            PayloadTooLarge { len, cap } =>
+                f.write_str(f"JSON extractor: payload {len} bytes exceeds cap {cap}".as_str()),
+            InvalidUtf8 { offset } =>
+                f.write_str(f"JSON extractor: invalid UTF-8 at offset {offset}".as_str()),
+            ParseError { json_err } =>
+                f.write_str(f"JSON extractor: {json_err}".as_str()),
+            ShapeMismatch { reason, path } =>
+                f.write_str(f"JSON extractor: shape mismatch at {path}: {reason}".as_str()),
+            RefinementViolation { reason, path } =>
+                f.write_str(f"JSON extractor: refinement violation at {path}: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for JsonExtractError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MissingContentType =>
+                f.write_str("MissingContentType"),
+            WrongContentType { actual } =>
+                f.write_str(f"WrongContentType {{ actual: {actual} }}".as_str()),
+            PayloadTooLarge { len, cap } =>
+                f.write_str(f"PayloadTooLarge {{ len: {len}, cap: {cap} }}".as_str()),
+            InvalidUtf8 { offset } =>
+                f.write_str(f"InvalidUtf8 {{ offset: {offset} }}".as_str()),
+            ParseError { json_err } =>
+                f.write_str(f"ParseError {{ json_err: {json_err:?} }}".as_str()),
+            ShapeMismatch { reason, path } =>
+                f.write_str(f"ShapeMismatch {{ reason: {reason}, path: {path} }}".as_str()),
+            RefinementViolation { reason, path } =>
+                f.write_str(f"RefinementViolation {{ reason: {reason}, path: {path} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for JsonExtractError {
+    fn eq(&self, other: &JsonExtractError) -> Bool {
+        match (self, other) {
+            (MissingContentType, MissingContentType) => true,
+            (WrongContentType { actual: a }, WrongContentType { actual: b }) => a == b,
+            (PayloadTooLarge { len: la, cap: ca }, PayloadTooLarge { len: lb, cap: cb }) => la == lb && ca == cb,
+            (InvalidUtf8 { offset: a }, InvalidUtf8 { offset: b }) => a == b,
+            (ParseError { json_err: a }, ParseError { json_err: b }) => a == b,
+            (ShapeMismatch { reason: ra, path: pa }, ShapeMismatch { reason: rb, path: pb }) => ra == rb && pa == pb,
+            (RefinementViolation { reason: ra, path: pa }, RefinementViolation { reason: rb, path: pb }) => ra == rb && pa == pb,
+            _ => false,
+        }
+    }
+}
+
 implement JsonExtractError {
     /// Map every variant to a (status, body) pair for the error path.
     public fn into_response(self) -> Response {

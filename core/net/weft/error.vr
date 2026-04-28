@@ -94,6 +94,52 @@ public type WeftError is
     | UpstreamIo(Text)
     | Internal(Text);
 
+implement Display for WeftError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadRequest(reason)         => f.write_str(f"weft: bad request ({reason})".as_str()),
+            RouteNotFound              => f.write_str("weft: route not found"),
+            MethodNotAllowed           => f.write_str("weft: method not allowed"),
+            ExtractionRejected(reason) => f.write_str(f"weft: extraction rejected ({reason})".as_str()),
+            Timeout                    => f.write_str("weft: request timeout"),
+            Overloaded                 => f.write_str("weft: server overloaded"),
+            UpstreamIo(reason)         => f.write_str(f"weft: upstream I/O error ({reason})".as_str()),
+            Internal(reason)           => f.write_str(f"weft: internal error ({reason})".as_str()),
+        }
+    }
+}
+
+implement Debug for WeftError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadRequest(reason)         => f.write_str(f"BadRequest({reason})".as_str()),
+            RouteNotFound              => f.write_str("RouteNotFound"),
+            MethodNotAllowed           => f.write_str("MethodNotAllowed"),
+            ExtractionRejected(reason) => f.write_str(f"ExtractionRejected({reason})".as_str()),
+            Timeout                    => f.write_str("Timeout"),
+            Overloaded                 => f.write_str("Overloaded"),
+            UpstreamIo(reason)         => f.write_str(f"UpstreamIo({reason})".as_str()),
+            Internal(reason)           => f.write_str(f"Internal({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for WeftError {
+    fn eq(&self, other: &WeftError) -> Bool {
+        match (self, other) {
+            (BadRequest(a),         BadRequest(b))         => a == b,
+            (RouteNotFound,         RouteNotFound)         => true,
+            (MethodNotAllowed,      MethodNotAllowed)      => true,
+            (ExtractionRejected(a), ExtractionRejected(b)) => a == b,
+            (Timeout,               Timeout)               => true,
+            (Overloaded,            Overloaded)            => true,
+            (UpstreamIo(a),         UpstreamIo(b))         => a == b,
+            (Internal(a),           Internal(b))           => a == b,
+            _ => false,
+        }
+    }
+}
+
 implement WeftError {
     public fn category(&self) -> ErrorCategory {
         match self {
