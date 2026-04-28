@@ -1328,19 +1328,37 @@ public fn safe_clock_gettime(clock_id: Int) -> Result<DarwinTimespec, OSError> {
     }
 }
 
-/// Open file (safe wrapper)
-public fn safe_open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
-    // Copy path and null-terminate
-    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
-    let len = copy_path_nul(&mut path_buf, path);
-
-    let result = unsafe { open(path_buf.as_ptr() as &Byte, flags, mode) };
+/// Open file by raw NUL-terminated `&Byte` pointer.
+///
+/// This is the lowest-level path: the caller has already copied the
+/// path into its own NUL-terminated buffer and hands us a `&Byte`
+/// pointing at byte zero of that buffer.  Used when the interpreter
+/// path-via-`&[Byte]` argument coercion recurses to depth 16384 —
+/// the slice-typed parameter triggers a slice-on-array dispatch
+/// chain that is broken in the Tier-0 interpreter (proven by bisect
+/// at `internal/diag/sqlite-real/probe_safe_open_empty.vr`: even an
+/// empty-list argument overflows).  Sidestep: pass a raw `&Byte`
+/// instead.
+public fn safe_open_raw(path: &Byte, flags: Int, mode: Int) -> Result<FileDesc, OSError> {
+    let result = unsafe { open(path, flags, mode) };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
     } else {
         Ok(FileDesc(result))
     }
+}
+
+/// Open file (safe wrapper).  Slice-taking façade — most callers
+/// today.  When the Tier-0 interpreter's slice-argument coercion is
+/// fixed this body becomes the canonical path; until then,
+/// `safe_open_raw` is the path that actually runs end-to-end.
+public fn safe_open(path: &[Byte], flags: Int, mode: Int) -> Result<FileDesc, OSError> {
+    // Copy path and null-terminate
+    let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+    let len = copy_path_nul(&mut path_buf, path);
+    let _ = len;
+    safe_open_raw(path_buf.as_ptr() as &Byte, flags, mode)
 }
 
 /// Seek file (safe wrapper)
