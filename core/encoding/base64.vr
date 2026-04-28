@@ -168,14 +168,47 @@ fn decode_with(input: &Text, url_safe: Bool) -> Result<List<Byte>, Base64Error> 
             });
         }
     } else {
-        // URL-safe accepts padded or unpadded but rejects malformed
-        // intermediate forms.
-        if pad_chars > 2 {
-            return Err(Base64Error {
-                kind: InvalidPadding,
-                position: effective,
-                message: "more than 2 trailing '=' characters",
-            });
+        // URL-safe (RFC 4648 §5): padding is OPTIONAL. If absent,
+        // accept any length except a 1-char tail (handled below).
+        // If present, the encoding MUST be canonical — same shape
+        // rules as standard base64, otherwise we accept multiple
+        // distinct inputs that decode to the same bytes (malleability
+        // surface for JWT / capability-token comparison).
+        //
+        // Pre-fix bug: `decode_url("AA")`, `decode_url("AA=")`, and
+        // `decode_url("AA==")` all returned the same one-byte
+        // result. The first two were silently accepted here because
+        // only `pad_chars > 2` was rejected — letting a forger swap
+        // padding without changing the decoded bytes.
+        if pad_chars > 0 {
+            if n % 4 != 0 {
+                return Err(Base64Error {
+                    kind: InvalidLength,
+                    position: n,
+                    message: "padded URL-safe base64 must be a multiple of 4",
+                });
+            }
+            if pad_chars > 2 {
+                return Err(Base64Error {
+                    kind: InvalidPadding,
+                    position: effective,
+                    message: "more than 2 trailing '=' characters",
+                });
+            }
+            if pad_chars == 1 && rem != 3 {
+                return Err(Base64Error {
+                    kind: InvalidPadding,
+                    position: effective,
+                    message: "single '=' must follow a 3-char group",
+                });
+            }
+            if pad_chars == 2 && rem != 2 {
+                return Err(Base64Error {
+                    kind: InvalidPadding,
+                    position: effective,
+                    message: "double '==' must follow a 2-char group",
+                });
+            }
         }
     }
 
