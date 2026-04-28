@@ -32,6 +32,32 @@ public type Quantity is
     | Many
     | AtMost { n: Int{>= 0} };
 
+/// Saturation threshold for AtMost. Beyond this, `add_quantity` and
+/// `mul_quantity` collapse to `Many` rather than computing a giant
+/// number that wraps the Int{>= 0} refinement on overflow. 1 << 30 is
+/// well past any practical resource count and leaves `na + nb`
+/// representable as a positive Int even at the saturation edge.
+public const QTT_SATURATION: Int = 1 << 30;
+
+/// Normalise a quantity into canonical form:
+///   * `AtMost { n: 0 }` ↔ `Zero` (zero uses allowed in either case)
+///   * `AtMost { n: m }` for `m > QTT_SATURATION` collapses to `Many`
+///
+/// `AtMost { n: 1 }` is intentionally NOT normalised to `One` — they
+/// differ semantically: `One` requires exactly one runtime occurrence,
+/// `AtMost { n: 1 }` admits zero occurrences too. The lattice isn't
+/// total around 1.
+public fn normalize_quantity(q: Quantity) -> Quantity {
+    match q {
+        Quantity.AtMost { n } => {
+            if n == 0 { Quantity.Zero }
+            else if n > QTT_SATURATION { Quantity.Many }
+            else { Quantity.AtMost { n } }
+        },
+        other => other,
+    }
+}
+
 /// Does this quantity allow `uses` runtime occurrences?
 public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
     match q {
@@ -47,20 +73,39 @@ public fn allows(q: Quantity, uses: Int{>= 0}) -> Bool {
 /// `add_quantity(p, q)` is the cumulative count when one binding
 /// is used `p` times and then `q` times — the natural pattern for
 /// `let`-sequencing. Identity is `Zero`; absorbing element is
-/// `Many`.
+/// `Many`. SOUNDNESS: arithmetic saturates to `Many` at
+/// `QTT_SATURATION` so the `Int{>= 0}` refinement on `AtMost.n` is
+/// never violated by overflow on AtMost(big) + AtMost(big). Both
+/// inputs and the output are run through `normalize_quantity` so
+/// `AtMost(0) + One` correctly returns `One` (was `AtMost(1)` due
+/// to skipped Zero-identity short-circuit).
 public fn add_quantity(a: Quantity, b: Quantity) -> Quantity {
-    match (a, b) {
+    let na = normalize_quantity(a);
+    let nb = normalize_quantity(b);
+    match (na, nb) {
         (Quantity.Zero, q) => q,
         (q, Quantity.Zero) => q,
         (Quantity.Many, _) => Quantity.Many,
         (_, Quantity.Many) => Quantity.Many,
         (Quantity.One, Quantity.One) => Quantity.AtMost { n: 2 },
-        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) =>
-            Quantity.AtMost { n: na + nb },
+        (Quantity.AtMost { n: nx }, Quantity.AtMost { n: ny }) =>
+            normalize_quantity(saturating_at_most(nx, ny)),
         (Quantity.One, Quantity.AtMost { n }) =>
-            Quantity.AtMost { n: n + 1 },
+            normalize_quantity(saturating_at_most(1, n)),
         (Quantity.AtMost { n }, Quantity.One) =>
-            Quantity.AtMost { n: n + 1 },
+            normalize_quantity(saturating_at_most(n, 1)),
+    }
+}
+
+/// `AtMost(a + b)` with saturation to `Many` if `a + b` would
+/// exceed `QTT_SATURATION`. Used by `add_quantity`; the saturation
+/// limit is well past any practical resource count, so legitimate
+/// QTT analyses never hit it.
+fn saturating_at_most(a: Int, b: Int) -> Quantity {
+    if a > QTT_SATURATION || b > QTT_SATURATION || a > QTT_SATURATION - b {
+        Quantity.Many
+    } else {
+        Quantity.AtMost { n: a + b }
     }
 }
 
@@ -85,15 +130,33 @@ public fn add_quantity(a: Quantity, b: Quantity) -> Quantity {
 ///     AtMost(a) × AtMost(b) = AtMost(a · b)
 /// ```
 public fn mul_quantity(a: Quantity, b: Quantity) -> Quantity {
-    match (a, b) {
+    let na = normalize_quantity(a);
+    let nb = normalize_quantity(b);
+    match (na, nb) {
         (Quantity.Zero, _) => Quantity.Zero,
         (_, Quantity.Zero) => Quantity.Zero,
         (Quantity.One, q) => q,
         (q, Quantity.One) => q,
         (Quantity.Many, _) => Quantity.Many,
         (_, Quantity.Many) => Quantity.Many,
-        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) =>
-            Quantity.AtMost { n: na * nb },
+        (Quantity.AtMost { n: nx }, Quantity.AtMost { n: ny }) =>
+            normalize_quantity(saturating_mul_at_most(nx, ny)),
+    }
+}
+
+/// `AtMost(a · b)` with saturation to `Many` if the product would
+/// exceed `QTT_SATURATION`. Mirrors `saturating_at_most` for the
+/// multiplicative direction.
+fn saturating_mul_at_most(a: Int, b: Int) -> Quantity {
+    // Reject `a * b > QTT_SATURATION` without computing the product
+    // (avoids the Int overflow itself).
+    if a == 0 || b == 0 {
+        return Quantity.Zero;   // multiplicative absorbing
+    }
+    if a > QTT_SATURATION / b {
+        Quantity.Many
+    } else {
+        Quantity.AtMost { n: a * b }
     }
 }
 
@@ -124,27 +187,37 @@ public fn bottom_quantity() -> Quantity {
 /// `One` argument into a `Many` parameter is sound, the other way
 /// is not).
 public fn is_sub(a: Quantity, b: Quantity) -> Bool {
-    match (a, b) {
+    // Normalise so AtMost(0) is treated identically to Zero — the two
+    // are semantically equivalent (both admit only zero uses) but the
+    // raw match on the unnormalised pair would route AtMost(0) into
+    // the AtMost arms and miss the obvious case `AtMost(0) ≤ Zero`.
+    let na = normalize_quantity(a);
+    let nb = normalize_quantity(b);
+    match (na, nb) {
         (Quantity.Zero, _) => true,
         (_, Quantity.Many) => true,
         (Quantity.Many, _) => false,
         (Quantity.One, Quantity.Zero) => false,
         (Quantity.One, Quantity.One) => true,
         (Quantity.One, Quantity.AtMost { n }) => n >= 1,
+        // AtMost(n) admits zero uses, so it's never ≤ Zero (n > 0
+        // by post-normalisation) nor ≤ One (One forbids zero uses).
         (Quantity.AtMost { n: _ }, Quantity.Zero) => false,
         (Quantity.AtMost { n: _ }, Quantity.One) => false,
-        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) => na <= nb,
+        (Quantity.AtMost { n: nx }, Quantity.AtMost { n: ny }) => nx <= ny,
     }
 }
 
 /// Equality on quantities — the partial-order's antisymmetry
 /// witness. `quantity_eq(a, b)` iff `is_sub(a, b) && is_sub(b, a)`.
 public fn quantity_eq(a: Quantity, b: Quantity) -> Bool {
-    match (a, b) {
+    let na = normalize_quantity(a);
+    let nb = normalize_quantity(b);
+    match (na, nb) {
         (Quantity.Zero, Quantity.Zero) => true,
         (Quantity.One, Quantity.One) => true,
         (Quantity.Many, Quantity.Many) => true,
-        (Quantity.AtMost { n: na }, Quantity.AtMost { n: nb }) => na == nb,
+        (Quantity.AtMost { n: nx }, Quantity.AtMost { n: ny }) => nx == ny,
         _ => false,
     }
 }
@@ -176,9 +249,14 @@ public type QttViolation is
     /// Erased binding referenced at runtime.
     | ErasedUsedAtRuntime { binding: Text };
 
-/// Check a single binding against its observed usage.
+/// Check a single binding against its observed usage. Normalises
+/// the declared quantity first so `AtMost(0)` collapses to the
+/// `Zero` arm and produces `ErasedUsedAtRuntime` for any observed
+/// runtime occurrence — was producing the more generic `OverUse`
+/// for the same case.
 public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> Maybe<QttViolation> {
-    match declared {
+    let normalized = normalize_quantity(declared);
+    match normalized {
         Quantity.Zero => {
             if observed > 0 {
                 Some(QttViolation.ErasedUsedAtRuntime { binding: name })
@@ -186,15 +264,15 @@ public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> 
         },
         Quantity.One => {
             if observed == 0 {
-                Some(QttViolation.UnderUse { binding: name, declared })
+                Some(QttViolation.UnderUse { binding: name, declared: normalized })
             } else if observed > 1 {
-                Some(QttViolation.OverUse { binding: name, observed, declared })
+                Some(QttViolation.OverUse { binding: name, observed, declared: normalized })
             } else { None }
         },
         Quantity.Many => None,
         Quantity.AtMost { n } => {
             if observed > n {
-                Some(QttViolation.OverUse { binding: name, observed, declared })
+                Some(QttViolation.OverUse { binding: name, observed, declared: normalized })
             } else { None }
         },
     }
