@@ -250,6 +250,18 @@ fn decode_core(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
             }
             k = k + 1;
         }
+        // Reject non-canonical pad counts. Per RFC 4648 §6 the
+        // final block carries 1/2/3/4/5 payload bytes — encoded as
+        // pad ∈ {6, 4, 3, 1, 0}. Any other count (2, 5, 7, 8)
+        // would let multiple distinct encodings decode to the same
+        // bytes (the unused real chars contribute high-bit junk
+        // that the canonical form ignores), defeating round-trip
+        // equality and admitting malleable / forgeable encodings
+        // — soundness defect for any protocol that compares the
+        // encoded form.
+        if pad == 2 || pad == 5 || pad == 7 || pad == 8 {
+            return Err(Base32Error.InvalidLength(pad));
+        }
         // Decode 8 5-bit groups into up to 5 bytes.
         let v0 = ((group[0] << 3) | (group[1] >> 2)) & 0xFF;
         out.push(v0 as Byte);
@@ -419,6 +431,12 @@ fn decode_core_with_alpha(src: &[Byte], alpha: Base32Alphabet) -> Result<List<By
                 group[k] = v;
             }
             k = k + 1;
+        }
+        // Same canonicality gate as `decode_core`. RFC 4648 §6 / §7
+        // both restrict pad counts to {0, 1, 3, 4, 6}; the §7 hex
+        // alphabet inherits §3.5's trailing-bits clause unchanged.
+        if pad == 2 || pad == 5 || pad == 7 || pad == 8 {
+            return Err(Base32Error.InvalidLength(pad));
         }
         let v0 = ((group[0] << 3) | (group[1] >> 2)) & 0xFF;
         out.push(v0 as Byte);
