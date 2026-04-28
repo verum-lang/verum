@@ -1,0 +1,49 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L0
+// @tags: red-team-2, round-2-2.3, nested-generics, recursion-limit, dos
+// @timeout: 30000
+// @description: Round-2 §2.3 (Nested generics 100 levels deep) — adversarial-depth
+//   guardrail. The type-checker has a hard `ast_to_type` recursion-depth cap
+//   (currently 64).  Annotations exceeding the cap MUST surface as a typed error
+//   ("recursion limit exceeded: ast_to_type recursion depth exceeded") rather
+//   than overflowing the host stack with a SIGSEGV.  This file pins the
+//   rejection at depth 65+ so a future refactor can't accidentally remove the
+//   bound (which would re-open the DoS vector: a hostile .vr file with deep
+//   generics could crash the type-checker).
+//
+// Pre-fix surface: 100-deep `Maybe<Maybe<…>>` could in principle stack-overflow
+// the recursive type-walker.  Defense: hard depth cap returns
+// `recursion limit exceeded` from `ast_to_type`, propagated as a compile error.
+//
+// Cross-reference: companion pass-case at `vcs/specs/L0-critical/red_team_round_2_confirmations.vr`
+// §2.3 covers depth 32 (well within bounds) — together they pin the
+// DEFENSE CONFIRMED interval [≤64 OK, ≥65 graceful-fail].
+
+// 65-level Maybe<…<Int>…> — one above the type-checker's recursion limit.
+// The signature alone (regardless of body) drives `ast_to_type` past the cap.
+fn deep_generic_overflow()
+    -> Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Int
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       > {
+    None
+}
+
+fn main() {
+    let _ = deep_generic_overflow();
+}

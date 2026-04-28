@@ -137,8 +137,39 @@ fn deep_recursion_witness(n: Int) -> Int {
     if n <= 0 { 0 } else { deep_recursion_witness(n - 1) + 1 }
 }
 
+// -----------------------------------------------------------------------------
+// §2.3 — Nested generics 32 levels deep (DEFENSE CONFIRMED + guardrail 2026-04-28)
+// -----------------------------------------------------------------------------
+// Stress on the type-checker's `ast_to_type` recursion-depth handling.
+// A 32-level `Maybe<Maybe<…<Int>…>>` chain comfortably exceeds the depths
+// real-world code produces while staying well within the type-walker's
+// hard recursion-depth cap (currently 64; rejection at 65+ is exercised
+// by `vcs/specs/L0-critical/parser/edge_cases/red_team_nested_generic_recursion_limit.vr`).
+//
+// Pin: this function must parse + type-check + monomorphize without panic
+// or stack-overflow.  Should the type-walker ever degrade to unbounded
+// recursion, the test suite catches it before a malicious .vr file does.
+//
+// The body returns `None`, so codegen sees the deeply-nested annotation
+// but the runtime sees a plain Maybe — keeping the test orthogonal to
+// runtime semantics.
+
+fn deep_generic_witness()
+    -> Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<
+       Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Maybe<Int
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>>
+       >>>>>>>> {
+    None
+}
+
 fn main() {
-    // Smoke check that the impl-cycle, module-cycle, and deep-super
-    // graphs all compile without the closure walker infinite-looping.
+    // Smoke check that the impl-cycle, module-cycle, deep-super, and
+    // deep-generic graphs all compile without the closure walker
+    // infinite-looping or the type-checker stack-overflowing.
+    let _ = deep_generic_witness();
     print("L0-critical: red-team round-2 confirmations");
 }

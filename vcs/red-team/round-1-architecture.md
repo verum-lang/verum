@@ -122,10 +122,20 @@ review.
 flag with save/restore guard around impl-block. Cfg-overlap walker is conservative
 but explicit on the `unix` predicate.
 
-### 4.2 4-level deep `super.super.super.super.X` mount
+### 4.2 4-level deep `super.super.super.super.X` mount — DEFENSE CONFIRMED + guardrail 2026-04-28
 
-**Status:** DEFENSE CONFIRMED — currently returns input unchanged at the lexer
-level. No confused-deputy callers found through audit.
+**Status:** DEFENSE CONFIRMED — `super.super.super.super.X` is a no-op at
+the lexer level; deep super-chains do not lift past the parent of
+where they were lexically anchored.  Audit found no confused-deputy
+callers across the codebase.
+
+**Guardrail:** `vcs/specs/L0-critical/red_team_round_2_confirmations.vr`
+§5.2 (cross-listed as round-1 §4.2 here) — module
+`super_outer.middle1.middle2.middle3.deep` reaches up via
+`mount super.super.super.super.OuterT;` and binds `OuterT` to a value
+declared four levels up.  If the super walker ever silently returns
+`X` from a different scope than the syntactic parent-chain target,
+the test catches it.
 
 ### 4.3 Mount alias shadowing built-in identifier — DEFENSE CONFIRMED 2026-04-28
 
