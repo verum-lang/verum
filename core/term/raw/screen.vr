@@ -139,6 +139,10 @@ public fn query_cursor_position(fd: FileDesc) -> IoResult<(Int, Int)> {
     let mut col = 0;
     let mut parsing_col = false;
 
+    // Cursor-position report values are small (terminal dimensions
+    // ≤ ~10000). Saturate at Int.MAX/100 so a hostile / corrupted
+    // terminal response can't wrap row/col past Int.MAX into a small
+    // positive value that downstream cursor logic accepts.
     let mut i = start;
     while i < pos - 1 {  // -1 to skip 'R'
         if buf[i] == ';' as Byte {
@@ -146,9 +150,13 @@ public fn query_cursor_position(fd: FileDesc) -> IoResult<(Int, Int)> {
         } else if buf[i] >= '0' as Byte && buf[i] <= '9' as Byte {
             let digit = (buf[i] - '0' as Byte) as Int;
             if parsing_col {
-                col = col * 10 + digit;
+                if col <= 92_233_720_368_547_758 {
+                    col = col * 10 + digit;
+                }
             } else {
-                row = row * 10 + digit;
+                if row <= 92_233_720_368_547_758 {
+                    row = row * 10 + digit;
+                }
             }
         }
         i = i + 1;

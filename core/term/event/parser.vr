@@ -252,7 +252,17 @@ implement InputParser {
                 0
             }
             (OscString { ref mut code, parsing_code: true, .. }, b) if b >= '0' as Byte && b <= '9' as Byte => {
-                *code = *code * 10 + (b - '0' as Byte) as Int;
+                // OSC codes are small integers (xterm assigns ≤ 1000 in
+                // practice); a hostile terminal could send a multi-MB
+                // digit run that wraps `*code * 10 + d` past Int.MAX.
+                // Saturate at Int.MAX/100 (no realistic OSC code is
+                // anywhere near this) so wrap can't smuggle a small
+                // positive value past the dispatcher.
+                if *code > 92_233_720_368_547_758 {
+                    // Don't update on overflow.
+                } else {
+                    *code = *code * 10 + (b - '0' as Byte) as Int;
+                }
                 0
             }
             (OscString { ref mut data, .. }, b) => {
@@ -310,9 +320,16 @@ implement InputParser {
         match byte {
             // Digit: accumulate current parameter
             b if b >= '0' as Byte && b <= '9' as Byte => {
+                // CSI parameters are small (typically 0..255); a hostile
+                // terminal could send a multi-MB digit run that wraps
+                // `*current * 10 + d` past Int.MAX. Saturate before
+                // overflow so the wrap can't smuggle a small value
+                // past the cursor / mode / SGR dispatcher.
                 match &mut self.state {
                     CsiParam { ref mut current, .. } => {
-                        *current = *current * 10 + (b - '0' as Byte) as Int;
+                        if *current <= 92_233_720_368_547_758 {
+                            *current = *current * 10 + (b - '0' as Byte) as Int;
+                        }
                     }
                     _ => {}
                 }

@@ -955,11 +955,18 @@ fn parse_copy_command_count(tag: &Text) -> Int {
     // Skip "COPY ".
     while i < raw.len() && raw[i] != 0x20_u8 as Byte { i = i + 1; }
     while i < raw.len() && raw[i] == 0x20_u8 as Byte { i = i + 1; }
+    // CommandComplete tag arrives over the wire from a Postgres peer.
+    // 3-layer overflow defense — saturate at 0 (the doc-stated
+    // malformed-tag fallback) on any wrap.
     let mut n: Int = 0;
+    let mut digit_count: Int = 0;
     while i < raw.len() {
         let b = raw[i];
         if b < 0x30_u8 as Byte || b > 0x39_u8 as Byte { break; }
+        if digit_count >= 19 || n > 922_337_203_685_477_580 { return 0; }
         n = n * 10 + ((b as Int) - 0x30);
+        if n < 0 { return 0; }
+        digit_count = digit_count + 1;
         i = i + 1;
     }
     n
