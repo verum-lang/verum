@@ -119,12 +119,24 @@ public theorem writer_left_identity<W, A, B>(
     }
 {
     proof {
-        // writer_bind(Writer{a, zero}, f, combine) =
-        //   let inner = f(a);
-        //   Writer { value: inner.value, output: combine(zero, inner.output) }
-        // By the requires-clause, combine(zero, inner.output) = inner.output,
-        // so the result IS f(a) structurally.
-        true
+        // ── Step 1: build the unit Writer.
+        //   writer_unit(a, zero) = Writer { value: a, output: zero }   (definition)
+        let unit_a: Writer<W, A> = writer_unit(a.clone(), zero.clone());
+        // ── Step 2: take f(a) once for naming — this is the RHS body.
+        let inner: Writer<W, B> = f(a.clone());
+        // ── Step 3: writer_bind unfolds:
+        //   writer_bind(unit_a, f, combine):
+        //     inner' = f(unit_a.value) = f(a) = inner                  (β-app)
+        //     Writer { value: inner.value,
+        //              output: combine(unit_a.output, inner.output)
+        //                    = combine(zero, inner.output)
+        //                    = inner.output                            (← requires-clause)
+        //            }
+        let bound: Writer<W, B> = writer_bind(unit_a, f.clone(), combine);
+        // ── Step 4: the spec's RHS — direct application f(a).
+        let rhs: Writer<W, B> = inner;
+        // ── Step 5: bound = rhs structurally per Step 3 reduction.
+        bound.value == rhs.value && bound.output == rhs.output
     }
 }
 
@@ -148,12 +160,22 @@ public theorem writer_right_identity<W, A>(
     }
 {
     proof {
-        // writer_bind(m, |a| unit(a, zero), combine):
-        //   inner = unit(m.value, zero) = Writer{value: m.value, output: zero}
-        //   result = Writer { value: inner.value = m.value,
-        //                     output: combine(m.output, zero) = m.output }
-        // Equal to m by the requires-clause.
-        true
+        // ── Step 1: extract the value carried by m for naming.
+        let mv: A = m.value.clone();
+        let mo: W = m.output.clone();
+        // ── Step 2: writer_bind(m, |a| unit(a, zero), combine):
+        //   inner = (|a| unit(a, zero))(mv) = Writer{value: mv, output: zero}  (β-app + definition)
+        //   result = Writer { value: inner.value = mv,
+        //                     output: combine(mo, zero) = mo                   (← requires-clause)
+        //                   }
+        let bound: Writer<W, A> = writer_bind(
+            m.clone(),
+            |a: A| writer_unit(a, zero.clone()),
+            combine,
+        );
+        // ── Step 3: bound = m structurally per Step 2 reduction.
+        let _ = mv; let _ = mo;
+        bound.value == m.value && bound.output == m.output
     }
 }
 
@@ -192,11 +214,36 @@ public theorem writer_associativity<W, A, B, C>(
     }
 {
     proof {
-        // Both sides compute the same value triple (g ∘ f ∘ m); the
-        // outputs are combined under different parenthesisations
-        // (combine(combine(w1, w2), w3) vs combine(w1, combine(w2, w3))),
-        // which the monoid-associativity precondition equates.
-        true
+        // ── Step 1: extract the value-thread (a, b, c) once for naming.
+        //   These are the structurally-identical witnesses both LHS
+        //   and RHS reduce through; only the OUTPUT-monoid grouping
+        //   differs (left- vs right-associated).
+        let a: A = m.value.clone();
+        let inner_b: Writer<W, B> = f(a.clone());
+        let b: B = inner_b.value.clone();
+        let inner_c: Writer<W, C> = g(b.clone());
+        // ── Step 2: LHS — reader_bind(reader_bind(m, f), g) reduces
+        //   to Writer { value: inner_c.value,
+        //               output: combine(combine(m.output, inner_b.output), inner_c.output)
+        //             }                                              (β + definition)
+        let lhs: Writer<W, C> = writer_bind(
+            writer_bind(m.clone(), f.clone(), combine.clone()),
+            g.clone(),
+            combine.clone(),
+        );
+        // ── Step 3: RHS — bind(m, |x| bind(f(x), g)) reduces to
+        //   Writer { value: inner_c.value,
+        //            output: combine(m.output, combine(inner_b.output, inner_c.output))
+        //          }                                                 (β + definition)
+        let rhs: Writer<W, C> = writer_bind(
+            m.clone(),
+            |x: A| writer_bind(f(x), g.clone(), combine.clone()),
+            combine,
+        );
+        // ── Step 4: outputs equate under the monoid-associativity
+        //   requires-clause; values are both inner_c.value.
+        let _ = a; let _ = b; let _ = inner_c;
+        lhs.value == rhs.value && lhs.output == rhs.output
     }
 }
 
@@ -236,13 +283,40 @@ public theorem writer_commutativity_iff_monoid_commutative<W, A, B>(
     }
 {
     proof {
-        // LHS output = combine(combine(m1.output, m2.output), zero)
-        //            = combine(m1.output, m2.output)  (zero-identity)
-        // RHS output = combine(combine(m2.output, m1.output), zero)
-        //            = combine(m2.output, m1.output)
-        // Equal under the requires-clause monoid commutativity.
-        // LHS value = (m1.value, m2.value); RHS value = (m1.value, m2.value)
-        // (the lambdas project the same pair regardless of bind order).
-        true
+        // ── Step 1: extract the two values.
+        let a: A = m1.value.clone();
+        let b: B = m2.value.clone();
+        let w1: W = m1.output.clone();
+        let w2: W = m2.output.clone();
+        // ── Step 2: LHS — m1 outer, m2 inner.
+        //   bind(m1, |x| bind(m2, |y| unit((x,y), zero))) reduces:
+        //     inner = (|y| unit((a,y), zero))(b) = Writer{(a,b), zero}
+        //     mid   = bind(m2, |y| ..., combine) = Writer{(a,b), combine(w2, zero) = w2}
+        //     result = bind(m1, |x| mid, combine) = Writer{(a,b), combine(w1, w2)}
+        let lhs: Writer<W, (A, B)> = writer_bind(
+            m1.clone(),
+            |x: A| writer_bind(
+                m2.clone(),
+                |y: B| writer_unit((x, y), zero.clone()),
+                combine.clone(),
+            ),
+            combine.clone(),
+        );
+        // ── Step 3: RHS — m2 outer, m1 inner; value-pair stays (a, b)
+        //   but output threading is combine(w2, w1).
+        let rhs: Writer<W, (A, B)> = writer_bind(
+            m2,
+            |y: B| writer_bind(
+                m1,
+                |x: A| writer_unit((x, y), zero.clone()),
+                combine.clone(),
+            ),
+            combine,
+        );
+        // ── Step 4: outputs equate under requires-clause monoid
+        //   commutativity (combine(w1, w2) == combine(w2, w1));
+        //   values are both (a, b) regardless of bind order.
+        let _ = a; let _ = b; let _ = w1; let _ = w2;
+        lhs.value == rhs.value && lhs.output == rhs.output
     }
 }
