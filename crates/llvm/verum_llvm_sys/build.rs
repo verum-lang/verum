@@ -92,9 +92,15 @@ fn has_llvm_config(dir: &Path) -> bool {
 ///
 /// Search order:
 /// 1. VERUM_LLVM_DIR environment variable (explicit override)
-/// 2. Local llvm/install/ directory (PRIMARY - built from source)
+/// 2. Local llvm/install/ directory — built automatically via
+///    `llvm/build.sh` if missing.
 ///
-/// System LLVM is NOT used - we require our own build for consistency
+/// System LLVM is NOT used — we require our own build for
+/// consistency. Auto-invocation of `llvm/build.sh` keeps
+/// `cargo build` self-contained: a fresh checkout that lacks
+/// `llvm/install/` triggers the source build (~30–60 min) and
+/// then continues, instead of stopping the user with manual
+/// instructions.
 fn get_llvm_install_dir() -> PathBuf {
     // 1. Check explicit environment variable override
     if let Ok(dir) = env::var("VERUM_LLVM_DIR") {
@@ -105,12 +111,12 @@ fn get_llvm_install_dir() -> PathBuf {
         println!("cargo:warning=VERUM_LLVM_DIR={} but llvm-config not found there", dir);
     }
 
-    // 2. Use local llvm/install/ directory (PRIMARY)
+    // 2. Use local llvm/install/ directory
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_root = PathBuf::from(&manifest_dir)
         .parent() // crates/llvm/
         .and_then(|p| p.parent()) // crates/
-        .and_then(|p| p.parent()) // axiom/
+        .and_then(|p| p.parent()) // workspace root
         .unwrap()
         .to_path_buf();
 
@@ -120,64 +126,73 @@ fn get_llvm_install_dir() -> PathBuf {
         return local_install;
     }
 
-    // Check if build is in progress
-    let build_dir = workspace_root.join("llvm/build");
-    if build_dir.exists() {
+    // 3. Auto-invoke llvm/build.sh — clones llvm-project, configures
+    //    cmake with llvm/llvm.toml, builds LLVM/LLD/MLIR static libs
+    //    and installs into llvm/install/.
+    auto_build_llvm(&workspace_root);
+
+    // 4. Re-check after the build script ran.
+    if has_llvm_config(&local_install) {
+        return local_install;
+    }
+
+    panic!(
+        "LLVM auto-build did not produce {}/bin/llvm-config — \
+         inspect llvm/build.log for the failure.",
+        local_install.display()
+    );
+}
+
+/// Run `llvm/build.sh` to populate `llvm/install/`. Aborts the build
+/// with a helpful message on platforms that don't ship a POSIX shell
+/// (Windows native cargo runs without bash on `$PATH`).
+fn auto_build_llvm(workspace_root: &Path) {
+    let build_script = workspace_root.join("llvm/build.sh");
+    if !build_script.exists() {
         panic!(
-            r#"
-LLVM build in progress but not complete!
-
-The llvm/build directory exists but llvm/install is not ready.
-Please wait for the build to complete:
-
-  cd llvm && ./build.sh
-
-Or check build progress:
-  tail -f llvm/build/build.log (if logging enabled)
-
-Build typically takes 30-60 minutes.
-"#
+            "llvm/build.sh not found at {}. The repository is incomplete.",
+            build_script.display()
         );
     }
 
-    // No local build found
-    let build_cmd = if cfg!(windows) {
-        r#"cd llvm && .\build.bat"#
-    } else {
-        "cd llvm && ./build.sh"
-    };
-    let lib_ext = if cfg!(windows) { ".lib" } else { ".a" };
-
-    panic!(
-        "\n\
-Local LLVM installation not found!\n\
-\n\
-verum_llvm_sys requires a local LLVM build for consistency.\n\
-System LLVM (homebrew, apt, etc.) is NOT used.\n\
-\n\
-To build LLVM locally:\n\
-\n\
-  {build_cmd}\n\
-\n\
-This will:\n\
-  1. Clone llvm-project (if needed)\n\
-  2. Build LLVM + LLD + MLIR with static libraries\n\
-  3. Install to llvm/install/\n\
-\n\
-Build configuration is in llvm/llvm.toml\n\
-\n\
-Alternatively, set VERUM_LLVM_DIR to override:\n\
-  export VERUM_LLVM_DIR=/path/to/custom/llvm\n\
-\n\
-Expected structure:\n\
-  llvm/\n\
-    install/\n\
-      bin/llvm-config[.exe]\n\
-      lib/LLVM*{lib_ext}\n\
-      lib/LLD*{lib_ext}\n\
-      lib/MLIR*{lib_ext}\n\
-      include/\n"
+    println!(
+        "cargo:warning=llvm/install/ not found — invoking llvm/build.sh \
+         (this clones llvm-project and builds LLVM 21 + LLD + MLIR; \
+         expect 30–60 min on a fresh checkout)."
     );
+
+    // On Unix run the script directly; on Windows route through `bash`
+    // so Git-Bash / WSL / MSYS2 environments work. Native cmd.exe
+    // builds are not supported — set VERUM_LLVM_DIR to a prebuilt LLVM
+    // tree instead.
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("bash");
+        c.arg(build_script.to_string_lossy().as_ref());
+        c
+    } else {
+        Command::new(&build_script)
+    };
+
+    let status = cmd
+        .current_dir(workspace_root.join("llvm"))
+        .status()
+        .unwrap_or_else(|err| {
+            panic!(
+                "Failed to launch llvm/build.sh: {err}. \
+                 Ensure bash + cmake + ninja + a C++ compiler are on \
+                 $PATH, or set VERUM_LLVM_DIR to a prebuilt LLVM tree."
+            )
+        });
+
+    if !status.success() {
+        panic!(
+            "llvm/build.sh exited with {:?}. \
+             See llvm/build.log for details. Common causes: \
+             missing cmake/ninja/C++ toolchain, insufficient disk \
+             (~50 GB needed), insufficient RAM (~16 GB recommended).",
+            status.code()
+        );
+    }
 }
 
 /// Verify LLVM version matches expected

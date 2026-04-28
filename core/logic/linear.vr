@@ -119,23 +119,44 @@ public fn lin_lolli(a: LinForm, b: LinForm) -> LinForm {
 // 3. Classification predicates
 // =============================================================================
 
-/// `!A` makes A unrestricted: usable any number of times.
+/// `f` admits both weakening and contraction — usable any number
+/// of times, including zero. The unrestricted-shape set in
+/// classical linear logic:
+///
+/// - `!A` (`OfCourse`) admits weakening + contraction on the LHS
+///   — the bang's exponential structural rules.
+/// - `?A` (`WhyNot`) admits weakening + contraction on the RHS
+///   — the dual why-not modality.
+/// - `⊤` (`Top`) is the additive truth: `⊢ Δ, ⊤` absorbs any
+///   surrounding context, so it admits both structural rules
+///   trivially.
+///
+/// `1` (`One`) is the unit of `⊗` — it has exactly one proof and
+/// admits **no** structural rules. The previous implementation
+/// claimed `One` was unrestricted; that was a soundness defect
+/// that would let a resource analyser silently relax linearity
+/// for tensor-units. `⊥`, `0`, and bare atoms / connectives also
+/// admit no exponential structure and stay false.
 public fn is_unrestricted(f: LinForm) -> Bool {
     match f {
         LinForm.OfCourse { inner: _ } => true,
-        LinForm.One => true,
+        LinForm.WhyNot { inner: _ } => true,
         LinForm.Top => true,
         _ => false,
     }
 }
 
-/// `?A` makes A weakenable: discardable without use.
+/// `f` admits weakening — usable zero times. In classical linear
+/// logic weakening and contraction travel together as the
+/// exponential-modality structural-rule package, so weakenable and
+/// unrestricted classify the same set. The surface is preserved
+/// as a distinct predicate so callers that only care about the
+/// "discardable without use" aspect read clearly. The previous
+/// implementation excluded `OfCourse`, which forced callers to
+/// special-case `!A` even though `!A` admits weakening by
+/// dereliction-and-discard.
 public fn is_weakenable(f: LinForm) -> Bool {
-    match f {
-        LinForm.WhyNot { inner: _ } => true,
-        LinForm.Top => true,
-        _ => false,
-    }
+    is_unrestricted(f)
 }
 
 // =============================================================================

@@ -209,19 +209,40 @@ impl LinForm {
         }
     }
 
-    /// `!A` makes `A` unrestricted: it can be used any number of
-    /// times. Returns true iff the outermost connective is `!` or
-    /// the formula is a multiplicative truth.
+    /// `f` admits both weakening and contraction — usable any
+    /// number of times, including zero. The unrestricted-shape set
+    /// in classical linear logic:
+    ///
+    /// - `!A` (`OfCourse`) admits weakening + contraction on the
+    ///   LHS — the bang's exponential structural rules.
+    /// - `?A` (`WhyNot`) admits weakening + contraction on the RHS
+    ///   — the dual why-not modality.
+    /// - `⊤` (`Top`) is the additive truth: `⊢ Δ, ⊤` absorbs any
+    ///   surrounding context, so it admits both rules trivially.
+    ///
+    /// `1` (`One`) is the unit of `⊗` — exactly one proof, no
+    /// structural rules. The previous implementation classified
+    /// `One` as unrestricted; that was a soundness defect that
+    /// would let a resource analyser silently relax linearity for
+    /// tensor units.
     pub fn is_unrestricted(&self) -> bool {
-        matches!(self, LinForm::OfCourse(_) | LinForm::Top | LinForm::One)
+        matches!(
+            self,
+            LinForm::OfCourse(_) | LinForm::WhyNot(_) | LinForm::Top
+        )
     }
 
-    /// `?A` makes `A` weakenable: it can be discarded without use.
-    /// Returns true iff the outermost connective is `?` or the
-    /// formula is an additive false (which has weakening built in
-    /// via the `Top` rule on the dual side).
+    /// `f` admits weakening — usable zero times. In classical
+    /// linear logic weakening and contraction travel together as
+    /// the exponential-modality structural-rule package, so this
+    /// predicate classifies the same set as
+    /// [`Self::is_unrestricted`]. Kept as a distinct surface so
+    /// callers that only care about "discardable without use"
+    /// read clearly. The previous implementation excluded
+    /// `OfCourse`, forcing callers to special-case `!A` even
+    /// though `!A` admits weakening by dereliction-and-discard.
     pub fn is_weakenable(&self) -> bool {
-        matches!(self, LinForm::WhyNot(_) | LinForm::Top)
+        self.is_unrestricted()
     }
 
     /// Two formulas are *dual* iff one is the linear negation of
@@ -361,11 +382,41 @@ mod tests {
     }
 
     #[test]
-    fn one_and_top_are_unrestricted() {
-        assert!(LinForm::One.is_unrestricted());
+    fn unrestricted_classifies_only_exponentials_and_top() {
+        // `!A`, `?A`, and `⊤` admit both weakening and contraction.
+        assert!(LinForm::of_course(a()).is_unrestricted());
+        assert!(LinForm::why_not(a()).is_unrestricted());
         assert!(LinForm::Top.is_unrestricted());
-        assert!(!LinForm::Zero.is_unrestricted());
+
+        // Multiplicative + additive units (other than `⊤`) admit no
+        // structural rules; classifying them as unrestricted would
+        // let a resource analyser silently relax linearity.
+        assert!(!LinForm::One.is_unrestricted());
         assert!(!LinForm::Bottom.is_unrestricted());
+        assert!(!LinForm::Zero.is_unrestricted());
+
+        // Bare atoms and pure-multiplicative connectives are linear.
+        assert!(!a().is_unrestricted());
+        assert!(!LinForm::tensor(a(), b()).is_unrestricted());
+    }
+
+    #[test]
+    fn weakenable_coincides_with_unrestricted_in_cll() {
+        // In classical linear logic weakening + contraction come
+        // together as the exponential-modality package, so
+        // `is_weakenable` and `is_unrestricted` classify the same
+        // set. `!A` admits weakening just as `?A` does.
+        for f in [
+            LinForm::of_course(a()),
+            LinForm::why_not(a()),
+            LinForm::Top,
+            LinForm::One,
+            LinForm::Zero,
+            LinForm::Bottom,
+            a(),
+        ] {
+            assert_eq!(f.is_unrestricted(), f.is_weakenable(), "for {f}");
+        }
     }
 
     #[test]
