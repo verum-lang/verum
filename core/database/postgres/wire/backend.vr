@@ -43,6 +43,54 @@ public type BackendDecodeError is
     | BdUnsupportedTag { tag: Byte }
     | BdProtocolViolation { reason: Text };
 
+implement Display for BackendDecodeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BdShortPayload { wanted, available } =>
+                f.write_str(f"postgres backend payload short: wanted {wanted}, available {available}".as_str()),
+            BdInvalidUtf8 =>
+                f.write_str("postgres backend payload invalid UTF-8"),
+            BdUnsupportedAuth { code } =>
+                f.write_str(f"postgres backend unsupported auth code {code}".as_str()),
+            BdUnsupportedTag { tag } =>
+                f.write_str(f"postgres backend unsupported message tag {tag}".as_str()),
+            BdProtocolViolation { reason } =>
+                f.write_str(f"postgres backend protocol violation: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for BackendDecodeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BdShortPayload { wanted, available } =>
+                f.write_str(f"BdShortPayload {{ wanted: {wanted}, available: {available} }}".as_str()),
+            BdInvalidUtf8 =>
+                f.write_str("BdInvalidUtf8"),
+            BdUnsupportedAuth { code } =>
+                f.write_str(f"BdUnsupportedAuth {{ code: {code} }}".as_str()),
+            BdUnsupportedTag { tag } =>
+                f.write_str(f"BdUnsupportedTag {{ tag: {tag} }}".as_str()),
+            BdProtocolViolation { reason } =>
+                f.write_str(f"BdProtocolViolation {{ reason: {reason} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for BackendDecodeError {
+    fn eq(&self, other: &BackendDecodeError) -> Bool {
+        match (self, other) {
+            (BdShortPayload { wanted: wa, available: aa },
+             BdShortPayload { wanted: wb, available: ab }) => wa == wb && aa == ab,
+            (BdInvalidUtf8,                    BdInvalidUtf8)                    => true,
+            (BdUnsupportedAuth { code: a },    BdUnsupportedAuth { code: b })    => a == b,
+            (BdUnsupportedTag { tag: a },      BdUnsupportedTag { tag: b })      => a == b,
+            (BdProtocolViolation { reason: a }, BdProtocolViolation { reason: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Authentication
 // -----------------------------------------------------------------------------

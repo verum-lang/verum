@@ -62,6 +62,74 @@ public type ScramError is
     | SeUnsupportedChannelBinding(Text)
     | SeKdfFailed;
 
+// Display + Debug + Eq for ScramError.  ServerSignatureMismatch
+// + NonceMismatch surface no detail (RFC 5802 §5.1 — value-blind
+// comparisons; surfacing detail would create a credential-probe
+// oracle for the client-side verifier).
+
+implement Display for ScramError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SeMechanismRejected =>
+                f.write_str("SCRAM mechanism rejected by server"),
+            SeMalformedServerMessage { stage, reason } =>
+                f.write_str(f"SCRAM server message malformed at stage {stage}: {reason}".as_str()),
+            SeBadIterationCount { iterations } =>
+                f.write_str(f"SCRAM iteration count {iterations} outside permitted range".as_str()),
+            SeBase64DecodeFailed =>
+                f.write_str("SCRAM base64 decode failed"),
+            SeNonceMismatch =>
+                f.write_str("SCRAM nonce mismatch"),
+            SeServerSignatureMismatch =>
+                f.write_str("SCRAM server signature verification failed"),
+            SeUnsupportedChannelBinding(name) =>
+                f.write_str(f"SCRAM unsupported channel-binding type: {name}".as_str()),
+            SeKdfFailed =>
+                f.write_str("SCRAM key-derivation failed"),
+        }
+    }
+}
+
+implement Debug for ScramError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SeMechanismRejected =>
+                f.write_str("SeMechanismRejected"),
+            SeMalformedServerMessage { stage, reason } =>
+                f.write_str(f"SeMalformedServerMessage {{ stage: {stage}, reason: {reason} }}".as_str()),
+            SeBadIterationCount { iterations } =>
+                f.write_str(f"SeBadIterationCount {{ iterations: {iterations} }}".as_str()),
+            SeBase64DecodeFailed =>
+                f.write_str("SeBase64DecodeFailed"),
+            SeNonceMismatch =>
+                f.write_str("SeNonceMismatch"),
+            SeServerSignatureMismatch =>
+                f.write_str("SeServerSignatureMismatch"),
+            SeUnsupportedChannelBinding(name) =>
+                f.write_str(f"SeUnsupportedChannelBinding({name})".as_str()),
+            SeKdfFailed =>
+                f.write_str("SeKdfFailed"),
+        }
+    }
+}
+
+implement Eq for ScramError {
+    fn eq(&self, other: &ScramError) -> Bool {
+        match (self, other) {
+            (SeMechanismRejected,                     SeMechanismRejected)                     => true,
+            (SeMalformedServerMessage { stage: sa, reason: ra },
+             SeMalformedServerMessage { stage: sb, reason: rb })                                => sa == sb && ra == rb,
+            (SeBadIterationCount { iterations: a },   SeBadIterationCount { iterations: b })   => a == b,
+            (SeBase64DecodeFailed,                    SeBase64DecodeFailed)                    => true,
+            (SeNonceMismatch,                         SeNonceMismatch)                         => true,
+            (SeServerSignatureMismatch,               SeServerSignatureMismatch)               => true,
+            (SeUnsupportedChannelBinding(a),          SeUnsupportedChannelBinding(b))          => a == b,
+            (SeKdfFailed,                             SeKdfFailed)                             => true,
+            _ => false,
+        }
+    }
+}
+
 /// RFC 7677 §4: SCRAM-SHA-256 servers SHOULD use at least 4096
 /// iterations. We accept anything ≥ this; lower values indicate a
 /// misconfigured / downgrade-attempting server.

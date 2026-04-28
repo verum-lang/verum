@@ -334,6 +334,39 @@ public type WireReadError is
       WrShortRead { wanted: Int, available: Int }
     | WrInvalidUtf8;
 
+implement Display for WireReadError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WrShortRead { wanted, available } =>
+                f.write_str(f"wire read short: wanted {wanted}, available {available}".as_str()),
+            WrInvalidUtf8 =>
+                f.write_str("wire read: invalid UTF-8"),
+        }
+    }
+}
+
+implement Debug for WireReadError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WrShortRead { wanted, available } =>
+                f.write_str(f"WrShortRead {{ wanted: {wanted}, available: {available} }}".as_str()),
+            WrInvalidUtf8 =>
+                f.write_str("WrInvalidUtf8"),
+        }
+    }
+}
+
+implement Eq for WireReadError {
+    fn eq(&self, other: &WireReadError) -> Bool {
+        match (self, other) {
+            (WrShortRead { wanted: wa, available: aa },
+             WrShortRead { wanted: wb, available: ab }) => wa == wb && aa == ab,
+            (WrInvalidUtf8, WrInvalidUtf8) => true,
+            _ => false,
+        }
+    }
+}
+
 implement WireReader {
     public fn new(src: List<Byte>) -> WireReader {
         WireReader { src: src, pos: 0 }

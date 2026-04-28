@@ -29,6 +29,44 @@ public type FrameError is
     | FeBadLength { len: Int }
     | FeInvalidUtf8;
 
+implement Display for FrameError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FeShort { wanted, available } =>
+                f.write_str(f"postgres frame short: wanted {wanted}, available {available}".as_str()),
+            FeBadLength { len } =>
+                f.write_str(f"postgres frame bad length {len}".as_str()),
+            FeInvalidUtf8 =>
+                f.write_str("postgres frame invalid UTF-8"),
+        }
+    }
+}
+
+implement Debug for FrameError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FeShort { wanted, available } =>
+                f.write_str(f"FeShort {{ wanted: {wanted}, available: {available} }}".as_str()),
+            FeBadLength { len } =>
+                f.write_str(f"FeBadLength {{ len: {len} }}".as_str()),
+            FeInvalidUtf8 =>
+                f.write_str("FeInvalidUtf8"),
+        }
+    }
+}
+
+implement Eq for FrameError {
+    fn eq(&self, other: &FrameError) -> Bool {
+        match (self, other) {
+            (FeShort { wanted: wa, available: aa },
+             FeShort { wanted: wb, available: ab }) => wa == wb && aa == ab,
+            (FeBadLength { len: a }, FeBadLength { len: b }) => a == b,
+            (FeInvalidUtf8, FeInvalidUtf8) => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Frame writer
 // -----------------------------------------------------------------------------

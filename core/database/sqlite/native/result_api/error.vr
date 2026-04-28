@@ -38,3 +38,32 @@ public fn error_message(e: &ResultError) -> Text {
         ReTooBig => "string or blob too big".clone(),
     }
 }
+
+implement Display for ResultError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"sqlite {error_name(self)} ({error_code(self)}): {error_message(self)}".as_str())
+    }
+}
+
+implement Debug for ResultError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ReCustom { code, message } =>
+                f.write_str(f"ReCustom {{ code: {code}, message: {message} }}".as_str()),
+            ReNoMem  => f.write_str("ReNoMem"),
+            ReTooBig => f.write_str("ReTooBig"),
+        }
+    }
+}
+
+implement Eq for ResultError {
+    fn eq(&self, other: &ResultError) -> Bool {
+        match (self, other) {
+            (ReCustom { code: ca, message: ma },
+             ReCustom { code: cb, message: mb }) => ca == cb && ma == mb,
+            (ReNoMem,  ReNoMem)  => true,
+            (ReTooBig, ReTooBig) => true,
+            _ => false,
+        }
+    }
+}
