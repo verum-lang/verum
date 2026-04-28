@@ -92,6 +92,7 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
 pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
     let module = deserialize_module(data)?;
     verify_content_hash(data, module.header.content_hash)?;
+    verify_dependency_hash(&module)?;
     crate::validate::validate_module(&module)?;
     Ok(module)
 }
@@ -123,6 +124,39 @@ fn verify_content_hash(data: &[u8], expected: u64) -> VbcResult<()> {
     };
     if computed != expected {
         return Err(VbcError::ContentHashMismatch { expected, computed });
+    }
+    Ok(())
+}
+
+/// Verifies the dependency hash carried by the VBC header against a
+/// freshly-computed `blake3` over the concatenation of each dependency's
+/// `hash` field (encoded as little-endian u64).
+///
+/// This is the dependency-tree-fingerprint defense:
+/// `content_hash` covers the bytes-on-disk; `dependency_hash`
+/// independently fingerprints the cog-distribution dependency
+/// graph so a downstream verifier (cog-resolver, build-cache,
+/// reproducibility checker) can compare two modules' dep trees in
+/// O(8) without walking the full dependency table.
+///
+/// Returns `VbcError::DependencyHashMismatch { expected, computed }`
+/// on mismatch.
+fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
+    use crate::encoding::encode_u64;
+
+    let mut dep_data = Vec::with_capacity(module.dependencies.len() * 8);
+    for dep in &module.dependencies {
+        encode_u64(dep.hash, &mut dep_data);
+    }
+    let computed = {
+        let hash = blake3::hash(&dep_data);
+        u64::from_le_bytes(
+            hash.as_bytes()[..8].try_into().unwrap_or([0u8; 8]),
+        )
+    };
+    let expected = module.header.dependency_hash;
+    if computed != expected {
+        return Err(VbcError::DependencyHashMismatch { expected, computed });
     }
     Ok(())
 }
