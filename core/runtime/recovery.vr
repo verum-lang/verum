@@ -847,7 +847,7 @@ implement InlineRetryPolicy {
 /// Permanent failures (NotFound, PermissionDenied,
 /// InvalidInput, AddrInUse, etc.) are NOT matched —
 /// retrying them is wasted work.
-fn is_transient_error(error_msg: &Text) -> Bool {
+public fn is_transient_error(error_msg: &Text) -> Bool {
     // Lowercase once for case-insensitive matching.  The
     // typed Display strings are lowercase but user-supplied
     // and OS-supplied messages may not be.
