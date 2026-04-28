@@ -41,6 +41,132 @@ public type TlsError is
     // IO
     | IoError(Text);
 
+// Display + Debug + Eq for TlsError — standard stdlib
+// protocol impls.  Cryptographic-failure variants
+// (BadRecordMac / DecryptError) deliberately surface no
+// detail per RFC 8446 §6.2 to avoid timing/oracle
+// leakage.  Eq for the RemoteAlert(AlertDescription)
+// variant compares via the wire-tag u8 from
+// `AlertDescription::to_u8()` — avoids needing a
+// separate Eq impl on AlertDescription while still
+// giving precise equality.
+
+implement Display for TlsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TlsError.ProtocolVersion         => f.write_str("TLS protocol version mismatch"),
+            TlsError.HandshakeFailure        => f.write_str("TLS handshake failure"),
+            TlsError.UnexpectedMessage       => f.write_str("TLS unexpected message"),
+            TlsError.IllegalParameter        => f.write_str("TLS illegal parameter"),
+            TlsError.MissingExtension        => f.write_str("TLS missing extension"),
+            TlsError.UnsupportedExtension    => f.write_str("TLS unsupported extension"),
+            TlsError.UnrecognizedName        => f.write_str("TLS unrecognized SNI name"),
+            TlsError.NoApplicationProtocol   => f.write_str("TLS no acceptable ALPN protocol"),
+            TlsError.InappropriateFallback   => f.write_str("TLS inappropriate fallback"),
+            TlsError.InsufficientSecurity    => f.write_str("TLS insufficient security"),
+            TlsError.BadCertificate          => f.write_str("TLS bad certificate"),
+            TlsError.UnsupportedCertificate  => f.write_str("TLS unsupported certificate"),
+            TlsError.CertificateRevoked      => f.write_str("TLS certificate revoked"),
+            TlsError.CertificateExpired      => f.write_str("TLS certificate expired"),
+            TlsError.CertificateUnknown      => f.write_str("TLS certificate unknown"),
+            TlsError.UnknownCa               => f.write_str("TLS unknown CA"),
+            TlsError.BadCertificateStatusResponse =>
+                f.write_str("TLS bad certificate status response"),
+            TlsError.BadRecordMac            => f.write_str("TLS bad record MAC"),
+            TlsError.DecryptError            => f.write_str("TLS decrypt error"),
+            TlsError.RecordOverflow          => f.write_str("TLS record overflow"),
+            TlsError.DecodeError             => f.write_str("TLS decode error"),
+            TlsError.UnknownPskIdentity      => f.write_str("TLS unknown PSK identity"),
+            TlsError.InternalError(msg) => {
+                f.write_str("TLS internal error: ")?;
+                f.write_str(msg.as_str())
+            },
+            TlsError.RemoteAlert(desc) =>
+                f.write_str(f"TLS peer alert: code={desc.to_u8()}".as_str()),
+            TlsError.IoError(msg) => {
+                f.write_str("TLS IO error: ")?;
+                f.write_str(msg.as_str())
+            },
+        }
+    }
+}
+
+implement Debug for TlsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TlsError.ProtocolVersion         => f.write_str("ProtocolVersion"),
+            TlsError.HandshakeFailure        => f.write_str("HandshakeFailure"),
+            TlsError.UnexpectedMessage       => f.write_str("UnexpectedMessage"),
+            TlsError.IllegalParameter        => f.write_str("IllegalParameter"),
+            TlsError.MissingExtension        => f.write_str("MissingExtension"),
+            TlsError.UnsupportedExtension    => f.write_str("UnsupportedExtension"),
+            TlsError.UnrecognizedName        => f.write_str("UnrecognizedName"),
+            TlsError.NoApplicationProtocol   => f.write_str("NoApplicationProtocol"),
+            TlsError.InappropriateFallback   => f.write_str("InappropriateFallback"),
+            TlsError.InsufficientSecurity    => f.write_str("InsufficientSecurity"),
+            TlsError.BadCertificate          => f.write_str("BadCertificate"),
+            TlsError.UnsupportedCertificate  => f.write_str("UnsupportedCertificate"),
+            TlsError.CertificateRevoked      => f.write_str("CertificateRevoked"),
+            TlsError.CertificateExpired      => f.write_str("CertificateExpired"),
+            TlsError.CertificateUnknown      => f.write_str("CertificateUnknown"),
+            TlsError.UnknownCa               => f.write_str("UnknownCa"),
+            TlsError.BadCertificateStatusResponse =>
+                f.write_str("BadCertificateStatusResponse"),
+            TlsError.BadRecordMac            => f.write_str("BadRecordMac"),
+            TlsError.DecryptError            => f.write_str("DecryptError"),
+            TlsError.RecordOverflow          => f.write_str("RecordOverflow"),
+            TlsError.DecodeError             => f.write_str("DecodeError"),
+            TlsError.UnknownPskIdentity      => f.write_str("UnknownPskIdentity"),
+            TlsError.InternalError(msg) => {
+                f.write_str("InternalError(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            TlsError.RemoteAlert(desc) =>
+                f.write_str(f"RemoteAlert(<u8>{desc.to_u8()})".as_str()),
+            TlsError.IoError(msg) => {
+                f.write_str("IoError(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+        }
+    }
+}
+
+implement Eq for TlsError {
+    fn eq(&self, other: &TlsError) -> Bool {
+        match (self, other) {
+            (TlsError.ProtocolVersion,         TlsError.ProtocolVersion)         => true,
+            (TlsError.HandshakeFailure,        TlsError.HandshakeFailure)        => true,
+            (TlsError.UnexpectedMessage,       TlsError.UnexpectedMessage)       => true,
+            (TlsError.IllegalParameter,        TlsError.IllegalParameter)        => true,
+            (TlsError.MissingExtension,        TlsError.MissingExtension)        => true,
+            (TlsError.UnsupportedExtension,    TlsError.UnsupportedExtension)    => true,
+            (TlsError.UnrecognizedName,        TlsError.UnrecognizedName)        => true,
+            (TlsError.NoApplicationProtocol,   TlsError.NoApplicationProtocol)   => true,
+            (TlsError.InappropriateFallback,   TlsError.InappropriateFallback)   => true,
+            (TlsError.InsufficientSecurity,    TlsError.InsufficientSecurity)    => true,
+            (TlsError.BadCertificate,          TlsError.BadCertificate)          => true,
+            (TlsError.UnsupportedCertificate,  TlsError.UnsupportedCertificate)  => true,
+            (TlsError.CertificateRevoked,      TlsError.CertificateRevoked)      => true,
+            (TlsError.CertificateExpired,      TlsError.CertificateExpired)      => true,
+            (TlsError.CertificateUnknown,      TlsError.CertificateUnknown)      => true,
+            (TlsError.UnknownCa,               TlsError.UnknownCa)               => true,
+            (TlsError.BadCertificateStatusResponse,
+             TlsError.BadCertificateStatusResponse) => true,
+            (TlsError.BadRecordMac,            TlsError.BadRecordMac)            => true,
+            (TlsError.DecryptError,            TlsError.DecryptError)            => true,
+            (TlsError.RecordOverflow,          TlsError.RecordOverflow)          => true,
+            (TlsError.DecodeError,             TlsError.DecodeError)             => true,
+            (TlsError.UnknownPskIdentity,      TlsError.UnknownPskIdentity)      => true,
+            (TlsError.InternalError(a),        TlsError.InternalError(b))        => a == b,
+            (TlsError.RemoteAlert(a),          TlsError.RemoteAlert(b))          => a.to_u8() == b.to_u8(),
+            (TlsError.IoError(a),              TlsError.IoError(b))              => a == b,
+            _ => false,
+        }
+    }
+}
+
 implement TlsError {
     /// Translate this error into the AlertDescription we'd send to
     /// the peer. `None` for errors that don't yield an outgoing alert
