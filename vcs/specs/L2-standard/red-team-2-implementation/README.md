@@ -16,6 +16,7 @@ that the defense must reject.
 | `csprng_id_entropy.vr` | UUID v4 / v7 + ULID entropy + timestamp non-zero | dishonest-stub class (lenient-codegen swallowed missing-fn calls) |
 | `protobuf_varint_canonicality.vr` | 10th-byte data-bits-1..6 rejection | varint round-trip-equality forgery |
 | `int_min_unary_negation.vr` | bit-flip pattern handles `Int.MIN` correctly | `(-n) as UInt64` overflow-back-to-Int.MIN |
+| `http_cache_overflow.vr` | Cache-Control numeric directives 3-layer overflow defense | `max-age=…` silent UInt64 wrap |
 
 ## Adding new vectors
 

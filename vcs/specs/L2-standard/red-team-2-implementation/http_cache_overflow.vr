@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, hostile-input, http, cache-control
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173 Section A — closed
+// soundness defect). Cache-Control directive integers came from
+// untrusted origin/intermediary and ran `v * 10 + d` over UInt64
+// with no overflow protection. Hostile values like
+// `max-age=99999999999999999999` silently wrapped to a small
+// duration, defeating cache eviction policies.
+//
+// Closed in commit ee12b616 (alongside the http_range fix) with
+// the standard 3-layer recipe (length cap + per-step MAX/10 +
+// post-add wrap-around). On overflow, parse_u64_opt returns None
+// and `parse` leaves the corresponding Maybe<UInt64> field as None,
+// matching "directive absent".
+//
+// This test pins that hostile inputs DON'T silently wrap to small
+// values — the parsed Maybe field is None on overflow.
+
+mount core.net.http_cache.{CacheControl, parse};
+
+// 21-digit value exceeds UInt64.MAX width. Pre-fix wrapped silently;
+// post-fix the parsed `max_age` is None.
+fn cache_control_huge_max_age_rejected() {
+    let cc = parse(&Text.from("max-age=999999999999999999999"));
+    match cc.max_age {
+        Maybe.Some(_) => panic(
+            "21-digit max-age MUST be rejected (parsed as None)"),
+        Maybe.None => {},
+    }
+}
+
+fn cache_control_huge_s_maxage_rejected() {
+    let cc = parse(&Text.from("s-maxage=999999999999999999999"));
+    match cc.s_maxage {
+        Maybe.Some(_) => panic(
+            "21-digit s-maxage MUST be rejected"),
+        Maybe.None => {},
+    }
+}
+
+fn cache_control_huge_stale_while_revalidate_rejected() {
+    let cc = parse(&Text.from("stale-while-revalidate=999999999999999999999"));
+    match cc.stale_while_revalidate {
+        Maybe.Some(_) => panic(
+            "21-digit stale-while-revalidate MUST be rejected"),
+        Maybe.None => {},
+    }
+}
+
+// Boundary: 20 digits but value > UInt64.MAX.
+fn cache_control_above_uint64_max_rejected() {
+    let cc = parse(&Text.from("max-age=99999999999999999999"));
+    match cc.max_age {
+        Maybe.Some(_) => panic(
+            "20-digit value above UInt64.MAX MUST be rejected"),
+        Maybe.None => {},
+    }
+}
+
+// Sanity: small valid max-age parses.
+fn cache_control_normal_max_age_works() {
+    let cc = parse(&Text.from("max-age=3600"));
+    match cc.max_age {
+        Maybe.Some(v) => assert(v == 3600_u64),
+        Maybe.None => panic("normal max-age must parse"),
+    }
+}
+
+// Sanity: 19-digit valid value works (under MAX).
+fn cache_control_19_digit_max_age_works() {
+    let cc = parse(&Text.from("max-age=1844674407370955161"));
+    match cc.max_age {
+        Maybe.Some(v) => assert(v == 1_844_674_407_370_955_161_u64),
+        Maybe.None => panic("19-digit valid max-age must parse"),
+    }
+}
+
+// Boolean directives unaffected by the numeric overflow fix.
+fn cache_control_no_store_unaffected() {
+    let cc = parse(&Text.from("no-store, max-age=999999999999999999999"));
+    assert(cc.no_store, "no-store must parse alongside hostile max-age");
+    match cc.max_age {
+        Maybe.Some(_) => panic("hostile max-age must still surface as None"),
+        Maybe.None => {},
+    }
+}
+
+fn main() {
+    cache_control_huge_max_age_rejected();
+    cache_control_huge_s_maxage_rejected();
+    cache_control_huge_stale_while_revalidate_rejected();
+    cache_control_above_uint64_max_rejected();
+    cache_control_normal_max_age_works();
+    cache_control_19_digit_max_age_works();
+    cache_control_no_store_unaffected();
+}
