@@ -479,7 +479,16 @@ public fn clone_expr(e: &Expr) -> Expr {
             match el { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
         ),
         EIn(ref e, ref xs, neg) => EIn(Heap(clone_expr(e)), clone_expr_list(xs), neg),
-        EInSubquery(_, _, _)    => ELit(LNull),    // unsupported path — emit NULL
+        // Subquery expressions are rejected by the resolver
+        // (`TooComplex("subquery in expression")`) before reaching
+        // clone_expr.  Pre-fix these arms silently coerced to
+        // `ELit(LNull)`, so any future code path that cloned a
+        // pre-resolution expression would smuggle NULL into a subquery
+        // position — `WHERE id IN (SELECT ...)` becomes `WHERE id IN
+        // NULL` ≡ unknown-for-every-row → empty result set.  Panic
+        // loudly instead so the bug surfaces immediately rather than
+        // returning a wrong-answer result set.
+        EInSubquery(_, _, _) => panic("clone_expr: EInSubquery should be rejected by the resolver before clone"),
         EBetween(ref e, ref lo, ref hi, neg) => EBetween(
             Heap(clone_expr(e)), Heap(clone_expr(lo)), Heap(clone_expr(hi)), neg,
         ),
@@ -491,8 +500,8 @@ public fn clone_expr(e: &Expr) -> Expr {
         ),
         ECast(ref x, ref t) => ECast(Heap(clone_expr(x)), t.clone()),
         ECollate(ref x, ref n) => ECollate(Heap(clone_expr(x)), n.clone()),
-        EExists(_, _)        => ELit(LNull),
-        ESubquery(_)          => ELit(LNull),
+        EExists(_, _)   => panic("clone_expr: EExists should be rejected by the resolver before clone"),
+        ESubquery(_)    => panic("clone_expr: ESubquery should be rejected by the resolver before clone"),
         ENullIf(ref a, ref b) => ENullIf(Heap(clone_expr(a)), Heap(clone_expr(b))),
         ECoalesce(ref xs)     => ECoalesce(clone_expr_list(xs)),
         EColumnRef(cid, idx)  => EColumnRef(cid, idx),
