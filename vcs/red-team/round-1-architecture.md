@@ -214,11 +214,41 @@ Verum's context system (`verum_context`) is documented as runtime DI with
 calls into a monomorphized context that doesn't satisfy `using [...]`. Verify
 through dedicated test.
 
-### 6.2 Erased-vs-reified type consistency
+### 6.2 Erased-vs-reified type consistency — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — current implementation enforces consistent
-treatment per the type system; no known escape but worth a dedicated
-exhaustive case test.
+**Status:** DEFENSE CONFIRMED — Quantitative Type Theory (QTT) framework
+in `crates/verum_types/src/qtt_usage.rs` ensures erased (Quantity::Zero)
+bindings cannot flow to runtime positions. The `check_binding` function
+(qtt_usage.rs:208) emits `ViolationKind::ErasedUsedAtRuntime` whenever
+a Zero-quantity binding's runtime usage count exceeds 0.
+
+**Architectural foundation:**
+- `@meta` generic parameters auto-register as `Quantity::Zero` per
+  `infer.rs:35948`.
+- Regular params auto-register as `Quantity::Omega` (or specific via
+  `@quantity(...)` attribute extraction at `infer.rs:35926-35938`).
+- The `check_function_qtt` pipeline walks the function body, counts
+  usage per binding, and validates against declared quantities via
+  `qtt_usage::check_usage`.
+
+**4 exhaustive guardrail tests added:**
+`crates/verum_types/tests/qtt_function_check.rs`:
+- `red_team_1_6_2_meta_zero_alongside_omega_consistent` — erased + reified
+  bindings co-exist without cross-contamination.
+- `red_team_1_6_2_meta_zero_escaping_to_runtime_caught` — erased binding
+  used at runtime → ErasedUsedAtRuntime violation.
+- `red_team_1_6_2_meta_zero_used_multiple_times_still_erased_violation` —
+  erased used twice ⇒ erasure violation (logically prior to OverUse).
+- `red_team_1_6_2_three_quantities_compose_consistently` — Zero +
+  One + Omega all flow through their declared quantities; erased stays
+  erased, linear used once, omega-3-times all consistently tracked.
+
+All 11 QTT tests passing.
+
+The architectural rule `crates/verum_types/src/CLAUDE.md` "compiler
+must have ZERO knowledge of stdlib types" forecloses the alternative
+unsoundness vector (compiler hardcoding which type is erased) — every
+binding's quantity is discovered from its declaration / attribute.
 
 ---
 
@@ -345,12 +375,12 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 5.1 Z3 timeout policy | **DEFENSE CONFIRMED** | 9-site audit + 3 guardrails (2026-04-28) |
 | 5.2 Always-timeout | **DEFENSE CONFIRMED** | guardrails pin fail-closed (2026-04-28) |
 | 6.1 Capability monomorph | PENDING | monomorph audit |
-| 6.2 Erased/reified | PARTIAL | exhaustive cases |
+| 6.2 Erased/reified | **DEFENSE CONFIRMED** | QTT framework + 4 RT-1.6.2 tests (2026-04-28) |
 | 7.1 Tier-0 vs Tier-1 | PENDING | #196 |
 | 7.2 Hash determinism | **DEFENSE CONFIRMED** | full audit + 7 L0 guardrails (2026-04-28) |
 
-**10 vectors confirmed defended (full or partial), 8 pending** (post 2026-04-28
-RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 closures). Round 1 success condition: every PENDING entry has either a
+**11 vectors confirmed defended (full or partial), 7 pending** (post 2026-04-28
+RT-1.5 + RT-1.2.2 + RT-1.7.2 + RT-1.4.3 + RT-1.6.2 closures). Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.
