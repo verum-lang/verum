@@ -113,17 +113,24 @@ public fn divides(a: Int, b: Int) -> Bool {
 // =============================================================================
 
 /// Greatest common divisor via the Euclidean algorithm.
+///
+/// Two's-complement-safe absolute value: the naive `0 - x` wraps
+/// back to Int.MIN for `x == Int.MIN`, leaving the Euclidean loop
+/// running with a negative operand. The mathematical identity
+/// `gcd(Int.MIN, b) = gcd(|Int.MIN|, |b|)` doesn't fit in Int, so
+/// we route the absolute-value computation through UInt64 and run
+/// the Euclidean loop in UInt64 too. Output fits in Int because
+/// gcd(a, b) ≤ min(|a|, |b|) ≤ Int.MAX (since gcd ≠ |Int.MIN|
+/// unless b also has magnitude > Int.MAX, which Int can't hold).
 public fn gcd(a: Int, b: Int) -> Int {
-    let mut x = a;
-    let mut y = b;
-    if x < 0 { x = 0 - x; }
-    if y < 0 { y = 0 - y; }
-    while y != 0 {
+    let mut x: UInt64 = if a < 0 { (((!a) as UInt64) + 1_u64) } else { a as UInt64 };
+    let mut y: UInt64 = if b < 0 { (((!b) as UInt64) + 1_u64) } else { b as UInt64 };
+    while y != 0_u64 {
         let temp = y;
         y = x % y;
         x = temp;
     }
-    x
+    x as Int
 }
 
 /// Least common multiple.
@@ -239,19 +246,27 @@ public fn primes_up_to(n: Int) -> List<Int> {
 }
 
 /// Trial division factorization.
+///
+/// Two's-complement-safe magnitude — `0 - Int.MIN` wraps back to
+/// Int.MIN, leaving `x < 0` and the trial-division loop never
+/// terminates correctly. Sign is irrelevant for prime-factorisation,
+/// so route through UInt64 magnitude. Int.MIN's prime factors are
+/// the factors of |Int.MIN| = 2^63 = 2 × 62 — a single recursion of
+/// the loop catches that.
 public fn prime_factors(n: Int) -> List<Int> {
     let mut factors = List.new();
-    let mut x = if n < 0 { 0 - n } else { n };
-    let mut d = 2;
+    let mag: UInt64 = if n < 0 { (((!n) as UInt64) + 1_u64) } else { n as UInt64 };
+    let mut x: UInt64 = mag;
+    let mut d: UInt64 = 2_u64;
     while d * d <= x {
-        while x % d == 0 {
-            factors.push(d);
+        while x % d == 0_u64 {
+            factors.push(d as Int);
             x = x / d;
         }
-        d = d + 1;
+        d = d + 1_u64;
     }
-    if x > 1 {
-        factors.push(x);
+    if x > 1_u64 {
+        factors.push(x as Int);
     }
     factors
 }
