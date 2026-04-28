@@ -129,13 +129,9 @@ fn agg_step_concat(st: &mut AggregateState, value: &Register, want_sep_required:
     match value {
         RText(s) => {
             if st.has_value {
-                let sb = st.sep.as_bytes();
-                let mut i: Int = 0;
-                while i < sb.len() { st.text_buf.push_byte(sb[i]); i = i + 1; }
+                st.text_buf.push_str(&st.sep);
             }
-            let bs = s.as_bytes();
-            let mut i: Int = 0;
-            while i < bs.len() { st.text_buf.push_byte(bs[i]); i = i + 1; }
+            st.text_buf.push_str(s);
             st.has_value = true;
         }
         _ => {}
@@ -196,9 +192,8 @@ fn clone_register(r: &Register) -> Register {
         RReal(x)  => RReal(x),
         RText(s)  => RText(s.clone()),
         RBlob(b)  => {
-            let mut out: List<Byte> = List.new();
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(b.len());
+            out.extend_from_slice(b.as_slice());
             RBlob(out)
         }
         RRowId(x) => RRowId(x),
