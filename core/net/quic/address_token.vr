@@ -115,9 +115,8 @@ public fn issue(
     let pt = encode_plaintext(plain);
 
     // AAD = key_id || version || kind.
-    let mut aad: List<Byte> = [];
-    let mut i: Int = 0;
-    while i < 8 { aad.push(key.key_id[i]); i = i + 1; }
+    let mut aad: List<Byte> = List.with_capacity(10);
+    aad.extend_from_slice(&key.key_id[..]);
     aad.push(WIRE_VERSION);
     aad.push(kind_byte(&plain.kind));
 
@@ -127,15 +126,12 @@ public fn issue(
         .map_err(|_| TokenError.SealFailure)?;
 
     // Wire = key_id || version || kind || nonce || sealed.
-    let mut out: List<Byte> = [];
-    let mut j: Int = 0;
-    while j < 8 { out.push(key.key_id[j]); j = j + 1; }
+    let mut out: List<Byte> = List.with_capacity(8 + 1 + 1 + 12 + sealed.len());
+    out.extend_from_slice(&key.key_id[..]);
     out.push(WIRE_VERSION);
     out.push(kind_byte(&plain.kind));
-    let mut n: Int = 0;
-    while n < 12 { out.push(nonce[n]); n = n + 1; }
-    let mut s: Int = 0;
-    while s < sealed.len() { out.push(sealed[s]); s = s + 1; }
+    out.extend_from_slice(&nonce[..]);
+    out.extend_from_slice(sealed.as_slice());
     Ok(out)
 }
 
@@ -204,18 +200,16 @@ public fn verify(
     while j < 12 { nonce[j] = wire[10 + j]; j = j + 1; }
 
     let aad = {
-        let mut a: List<Byte> = [];
-        let mut k: Int = 0;
-        while k < 8 { a.push(wire[k]); k = k + 1; }
+        let mut a: List<Byte> = List.with_capacity(10);
+        a.extend_from_slice(&wire[0..8]);
         a.push(WIRE_VERSION);
         a.push(wire[9]);
         a
     };
 
     let ct_start: Int = 22;
-    let mut ct: List<Byte> = [];
-    let mut c: Int = ct_start;
-    while c < wire.len() { ct.push(wire[c]); c = c + 1; }
+    let mut ct: List<Byte> = List.with_capacity(wire.len() - ct_start);
+    ct.extend_from_slice(&wire[ct_start..]);
 
     let mut pt: List<Byte> = [];
     aes128_gcm_open(&key.key, &nonce, aad.as_slice(), ct.as_slice(), &mut pt)
@@ -265,12 +259,10 @@ fn encode_plaintext(p: &TokenPlaintext) -> List<Byte> {
     out.push((t & 0xFF_u64) as Byte);
 
     out.push(p.client_ip.len() as Byte);
-    let mut i: Int = 0;
-    while i < p.client_ip.len() { out.push(p.client_ip[i]); i = i + 1; }
+    out.extend_from_slice(p.client_ip.as_slice());
 
     out.push(p.orig_dcid.len() as Byte);
-    let mut j: Int = 0;
-    while j < p.orig_dcid.len() { out.push(p.orig_dcid[j]); j = j + 1; }
+    out.extend_from_slice(p.orig_dcid.as_slice());
     out
 }
 
@@ -295,17 +287,15 @@ fn decode_plaintext(buf: &[Byte], kind_hint: QuicTokenKind) -> Result<TokenPlain
     if ip_len > 16 || 10 + ip_len + 1 > buf.len() {
         return Err(TokenError.Malformed);
     }
-    let mut ip: List<Byte> = [];
-    let mut i: Int = 10;
-    while i < 10 + ip_len { ip.push(buf[i]); i = i + 1; }
+    let mut ip: List<Byte> = List.with_capacity(ip_len);
+    ip.extend_from_slice(&buf[10..10 + ip_len]);
     let dcid_off = 10 + ip_len;
     let dcid_len = buf[dcid_off] as Int;
     if dcid_off + 1 + dcid_len > buf.len() {
         return Err(TokenError.Malformed);
     }
-    let mut dcid: List<Byte> = [];
-    let mut j: Int = dcid_off + 1;
-    while j < dcid_off + 1 + dcid_len { dcid.push(buf[j]); j = j + 1; }
+    let mut dcid: List<Byte> = List.with_capacity(dcid_len);
+    dcid.extend_from_slice(&buf[dcid_off + 1..dcid_off + 1 + dcid_len]);
     Ok(TokenPlaintext {
         kind: kind, issued_unix: t, client_ip: ip, orig_dcid: dcid,
     })
@@ -325,9 +315,8 @@ public fn ip_bytes_from(addr: &IpAddr) -> List<Byte> {
         },
         IpAddr.V6(v6) => {
             let arr: [Byte; 16] = v6.octets();
-            let mut out: List<Byte> = [];
-            let mut i: Int = 0;
-            while i < 16 { out.push(arr[i]); i = i + 1; }
+            let mut out: List<Byte> = List.with_capacity(16);
+            out.extend_from_slice(&arr[..]);
             out
         },
     }
