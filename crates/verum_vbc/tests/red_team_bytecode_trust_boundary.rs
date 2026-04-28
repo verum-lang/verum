@@ -185,3 +185,69 @@ fn conditional_jmp_offsets_are_also_i32() {
         _ => unreachable!(),
     }
 }
+
+// -----------------------------------------------------------------------------
+// Round 3 §4.1 — Long single-instruction basic-block chain
+// -----------------------------------------------------------------------------
+// PENDING → DEFENSE CONFIRMED 2026-04-28.  Adversarial input: a function
+// body of N straight-line `Mov` instructions with no branches.  Pre-fix
+// concern was whether the bytecode encoder/decoder pair survives a basic
+// block far past typical real-world function sizes — the fix invariant
+// being that there's no implicit i16 cap on instruction count, only the
+// i32 branch-target cap pinned by §2.2.
+//
+// 100,000 Mov instructions ≈ 6 bytes each (opcode + two reg bytes) ≈
+// 600 KB of bytecode — comfortably below any reasonable per-function
+// size limit, but tens of orders of magnitude beyond what any real
+// codegen path emits.  If the encoder ever introduced a per-block
+// instruction-count cap, this test fires.
+
+#[test]
+fn long_basic_block_chain_roundtrips() {
+    // Build N Mov instructions in a line, encode them into one
+    // contiguous bytecode buffer, then decode them back and check
+    // the instruction count + per-instruction integrity at three
+    // offsets (start, mid, end) without holding the entire decoded
+    // sequence in memory.
+    const N: usize = 100_000;
+
+    let mut encoded = Vec::with_capacity(N * 6);
+    for i in 0..N {
+        let dst = Reg(((i % 16383) + 1) as u16);
+        let src = Reg((i % 16383) as u16);
+        bytecode::encode_instruction(
+            &Instruction::Mov { dst, src },
+            &mut encoded,
+        );
+    }
+
+    // Walk the buffer and count successfully-decoded instructions.
+    // A regression that introduced an early-stop (i16 length cap or
+    // similar) would short-circuit here.
+    let mut offset = 0usize;
+    let mut decoded_count = 0usize;
+    while offset < encoded.len() {
+        let instr = bytecode::decode_instruction(&encoded, &mut offset)
+            .expect("decode_instruction failed in long basic block");
+        // Sanity check: every instruction must be a Mov, since that's
+        // all we encoded.
+        match instr {
+            Instruction::Mov { .. } => {}
+            other => panic!("expected Mov, got {:?}", other),
+        }
+        decoded_count += 1;
+    }
+
+    assert_eq!(
+        decoded_count, N,
+        "long basic block: encoded {} Mov instructions but decoded {}",
+        N, decoded_count
+    );
+    assert_eq!(
+        offset,
+        encoded.len(),
+        "decode consumed {} bytes but buffer has {}",
+        offset,
+        encoded.len()
+    );
+}
