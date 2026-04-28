@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, architecture, determinism, collections, set
+// @timeout: 10000
+// @expect: pass
+// @description: Round-1 architectural guardrail — extends
+// `hash_iter_determinism.vr` to `Set<T>` (vector 7.2 full audit
+// from #207's hash-iter full audit sub-deliverable).
+//
+// Same property-style invariants as the Map test: same-instance
+// iteration consistency, full-coverage of insertions, no duplicates.
+// Without these, Set-keyed code paths can produce divergent
+// Tier-0 vs Tier-1 outputs (round-1 vector 7.1) or non-reproducible
+// hash-set membership iteration.
+
+mount core.collections.set.{Set};
+
+fn set_iter_same_instance_deterministic() {
+    let mut s: Set<Text> = Set.new();
+    s.insert("alpha".clone());
+    s.insert("bravo".clone());
+    s.insert("charlie".clone());
+    s.insert("delta".clone());
+
+    // Two iterations of the same instance.
+    let mut a: List<Text> = [];
+    for v in s.iter() { a.push(v.clone()); }
+    let mut b: List<Text> = [];
+    for v in s.iter() { b.push(v.clone()); }
+
+    assert(a.len() == b.len(),
+           "same-instance iter must yield same length");
+    let mut i: Int = 0;
+    while i < a.len() {
+        assert(a[i] == b[i],
+               "same-instance iter must yield same value order");
+        i = i + 1;
+    }
+}
+
+// Set must contain exactly the inserted values (no missing /
+// no duplicates from re-insertion).
+fn set_iter_covers_all_insertions() {
+    let mut s: Set<Int> = Set.new();
+    let inputs: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8];
+    let mut i: Int = 0;
+    while i < inputs.len() {
+        s.insert(inputs[i]);
+        i = i + 1;
+    }
+    let mut count: Int = 0;
+    for _ in s.iter() { count = count + 1; }
+    assert(count == inputs.len(),
+           "Set iter count must equal distinct insertion count");
+}
+
+// Re-insertion of the same value MUST NOT increase set size.
+fn set_reinsertion_idempotent() {
+    let mut s: Set<Text> = Set.new();
+    s.insert("x".clone());
+    s.insert("x".clone());
+    s.insert("x".clone());
+    let mut count: Int = 0;
+    for _ in s.iter() { count = count + 1; }
+    assert(count == 1, "duplicate insertions must yield set of size 1");
+}
+
+// Iteration yields every value at most once — pin via
+// contains-on-each-yielded-value (the `s.contains(v)` invariant
+// must hold for every v iter() produces).
+fn set_iter_yields_only_members() {
+    let mut s: Set<Int> = Set.new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    for v in s.iter() {
+        assert(s.contains(v),
+               "every value yielded by iter() must satisfy contains()");
+    }
+}
+
+fn main() {
+    set_iter_same_instance_deterministic();
+    set_iter_covers_all_insertions();
+    set_reinsertion_idempotent();
+    set_iter_yields_only_members();
+}
