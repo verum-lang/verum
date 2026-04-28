@@ -132,10 +132,24 @@ violations.
 
 ## Vector 4 — AOT/LLVM lowering
 
-### 4.1 LibraryCall name collisions
+### 4.1 LibraryCall name collisions — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — #168 work covers LibraryCall resolution.
-Cross-references task #176 lenient-skip waiver registry.
+**Status:** DEFENSE CONFIRMED — `LibraryCall` strategy was REMOVED entirely
+under #168. Per `crates/verum_vbc/CLAUDE.md`: *"The previous `LibraryCall`
+strategy (string-keyed external function call that the interpreter could
+not resolve) has been removed — every intrinsic now uses one of the typed
+strategies above."*
+
+The 14-intrinsic backlog (saturating_add_i128, sqrt_f64, abort,
+cbgr_advance_epoch, num_cpus, tier_promote, get_tier, future_poll_sync,
+supervisor_set_parent, exec_with_recovery, shared_registry_global,
+middleware_chain_empty, plus parents) was migrated to typed dispatch
+ahead of #168 close-out. No string-keyed name resolution remains; name
+collisions are no longer expressible in the dispatch table.
+
+Remaining `LibraryCall` references in the codebase are historical
+commentary in changelog-style comments at `intrinsics/codegen.rs:1838,
+1888, 3098` and `instruction.rs:7721` — none represent live dispatch.
 
 ### 4.2 emit_verum_networking_functions arity
 
@@ -329,7 +343,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 3.2 Arity mismatch | **PARTIAL (documented)** | codegen-enforced; bytecode-validator under round-1 §3.1 |
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
-| 4.1 LibraryCall collision | PARTIAL | #176 |
+| 4.1 LibraryCall collision | **DEFENSE CONFIRMED** | strategy removed entirely under #168 (2026-04-28) |
 | 4.2 Networking arity | PARTIAL | #105 follow-up |
 | 4.3 GlobalDCE | **DEFENSE CONFIRMED** | Phase 3.7 audit + External list pinned (2026-04-28) |
 | 5.1 Module cycle | **DEFENSE** | guardrails (2026-04-28) |
@@ -345,8 +359,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | PENDING | lint audit |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**10 vectors confirmed defended (was 9), 14 partial (was 15), 3 pending** post
+**11 vectors confirmed defended (was 10), 13 partial (was 14), 3 pending** post
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
-RT-2.3.2 + RT-2.4.3 closures (§1.2 / §2.2 / §2.4 / §3.2 (documented) /
-§3.3 / §3.4 / §4.3 / §5.1 / §5.2 / §5.3 / §6.2 guardrails landed).
-Sections A-C below record real defects already closed in the audit pass.
+RT-2.3.2 + RT-2.4.3 + RT-2.4.1 closures. Sections A-C below record real
+defects already closed in the audit pass.
