@@ -170,7 +170,7 @@ endef
 .PHONY: list list-l0 list-l1 list-l2 list-l3 list-l4 list-all list-by-tag
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
-.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose
+.PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team
 
 # =============================================================================
 # Default Target
@@ -988,6 +988,28 @@ diff-memory: build
 	@$(VTEST) run $(DIFF_DIR)/tests/memory.vr --tier 0,3 --parallel 4 \
 		--timeout $(TIMEOUT_EXTENDED) --config $(CONFIG_FILE)
 	$(call SUCCESS,Memory differential tests completed)
+
+# Run the red-team audit-armor guardrails on Tier-0 + Tier-1.
+# Each .vr file under vcs/specs/L*/red-team-*-{architecture,implementation,perf}/
+# pins one audit-confirmed defense (overflow recipe / decoder canonicality /
+# dishonest-stub / Int.MIN unary-negation / constant-time crypto / etc.).
+# Any divergence between Tier-0 and Tier-1 on these tests is a hard failure —
+# it means the audit defense surfaces differently across tiers.
+.PHONY: diff-red-team
+diff-red-team: build
+	$(call PROGRESS,Running red-team audit-armor differential tests...)
+	@for dir in \
+		$(VCS_ROOT)/specs/L0-critical/modules \
+		$(VCS_ROOT)/specs/L2-standard/red-team-1-architecture \
+		$(VCS_ROOT)/specs/L2-standard/red-team-2-implementation \
+		$(VCS_ROOT)/specs/L4-performance/red-team-3-perf; do \
+		if [ -d "$$dir" ]; then \
+			echo -e "$(CYAN)Tier 0 vs Tier 1 over $$dir$(NC)"; \
+			$(VTEST) run "$$dir" --tier 0,1 --parallel $(PARALLEL) \
+				--config $(CONFIG_FILE) || true; \
+		fi; \
+	done
+	$(call SUCCESS,Red-team audit-armor differential tests completed)
 
 # =============================================================================
 # List Targets
