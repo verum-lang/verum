@@ -22,6 +22,7 @@ mount core.runtime.recovery.{
     RetryPredicate,
     RuntimeRecoveryStrategy,
     InlineRetryPolicy,
+    is_transient_error,
 };
 
 // =============================================================================
@@ -976,6 +977,100 @@ fn test_jitter_match_all_variants() {
         };
         assert(matched);
     }
+}
+
+// =============================================================================
+// Section X: is_transient_error — typed-Display predicate
+// =============================================================================
+//
+// Pins the predicate's recognition of canonical Display
+// strings produced by the stdlib's typed errors.  The
+// pre-fix predicate (4 substrings) missed `IoErrorKind.TimedOut`
+// (Display: "operation timed out"), `WouldBlock`
+// ("operation would block"), and `Interrupted`
+// ("operation interrupted") — these tests guard against
+// regression to the pre-fix substring set.
+
+@test
+fn test_is_transient_iokind_timed_out() {
+    // IoErrorKind.TimedOut Display
+    assert(is_transient_error(&"operation timed out"));
+}
+
+@test
+fn test_is_transient_legacy_timeout() {
+    // Legacy substring still recognised for back-compat.
+    assert(is_transient_error(&"request timeout"));
+}
+
+@test
+fn test_is_transient_iokind_would_block() {
+    // IoErrorKind.WouldBlock Display
+    assert(is_transient_error(&"operation would block"));
+}
+
+@test
+fn test_is_transient_libc_eagain() {
+    // libc strerror form for EAGAIN
+    assert(is_transient_error(&"Resource temporarily unavailable"));
+}
+
+@test
+fn test_is_transient_iokind_interrupted() {
+    // IoErrorKind.Interrupted Display
+    assert(is_transient_error(&"operation interrupted"));
+}
+
+@test
+fn test_is_transient_iokind_connection_reset() {
+    assert(is_transient_error(&"connection reset"));
+}
+
+@test
+fn test_is_transient_iokind_connection_aborted() {
+    assert(is_transient_error(&"connection aborted"));
+}
+
+@test
+fn test_is_transient_iokind_connection_refused() {
+    assert(is_transient_error(&"connection refused"));
+}
+
+@test
+fn test_is_transient_dns_try_again() {
+    // DnsError.TryAgain Display
+    assert(is_transient_error(&"try again"));
+}
+
+@test
+fn test_is_transient_dns_try_again_concatenated() {
+    // DnsError.TryAgain Debug form (no space)
+    assert(is_transient_error(&"TryAgain"));
+}
+
+@test
+fn test_is_transient_case_insensitive() {
+    // Mixed-case input must still match.
+    assert(is_transient_error(&"Operation Timed Out"));
+    assert(is_transient_error(&"Connection Reset by peer"));
+}
+
+@test
+fn test_is_transient_permanent_not_matched() {
+    // Permanent failures must NOT be matched — retrying
+    // them is wasted work.
+    assert(!is_transient_error(&"entity not found"));
+    assert(!is_transient_error(&"permission denied"));
+    assert(!is_transient_error(&"invalid input parameter"));
+    assert(!is_transient_error(&"address in use"));
+    assert(!is_transient_error(&"already exists"));
+    assert(!is_transient_error(&"broken pipe"));
+}
+
+@test
+fn test_is_transient_empty_message() {
+    // Empty message: no transient substring → NOT transient.
+    assert(!is_transient_error(&""));
 }
 
 fn main() {
