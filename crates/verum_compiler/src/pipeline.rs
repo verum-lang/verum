@@ -10956,23 +10956,48 @@ impl<'s> CompilationPipeline<'s> {
         match result {
             Ok(value) => {
                 info!("VBC execution completed successfully: {:?}", value);
-                // Tier-parity with AOT: if `main` returns an Int, use it as
-                // the process exit code. Without this, the interpreter ran
-                // `fn main() -> Int { 1 }` to completion but the process
-                // exited 0, diverging from the AOT path (where main's return
-                // is the C-level exit status).
-                if value.is_int() {
-                    let code = value.as_i64() as i32;
-                    if code != 0 {
-                        std::process::exit(code);
-                    }
-                }
+                Self::propagate_main_exit_code(&value);
                 Ok(())
             }
             Err(e) => {
                 Err(anyhow::anyhow!("VBC execution error: {}", e))
             }
         }
+    }
+
+    /// Tier-parity exit-code propagation.
+    ///
+    /// When the entry point returns an `Int`, surface it to the OS as the
+    /// process exit status — matching what AOT compilation produces (where
+    /// `main`'s return value lands directly in `_exit`). Without this, the
+    /// interpreter would run `fn main() -> Int { 1 }` to completion but
+    /// the process would exit 0, silently masking failures.
+    ///
+    /// Behaviour:
+    /// - `Int` value → `std::process::exit(value as i32)` (always, even 0,
+    ///   so the script's intended exit code wins over the implicit Rust
+    ///   `Ok(())` path that follows).
+    /// - `Bool` → 0 for true, 1 for false (Unix convention).
+    /// - `Unit` / `Nil` / anything else → no-op; the caller continues and
+    ///   the CLI returns 0 via its normal `Ok` path.
+    ///
+    /// Called from BOTH `phase_interpret` (no-args entry) and
+    /// `phase_interpret_with_args` (args-aware entry) so behaviour is
+    /// uniform across `verum run file.vr` and `verum run file.vr a b`.
+    /// Script wrappers (`__verum_script_main`) pass through transparently:
+    /// the parser lifts an unsemicoloned tail expression into the
+    /// wrapper's return slot, so a script ending in `42` exits 42 here.
+    fn propagate_main_exit_code(value: &verum_vbc::Value) {
+        if value.is_int() {
+            let code = value.as_i64() as i32;
+            std::process::exit(code);
+        }
+        if value.is_bool() {
+            // Unix convention: true = success (0), false = failure (1).
+            std::process::exit(if value.as_bool() { 0 } else { 1 });
+        }
+        // Unit / Nil / Float / Object / Pointer / String — no exit-code
+        // semantics. Caller's normal `Ok(())` path returns 0 to the OS.
     }
 
     /// Phase 5b: Interpretation with arguments
@@ -11016,6 +11041,7 @@ impl<'s> CompilationPipeline<'s> {
             return match result {
                 Ok(value) => {
                     info!("VBC execution completed successfully: {:?}", value);
+                    Self::propagate_main_exit_code(&value);
                     Ok(())
                 }
                 Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),
@@ -11033,6 +11059,7 @@ impl<'s> CompilationPipeline<'s> {
         match result {
             Ok(value) => {
                 info!("VBC execution completed successfully: {:?}", value);
+                Self::propagate_main_exit_code(&value);
                 Ok(())
             }
             Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),

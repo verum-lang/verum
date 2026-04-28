@@ -290,6 +290,29 @@ pub struct CompilerOptions {
     /// `InstructionLimitExceeded` at the next check point (~every 1024 instructions).
     /// Used by the test runner to cancel timed-out tests.
     pub cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+
+    /// Script-mode entry-point flag.
+    ///
+    /// When `true`, the entry source identified by [`Self::input`] is parsed
+    /// in **script mode** — top-level statements (let, expression-stmts,
+    /// defer / errdefer / provide) are accepted alongside regular items and
+    /// are folded into a synthesised `__verum_script_main` wrapper. The
+    /// resulting module is tagged with `@![__verum_kind("script")]` so the
+    /// entry-detection pass picks the wrapper as the program entry instead
+    /// of requiring an explicit `fn main()`.
+    ///
+    /// Independently of this flag, **any** source whose first bytes are a
+    /// `#!` shebang (BOM-tolerant) is auto-detected as a script and parsed
+    /// in script mode regardless of CLI invocation form. The flag covers
+    /// the case where the user invokes `verum hello.vr` (or `verum -e …`,
+    /// stdin) on a source that has no shebang but should still be treated
+    /// as a single-file script.
+    ///
+    /// Only the entry source — the file matching [`Self::input`] — is
+    /// affected by this flag. Stdlib modules and imported user modules are
+    /// always parsed in library mode (the shebang prefix check still applies
+    /// per-file, but stdlib files never carry one).
+    pub script_mode: bool,
 }
 
 impl Default for CompilerOptions {
@@ -346,6 +369,7 @@ impl Default for CompilerOptions {
             profile: Profile::Application,
             language_features: LanguageFeatures::default(),
             cancel_flag: None,
+            script_mode: false,
         }
     }
 }
@@ -472,6 +496,19 @@ impl CompilerOptions {
     /// Builder: Enable test mode
     pub fn with_test_mode(mut self, enabled: bool) -> Self {
         self.test_mode = enabled;
+        self
+    }
+
+    /// Builder: Enable script mode for the entry source.
+    ///
+    /// When enabled, the entry file referenced by [`Self::input`] is parsed
+    /// with top-level statements allowed; the parser folds them into a
+    /// synthesised `__verum_script_main` wrapper that the entry-detection
+    /// phase uses as the program entry. Sources beginning with a `#!`
+    /// shebang are auto-detected as scripts independently of this flag.
+    /// See the field documentation on [`Self::script_mode`].
+    pub fn with_script_mode(mut self, enabled: bool) -> Self {
+        self.script_mode = enabled;
         self
     }
 
