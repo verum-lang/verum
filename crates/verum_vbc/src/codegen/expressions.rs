@@ -17770,6 +17770,26 @@ impl VbcCodegen {
                 );
             }
 
+            // #101 — read one PermissionRouterStats field.
+            InlineSequenceId::PermissionStatsRead => {
+                use crate::instruction::TensorExtSubOpcode;
+                self.emit_intrinsic_tensor_ext_extended(
+                    TensorExtSubOpcode::PermissionStatsRead,
+                    args,
+                    dest,
+                );
+            }
+
+            // #101 — clear all PermissionRouter stats.
+            InlineSequenceId::PermissionStatsClear => {
+                use crate::instruction::TensorExtSubOpcode;
+                self.emit_intrinsic_tensor_ext_extended(
+                    TensorExtSubOpcode::PermissionStatsClear,
+                    args,
+                    dest,
+                );
+            }
+
             // =================================================================
             // Type Introspection Operations
             // =================================================================

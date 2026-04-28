@@ -4013,6 +4013,43 @@ pub(in super::super) fn handle_tensor_extended(state: &mut InterpreterState) -> 
                     Ok(DispatchResult::Continue)
                 }
 
+                // #101 — read a single PermissionRouterStats
+                // field. Selectors mirror the field order in
+                // PermissionRouterStats; out-of-range
+                // collapses to 0 so version-skew between
+                // callers and runtime fails open instead of
+                // panicking.
+                Some(TensorExtSubOpcode::PermissionStatsRead) => {
+                    let dst = read_reg(state)?;
+                    let selector_reg = read_reg(state)?;
+                    let selector_val = state.get_reg(selector_reg);
+                    let selector = if selector_val.is_int() {
+                        selector_val.as_i64() as u32
+                    } else {
+                        0
+                    };
+                    let stats = state.permission_router.stats;
+                    let value: u64 = match selector {
+                        0 => stats.total,
+                        1 => stats.last_entry_hits,
+                        2 => stats.map_hits,
+                        3 => stats.policy_invocations,
+                        4 => stats.denials,
+                        _ => 0,
+                    };
+                    state.set_reg(dst, Value::from_i64(value as i64));
+                    Ok(DispatchResult::Continue)
+                }
+
+                // #101 — clear all stats (cache itself preserved).
+                Some(TensorExtSubOpcode::PermissionStatsClear) => {
+                    let dst = read_reg(state)?;
+                    state.permission_router.stats =
+                        crate::interpreter::permission::PermissionRouterStats::default();
+                    state.set_reg(dst, Value::unit());
+                    Ok(DispatchResult::Continue)
+                }
+
                 None => {
                     Err(InterpreterError::NotImplemented {
                         feature: "tensor sub-opcode",

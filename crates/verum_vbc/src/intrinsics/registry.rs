@@ -822,6 +822,14 @@ pub enum InlineSequenceId {
     /// explosion.
     PermissionCheckWire,
 
+    /// permission_stats_read: read a single
+    /// PermissionRouterStats field by selector index (#101).
+    PermissionStatsRead,
+
+    /// permission_stats_clear: zero all PermissionRouter
+    /// stats counters; cache itself is preserved (#101).
+    PermissionStatsClear,
+
     // =========================================================================
     // Type Introspection Operations
     // =========================================================================
@@ -9685,6 +9693,32 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PermissionCheckWire),
         mlir_op: Some("verum.permission_check_wire"),
         doc: "Route a (scope, target) pair through the PermissionRouter",
+    },
+    // #101 — observability: read one PermissionRouterStats
+    // field by selector. NOT permission-gated (read-only
+    // observability surface; gating would produce a
+    // chicken-and-egg with the gate's own diagnostics).
+    Intrinsic {
+        name: "permission_stats_read",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure],
+        param_count: 1, // selector (UInt32)
+        return_count: 1, // u64 stat value
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PermissionStatsRead),
+        mlir_op: Some("verum.permission_stats_read"),
+        doc: "Read a single PermissionRouterStats field (#101)",
+    },
+    // #101 — observability: zero all stats counters.
+    // Cache itself is preserved.
+    Intrinsic {
+        name: "permission_stats_clear",
+        category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::SideEffect],
+        param_count: 0,
+        return_count: 1, // Unit
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PermissionStatsClear),
+        mlir_op: Some("verum.permission_stats_clear"),
+        doc: "Reset PermissionRouterStats counters (#101)",
     },
     // =========================================================================
     // Time Operations

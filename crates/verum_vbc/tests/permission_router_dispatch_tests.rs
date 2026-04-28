@@ -272,3 +272,112 @@ fn dispatch_handler_writes_value_zero_for_allow_one_for_deny() {
     assert_eq!(allow_value.as_i64(), 0);
     assert_eq!(deny_value.as_i64(), 1);
 }
+
+// ============================================================================
+// #101 — PermissionStatsRead / PermissionStatsClear opcodes
+// ============================================================================
+
+#[test]
+fn permission_stats_read_encodes_and_decodes_round_trip() {
+    // [TensorExtended 0xFC] [0x1E sub-op] [dst:reg] [selector:reg]
+    let instr = Instruction::PermissionStatsRead {
+        dst: Reg(2),
+        selector: Reg(5),
+    };
+    let mut bytes = Vec::new();
+    encode_instruction(&instr, &mut bytes);
+    assert_eq!(bytes.len(), 4);
+    assert_eq!(bytes[1], 0x1E, "permission_stats_read sub-opcode tag");
+
+    let mut offset = 0;
+    let decoded = decode_instruction(&bytes, &mut offset).expect("decode");
+    match decoded {
+        Instruction::PermissionStatsRead { dst, selector } => {
+            assert_eq!(dst.0, 2);
+            assert_eq!(selector.0, 5);
+        }
+        other => panic!("expected PermissionStatsRead, got {:?}", other),
+    }
+}
+
+#[test]
+fn permission_stats_clear_encodes_and_decodes_round_trip() {
+    let instr = Instruction::PermissionStatsClear { dst: Reg(3) };
+    let mut bytes = Vec::new();
+    encode_instruction(&instr, &mut bytes);
+    assert_eq!(bytes.len(), 3);
+    assert_eq!(bytes[1], 0x1F, "permission_stats_clear sub-opcode tag");
+
+    let mut offset = 0;
+    let decoded = decode_instruction(&bytes, &mut offset).expect("decode");
+    match decoded {
+        Instruction::PermissionStatsClear { dst } => {
+            assert_eq!(dst.0, 3);
+        }
+        other => panic!("expected PermissionStatsClear, got {:?}", other),
+    }
+}
+
+#[test]
+fn permission_stats_field_selector_mapping_matches_router() {
+    // The selector encoding is the public contract for the
+    // stdlib's `permission_stats()` wrapper — this test pins
+    // the selector → field mapping so a future refactor of
+    // the Rust-side struct can't silently drift.
+    let mut router = verum_vbc::interpreter::permission::PermissionRouter::with_policy(
+        |scope, target| {
+            if scope == PermissionScope::Network && target == 80 {
+                PermissionDecision::Deny
+            } else {
+                PermissionDecision::Allow
+            }
+        },
+    );
+
+    // Drive deterministic activity:
+    //   * 1 deny-policy invocation (Network/80)
+    //   * 4 repeats of the deny → 4 last-entry hits
+    //   * 1 allow-policy invocation (Syscall/1)
+    //   * 1 last-entry hit on the allow
+    let _ = router.check(PermissionScope::Network, 80);
+    for _ in 0..4 {
+        let _ = router.check(PermissionScope::Network, 80);
+    }
+    let _ = router.check(PermissionScope::Syscall, 1);
+    let _ = router.check(PermissionScope::Syscall, 1);
+
+    let s = router.stats;
+    assert_eq!(s.total, 7);
+    assert_eq!(s.last_entry_hits, 5); // 4 deny repeats + 1 allow repeat
+    assert_eq!(s.map_hits, 0);
+    assert_eq!(s.policy_invocations, 2);
+    assert_eq!(s.denials, 5); // 1 cold deny + 4 warm-deny short-circuits
+}
+
+#[test]
+fn permission_stats_clear_zeros_counters_preserves_cache() {
+    use verum_vbc::interpreter::permission::PermissionRouterStats;
+
+    let mut state = empty_state();
+    state.set_permission_policy(|_, _| PermissionDecision::Allow);
+
+    state.check_permission(PermissionScope::Memory, 1);
+    state.check_permission(PermissionScope::Memory, 1);
+    assert!(state.permission_router.stats.total > 0);
+
+    // Simulate the dispatch handler's clear-stats path.
+    state.permission_router.stats = PermissionRouterStats::default();
+    let after = state.permission_router.stats;
+    assert_eq!(after.total, 0);
+    assert_eq!(after.last_entry_hits, 0);
+
+    // Cache survives — next check still hits the warm path,
+    // not the policy.
+    let invocations_before = state.permission_router.stats.policy_invocations;
+    state.check_permission(PermissionScope::Memory, 1);
+    let invocations_after = state.permission_router.stats.policy_invocations;
+    assert_eq!(
+        invocations_after, invocations_before,
+        "clearing stats must NOT clear the cache; warm-path hits should not invoke policy"
+    );
+}
