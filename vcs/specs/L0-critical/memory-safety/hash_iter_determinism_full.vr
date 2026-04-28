@@ -1,0 +1,207 @@
+// =============================================================================
+// L0-critical: Red-team Round 1 §7.2 — Hash-table iteration determinism (full audit)
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: collections, determinism, reproducibility, red-team-1.7.2, soundness
+// @timeout: 30000
+// =============================================================================
+//
+// Pins the iteration-determinism contract across all `core/collections/`
+// types that expose iteration. Determinism here means: given the SAME
+// insertion sequence, two independently-constructed instances produce
+// the SAME iteration order. This is critical for:
+//
+//   * Reproducible builds (compiler hashing test fixtures)
+//   * Differential testing (Tier-0 vs Tier-1/2/3 must agree on order)
+//   * Debugging (panic backtraces / leak reports stable across runs)
+//   * SMT certificate hashing (formula serialisation order matters)
+//
+// **Audit findings (2026-04-28):**
+//
+//   * `core/base/protocols.vr::DefaultHasher` uses FxHash with `state: 0`
+//     (no per-process random seed). Docstring: "this default is for
+//     compiler-internal / trusted-input use." Means: determinism YES,
+//     HashDoS resistance NO. The latter is documented; users who need
+//     HashDoS resistance must use a seeded hasher.
+//
+//   * Iteration order across collections:
+//     - `List` / `Deque`        — deterministic by index (insertion order)
+//     - `Heap`                  — deterministic by heap-tree shape (insertion-dependent)
+//     - `BTreeMap` / `BTreeSet` — deterministic by sorted key order
+//     - `Map` / `Set`           — deterministic via FxHash + Robin-Hood probing
+//
+// **Companion guardrail:**
+//   * `vcs/specs/L2-standard/red-team-1-architecture/hash_iter_determinism.vr`
+//     — pre-existing surface test from #143 sweep.
+//
+// Audit reference: vcs/red-team/round-1-architecture.md §7.2 (post-2026-04-28).
+
+mount core.collections.list.{List};
+mount core.collections.deque.{Deque};
+mount core.collections.heap.{Heap};
+mount core.collections.map.{Map};
+mount core.collections.set.{Set};
+mount core.collections.btree.{BTreeMap, BTreeSet};
+
+// -----------------------------------------------------------------------------
+// Map<Int, Int>: same insertion sequence → same iteration order
+// -----------------------------------------------------------------------------
+@test
+fn test_map_int_int_iteration_deterministic() {
+    let m1 = Map.from([(1, 100), (2, 200), (3, 300), (4, 400), (5, 500)]);
+    let m2 = Map.from([(1, 100), (2, 200), (3, 300), (4, 400), (5, 500)]);
+
+    let order1 = m1.keys_list();
+    let order2 = m2.keys_list();
+
+    assert_eq(order1.len(), order2.len());
+    let mut i = 0;
+    while i < order1.len() {
+        assert_eq(order1[i], order2[i]);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Map<Text, Int>: same insertion sequence → same iteration order
+// (different key type to exercise the Text Hash impl)
+// -----------------------------------------------------------------------------
+@test
+fn test_map_text_int_iteration_deterministic() {
+    let m1 = Map.from([("alpha", 1), ("beta", 2), ("gamma", 3), ("delta", 4)]);
+    let m2 = Map.from([("alpha", 1), ("beta", 2), ("gamma", 3), ("delta", 4)]);
+
+    let order1 = m1.keys_list();
+    let order2 = m2.keys_list();
+
+    assert_eq(order1.len(), order2.len());
+    let mut i = 0;
+    while i < order1.len() {
+        assert_eq(order1[i], order2[i]);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Set<Int>: deterministic via underlying Map
+// -----------------------------------------------------------------------------
+@test
+fn test_set_iteration_deterministic() {
+    let mut s1 = Set.new();
+    let mut s2 = Set.new();
+    for v in [10, 20, 30, 40, 50] {
+        s1.insert(v);
+        s2.insert(v);
+    }
+
+    let mut buf1 = List.new();
+    for v in s1.iter() { buf1.push(*v); }
+    let mut buf2 = List.new();
+    for v in s2.iter() { buf2.push(*v); }
+
+    assert_eq(buf1.len(), buf2.len());
+    let mut i = 0;
+    while i < buf1.len() {
+        assert_eq(buf1[i], buf2[i]);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// BTreeMap: iteration is sorted by key — deterministic by construction
+// -----------------------------------------------------------------------------
+@test
+fn test_btreemap_iteration_sorted() {
+    let mut bt = BTreeMap.new();
+    // Insert in scrambled order
+    bt.insert(3, "three");
+    bt.insert(1, "one");
+    bt.insert(4, "four");
+    bt.insert(1, "ONE");  // duplicate key — overwrites
+    bt.insert(5, "five");
+    bt.insert(9, "nine");
+    bt.insert(2, "two");
+
+    let mut keys = List.new();
+    for (k, _) in bt.iter() { keys.push(*k); }
+
+    // BTreeMap iter must produce keys in ascending order.
+    assert_eq(keys.len(), 6);  // 1, 2, 3, 4, 5, 9 (1 dedup'd)
+    let mut i = 1;
+    while i < keys.len() {
+        assert(keys[i - 1] < keys[i]);
+        i = i + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// List: iteration is by index — deterministic by construction
+// -----------------------------------------------------------------------------
+@test
+fn test_list_iteration_index_order() {
+    let xs = List.from([42, 17, 99, 3, 256]);
+    let mut order = List.new();
+    for v in xs.iter() { order.push(*v); }
+
+    assert_eq(order.len(), 5);
+    assert_eq(order[0], 42);
+    assert_eq(order[1], 17);
+    assert_eq(order[2], 99);
+    assert_eq(order[3], 3);
+    assert_eq(order[4], 256);
+}
+
+// -----------------------------------------------------------------------------
+// Deque: iteration is logical-index — deterministic by construction
+// -----------------------------------------------------------------------------
+@test
+fn test_deque_iteration_logical_order() {
+    let mut dq = Deque.new();
+    dq.push_back(10);
+    dq.push_back(20);
+    dq.push_front(5);
+    dq.push_back(30);
+    dq.push_front(1);
+    // Logical order: [1, 5, 10, 20, 30]
+
+    let mut order = List.new();
+    for v in dq.iter() { order.push(*v); }
+
+    assert_eq(order.len(), 5);
+    assert_eq(order[0], 1);
+    assert_eq(order[1], 5);
+    assert_eq(order[2], 10);
+    assert_eq(order[3], 20);
+    assert_eq(order[4], 30);
+}
+
+// -----------------------------------------------------------------------------
+// Cross-instance determinism: same insertions → same hash → same iteration.
+// This is the critical property differential testing (Tier-0 vs Tier-1/2/3)
+// relies on for hash-keyed structures.
+// -----------------------------------------------------------------------------
+@test
+fn test_map_repeated_construction_identical_iteration() {
+    let pairs = [("k1", 1), ("k2", 2), ("k3", 3), ("k4", 4), ("k5", 5),
+                 ("k6", 6), ("k7", 7), ("k8", 8), ("k9", 9), ("k10", 10)];
+
+    let m1 = Map.from(pairs);
+    let m2 = Map.from(pairs);
+    let m3 = Map.from(pairs);
+
+    let o1 = m1.keys_list();
+    let o2 = m2.keys_list();
+    let o3 = m3.keys_list();
+
+    assert_eq(o1.len(), o2.len());
+    assert_eq(o2.len(), o3.len());
+
+    let mut i = 0;
+    while i < o1.len() {
+        assert_eq(o1[i], o2[i]);
+        assert_eq(o2[i], o3[i]);
+        i = i + 1;
+    }
+}

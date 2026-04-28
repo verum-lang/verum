@@ -218,12 +218,38 @@ exhaustive case test.
 The differential harness at `vcs/differential/` exists but coverage is uneven.
 #196 drives this to comprehensive coverage.
 
-### 7.2 Hash-table iteration determinism
+### 7.2 Hash-table iteration determinism — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — #143 fix applied to selected hash-keyed
-tables; comprehensive coverage of *all* tables not yet verified. Audit recipe:
-`grep -rn "fn iter\|fn keys\|fn values" core/collections/` and confirm each
-returns a deterministic order.
+**Status:** DEFENSE CONFIRMED — full audit recipe applied across
+`core/collections/`. All iter-exposing collections produce deterministic
+iteration order given the same insertion sequence.
+
+**Audit recipe and findings:**
+
+`grep -rn "fn iter|fn keys|fn values|fn entries|fn into_iter" core/collections/`
+
+| Collection | Iter source | Determinism |
+|---|---|---|
+| `List` (list.vr) | dense indexed array | deterministic by index ✓ |
+| `Deque` (deque.vr) | indexed ring buffer | deterministic by logical index ✓ |
+| `Heap` (heap.vr) | array of heap nodes | deterministic by tree-shape (insertion-dependent) ✓ |
+| `BTreeMap`/`BTreeSet` (btree.vr) | sorted in-order traversal | deterministic by key-order ✓ |
+| `Set` (set.vr) | underlying Map | deterministic via FxHash ✓ |
+| `Map` (map.vr) | underlying hash table | deterministic via FxHash + Robin-Hood probe ✓ |
+
+**Why deterministic.** `core/base/protocols.vr::DefaultHasher::new()` starts
+with `state: 0` — FxHash is unkeyed, no per-process random seed. The
+docstring explicitly notes: *"this default is for compiler-internal /
+trusted-input use"*. The HashDoS trade-off is acknowledged and documented;
+users who need adversarial-input resistance must opt into a seeded hasher.
+
+**Guardrail tests:**
+- `vcs/specs/L2-standard/red-team-1-architecture/hash_iter_determinism.vr`
+  — pre-existing surface test from #143 sweep.
+- `vcs/specs/L0-critical/memory-safety/hash_iter_determinism_full.vr` (NEW
+  2026-04-28) — 7 L0 invariants pinning iteration determinism across
+  Map/Set/BTreeMap/List/Deque + cross-instance determinism for hash-keyed
+  structures (critical for Tier-0/1/2/3 differential testing).
 
 ---
 
@@ -308,10 +334,10 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 6.1 Capability monomorph | PENDING | monomorph audit |
 | 6.2 Erased/reified | PARTIAL | exhaustive cases |
 | 7.1 Tier-0 vs Tier-1 | PENDING | #196 |
-| 7.2 Hash determinism | PARTIAL | full audit |
+| 7.2 Hash determinism | **DEFENSE CONFIRMED** | full audit + 7 L0 guardrails (2026-04-28) |
 
-**8 vectors confirmed defended (full or partial), 10 pending** (post 2026-04-28
-RT-1.5 + RT-1.2.2 closures). Round 1 success condition: every PENDING entry has either a
+**9 vectors confirmed defended (full or partial), 9 pending** (post 2026-04-28
+RT-1.5 + RT-1.2.2 + RT-1.7.2 closures). Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.
