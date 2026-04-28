@@ -43,6 +43,7 @@ public mount .connection.{
     PgConnection, PgConnState, SimpleQueryResult,
     PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
     connect,
+    cancel_running_query_at,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
