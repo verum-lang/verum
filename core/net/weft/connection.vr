@@ -279,15 +279,18 @@ fn decide_keep_alive(
     server_allows: Bool,
 ) -> Bool {
     if !server_allows { return false; }
-    let conn = headers.get(&"connection").map(|v| v.to_lowercase());
+    // ASCII-fast eq_ignore_case (#88) on the borrowed value avoids
+    // allocating a fresh lowercase Text per request — was the
+    // dominant per-request allocation on HTTP/1.1 keep-alive.
+    let conn_v = headers.get(&"connection");
     match version {
-        Version.Http11 => match &conn {
-            Some(v) if v == &"close" => false,
-            _                        => true,
+        Version.Http11 => match conn_v {
+            Some(v) if v.eq_ignore_case(&"close") => false,
+            _                                     => true,
         },
-        Version.Http10 => match &conn {
-            Some(v) if v == &"keep-alive" => true,
-            _                             => false,
+        Version.Http10 => match conn_v {
+            Some(v) if v.eq_ignore_case(&"keep-alive") => true,
+            _                                          => false,
         },
         _ => false,
     }
