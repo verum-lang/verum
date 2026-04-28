@@ -30,10 +30,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      # The repo's `rust-toolchain.toml` pins the nightly channel
+      # (verum_common uses `#![feature(pattern)]` and the workspace
+      # is on edition 2024). Using @stable here would fail to build
+      # — let cargo read rust-toolchain.toml on first invocation and
+      # install the pinned channel automatically.
+      - name: Install Rust toolchain (nightly per rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly
           targets: ${{ matrix.target }}
+          components: rustfmt, clippy, rust-src
 
       - name: Fetch prebuilt LLVM
         uses: ./.github/actions/fetch-llvm
