@@ -925,15 +925,25 @@ impl ProofExtractor {
             proof_term
         };
 
-        // Validate if configured
+        // Validate if configured.  When `validate_on_extract` is set the
+        // caller has declared that an unvalidated proof must NOT be
+        // returned — fail-closed by returning `Maybe::None` on a hard
+        // validation error.  Pre-fix the failure was logged at WARN and
+        // the (possibly invalid) proof was returned anyway, defeating
+        // the entire enforcement contract of the flag.  Callers that
+        // want the warn-but-don't-reject behaviour should use
+        // `extract_proof_with_validation` and inspect the returned
+        // `ProofValidation` themselves.
         if self.config.validate_on_extract {
             let validation = self.validate_proof(&proof_term);
             if !validation.is_ok() {
                 tracing::warn!(
-                    "Extracted proof failed validation: {} errors, {} warnings",
+                    "Extracted proof failed validation ({} errors, {} warnings); \
+                     rejecting per validate_on_extract=true",
                     validation.errors.len(),
                     validation.warnings.len()
                 );
+                return Maybe::None;
             }
         }
 
@@ -3707,3 +3717,62 @@ impl ProofMinimizer {
 }
 
 // ==================== Tests ====================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pin the fail-closed contract of `validate_on_extract = true`.
+    ///
+    /// Pre-fix `extract_proof` logged a warning and RETURNED the
+    /// (possibly invalid) proof anyway, defeating the safety-critical
+    /// semantics of the flag.  Now: a hard validation failure
+    /// (`!validation.is_ok()`) under `validate_on_extract = true`
+    /// returns `Maybe::None`, so the caller can no longer accidentally
+    /// consume an unvalidated proof while believing it was validated.
+    ///
+    /// We test the public surface directly: build a `ProofValidation`
+    /// with `is_valid = false` + a non-empty `errors` list, and assert
+    /// that `is_ok()` returns false.  The integration with
+    /// `extract_proof` requires a Z3 proof object which can't be
+    /// constructed in a unit-test context, so the structural pin
+    /// covers the validation predicate; the call-site integration is
+    /// a one-line `return Maybe::None;` that the diff makes obvious.
+    #[test]
+    fn proof_validation_is_ok_requires_no_errors() {
+        let v_ok = ProofValidation {
+            is_valid: true,
+            errors: List::new(),
+            warnings: List::new(),
+        };
+        assert!(v_ok.is_ok(), "fully-valid proof must be ok");
+
+        let mut errs = List::new();
+        errs.push("structural error".into());
+        let v_err = ProofValidation {
+            is_valid: false,
+            errors: errs,
+            warnings: List::new(),
+        };
+        assert!(
+            !v_err.is_ok(),
+            "validation with errors must NOT be ok — \
+             extract_proof relies on this to fail-close"
+        );
+
+        // Edge case: is_valid=true but errors non-empty — still NOT ok.
+        // The `is_ok` predicate is the conjunction, so a defensive
+        // is_valid=true claim doesn't override an errors list.
+        let mut errs2 = List::new();
+        errs2.push("conflicting state".into());
+        let v_inconsistent = ProofValidation {
+            is_valid: true,
+            errors: errs2,
+            warnings: List::new(),
+        };
+        assert!(
+            !v_inconsistent.is_ok(),
+            "is_valid=true with errors must NOT be ok",
+        );
+    }
+}
