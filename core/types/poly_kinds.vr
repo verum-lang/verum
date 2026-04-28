@@ -11,9 +11,26 @@
 // Practical use: heterogeneous containers, levitated functor
 // combinators, type-class hierarchies parameterised by kind.
 //
+// ## Storage model
+//
+// Substitutions are stored as `Map<Text, Kind>` keyed by kind-
+// variable name. Lookup is O(1) amortised — the natural operation
+// during recursive unification of arrow-shaped kinds where every
+// recursive step queries the running substitution by name. The
+// previous `List<KindBinding>` storage made every lookup O(n) and
+// turned `kind_compose` into O(n + m²) for n+m bindings.
+//
+// `free_vars` returns `Set<Text>` directly — callers needing a
+// dedup-free view of the kind-vars in scope no longer have to
+// re-scan the result list themselves.
+//
 // =============================================================================
 
 module core.types.poly_kinds;
+
+mount core.*;
+mount core.collections.map.{Map};
+mount core.collections.set.{Set};
 
 /// A kind in the polymorphic-kind algebra.
 public type Kind is
@@ -33,62 +50,72 @@ public fn k_arrow(a: Kind, b: Kind) -> Kind {
 }
 public fn k_var(name: Text) -> Kind { Kind.KVar { name } }
 
+/// A substitution from kind-variable names to their resolved
+/// kinds. `Map<Text, Kind>` for O(1) lookup; the previous
+/// `List<KindBinding>` made every lookup O(n).
+public type KindSubst is { entries: Map<Text, Kind> };
+
+/// Empty substitution.
+public fn subst_empty() -> KindSubst {
+    KindSubst { entries: Map.new() }
+}
+
+/// Single-binding substitution.
+public fn subst_single(name: Text, kind: Kind) -> KindSubst {
+    let mut m: Map<Text, Kind> = Map.new();
+    m.insert(name, kind);
+    KindSubst { entries: m }
+}
+
+/// Look up a binding for `var_name`.
+public fn subst_lookup(s: &KindSubst, var_name: Text) -> Maybe<Kind> {
+    s.entries.get_optional(var_name)
+}
+
+/// Number of bindings in the substitution.
+public fn subst_size(s: &KindSubst) -> Int {
+    s.entries.len()
+}
+
 /// Does the named kind variable occur anywhere in this kind?
 /// Used for the occurs check during unification.
 public fn kind_occurs(k: Kind, var_name: Text) -> Bool {
     match k {
         Kind.KVar { name } => name == var_name,
         Kind.KArrow { domain, codomain } =>
-            kind_occurs(*domain, var_name) || kind_occurs(*codomain, var_name),
+            kind_occurs(*domain, var_name.clone()) || kind_occurs(*codomain, var_name),
         _ => false,
     }
 }
 
 /// Result of kind unification.
 public type KindUnifyResult is
-    /// Success — substitution captured as a list of (name, kind) bindings.
-    | KindOk { bindings: List<KindBinding> }
+    /// Success — the most-general unifying substitution.
+    | KindOk { bindings: KindSubst }
     /// Failure — mismatch or occurs-check failure.
     | KindError { reason: Text };
-
-public type KindBinding is { name: Text, kind: Kind };
 
 // =============================================================================
 // 2. Substitution
 // =============================================================================
-
-/// Look up a binding for `var_name` in `bindings`. Linear scan is
-/// fine — practical kind substitutions rarely exceed a handful of
-/// entries, and unification proceeds in dependency order.
-fn lookup_binding(bindings: List<KindBinding>, var_name: Text) -> Maybe<Kind> {
-    let mut i: Int = 0;
-    while i < bindings.len() as Int {
-        let b: KindBinding = (*bindings.get(i as Int).expect("poly_kinds: i < bindings.len() by while-condition")).clone();
-        if b.name == var_name {
-            return Some(b.kind);
-        }
-        i = i + 1;
-    }
-    None
-}
 
 /// Apply a substitution to a kind, recursively.
 ///
 /// `kind_apply([α↦Type, β↦α], KArrow(α, β))` walks the structure,
 /// rewriting every `KVar` whose name has a binding. Idempotent
 /// once the substitution itself is in normal form.
-public fn kind_apply(bindings: List<KindBinding>, k: Kind) -> Kind {
+public fn kind_apply(s: &KindSubst, k: Kind) -> Kind {
     match k {
         Kind.KType => Kind.KType,
         Kind.KConstraint => Kind.KConstraint,
-        Kind.KVar { name } => match lookup_binding(bindings, name.clone()) {
+        Kind.KVar { name } => match subst_lookup(s, name.clone()) {
             Some(replacement) => replacement,
             None => Kind.KVar { name },
         },
         Kind.KArrow { domain, codomain } =>
             k_arrow(
-                kind_apply(bindings.clone(), *domain),
-                kind_apply(bindings, *codomain),
+                kind_apply(s, *domain),
+                kind_apply(s, *codomain),
             ),
     }
 }
@@ -96,33 +123,25 @@ public fn kind_apply(bindings: List<KindBinding>, k: Kind) -> Kind {
 /// Compose two substitutions: `s2 ∘ s1` means "apply s1, then s2".
 /// Returns a substitution `s` such that `kind_apply(s, k) ==
 /// kind_apply(s2, kind_apply(s1, k))` for every k.
-fn kind_compose(
-    s1: List<KindBinding>,
-    s2: List<KindBinding>,
-) -> List<KindBinding> {
-    let mut out: List<KindBinding> = List.new();
+///
+/// Semantics: post-application of s2 to s1's range, then add s2's
+/// own bindings for any keys s1 doesn't cover (s1 wins on shared
+/// keys). Complexity: O(|s1| + |s2|) — Map iteration + insertion;
+/// the previous list-backed implementation was O(|s1|·|s2|) due to
+/// nested linear-scan dedup.
+public fn kind_compose(s1: &KindSubst, s2: &KindSubst) -> KindSubst {
+    let mut out: Map<Text, Kind> = Map.new();
     // Apply s2 to every range value of s1, then keep the binding.
-    let mut i: Int = 0;
-    while i < s1.len() as Int {
-        let b: KindBinding = (*s1.get(i as Int).expect("poly_kinds: i < s1.len() by while-condition")).clone();
-        out.push(KindBinding {
-            name: b.name,
-            kind: kind_apply(s2.clone(), b.kind),
-        });
-        i = i + 1;
+    for (name, kind) in s1.entries.iter() {
+        out.insert(name.clone(), kind_apply(s2, kind.clone()));
     }
-    // Add bindings from s2 that don't already appear (post-application
-    // s1 wins on shared keys, matching the "apply s1 first" semantics).
-    let mut j: Int = 0;
-    while j < s2.len() as Int {
-        let b2: KindBinding = (*s2.get(j as Int).expect("poly_kinds: j < s2.len() by while-condition")).clone();
-        match lookup_binding(out.clone(), b2.name.clone()) {
-            Some(_) => {},
-            None => { out.push(b2); },
+    // Add bindings from s2 for keys s1 doesn't cover.
+    for (name, kind) in s2.entries.iter() {
+        if !out.contains_key(name.clone()) {
+            out.insert(name.clone(), kind.clone());
         }
-        j = j + 1;
     }
-    out
+    KindSubst { entries: out }
 }
 
 // =============================================================================
@@ -149,23 +168,23 @@ fn kind_compose(
 public fn kind_unify(a: Kind, b: Kind) -> KindUnifyResult {
     match (a, b) {
         (Kind.KType, Kind.KType) =>
-            KindUnifyResult.KindOk { bindings: List.new() },
+            KindUnifyResult.KindOk { bindings: subst_empty() },
         (Kind.KConstraint, Kind.KConstraint) =>
-            KindUnifyResult.KindOk { bindings: List.new() },
+            KindUnifyResult.KindOk { bindings: subst_empty() },
         (Kind.KArrow { domain: d1, codomain: c1 },
          Kind.KArrow { domain: d2, codomain: c2 }) => {
             match kind_unify(*d1, *d2) {
                 KindUnifyResult.KindError { reason } =>
                     KindUnifyResult.KindError { reason },
                 KindUnifyResult.KindOk { bindings: s1 } => {
-                    let c1_sub = kind_apply(s1.clone(), *c1);
-                    let c2_sub = kind_apply(s1.clone(), *c2);
+                    let c1_sub = kind_apply(&s1, *c1);
+                    let c2_sub = kind_apply(&s1, *c2);
                     match kind_unify(c1_sub, c2_sub) {
                         KindUnifyResult.KindError { reason } =>
                             KindUnifyResult.KindError { reason },
                         KindUnifyResult.KindOk { bindings: s2 } =>
                             KindUnifyResult.KindOk {
-                                bindings: kind_compose(s1, s2),
+                                bindings: kind_compose(&s1, &s2),
                             },
                     }
                 },
@@ -173,14 +192,11 @@ public fn kind_unify(a: Kind, b: Kind) -> KindUnifyResult {
         },
         (Kind.KVar { name: a_name }, Kind.KVar { name: b_name }) => {
             if a_name == b_name {
-                KindUnifyResult.KindOk { bindings: List.new() }
+                KindUnifyResult.KindOk { bindings: subst_empty() }
             } else {
-                let mut bindings: List<KindBinding> = List.new();
-                bindings.push(KindBinding {
-                    name: a_name,
-                    kind: Kind.KVar { name: b_name },
-                });
-                KindUnifyResult.KindOk { bindings }
+                KindUnifyResult.KindOk {
+                    bindings: subst_single(a_name, Kind.KVar { name: b_name }),
+                }
             }
         },
         (Kind.KVar { name }, k) => bind_var(name, k),
@@ -207,9 +223,7 @@ fn bind_var(var_name: Text, k: Kind) -> KindUnifyResult {
                 + kind_show(k),
         };
     }
-    let mut bindings: List<KindBinding> = List.new();
-    bindings.push(KindBinding { name: var_name, kind: k });
-    KindUnifyResult.KindOk { bindings }
+    KindUnifyResult.KindOk { bindings: subst_single(var_name, k) }
 }
 
 /// Render a kind for diagnostic output. No assumption that this
@@ -261,24 +275,25 @@ public fn kind_arity(k: Kind) -> Int {
 /// unify with the next argument; on success the result is the
 /// codomain (under the unifying substitution).
 ///
-/// Returns `KindOk { bindings: [] }` when `args` is empty (the
+/// Returns `KindOk { bindings: ∅ }` when `args` is empty (the
 /// kind is already the result), or `KindError` when the kind has
 /// fewer arrows than args (over-application) or when any pairwise
 /// unification fails.
 public fn apply_args(k: Kind, args: List<Kind>) -> KindUnifyResult {
     let mut current = k;
-    let mut acc: List<KindBinding> = List.new();
+    let mut acc = subst_empty();
     let mut i: Int = 0;
-    while i < args.len() as Int {
-        let arg: Kind = (*args.get(i as Int).expect("poly_kinds: i < args.len() by while-condition")).clone();
+    while i < args.len() {
+        let arg = args[i].clone();
         match current {
             Kind.KArrow { domain, codomain } => {
                 match kind_unify(*domain, arg) {
                     KindUnifyResult.KindError { reason } =>
                         return KindUnifyResult.KindError { reason },
                     KindUnifyResult.KindOk { bindings: s } => {
-                        acc = kind_compose(acc, s.clone());
-                        current = kind_apply(s, *codomain);
+                        let next = kind_apply(&s, *codomain);
+                        acc = kind_compose(&acc, &s);
+                        current = next;
                     },
                 }
             },
@@ -297,20 +312,21 @@ public fn apply_args(k: Kind, args: List<Kind>) -> KindUnifyResult {
     KindUnifyResult.KindOk { bindings: acc }
 }
 
-/// Free type-variable set of a kind, returned as a list of names
-/// (no deduplication guarantee — call sites that need a set walk
-/// the list once).
-public fn free_vars(k: Kind) -> List<Text> {
-    let mut out: List<Text> = List.new();
+/// Free type-variable set of a kind. Returned as a Set<Text> —
+/// the previous version returned a deduplication-free List<Text>
+/// and shifted the dedup burden onto every caller. Set is the
+/// honest representation of "the names that occur freely".
+public fn free_vars(k: Kind) -> Set<Text> {
+    let mut out: Set<Text> = Set.new();
     free_vars_into(k, &mut out);
     out
 }
 
-fn free_vars_into(k: Kind, out: &mut List<Text>) {
+fn free_vars_into(k: Kind, out: &mut Set<Text>) {
     match k {
         Kind.KType => {},
         Kind.KConstraint => {},
-        Kind.KVar { name } => out.push(name),
+        Kind.KVar { name } => { out.insert(name); },
         Kind.KArrow { domain, codomain } => {
             free_vars_into(*domain, out);
             free_vars_into(*codomain, out);
