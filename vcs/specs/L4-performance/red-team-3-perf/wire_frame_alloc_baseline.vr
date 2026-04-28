@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L4
+// @tags: red-team, perf, allocator, wire-frame
+// @timeout: 30000
+// @expect: pass
+// @description: Round-3 red-team perf-baseline (#174 vector 2.1).
+//
+// Pins the alloc-pressure ceiling on wire-frame layers after the
+// #203 byte-loop sweep. Pre-sweep, building a 4 KiB ciphertext
+// "nonce || ct || tag" wire frame did ~4 K push_byte calls per
+// encrypt + per decrypt — each going through bounds check +
+// capacity probe + null-terminator memset. Post-sweep, three
+// extend_from_slice bulk copies replace the per-byte cascade.
+//
+// This test exercises a representative wire-frame pattern (assemble
+// header || body || tag from three byte slices) and asserts the
+// result is correct. The corresponding micro-benchmark belongs in
+// `crates/verum_compiler/benches/` once the bench harness is
+// wired (round-3 follow-up); for now this is the regression-
+// sanity test.
+
+mount core.collections.List;
+
+fn assemble_wire_frame() {
+    // Mock 4 KiB page cipher output: 12-byte nonce + 4096-byte
+    // ciphertext + 16-byte tag.
+    let mut nonce: List<Byte> = List.with_capacity(12);
+    let mut i: Int = 0;
+    while i < 12 { nonce.push((i as Byte) ^ 0x55_u8); i = i + 1; }
+
+    let mut ct: List<Byte> = List.with_capacity(4096);
+    let mut j: Int = 0;
+    while j < 4096 { ct.push((j as Byte) ^ 0xA5_u8); j = j + 1; }
+
+    let mut tag: List<Byte> = List.with_capacity(16);
+    let mut k: Int = 0;
+    while k < 16 { tag.push((k as Byte) ^ 0x33_u8); k = k + 1; }
+
+    // The bulk-copy assembly pattern from the audit sweep.
+    let total = nonce.len() + ct.len() + tag.len();
+    let mut frame: List<Byte> = List.with_capacity(total);
+    frame.extend_from_slice(nonce.as_slice());
+    frame.extend_from_slice(ct.as_slice());
+    frame.extend_from_slice(tag.as_slice());
+
+    // Asserts: the assembly is correct (this is the floor — perf
+    // is measured by the bench harness, not asserted here).
+    assert(frame.len() == 12 + 4096 + 16,
+           "wire frame must be exactly nonce + ct + tag bytes");
+    // Nonce prefix.
+    assert(frame[0] == (0_u8 ^ 0x55_u8),
+           "nonce[0] must round-trip through extend_from_slice");
+    // Ciphertext middle.
+    assert(frame[12] == (0_u8 ^ 0xA5_u8),
+           "ct[0] at offset 12 must round-trip");
+    assert(frame[12 + 4095] == (4095_u8 ^ 0xA5_u8),
+           "ct[last] must round-trip");
+    // Tag tail.
+    assert(frame[12 + 4096] == (0_u8 ^ 0x33_u8),
+           "tag[0] at offset 4108 must round-trip");
+    assert(frame[12 + 4096 + 15] == (15_u8 ^ 0x33_u8),
+           "tag[last] must round-trip");
+}
+
+// Pin the contract that with_capacity prevents the doubling-realloc
+// cascade — push_byte after with_capacity of the target size MUST
+// not grow the buffer further. (Verum's List.with_capacity is the
+// pre-sized bulk-copy primitive the audit migration relies on.)
+fn with_capacity_no_resize_cascade() {
+    let target: Int = 1024;
+    let mut buf: List<Byte> = List.with_capacity(target);
+    let cap_before = buf.capacity();
+    let mut i: Int = 0;
+    while i < target {
+        buf.push(0_u8);
+        i = i + 1;
+    }
+    let cap_after = buf.capacity();
+    assert(cap_after == cap_before,
+           "with_capacity(N) + push N times must NOT grow capacity");
+    assert(buf.len() == target,
+           "len after pushing N bytes must be N");
+}
+
+fn main() {
+    assemble_wire_frame();
+    with_capacity_no_resize_cascade();
+}
