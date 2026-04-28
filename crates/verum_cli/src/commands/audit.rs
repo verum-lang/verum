@@ -515,7 +515,7 @@ use verum_compiler::CompilerOptions;
 
 /// One framework-axiom usage point.
 #[derive(Debug, Clone)]
-struct FrameworkUsage {
+pub(crate) struct FrameworkUsage {
     /// Item name (theorem / axiom / lemma).
     item_name: Text,
     /// Kind of item the marker was attached to.
@@ -1758,7 +1758,7 @@ fn print_epsilon_report_json(
 /// stdlib + CLI). Comparison is lex on the pair; rendering uses Unicode
 /// `ω` so reports match the spec verbatim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CliOrdinal {
+pub(crate) struct CliOrdinal {
     omega_coeff: u32,
     finite_offset: u32,
 }
