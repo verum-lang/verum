@@ -178,12 +178,14 @@ extern {
     // Mach Semaphores
     // =========================================================================
 
-    /// Create semaphore
+    /// Create semaphore. C: `kern_return_t semaphore_create(task_t task,
+    /// semaphore_t *semaphore, int policy, int value);` — both `policy`
+    /// and `value` are POSIX `int` (Int32).
     fn semaphore_create(
         task: MachPort,
         semaphore: &mut SemaphoreT,
-        policy: Int,
-        value: Int,
+        policy: Int32,
+        value: Int32,
     ) -> KernReturn;
 
     /// Destroy semaphore
