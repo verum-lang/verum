@@ -460,8 +460,7 @@ fn decode_ext(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, Msg
 // =============================================================================
 
 fn push_all(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 fn push_u16_be(dst: &mut List<Byte>, v: UInt16) {

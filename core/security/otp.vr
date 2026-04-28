@@ -218,8 +218,7 @@ public fn generate_secret(len_bytes: Int) -> List<Byte> {
     while buf.len() < n {
         fill_secure_array(&mut tmp);
         let take = if (n - buf.len()) >= 32 { 32 } else { n - buf.len() };
-        let mut i: Int = 0;
-        while i < take { buf.push(tmp[i]); i = i + 1; }
+        buf.extend_from_slice(&tmp[..take]);
     }
     buf
 }
@@ -254,8 +253,7 @@ public fn provisioning_uri(
     push_text(&mut buf, label);
     push_bytes(&mut buf, b"?secret=");
     // b32 is already a List<Byte> of ASCII.
-    let mut i: Int = 0;
-    while i < b32.len() { buf.push(b32[i]); i = i + 1; }
+    buf.extend_from_slice(b32.as_slice());
     push_bytes(&mut buf, b"&issuer=");
     push_text(&mut buf, issuer);
     push_bytes(&mut buf, b"&algorithm=");
@@ -285,10 +283,9 @@ fn u64_be(x: UInt64) -> [Byte; 8] {
 }
 
 fn slice_owned(src: &[Byte]) -> List<Byte> {
-    // Output is exactly src.len() bytes — pre-allocate.
+    // Output is exactly src.len() bytes — pre-allocate + bulk-copy.
     let mut out: List<Byte> = List.with_capacity(src.len());
-    let mut i: Int = 0;
-    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out.extend_from_slice(src);
     out
 }
 
@@ -339,14 +336,11 @@ fn format_padded(value: UInt64, digits: Int) -> Text {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 fn push_text(dst: &mut List<Byte>, src: &Text) {
-    let b = src.as_bytes();
-    let mut i: Int = 0;
-    while i < b.len() { dst.push(b[i]); i = i + 1; }
+    dst.extend_from_slice(src.as_bytes());
 }
 
 fn push_int(dst: &mut List<Byte>, n: Int) {

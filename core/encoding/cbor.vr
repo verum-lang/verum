@@ -105,14 +105,12 @@ fn encode_into(v: &CborValue, out: &mut List<Byte>) {
         CborValue.CborNint(n) => write_head(out, 1_u8, *n),
         CborValue.CborBytes(b) => {
             write_head(out, 2_u8, b.len() as UInt64);
-            let mut i: Int = 0;
-            while i < b.len() { out.push(b[i]); i = i + 1; }
+            out.extend_from_slice(b.as_slice());
         },
         CborValue.CborText(t) => {
             let bytes = t.as_bytes();
             write_head(out, 3_u8, bytes.len() as UInt64);
-            let mut i: Int = 0;
-            while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+            out.extend_from_slice(bytes);
         },
         CborValue.CborArray(arr) => {
             write_head(out, 4_u8, arr.len() as UInt64);
