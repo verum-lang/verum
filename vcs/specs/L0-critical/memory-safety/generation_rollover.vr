@@ -1,0 +1,141 @@
+// =============================================================================
+// L0-critical: Red-team Round 1 §2.2 — Generation-counter u32 rollover guardrail
+// =============================================================================
+// @test: typecheck-pass
+// @tier: 0
+// @level: L0
+// @tags: memory-safety, cbgr, generation, epoch, red-team-1.2.2, soundness
+// @timeout: 30000
+// =============================================================================
+//
+// Pins the generation-counter wraparound contract that defends ThinRef /
+// FatRef from ABA-aliasing escape:
+//
+//   * generation: UInt32 — increments on every allocation slot reuse
+//   * epoch:      UInt16 — bumps once per generation wraparound
+//   * combined budget: 32 + 16 = 48 bits ≈ 2.8 × 10^14 distinct allocations
+//
+// On the 48-bit budget exhaustion (epoch == 0xFFFF and another wraparound
+// requested), `core/mem/header.vr::increment_generation` issues a HARD
+// PANIC ("AllocationHeader epoch overflow ..."). This is the soundness
+// defense — silently wrapping epoch to 0 would let a freshly-stamped
+// allocation collide with a long-dead reference's (gen=GEN_INITIAL,
+// epoch=0) pair, defeating use-after-free detection.
+//
+// Companion guardrails:
+//   * vcs/specs/core/mem/header_test.vr — unit tests at the header level.
+//   * vcs/red-team/round-1-architecture.md §2.2 — audit doc.
+//
+// Why L0-critical: any defect here breaks the type-system's memory-safety
+// guarantees for every CBGR-managed allocation in the language. This MUST
+// never fail.
+
+mount core.mem.header.{
+    AllocationHeader,
+    GEN_INITIAL, GEN_MAX,
+};
+mount core.mem.capability.{CAP_OWNED};
+
+// -----------------------------------------------------------------------------
+// Invariant 1: GEN_MAX is exactly 0xFFFF_FFFE (one less than UInt32::MAX).
+// -----------------------------------------------------------------------------
+// The off-by-one against UInt32::MAX is deliberate: it leaves a single
+// sentinel value (0xFFFFFFFF) reserved for "post-wraparound transient"
+// detection by the CAS recovery loop.
+@test
+fn test_gen_max_constant_pinned() {
+    assert_eq(GEN_MAX, 0xFFFFFFFE as UInt32);
+    assert(GEN_MAX < (0xFFFFFFFF as UInt32));
+}
+
+// -----------------------------------------------------------------------------
+// Invariant 2: increment_generation at GEN_MAX wraps to GEN_INITIAL
+// AND bumps epoch by exactly 1.
+// -----------------------------------------------------------------------------
+@test
+fn test_wraparound_bumps_epoch_exactly_once() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_generation(GEN_MAX);
+    let pre_epoch = header.load_epoch();
+
+    header.increment_generation();
+
+    assert_eq(header.load_generation(), GEN_INITIAL);
+    assert_eq(header.load_epoch(), pre_epoch + 1);
+}
+
+// -----------------------------------------------------------------------------
+// Invariant 3: Rapid consecutive wraparounds each bump epoch by exactly 1.
+// -----------------------------------------------------------------------------
+// Even if a workload artificially drives generation to GEN_MAX rapidly,
+// the wraparound CAS-loop at header.vr:447-458 keeps epoch increments
+// monotone: N rollovers → N epoch bumps, never N+k or N-k.
+@test
+fn test_consecutive_wraparounds_monotone() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    let start_epoch = header.load_epoch();
+
+    let n = 32;
+    let mut k = 0;
+    while k < n {
+        header.store_generation(GEN_MAX);
+        header.increment_generation();
+        assert_eq(header.load_generation(), GEN_INITIAL);
+        assert_eq(header.load_epoch(), start_epoch + (k + 1) as UInt16);
+        k = k + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Invariant 4: ABA-aliasing prevention — every (generation, epoch) pair
+// across rollovers is distinct.
+// -----------------------------------------------------------------------------
+// This is the soundness invariant Round 1 §2.2 directly targets. After
+// any sequence of wraparounds, no two recorded (gen, epoch) pairs may
+// collide — collision would mean a stale ThinRef pointing at a long-dead
+// allocation could pass the deref-time validation and read freshly-allocated
+// memory.
+@test
+fn test_aba_aliasing_no_pair_collision() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    let mut seen = List<(UInt32, UInt16)>.new();
+    let mut k = 0;
+    while k < 64 {
+        header.store_generation(GEN_MAX);
+        header.increment_generation();
+        let pair = (header.load_generation(), header.load_epoch());
+
+        // Search the seen-list for any prior collision.
+        let mut j = 0;
+        while j < seen.len() {
+            assert(seen[j] != pair);
+            j = j + 1;
+        }
+        seen.push(pair);
+        k = k + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Invariant 5: Mid-cycle increments do NOT trigger wraparound.
+// -----------------------------------------------------------------------------
+// Only the value that lands the fetch_add at >= GEN_MAX - 1 takes the
+// wraparound branch. Mid-cycle increments must be O(1) without
+// CAS-loop activity on the epoch field.
+@test
+fn test_mid_cycle_increment_does_not_bump_epoch() {
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_generation(100);  // far from GEN_MAX
+    let pre_epoch = header.load_epoch();
+
+    let mut k = 0;
+    while k < 1000 {
+        header.increment_generation();
+        k = k + 1;
+    }
+
+    // After 1000 mid-cycle increments, generation rose, epoch unchanged.
+    assert_eq(header.load_generation(), 1100 as UInt32);
+    assert_eq(header.load_epoch(), pre_epoch);
+}
