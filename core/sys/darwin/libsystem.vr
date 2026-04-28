@@ -51,38 +51,47 @@ extern {
     /// Tracked under T0.4 / T0.4.1 (full POSIX C-ABI audit).
     public fn close(fd: Int32) -> Int32;
 
-    /// Read at offset (does not change file position)
-    fn pread(fd: Int, buf: &unsafe Byte, nbyte: Int, offset: Int) -> Int;
+    /// Read at offset (does not change file position).
+    /// C: `ssize_t pread(int fd, void *buf, size_t nbyte, off_t offset)`.
+    /// T0.4.2: fd is C `int` (Int32), nbyte is `size_t` / off_t is `off_t`. Return is `ssize_t`.
+    fn pread(fd: Int32, buf: &unsafe Byte, nbyte: Int, offset: Int) -> Int;
 
-    /// Write at offset (does not change file position)
-    fn pwrite(fd: Int, buf: &Byte, nbyte: Int, offset: Int) -> Int;
+    /// Write at offset (does not change file position). T0.4.2 same shape as `pread`.
+    fn pwrite(fd: Int32, buf: &Byte, nbyte: Int, offset: Int) -> Int;
 
-    /// Reposition file offset
-    fn lseek(fd: Int, offset: Int, whence: Int) -> Int;
+    /// Reposition file offset.
+    /// C: `off_t lseek(int fd, off_t offset, int whence)`. T0.4.2 fix.
+    fn lseek(fd: Int32, offset: Int, whence: Int32) -> Int;
 
-    /// Duplicate file descriptor
-    fn dup(fd: Int) -> Int;
+    /// Duplicate file descriptor. C: `int dup(int oldfd)`. T0.4.2 fix.
+    fn dup(fd: Int32) -> Int32;
 
-    /// Duplicate file descriptor to specific number
-    fn dup2(oldfd: Int, newfd: Int) -> Int;
+    /// Duplicate file descriptor to specific number.
+    /// C: `int dup2(int oldfd, int newfd)`. T0.4.2 fix.
+    fn dup2(oldfd: Int32, newfd: Int32) -> Int32;
 
-    /// Create pipe (fds[0]=read end, fds[1]=write end)
-    fn pipe(fds: &mut Int) -> Int;
+    /// Create pipe (fds[0]=read end, fds[1]=write end).
+    /// C: `int pipe(int pipefd[2])`. T0.4.2: fd-array element type is Int32.
+    fn pipe(fds: &mut Int32) -> Int32;
 
-    /// File control operations
-    fn fcntl(fd: Int, cmd: Int, arg: Int) -> Int;
+    /// File control operations.
+    /// C: `int fcntl(int fd, int cmd, ...)`. T0.4.2: cmd is C `int`,
+    /// arg is variadic and varies per cmd; we keep `Int` for the
+    /// generic-arg slot at the FFI boundary.
+    fn fcntl(fd: Int32, cmd: Int32, arg: Int) -> Int32;
 
-    /// Synchronize file to disk
-    fn fsync(fd: Int) -> Int;
+    /// Synchronize file to disk. C: `int fsync(int fd)`. T0.4.2 fix.
+    fn fsync(fd: Int32) -> Int32;
 
-    /// Synchronize file data to disk
-    fn fdatasync(fd: Int) -> Int;
+    /// Synchronize file data to disk. C: `int fdatasync(int fd)`. T0.4.2 fix.
+    fn fdatasync(fd: Int32) -> Int32;
 
-    /// Truncate file to length
-    fn ftruncate(fd: Int, length: Int) -> Int;
+    /// Truncate file to length. C: `int ftruncate(int fd, off_t length)`. T0.4.2 fix.
+    fn ftruncate(fd: Int32, length: Int) -> Int32;
 
-    /// Get file status
-    fn fstat(fd: Int, buf: &unsafe DarwinStat) -> Int;
+    /// Get file status.
+    /// C: `int fstat(int fd, struct stat *buf)`. T0.4.2 fix.
+    fn fstat(fd: Int32, buf: &unsafe DarwinStat) -> Int32;
 
     /// Get file status (path)
     fn stat(path: &Byte, buf: &unsafe DarwinStat) -> Int;
