@@ -107,6 +107,46 @@ impl KernelRecheck {
         })
     }
 
+    /// `K-Refine-omega` recheck **gated by `@require_extension(vfe_7)`
+    /// policy** (M-VVA Sub-2.4 — VVA spec L170, deferred policy wiring).
+    ///
+    /// Routes through [`check_refine_omega`] only when the configured
+    /// [`ExtensionPolicy`] declares `vfe_7` active for the consuming
+    /// scope. When the extension is opt-out (policy = `OptInOnly` and
+    /// `set` lacks the `@require_extension(vfe_7)` annotation), this
+    /// returns `Ok(())` *without* invoking the kernel rule — preserving
+    /// the VVA Year-0–2 rollout default of "extensions off unless
+    /// explicitly opted in".
+    ///
+    /// **Soundness.** Skipping the rule is sound under the rollout
+    /// calendar: K-Refine-omega's transfinite stratification check is
+    /// strictly stronger than the always-on K-Refine rule (finite
+    /// `dp(P) < dp(A) + 1`); declining to apply the stronger rule means
+    /// the weaker rule still holds and the program is admitted under
+    /// the weaker discipline. No false acceptance results from gating
+    /// off — only from gating ON when the program author's intent was
+    /// to opt into the weaker rule.
+    ///
+    /// **Backward-compat.** Existing callers continue using
+    /// [`KernelRecheck::refine_omega`] (the unconditional form). The
+    /// gated form is opt-in for new callers wiring policy-aware passes.
+    pub fn refine_omega_gated(
+        binder: &Text,
+        base: &CoreTerm,
+        predicate: &CoreTerm,
+        policy: crate::extension_policy::ExtensionPolicy,
+        set: &crate::extension_policy::EnabledExtensions,
+    ) -> Result<(), KernelRecheckError> {
+        if policy.is_active(set, "vfe_7") {
+            Self::refine_omega(binder, base, predicate)
+        } else {
+            // Policy gate inactive — vacuous pass. The rule stays
+            // available but does not run on this scope; the weaker
+            // K-Refine still gates refinement formation.
+            Ok(())
+        }
+    }
+
     /// `K-Universe-Ascent` recheck for a meta-classifier application
     /// `M_stack(α) : Articulation@U_{k+1}`. Routes through
     /// [`check_universe_ascent`] and lifts any kernel error.
@@ -923,6 +963,144 @@ mod tests {
             }
             other => panic!("expected RefineOmega, got {:?}", other),
         }
+    }
+
+    // ---- K-Refine-omega gated by @require_extension(vfe_7) ----
+    //
+    // M-VVA Sub-2.4 — VVA spec L170 deferred policy wiring. The gate
+    // ensures K-Refine-omega only runs when the consuming scope opts
+    // in via `@require_extension(vfe_7)`. Year-0–2 default (`OptInOnly`)
+    // skips the rule; `AllRulesActive` (back-compat) runs unconditionally.
+
+    fn require_extension_attr(ext: &str) -> verum_ast::attr::Attribute {
+        use verum_ast::Ident;
+        use verum_ast::Span;
+        use verum_ast::attr::Attribute;
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::ty::{Path, PathSegment};
+        let span = Span::default();
+        let mut segs: verum_common::List<PathSegment> = verum_common::List::new();
+        segs.push(PathSegment::Name(Ident { name: Text::from(ext), span }));
+        let mut args: verum_common::List<Expr> = verum_common::List::new();
+        args.push(Expr::new(ExprKind::Path(Path::new(segs, span)), span));
+        Attribute {
+            name: Text::from("require_extension"),
+            args: Maybe::Some(args),
+            span,
+        }
+    }
+
+    fn disable_extension_attr(ext: &str) -> verum_ast::attr::Attribute {
+        let mut a = require_extension_attr(ext);
+        a.name = Text::from("disable_extension");
+        a
+    }
+
+    #[test]
+    fn refine_omega_gated_opt_in_only_skips_when_extension_absent() {
+        use crate::extension_policy::{EnabledExtensions, ExtensionPolicy};
+        // Predicate that WOULD reject under unconditional K-Refine-omega.
+        let binder = Text::from("it");
+        let base = var("Int");
+        let pred = CoreTerm::ModalBox(Heap::new(CoreTerm::ModalBox(Heap::new(var("p")))));
+
+        // Empty extension set + OptInOnly policy → vfe_7 inactive → vacuous Ok.
+        let empty = EnabledExtensions::empty();
+        assert!(
+            KernelRecheck::refine_omega_gated(
+                &binder,
+                &base,
+                &pred,
+                ExtensionPolicy::OptInOnly,
+                &empty,
+            )
+            .is_ok(),
+            "OptInOnly with empty set must skip K-Refine-omega"
+        );
+    }
+
+    #[test]
+    fn refine_omega_gated_opt_in_only_runs_when_extension_required() {
+        use crate::extension_policy::{EnabledExtensions, ExtensionPolicy};
+        let binder = Text::from("it");
+        let base = var("Int");
+        // Overshooting predicate.
+        let pred = CoreTerm::ModalBox(Heap::new(CoreTerm::ModalBox(Heap::new(var("p")))));
+
+        // Set with vfe_7 required.
+        let mut attrs: List<verum_ast::attr::Attribute> = List::new();
+        attrs.push(require_extension_attr("vfe_7"));
+        let required = EnabledExtensions::from_attributes(&attrs);
+
+        // OptInOnly + vfe_7 required → rule runs and rejects the predicate.
+        let result = KernelRecheck::refine_omega_gated(
+            &binder,
+            &base,
+            &pred,
+            ExtensionPolicy::OptInOnly,
+            &required,
+        );
+        assert!(
+            matches!(result, Err(KernelRecheckError::RefineOmega { .. })),
+            "OptInOnly with vfe_7 required must run K-Refine-omega and reject overshooting predicate; got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn refine_omega_gated_all_rules_active_runs_unconditionally() {
+        use crate::extension_policy::{EnabledExtensions, ExtensionPolicy};
+        let binder = Text::from("it");
+        let base = var("Int");
+        // Well-stratified predicate.
+        let pred = var("p");
+        let empty = EnabledExtensions::empty();
+
+        // AllRulesActive ignores the extension set — runs and passes.
+        assert!(
+            KernelRecheck::refine_omega_gated(
+                &binder,
+                &base,
+                &pred,
+                ExtensionPolicy::AllRulesActive,
+                &empty,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn refine_omega_gated_opt_out_only_runs_unless_disabled() {
+        use crate::extension_policy::{EnabledExtensions, ExtensionPolicy};
+        let binder = Text::from("it");
+        let base = var("Int");
+        let pred = CoreTerm::ModalBox(Heap::new(CoreTerm::ModalBox(Heap::new(var("p")))));
+
+        // OptOutOnly + empty set → rule active by default → rejects.
+        let empty = EnabledExtensions::empty();
+        let result = KernelRecheck::refine_omega_gated(
+            &binder,
+            &base,
+            &pred,
+            ExtensionPolicy::OptOutOnly,
+            &empty,
+        );
+        assert!(matches!(result, Err(KernelRecheckError::RefineOmega { .. })));
+
+        // OptOutOnly + vfe_7 explicitly disabled → rule skipped → vacuous Ok.
+        let mut attrs: List<verum_ast::attr::Attribute> = List::new();
+        attrs.push(disable_extension_attr("vfe_7"));
+        let disabled = EnabledExtensions::from_attributes(&attrs);
+        assert!(
+            KernelRecheck::refine_omega_gated(
+                &binder,
+                &base,
+                &pred,
+                ExtensionPolicy::OptOutOnly,
+                &disabled,
+            )
+            .is_ok()
+        );
     }
 
     // ---- K-Universe-Ascent ----

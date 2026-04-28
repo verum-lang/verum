@@ -939,8 +939,19 @@ fn add_reexports_from_link(
                         // Recursively handle nested structures
                         add_reexports_from_link(subtree, module_id, span, export_table)?;
                     }
+                    MountTreeKind::File { .. } => {
+                        // Relative-file-path mounts (`mount ./foo.vr`) are
+                        // resolved by the session loader (Session::cog_root +
+                        // importing source dir), NOT the module-path pipeline.
+                        // Re-export resolution skips them — File mounts don't
+                        // contribute to module-path-resolved re-exports.
+                    }
                 }
             }
+        }
+        MountTreeKind::File { .. } => {
+            // Top-level `pub mount ./foo.vr` — same as the nested case:
+            // file-mount resolution lives in the session loader, not here.
         }
     }
     Ok(())
@@ -1218,6 +1229,9 @@ fn collect_specific_links_for_kind_resolution(
                                     result,
                                 );
                             }
+                            MountTreeKind::File { .. } => {
+                                // Relative-file mounts handled by session loader.
+                            }
                         }
                     }
                 }
@@ -1225,6 +1239,9 @@ fn collect_specific_links_for_kind_resolution(
         }
         MountTreeKind::Glob(_) => {
             // Skip globs, handled by resolve_glob_reexports
+        }
+        MountTreeKind::File { .. } => {
+            // Relative-file mounts handled by session loader.
         }
     }
 }
@@ -1253,6 +1270,9 @@ fn collect_glob_links(
         }
         MountTreeKind::Path(_) => {
             // Not a glob link
+        }
+        MountTreeKind::File { .. } => {
+            // File mounts are not glob links — session loader resolves them.
         }
     }
 }

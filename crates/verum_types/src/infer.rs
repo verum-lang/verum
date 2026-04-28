@@ -28147,6 +28147,10 @@ impl TypeChecker {
             MountTreeKind::Path(path) => process_path(path).as_str().starts_with("std.math"),
             MountTreeKind::Glob(path) => process_path(path).as_str() == "std.math",
             MountTreeKind::Nested { prefix, .. } => process_path(prefix).as_str() == "std.math",
+            // #5 / P1.5 — file-relative mounts can't be stdlib
+            // math imports by construction (stdlib uses module
+            // paths, not source-relative file paths).
+            MountTreeKind::File { .. } => false,
         };
 
         // Handle stdlib math imports (special case)
@@ -28176,6 +28180,10 @@ impl TypeChecker {
                         }
                     }
                 }
+                // #5 / P1.5 — file-relative mount cannot reach
+                // here (the `is_std_math` filter already rules
+                // it out), but exhaustive match needs the arm.
+                MountTreeKind::File { .. } => {}
             }
             return Ok(());
         }
@@ -28237,6 +28245,10 @@ impl TypeChecker {
                     return Ok(());
                 }
             }
+            // #5 / P1.5 — file-relative mounts are resolved by
+            // the session loader before reaching the inline-
+            // module pipeline; nothing to do here.
+            MountTreeKind::File { .. } => {}
         }
 
         // For non-stdlib imports, use process_import for cross-module resolution
@@ -29094,6 +29106,9 @@ impl TypeChecker {
                     return Err(e);
                 }
             }
+            // #5 / P1.5 — file-relative mounts are session-loader-resolved
+            // before reaching this inline-module pipeline; nothing to do.
+            MountTreeKind::File { .. } => {}
         }
 
         Ok(())
@@ -32665,6 +32680,9 @@ impl TypeChecker {
                             None
                         }
                     }
+                    // #5 / P1.5 — file-relative mounts can't re-export functions
+                    // through the module-path lookup; session loader handles them.
+                    MountTreeKind::File { .. } => None,
                 };
 
                 if let Some(ref source_path) = source_module_path {
@@ -34049,6 +34067,15 @@ impl TypeChecker {
             MountTreeKind::Nested { prefix: _, trees } => {
                 for inner in trees {
                     self.collect_explicit_import_names(inner);
+                }
+            }
+            // #5 / P1.5 — a file-relative mount that carries an
+            // `as Alias` clause registers the alias as the
+            // explicit import name. Without an alias the file
+            // mount contributes no name to the parent scope.
+            MountTreeKind::File { .. } => {
+                if let Some(name) = alias_name {
+                    self.explicit_imports.insert(name);
                 }
             }
         }
@@ -46805,6 +46832,17 @@ fn mount_tree_exports_name(tree: &verum_ast::decl::MountTree, name: &str) -> boo
         MountTreeKind::Nested { trees, .. } => {
             trees.iter().any(|t| mount_tree_exports_name(t, name))
         }
+        // #5 / P1.5 — file-relative mounts contribute exports
+        // through the session loader's per-file module
+        // registration, not through this AST-level export
+        // probe.  The alias (if any) is the only name
+        // observable from the importing scope.
+        MountTreeKind::File { .. } => {
+            tree.alias
+                .as_ref()
+                .map(|a| a.name.as_str() == name)
+                .unwrap_or(false)
+        }
     }
 }
 
@@ -48798,6 +48836,12 @@ impl TypeChecker {
             MountTreeKind::Glob(_) => {
                 // Glob imports don't have aliases
             }
+            // #5 / P1.5 — file-relative mount aliases are
+            // captured by the session loader when it
+            // registers the resolved file as a module; the
+            // type-inference alias pipeline doesn't add
+            // anything more.
+            MountTreeKind::File { .. } => {}
         }
     }
 
