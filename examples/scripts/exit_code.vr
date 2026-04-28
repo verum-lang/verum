@@ -1,0 +1,13 @@
+#!/usr/bin/env verum
+//
+// exit_code.vr — script exit-code semantics.
+//
+// Demonstrates: tail-Int expression becomes the process exit code.
+// The value `42` at the bottom of this file is what the OS sees.
+//
+// Run:
+//   verum exit_code.vr; echo $?    # prints "from script\n42"
+
+print("from script");
+
+42

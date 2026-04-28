@@ -1,0 +1,21 @@
+#!/usr/bin/env verum
+//
+// refinement.vr — refinement types in a one-file script.
+//
+// Demonstrates: a refinement type (`Port`) constrained to the
+// non-privileged TCP range checked at compile time by the SMT
+// solver, then reused by a tiny utility function.
+//
+// Run:
+//   verum refinement.vr
+
+type Port is Int { 1024 <= self && self <= 65535 };
+
+fn describe(p: Port) -> Text {
+    if p < 8000 { "user-range" }
+    else if p < 49152 { "registered" }
+    else { "dynamic" }
+}
+
+let port: Port = 8080;
+print(f"port {port}: {describe(port)}");

@@ -1,0 +1,18 @@
+#!/usr/bin/env verum
+// /// script
+// verum = ">=0.1.0"
+// edition = "2026"
+// ///
+//
+// with_frontmatter.vr — PEP-723-style inline metadata block.
+//
+// Demonstrates: the `// /// script` block declares a minimum compiler
+// version. Scripts that require a newer Verum produce a clear
+// actionable error before the pipeline even loads stdlib. The
+// permissions / dependencies fields are documented in the schema and
+// land alongside their respective enforcement work.
+//
+// Run:
+//   verum with_frontmatter.vr
+
+print("frontmatter parsed and version checked");
