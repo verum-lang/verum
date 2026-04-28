@@ -1834,6 +1834,14 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
     // ground truth.
     let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
     let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    // Per-item @verify(...) strategy. The strategy lifts the framework's
+    // ν-coordinate per VVA §2.3 (`runtime` ↦ 0 / `static` ↦ 1 / `fast` ↦ 2 /
+    // `formal` ↦ ω / `proof` ↦ ω+1 / `thorough` ↦ ω·2 / `reliable` ↦ ω·2+1 /
+    // `certified` ↦ ω·2+2 / `synthesize` ↦ ≤ω·3+1). Theorem-level ν is
+    // max(framework_nu, verify_nu); without `@verify(...)` we project to
+    // the framework's bare ν (axiom-postulated case).
+    let mut verify_by_item: BTreeMap<(PathBuf, Text, &'static str), Text> =
+        BTreeMap::new();
     let mut parsed_files = 0usize;
     let mut skipped_files = 0usize;
 
@@ -1887,6 +1895,17 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
                 &mut by_framework,
                 &mut malformed,
             );
+            // Capture `@verify(...)` strategy per item — strictest mode
+            // wins when multiple are declared (e.g. `@verify(formal +
+            // proof)` lifts to `proof`).
+            if let Some(strategy) =
+                strictest_verify_strategy(&item.attributes, decl_attrs)
+            {
+                verify_by_item.insert(
+                    (rel_path.clone(), item_name.clone(), kind_label),
+                    strategy,
+                );
+            }
         }
     }
 
@@ -1895,22 +1914,83 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
             parsed_files,
             skipped_files,
             &by_framework,
+            &verify_by_item,
             &malformed,
         ),
         AuditFormat::Json => print_coord_report_json(
             parsed_files,
             skipped_files,
             &by_framework,
+            &verify_by_item,
             &malformed,
         ),
     }
     Ok(())
 }
 
+/// Map `@verify(<strategy>)` to its ν-ordinal per VVA §2.3.
+/// Returns `CliOrdinal::finite(0)` for unknown / `runtime`.
+fn verify_strategy_ordinal(strategy: &str) -> CliOrdinal {
+    match strategy {
+        "runtime"           => CliOrdinal::finite(0),
+        "static"            => CliOrdinal::finite(1),
+        "fast"              => CliOrdinal::finite(2),
+        "complexity_typed"  => CliOrdinal::finite(2),
+        "formal"            => CliOrdinal::omega(),
+        "proof"             => CliOrdinal::omega_plus(1),
+        "thorough"          => CliOrdinal { omega_coeff: 2, finite_offset: 0 },
+        "reliable"          => CliOrdinal { omega_coeff: 2, finite_offset: 1 },
+        "certified"         => CliOrdinal { omega_coeff: 2, finite_offset: 2 },
+        "coherent_static"   => CliOrdinal::omega(),
+        "coherent_runtime"  => CliOrdinal::finite(0),
+        "coherent"          => CliOrdinal::omega_plus(1),
+        "synthesize"        => CliOrdinal { omega_coeff: 3, finite_offset: 1 },
+        "assume"            => CliOrdinal::finite(0),
+        _                   => CliOrdinal::finite(0),
+    }
+}
+
+/// Pick the strictest (lex-maximum) `@verify(...)` strategy from the
+/// item's attribute lists. Returns `None` if no `@verify(...)` is
+/// declared. Strictness is the same lex ordering used for the
+/// per-theorem ν projection (`verify_strategy_ordinal`).
+fn strictest_verify_strategy(
+    item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+) -> Option<Text> {
+    use verum_ast::attr::{FromAttribute, VerifyAttr};
+    let mut best: Option<(CliOrdinal, Text)> = None;
+    for attrs in [item_attrs, decl_attrs] {
+        for attr in attrs.iter() {
+            if !attr.is_named("verify") {
+                continue;
+            }
+            let Ok(verify) = VerifyAttr::from_attribute(attr) else {
+                continue;
+            };
+            for mode in verify.modes.iter() {
+                let label = mode.as_str();
+                let ord = verify_strategy_ordinal(label);
+                let label_text = Text::from(label);
+                match &best {
+                    Some((best_ord, _)) => {
+                        if best_ord.lt(&ord) {
+                            best = Some((ord, label_text));
+                        }
+                    }
+                    None => best = Some((ord, label_text)),
+                }
+            }
+        }
+    }
+    best.map(|(_, label)| label)
+}
+
 fn print_coord_report(
     parsed_files: usize,
     skipped_files: usize,
     by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    verify_by_item: &BTreeMap<(PathBuf, Text, &'static str), Text>,
     malformed: &[(PathBuf, Text)],
 ) {
     println!();
@@ -1968,20 +2048,28 @@ fn print_coord_report(
 
     // per-theorem inferred-coordinate section.
     // For each theorem/lemma/corollary, the inferred (Fw, ν, τ)
-    // is the **max-of-cited-coords**: the lex-maximum over all
-    // framework-coordinates cited via @framework annotations on
-    // the item.
-    let per_theorem = invert_to_per_theorem(by_framework);
+    // is the **max-of-cited-coords + lifted by @verify**:
+    //   * framework_nu = max over all `@framework(name, ...)` markers
+    //   * verify_nu    = ν of the strictest `@verify(strategy)` (VVA §2.3)
+    //   * theorem_nu   = max(framework_nu, verify_nu)
+    // `@verify(formal)` is precisely what lifts an axiom-postulated
+    // theorem from ν=0 (paper-cited) to ν=ω (machine-checked SMT).
+    let per_theorem = invert_to_per_theorem(by_framework, verify_by_item);
     if !per_theorem.is_empty() {
         println!();
         println!(
-            "  {} Per-theorem inferred coordinates (max of cited frameworks):",
+            "  {} Per-theorem inferred coordinates (max of cited frameworks ⊔ @verify):",
             "▸".green().bold()
         );
         println!();
         for entry in &per_theorem {
+            let verify_label: &str = entry
+                .verify_strategy
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or("—");
             println!(
-                "    {} {} {}  →  ({}, ν={}, {}τ)  [{} cit{}]  {}",
+                "    {} {} {}  →  ({}, ν={}, {}τ)  [verify={}]  [{} cit{}]  {}",
                 "·".dimmed(),
                 entry.item_kind,
                 entry.item_name.as_str().cyan(),
@@ -1992,6 +2080,7 @@ fn print_coord_report(
                 } else {
                     "extensional-"
                 },
+                verify_label,
                 entry.frameworks_cited.len(),
                 if entry.frameworks_cited.len() == 1 { "" } else { "s" },
                 entry.file.display()
@@ -2020,6 +2109,7 @@ fn print_coord_report(
 /// list (by item_name) of inferred coordinates.
 fn invert_to_per_theorem(
     by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    verify_by_item: &BTreeMap<(PathBuf, Text, &'static str), Text>,
 ) -> Vec<PerTheoremCoord> {
     use std::collections::BTreeMap as Map;
     // Group cited frameworks by (file, item_name, item_kind).
@@ -2053,7 +2143,25 @@ fn invert_to_per_theorem(
                     }
                 }
             }
-            let (inferred_fw, inferred_nu, inferred_tau) = best.unwrap();
+            let (inferred_fw, framework_nu, inferred_tau) = best.unwrap();
+            // Lift the framework ν by `@verify(...)` strategy if any —
+            // `@verify(formal)` raises an axiom-postulated theorem to
+            // ν=ω even though its frameworks may carry no ν of their
+            // own. The lift is monotone: theorem_nu = max(framework_nu,
+            // verify_nu).
+            let key = (file.clone(), item_name.clone(), item_kind);
+            let verify_strategy = verify_by_item.get(&key).cloned();
+            let inferred_nu = match &verify_strategy {
+                Some(strategy) => {
+                    let verify_nu = verify_strategy_ordinal(strategy.as_str());
+                    if framework_nu.lt(&verify_nu) {
+                        verify_nu
+                    } else {
+                        framework_nu
+                    }
+                }
+                None => framework_nu,
+            };
             PerTheoremCoord {
                 file,
                 item_name,
@@ -2062,6 +2170,7 @@ fn invert_to_per_theorem(
                 inferred_nu,
                 inferred_tau,
                 frameworks_cited,
+                verify_strategy,
             }
         })
         .collect();
@@ -2085,17 +2194,22 @@ struct PerTheoremCoord {
     inferred_nu: CliOrdinal,
     inferred_tau: bool,
     frameworks_cited: Vec<Text>,
+    /// Strictest `@verify(...)` strategy declared on the item,
+    /// `None` if the item has no `@verify` annotation. The strategy
+    /// lifts `inferred_nu` via VVA §2.3 (per `verify_strategy_ordinal`).
+    verify_strategy: Option<Text>,
 }
 
 fn print_coord_report_json(
     parsed_files: usize,
     skipped_files: usize,
     by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    verify_by_item: &BTreeMap<(PathBuf, Text, &'static str), Text>,
     malformed: &[(PathBuf, Text)],
 ) {
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str("  \"schema_version\": 2,\n");
     out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
     out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
     out.push_str("  \"frameworks\": [\n");
@@ -2147,6 +2261,61 @@ fn print_coord_report_json(
         }
         out.push_str("      ]\n");
         out.push_str(if i + 1 == total_fw { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ],\n");
+    // Per-theorem inferred coordinates (schema_version 2 — adds the
+    // `verify_strategy` field and the lifted `inferred_nu` from VVA §2.3).
+    let per_theorem = invert_to_per_theorem(by_framework, verify_by_item);
+    out.push_str("  \"per_theorem\": [\n");
+    let total_pt = per_theorem.len();
+    for (i, entry) in per_theorem.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"item_kind\": \"{}\",\n",
+            entry.item_kind
+        ));
+        out.push_str(&format!(
+            "      \"item_name\": \"{}\",\n",
+            json_escape(entry.item_name.as_str())
+        ));
+        out.push_str(&format!(
+            "      \"file\": \"{}\",\n",
+            json_escape(&entry.file.display().to_string())
+        ));
+        out.push_str(&format!(
+            "      \"inferred_framework\": \"{}\",\n",
+            json_escape(entry.inferred_fw.as_str())
+        ));
+        out.push_str(&format!(
+            "      \"inferred_nu\": \"{}\",\n",
+            json_escape(&entry.inferred_nu.render())
+        ));
+        out.push_str(&format!(
+            "      \"inferred_nu_omega_coefficient\": {},\n",
+            entry.inferred_nu.omega_coeff
+        ));
+        out.push_str(&format!(
+            "      \"inferred_nu_finite_offset\": {},\n",
+            entry.inferred_nu.finite_offset
+        ));
+        out.push_str(&format!(
+            "      \"inferred_tau\": {},\n",
+            entry.inferred_tau
+        ));
+        match &entry.verify_strategy {
+            Some(strategy) => out.push_str(&format!(
+                "      \"verify_strategy\": \"{}\",\n",
+                json_escape(strategy.as_str())
+            )),
+            None => out.push_str("      \"verify_strategy\": null,\n"),
+        }
+        out.push_str("      \"frameworks_cited\": [");
+        for (j, fw) in entry.frameworks_cited.iter().enumerate() {
+            if j > 0 { out.push_str(", "); }
+            out.push_str(&format!("\"{}\"", json_escape(fw.as_str())));
+        }
+        out.push_str("]\n");
+        out.push_str(if i + 1 == total_pt { "    }\n" } else { "    },\n" });
     }
     out.push_str("  ],\n");
     out.push_str("  \"malformed\": [\n");
