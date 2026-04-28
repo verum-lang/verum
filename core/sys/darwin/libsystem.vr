@@ -1776,8 +1776,9 @@ public fn safe_listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
     }
 }
 
-/// Accept a connection (safe wrapper)
-public fn safe_accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<FileDesc, OSError> {
+/// Accept a connection (safe wrapper).
+/// `addr_len` is `socklen_t *` (UInt32 on Darwin). Phase 4 wrapper migration.
+public fn safe_accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<FileDesc, OSError> {
     let result = unsafe {
         accept(fd.0, addr_buf.as_mut_ptr() as &unsafe Byte, addr_len)
     };
@@ -1842,13 +1843,20 @@ public fn safe_sendto(
     }
 }
 
-/// Receive data with source address (safe wrapper)
+/// Receive data with source address (safe wrapper).
+///
+/// `addr_len` is `socklen_t *` (UInt32 on Darwin). T0.4.2 Phase 4
+/// migrated the wrapper signature to match the underlying `recvfrom_ffi`
+/// extern declaration; previously the wrapper took `&mut Int` and the
+/// kernel's 4-byte write left the high half uninitialized in Verum
+/// storage. `addr_len.0 as Int` at the slice-indexing site preserves
+/// the existing caller pattern.
 public fn safe_recvfrom(
     fd: FileDesc,
     buf: &mut [Byte],
     flags: Int,
     src_addr: &mut [Byte],
-    addr_len: &mut Int
+    addr_len: &mut UInt32
 ) -> Result<Int, OSError> {
     let buf_ptr: &unsafe Byte = transmute(buf);
     let buf_len = buf.len();
@@ -1887,13 +1895,16 @@ public fn safe_setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int
     safe_setsockopt(fd, level, optname, &val as &unsafe Byte, 4)
 }
 
-/// Get a socket option (safe wrapper)
+/// Get a socket option (safe wrapper).
+///
+/// `optlen` is `socklen_t *` (UInt32 on Darwin) — T0.4.2 Phase 4 wrapper
+/// migration to match `getsockopt`'s `&mut UInt32` extern declaration.
 public fn safe_getsockopt(
     fd: FileDesc,
     level: Int,
     optname: Int,
     optval: &mut [Byte],
-    optlen: &mut Int
+    optlen: &mut UInt32
 ) -> Result<(), OSError> {
     let result = unsafe {
         getsockopt(fd.0, level, optname, optval.as_mut_ptr() as &unsafe Byte, optlen)
@@ -1906,10 +1917,10 @@ public fn safe_getsockopt(
     }
 }
 
-/// Get socket error (convenience wrapper)
+/// Get socket error (convenience wrapper).
 public fn safe_getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
     let mut buf = [0_u8; 4];
-    let mut len = 4;
+    let mut len: UInt32 = 4;
     safe_getsockopt(fd, SOL_SOCKET, SO_ERROR, &mut buf, &mut len)?;
     let error = (buf[0] as Int) | ((buf[1] as Int) << 8) |
                 ((buf[2] as Int) << 16) | ((buf[3] as Int) << 24);
@@ -1927,8 +1938,11 @@ public fn safe_shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
     }
 }
 
-/// Get local socket address (safe wrapper)
-public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+/// Get local socket address (safe wrapper).
+///
+/// `addr_len` is `socklen_t *` (UInt32 on Darwin) — T0.4.2 Phase 4
+/// wrapper migration to match the `getsockname` extern declaration.
+public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<(), OSError> {
     let result = unsafe {
         getsockname(fd.0, addr_buf.as_mut_ptr() as &unsafe Byte, addr_len)
     };
@@ -1940,8 +1954,9 @@ public fn safe_getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut I
     }
 }
 
-/// Get peer socket address (safe wrapper)
-public fn safe_getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+/// Get peer socket address (safe wrapper). Same socklen_t* invariant
+/// as `safe_getsockname`.
+public fn safe_getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<(), OSError> {
     let result = unsafe {
         getpeername(fd.0, addr_buf.as_mut_ptr() as &unsafe Byte, addr_len)
     };

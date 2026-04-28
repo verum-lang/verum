@@ -1182,13 +1182,14 @@ public fn listen(fd: FileDesc, backlog: Int) -> Result<(), OSError> {
 
 /// Accept a connection on a socket.
 /// Returns the new socket file descriptor and fills addr_buf with peer address.
-public fn accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<FileDesc, OSError> {
+/// `addr_len` is `socklen_t *` (UInt32) — Phase 4 wrapper migration.
+public fn accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<FileDesc, OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_ACCEPT,
             fd.as_raw(),
             addr_buf.as_ptr() as Int,
-            addr_len as &mut Int as Int,
+            addr_len as &mut UInt32 as Int,
             0, 0, 0
         )
     };
@@ -1201,13 +1202,14 @@ public fn accept(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Res
 }
 
 /// Accept a connection with flags (accept4).
-public fn accept4(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int, flags: Int) -> Result<FileDesc, OSError> {
+/// `addr_len` is `socklen_t *` (UInt32). Phase 4 wrapper migration.
+public fn accept4(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32, flags: Int) -> Result<FileDesc, OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_ACCEPT4,
             fd.as_raw(),
             addr_buf.as_ptr() as Int,
-            addr_len as &mut Int as Int,
+            addr_len as &mut UInt32 as Int,
             flags,
             0, 0
         )
@@ -1253,12 +1255,13 @@ public fn send(fd: FileDesc, buf: &[Byte], flags: Int) -> Result<Int, OSError> {
 }
 
 /// Receive data from a socket.
+/// `addr_len` is `socklen_t *` (UInt32). Phase 4 wrapper migration.
 public fn recvfrom(
     fd: FileDesc,
     buf: &mut [Byte],
     flags: Int,
     src_addr: &mut [Byte],
-    addr_len: &mut Int
+    addr_len: &mut UInt32
 ) -> Result<Int, OSError> {
     let result = unsafe {
         syscall_raw(
@@ -1268,7 +1271,7 @@ public fn recvfrom(
             buf.len(),
             flags,
             src_addr.as_ptr() as Int,
-            addr_len as &mut Int as Int
+            addr_len as &mut UInt32 as Int
         )
     };
 
@@ -1282,7 +1285,7 @@ public fn recvfrom(
 /// Receive data from a connected socket.
 public fn recv(fd: FileDesc, buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
     let mut dummy_addr = [0_u8; 1];
-    let mut dummy_len = 0;
+    let mut dummy_len: UInt32 = 0;
     recvfrom(fd, buf, flags, &mut dummy_addr, &mut dummy_len)
 }
 
@@ -1320,12 +1323,13 @@ public fn setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> 
 }
 
 /// Get a socket option.
+/// `optlen` is `socklen_t *` (UInt32). Phase 4 wrapper migration.
 public fn getsockopt(
     fd: FileDesc,
     level: Int,
     optname: Int,
     optval: &mut [Byte],
-    optlen: &mut Int
+    optlen: &mut UInt32
 ) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
@@ -1334,7 +1338,7 @@ public fn getsockopt(
             level,
             optname,
             optval.as_ptr() as Int,
-            optlen as &mut Int as Int,
+            optlen as &mut UInt32 as Int,
             0
         )
     };
@@ -1349,7 +1353,7 @@ public fn getsockopt(
 /// Get socket error.
 public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
     let mut err: Int32 = 0;
-    let mut len = 4;
+    let mut len: UInt32 = 4;
     let mut buf = [0_u8; 4];
     getsockopt(fd, SOL_SOCKET, SO_ERROR, &mut buf, &mut len)?;
 
@@ -1373,13 +1377,21 @@ public fn shutdown(fd: FileDesc, how: Int) -> Result<(), OSError> {
 }
 
 /// Get socket name (local address).
-public fn getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+///
+/// `addr_len` is `socklen_t *` (UInt32 on Linux glibc). T0.4.2 Phase 4
+/// wrapper migration — the kernel writes 4 bytes through this pointer,
+/// so an `&mut Int` (i64*) would leave the high 4 bytes uninitialized
+/// (or stale) after the syscall. Migrated to `&mut UInt32` for ABI
+/// honesty; the syscall_raw bridge still passes the address as a raw
+/// `Int`, the kernel reads 4 bytes from it as documented by the
+/// syscall ABI.
+public fn getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_GETSOCKNAME,
             fd.as_raw(),
             addr_buf.as_ptr() as Int,
-            addr_len as &mut Int as Int,
+            addr_len as &mut UInt32 as Int,
             0, 0, 0
         )
     };
@@ -1391,14 +1403,15 @@ public fn getsockname(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -
     }
 }
 
-/// Get peer name (remote address).
-public fn getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut Int) -> Result<(), OSError> {
+/// Get peer name (remote address). Same socklen_t* invariant as
+/// `getsockname` — `addr_len: &mut UInt32`.
+public fn getpeername(fd: FileDesc, addr_buf: &mut [Byte], addr_len: &mut UInt32) -> Result<(), OSError> {
     let result = unsafe {
         syscall_raw(
             SYS_GETPEERNAME,
             fd.as_raw(),
             addr_buf.as_ptr() as Int,
-            addr_len as &mut Int as Int,
+            addr_len as &mut UInt32 as Int,
             0, 0, 0
         )
     };

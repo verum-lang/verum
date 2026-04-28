@@ -316,7 +316,7 @@ implement UdpSocket {
     /// ```
     public fn recv_from(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
         let mut addr_buf = [0_u8; 128];
-        let mut addr_len: Int = 128;
+        let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let n = recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len)
@@ -433,7 +433,7 @@ implement UdpSocket {
     /// Useful for checking message size or type before full receive.
     public fn peek_from(&self, buf: &mut [Byte]) -> Result<(Int, SocketAddr), IoError> {
         let mut addr_buf = [0_u8; 128];
-        let mut addr_len: Int = 128;
+        let mut addr_len: UInt32 = 128;
 
         @cfg(any(target_os = "linux", target_os = "windows"))
         let n = recvfrom(self.fd, buf, MSG_PEEK, &mut addr_buf, &mut addr_len)
@@ -784,7 +784,7 @@ implement UdpSocket {
 
         loop {
             let mut addr_buf = [0_u8; 128];
-            let mut addr_len: Int = 128;
+            let mut addr_len: UInt32 = 128;
 
             @cfg(any(target_os = "linux", target_os = "windows"))
             let result = recvfrom(self.fd, buf, 0, &mut addr_buf, &mut addr_len);
