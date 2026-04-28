@@ -715,7 +715,25 @@ fn plan_from_for_select(
                 JInner | JCross => (lt_orig, rt_orig, false),
                 JLeftOuter      => (lt_orig, rt_orig, true),
                 JRightOuter     => (rt_orig, lt_orig, true),
-                _ => { return Err(plan_error("FULL OUTER JOIN pending in v1".clone())); }
+                JFullOuter => {
+                    // FULL OUTER JOIN A B ON c is logically equivalent to
+                    //   (A LEFT JOIN B ON c) UNION ALL
+                    //   (B LEFT JOIN A ON c WHERE A.<key> IS NULL)
+                    // i.e. all left-anchored rows plus the right-anchored
+                    // rows that have no left match.  The plan-rewrite needs
+                    // a PnProject after the swapped LEFT JOIN to align the
+                    // column shape — non-trivial because the join's column
+                    // scopes are computed AFTER this match-arm.  Tracked
+                    // separately as SQL-2 follow-up; reject with the
+                    // workaround SQL spelled out so the caller can apply
+                    // it inline.
+                    return Err(plan_error(
+                        "FULL OUTER JOIN not yet supported — rewrite as: \
+                         (A LEFT JOIN B ON …) UNION ALL \
+                         (B LEFT JOIN A ON … WHERE A.<key> IS NULL)".clone()
+                    ));
+                }
+                _ => { return Err(plan_error("unrecognised JOIN kind".clone())); }
             };
             let lmeta = match schema.lookup_table(&lt.schema, &lt.name) {
                 Ok(m)  => m,
