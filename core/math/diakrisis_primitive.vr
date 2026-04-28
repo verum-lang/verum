@@ -1,0 +1,337 @@
+// =============================================================================
+// Diakrisis canonical primitive — carrier protocol for Axi-0..9 + T-α / T-2f*
+// =============================================================================
+//
+// Source: A. Sereda, Diakrisis preprint, §02-canonical-primitive/02-axiomatics.md.
+//
+// Diakrisis's canonical primitive is the 4-tuple `(⟪⟫, α_math, ρ, 𝖬)`
+// satisfying 10 base axioms (Axi-0..9) plus 3 derived primitives (T-α / T-2f*).
+//
+// **Architectural role of this module (M0.I/M1.F).** Pre-M0.I the 13 axioms
+// of `theorems/diakrisis/02_canonical_primitive/axiomatics.vr` and the 45
+// foundational theorems of `theorems/diakrisis/03_formal_architecture/`
+// were all `() -> Bool ensures true` placeholders. Without a carrier
+// protocol there's no way to express the inductive content of the axioms
+// — every axiom said only "I exist" not "this primitive satisfies this
+// property".
+//
+// This module introduces:
+//
+//   • `DiakrisisPrimitive` — single witness protocol exposing one Bool
+//     accessor per axiomatic content claim. The protocol is the kernel-
+//     visible projection of the 4-tuple `(⟪⟫, α_math, ρ, 𝖬)`'s structural
+//     properties; concrete instances (test fixtures, downstream theorems)
+//     supply the witnesses, and Axi-N axioms assert their existence /
+//     content via the protocol's accessors.
+//
+//   • `RefinedDiakrisisPrimitive` — refinement-typed record companion
+//     with depth-stratification rank `Int{0..=3}` (depth of T-2f* /
+//     T-α as introduced in §A.Z + the M1.B closure-depth bookkeeping).
+//
+// Downstream the corpus's `diakrisis_axi_N_*` axioms are restated as
+// witness-parameterised forms taking `&DiakrisisPrimitive` and asserting
+// `result.<accessor>()` — see M0.I follow-up.
+// =============================================================================
+
+module core.math.diakrisis_primitive;
+
+// =============================================================================
+// Carrier protocol — DiakrisisPrimitive
+// =============================================================================
+
+/// Witness of the Diakrisis canonical-primitive 4-tuple
+/// `(⟪⟫, α_math, ρ, 𝖬)`. Each accessor projects ONE structural
+/// property the corresponding Axi-N axiom asserts. Concrete instances
+/// (downstream theorem witnesses, test fixtures, Verum-side
+/// reconstructions) provide the implementations; the kernel uses the
+/// accessors to recheck every axis-N citation site.
+///
+/// The accessors are intentionally unnumbered-by-name (semantic flag
+/// rather than `axi_2_witness()`) so a single witness can simultaneously
+/// satisfy multiple axioms without naming-collision when downstream code
+/// treats them as compositional invariants.
+public type DiakrisisPrimitive is protocol {
+    // ─────────────────────────────────────────────────────────────────
+    // Base layer (Axi-0..3) — existence + 2-categorical structure
+    // ─────────────────────────────────────────────────────────────────
+
+    /// **Axi-0** witness: `⟪⟫ ≠ ∅` (the articulation 2-category is
+    /// non-empty).
+    fn articulation_2_cat_non_empty(self) -> Bool;
+
+    /// **Axi-1** witness: `⟪⟫` is a *locally-small* 2-category.
+    fn articulation_2_cat_locally_small(self) -> Bool;
+
+    /// **Axi-1** witness: `⟪⟫` is *internally closed* (Cartesian
+    /// closure on End — endo-operations of `⟪⟫` are themselves
+    /// representable inside `⟪⟫`).
+    fn articulation_2_cat_internally_closed(self) -> Bool;
+
+    /// **Axi-2** witness: `𝖬 ∈ End(⟪⟫)` is a 2-functor (the
+    /// M-operator carries 2-functorial structure).
+    fn m_is_2_functor(self) -> Bool;
+
+    /// **Axi-2** witness: the canonical M-representative `α_𝖬 := ι(𝖬)`
+    /// exists in `⟪⟫` (witnessed via Axi-1 internal closure applied
+    /// to the 2-functor `𝖬`).
+    fn alpha_m_canonical_representative(self) -> Bool;
+
+    /// **Axi-3** witness: a *distinguished* `α_math ∈ ⟪⟫` exists
+    /// (canonical mathematical-articulation primitive — strictly
+    /// stronger than Axi-0's bare non-emptiness).
+    fn alpha_math_distinguished_object(self) -> Bool;
+
+    // ─────────────────────────────────────────────────────────────────
+    // Realisation layer (Axi-4..9)
+    // ─────────────────────────────────────────────────────────────────
+
+    /// **Axi-4** witness: ρ : ⟪⟫ → ⟪⟫^op is realised through the
+    /// internal hom of `⟪⟫`.
+    fn rho_via_internal_hom(self) -> Bool;
+
+    /// **Axi-4** witness: `𝖬` is **λ-accessible** for some regular
+    /// cardinal λ (Adámek-Rosický 1994 prerequisite for Fix(𝖬)
+    /// existence at limit ordinals).
+    fn m_lambda_accessible(self) -> Bool;
+
+    /// **Axi-5** witness: ρ is non-trivial (∃ α, β ∈ ⟪⟫ with
+    /// `ρ(α) ≄ ρ(β)`). Without Axi-5 ρ would collapse all
+    /// articulations into one.
+    fn rho_nontrivial(self) -> Bool;
+
+    /// **Axi-6** witness: `ρ ∘ 𝖬 ≄ ρ` (𝖬-action visible through ρ).
+    /// Guarantees 𝖬 is *content-bearing*.
+    fn rho_after_m_distinguishable(self) -> Bool;
+
+    /// **Axi-7** witness: self-articulability via `α_𝖬 = ι(𝖬)` (M-5w).
+    fn m_self_articulable(self) -> Bool;
+
+    /// **Axi-8** witness: `α_𝖬` is *non-Yoneda-representable* in any
+    /// LP-model — the property that grounds the no-collapse argument
+    /// of Diakrisis 14.T2.
+    fn alpha_m_non_yoneda_representable(self) -> Bool;
+
+    /// **Axi-9** witness: AC/OC duality premise — canonical M ⊣ A
+    /// biadjunction between articulation and enactment 2-categories
+    /// (= Diakrisis 108.T premise).
+    fn m_a_biadjunction_witness(self) -> Bool;
+
+    // ─────────────────────────────────────────────────────────────────
+    // Extension layer (T-α / T-2f*) — depth-stratification primitives
+    // ─────────────────────────────────────────────────────────────────
+
+    /// **T-α** witness: depth function `α-rank : Ord(⟪⟫) → ω·k` for
+    /// some `k ≤ ω·3+1` (per VVA §3 ladder upper bound).
+    fn t_alpha_depth_function_present(self) -> Bool;
+
+    /// **T-2f*** witness: comprehension-by-predicate stratification
+    /// — selection of `α` by predicate `P` is admissible iff every
+    /// `M / ⊏•` occurrence in `P` sits at a strictly smaller depth.
+    /// The kernel-side realisation is K-Refine in core/math/strata
+    /// + verum_kernel.
+    fn t_2f_star_stratified_comprehension(self) -> Bool;
+};
+
+// =============================================================================
+// Refinement-typed companion — RefinedDiakrisisPrimitive
+// =============================================================================
+
+/// Refinement-typed record companion to `DiakrisisPrimitive`. Carries
+/// the **depth-stratification rank** as an inline-refined `Int{>= 0}`
+/// (K-Refine-checked at construction). The flag fields mirror the
+/// protocol accessors as Bools.
+///
+/// VVA §2.2 / §5 — three-form refinement; this record is the inline
+/// form, K-Refine validates `t_alpha_rank >= 0` at construction.
+public type RefinedDiakrisisPrimitive is {
+    t_alpha_rank: Int{>= 0},
+    articulation_2_cat_non_empty: Bool,
+    articulation_2_cat_locally_small: Bool,
+    articulation_2_cat_internally_closed: Bool,
+    m_is_2_functor: Bool,
+    alpha_m_canonical_representative: Bool,
+    alpha_math_distinguished_object: Bool,
+    rho_via_internal_hom: Bool,
+    m_lambda_accessible: Bool,
+    rho_nontrivial: Bool,
+    rho_after_m_distinguishable: Bool,
+    m_self_articulable: Bool,
+    alpha_m_non_yoneda_representable: Bool,
+    m_a_biadjunction_witness: Bool,
+    t_alpha_depth_function_present: Bool,
+    t_2f_star_stratified_comprehension: Bool,
+};
+
+/// Joint-base predicate (Axi-0..3 satisfaction over a refinement-typed
+/// witness). Convenience aggregator for downstream theorems that need
+/// the base layer without naming each flag.
+public pure fn diakrisis_base_layer_predicate(p: &RefinedDiakrisisPrimitive) -> Bool {
+    p.articulation_2_cat_non_empty
+        && p.articulation_2_cat_locally_small
+        && p.articulation_2_cat_internally_closed
+        && p.m_is_2_functor
+        && p.alpha_m_canonical_representative
+        && p.alpha_math_distinguished_object
+}
+
+/// Joint-realisation predicate (Axi-4..9 satisfaction over a
+/// refinement-typed witness).
+public pure fn diakrisis_realisation_layer_predicate(p: &RefinedDiakrisisPrimitive) -> Bool {
+    p.rho_via_internal_hom
+        && p.m_lambda_accessible
+        && p.rho_nontrivial
+        && p.rho_after_m_distinguishable
+        && p.m_self_articulable
+        && p.alpha_m_non_yoneda_representable
+        && p.m_a_biadjunction_witness
+}
+
+/// Joint-extension predicate (T-α + T-2f* satisfaction over a
+/// refinement-typed witness).
+public pure fn diakrisis_extension_layer_predicate(p: &RefinedDiakrisisPrimitive) -> Bool {
+    p.t_alpha_depth_function_present
+        && p.t_2f_star_stratified_comprehension
+}
+
+/// Full canonical-primitive satisfaction predicate. A
+/// `RefinedDiakrisisPrimitive` saturating this predicate witnesses
+/// the entire Axi-0..9 + T-α + T-2f* axiomatic shape.
+public pure fn diakrisis_canonical_primitive_predicate(p: &RefinedDiakrisisPrimitive) -> Bool {
+    diakrisis_base_layer_predicate(p)
+        && diakrisis_realisation_layer_predicate(p)
+        && diakrisis_extension_layer_predicate(p)
+}
+
+/// **MSFS / Diakrisis — refinement-typed depth invariant (@theorem).**
+/// `t_alpha_rank` of any `RefinedDiakrisisPrimitive` is non-negative
+/// by K-Refine (the field's inline refinement is checked at
+/// construction). The kernel needs no premise to deduce this — the
+/// type itself encodes the invariant.
+@verify(static)
+@accessibility(omega_0)
+@enact(epsilon = "ε_prove")
+@framework(diakrisis, "Diakrisis T-α — refinement-typed depth-rank ≥ 0 by K-Refine construction")
+public theorem diakrisis_refined_t_alpha_rank_nonneg(p: &RefinedDiakrisisPrimitive)
+    ensures p.t_alpha_rank >= 0;
+
+// =============================================================================
+// Canonical reference instance — CanonicalDiakrisisPrimitive (M3.A)
+// =============================================================================
+//
+// The protocol surface above declares the *shape* of a Diakrisis
+// canonical-primitive witness; this section ships the canonical
+// reference *instance* that satisfies all 15 accessor flags. Every
+// downstream theorem parameterised on `&DiakrisisPrimitive` becomes
+// directly invocable against `canonical_diakrisis_primitive()` —
+// integration tests, smoke tests, and end-user code now have a
+// working witness without each caller having to roll their own.
+//
+// The flags are all `true` because the canonical primitive is the
+// reference *satisfaction* model — the existence claim of the
+// 4-tuple `(⟪⟫, α_math, ρ, 𝖬)` per Axi-0..9 + T-α + T-2f* is
+// satisfied by construction. The α-rank of the canonical primitive
+// is `t_alpha_rank = 3` per Diakrisis 142.T (UHM articulation reaches
+// ω·3 + 1; finite-coordinate projection is 3).
+
+/// Canonical reference Diakrisis primitive — record-shape carrier
+/// satisfying every accessor of `DiakrisisPrimitive`. Drop-in instance
+/// for theorem invocation, smoke tests, and downstream integration.
+@derive(Clone)
+public type CanonicalDiakrisisPrimitive is {
+    // Base layer (Axi-0..3) — all `true` by construction (canonical
+    // primitive is the existence-witness for the 4-tuple).
+    base_articulation_2_cat_non_empty: Bool,
+    base_articulation_2_cat_locally_small: Bool,
+    base_articulation_2_cat_internally_closed: Bool,
+    base_m_is_2_functor: Bool,
+    base_alpha_m_canonical_representative: Bool,
+    base_alpha_math_distinguished_object: Bool,
+    // Realisation layer (Axi-4..9).
+    real_rho_via_internal_hom: Bool,
+    real_m_lambda_accessible: Bool,
+    real_rho_nontrivial: Bool,
+    real_rho_after_m_distinguishable: Bool,
+    real_m_self_articulable: Bool,
+    real_alpha_m_non_yoneda_representable: Bool,
+    real_m_a_biadjunction_witness: Bool,
+    // Extension layer (T-α + T-2f*).
+    ext_t_alpha_depth_function_present: Bool,
+    ext_t_2f_star_stratified_comprehension: Bool,
+};
+
+implement DiakrisisPrimitive for CanonicalDiakrisisPrimitive {
+    fn articulation_2_cat_non_empty(self) -> Bool { self.base_articulation_2_cat_non_empty }
+    fn articulation_2_cat_locally_small(self) -> Bool { self.base_articulation_2_cat_locally_small }
+    fn articulation_2_cat_internally_closed(self) -> Bool { self.base_articulation_2_cat_internally_closed }
+    fn m_is_2_functor(self) -> Bool { self.base_m_is_2_functor }
+    fn alpha_m_canonical_representative(self) -> Bool { self.base_alpha_m_canonical_representative }
+    fn alpha_math_distinguished_object(self) -> Bool { self.base_alpha_math_distinguished_object }
+    fn rho_via_internal_hom(self) -> Bool { self.real_rho_via_internal_hom }
+    fn m_lambda_accessible(self) -> Bool { self.real_m_lambda_accessible }
+    fn rho_nontrivial(self) -> Bool { self.real_rho_nontrivial }
+    fn rho_after_m_distinguishable(self) -> Bool { self.real_rho_after_m_distinguishable }
+    fn m_self_articulable(self) -> Bool { self.real_m_self_articulable }
+    fn alpha_m_non_yoneda_representable(self) -> Bool { self.real_alpha_m_non_yoneda_representable }
+    fn m_a_biadjunction_witness(self) -> Bool { self.real_m_a_biadjunction_witness }
+    fn t_alpha_depth_function_present(self) -> Bool { self.ext_t_alpha_depth_function_present }
+    fn t_2f_star_stratified_comprehension(self) -> Bool { self.ext_t_2f_star_stratified_comprehension }
+}
+
+/// Smart constructor — build the canonical reference primitive with
+/// every flag = true. Returns the heap-allocated instance for use as
+/// `&DiakrisisPrimitive` parameter to any of the corpus's
+/// canonical-primitive @theorems.
+///
+/// Example:
+///
+/// ```verum
+/// let p = canonical_diakrisis_primitive();
+/// // Now invocable: every accessor returns true.
+/// // assert p.articulation_2_cat_non_empty();
+/// // diakrisis_canonical_primitive_satisfaction(&p);
+/// ```
+public fn canonical_diakrisis_primitive() -> CanonicalDiakrisisPrimitive {
+    CanonicalDiakrisisPrimitive {
+        base_articulation_2_cat_non_empty: true,
+        base_articulation_2_cat_locally_small: true,
+        base_articulation_2_cat_internally_closed: true,
+        base_m_is_2_functor: true,
+        base_alpha_m_canonical_representative: true,
+        base_alpha_math_distinguished_object: true,
+        real_rho_via_internal_hom: true,
+        real_m_lambda_accessible: true,
+        real_rho_nontrivial: true,
+        real_rho_after_m_distinguishable: true,
+        real_m_self_articulable: true,
+        real_alpha_m_non_yoneda_representable: true,
+        real_m_a_biadjunction_witness: true,
+        ext_t_alpha_depth_function_present: true,
+        ext_t_2f_star_stratified_comprehension: true,
+    }
+}
+
+/// Refinement-typed reference primitive — drop-in `RefinedDiakrisisPrimitive`
+/// satisfying `diakrisis_canonical_primitive_predicate`. The
+/// `t_alpha_rank = 3` value reflects Diakrisis 142.T's UHM articulation
+/// reaching ω·3 + 1 (finite projection 3); satisfies the inline
+/// `Int{>= 0}` K-Refine invariant.
+public fn canonical_refined_diakrisis_primitive() -> RefinedDiakrisisPrimitive {
+    RefinedDiakrisisPrimitive {
+        t_alpha_rank: 3,
+        articulation_2_cat_non_empty: true,
+        articulation_2_cat_locally_small: true,
+        articulation_2_cat_internally_closed: true,
+        m_is_2_functor: true,
+        alpha_m_canonical_representative: true,
+        alpha_math_distinguished_object: true,
+        rho_via_internal_hom: true,
+        m_lambda_accessible: true,
+        rho_nontrivial: true,
+        rho_after_m_distinguishable: true,
+        m_self_articulable: true,
+        alpha_m_non_yoneda_representable: true,
+        m_a_biadjunction_witness: true,
+        t_alpha_depth_function_present: true,
+        t_2f_star_stratified_comprehension: true,
+    }
+}

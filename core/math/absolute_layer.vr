@@ -30,6 +30,7 @@
 module core.math.absolute_layer;
 
 mount core.math.strata.{MathObject};
+mount core.math.s_definable.class_s_s.{SSMembership};
 mount core.math.s_definable.lemma_3_4.{FormallySDefinable};
 
 // =============================================================================
@@ -235,34 +236,41 @@ public pure fn refined_l_abs_predicate(w: &RefinedLAbsWitness) -> Bool {
         && pi_3_max_witness_predicate(&w.pi_3_max_witness)
 }
 
-/// Refinement-form analogue of MSFS Theorem 5.1 — over the lifted
-/// witness type. Stated as `@verify(formal)` `@theorem` once the
-/// downstream MSFS proof reconstruction lands; for now, the
-/// refinement-form claim is recorded as `@axiom` (no inferential
-/// content beyond Theorem 5.1's protocol-typed statement).
-@verify(formal)
+/// **Refinement→protocol bridge — witness construction (M0.B-A).**
+///
+/// A `&RefinedLAbsWitness` saturating `refined_l_abs_predicate` projects
+/// onto a protocol-form `&LAbsCandidate` whose three condition methods
+/// already deliver the conjunction Theorem 5.1's `requires` clause
+/// expects. The bridge is **shape translation only** — it asserts no
+/// inferential content beyond the obvious correspondence between the
+/// two surface forms (refined record fields ↔ protocol method results).
+/// Theorem 5.1 itself remains the load-bearing argument that forecloses
+/// any such candidate; the bridge merely translates the input format.
+///
+/// **Why an axiom and not a @theorem.** Constructing a `&LAbsCandidate`
+/// from refinement-typed fields requires the kernel to allocate the
+/// protocol-witness object, which sits beyond the propositional proof
+/// DSL (same architectural class as `msfs_lemma_3_4_s_definability`).
+/// When kernel V3 lands first-class refinement-to-protocol coercion
+/// (T0.1 follow-up), this axiom is promoted to a @derive-style
+/// generated implementation.
+///
+/// The pre-M0.7-A signature was `-> Bool ensures false` — i.e., the
+/// bridge axiom itself directly delivered the goal of the
+/// refinement-form theorem, making the @theorem statement vacuous (a
+/// one-line `apply` against a tautological axiom). The current shape
+/// makes the bridge a honest type-translator: it produces a candidate,
+/// and the ensures asserts only the field-to-method correspondence.
+@accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Theorem 5.1 refined view — refined_l_abs_predicate ≡ false")
-public theorem msfs_theorem_5_1_refined_view(w: &RefinedLAbsWitness)
+@framework(msfs, "MSFS §4 refinement bridge — RefinedLAbsWitness ⟹ LAbsCandidate (shape-translation, witness-constructor)")
+public axiom msfs_refined_to_protocol_l_abs_bridge(
+    w: &RefinedLAbsWitness,
+) -> &LAbsCandidate
     requires refined_l_abs_predicate(w)
-    ensures false
-    proof {
-        // The refinement-form theorem reduces to the protocol-form
-        // Theorem 5.1 once a bridge `RefinedLAbsWitness → LAbsCandidate`
-        // is in scope. The bridge is recorded as the auxiliary axiom
-        // below; the proof body dispatches via that bridge.
-        apply msfs_refined_to_protocol_l_abs_bridge(w);
-    };
-
-/// Bridge axiom: a `RefinedLAbsWitness` saturating the joint predicate
-/// produces a protocol-form `LAbsCandidate`. The axiom is the shape-
-/// translation only — any actual L_Abs candidate continues to be
-/// foreclosed by Theorem 5.1.
-@enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS §4 refinement bridge — RefinedLAbsWitness ⟹ LAbsCandidate (shape-translation)")
-public axiom msfs_refined_to_protocol_l_abs_bridge(w: &RefinedLAbsWitness) -> Bool
-    requires refined_l_abs_predicate(w)
-    ensures false;
+    ensures  result.cond_F_S().has_phi_X()
+          && result.cond_Pi_4().is_irreducible_in_s_s()
+          && result.cond_Pi_3_max().is_maximally_generative();
 
 // =============================================================================
 // Bridge to Lemma 3.4
@@ -273,6 +281,13 @@ public axiom msfs_refined_to_protocol_l_abs_bridge(w: &RefinedLAbsWitness) -> Bo
 /// driving Theorem 5.1's contradiction — the joint-membership
 /// witness of L_Abs immediately invokes Lemma 3.4 on its (F_S)
 /// component, placing X in S_S<S> and contradicting (Π_4).
+///
+/// Postcondition load-bearing: the returned `&FormallySDefinable`
+/// satisfies `has_phi_x_witness()`, which is *exactly* the precondition
+/// of `msfs_lemma_3_4_s_definability` and `msfs_lemma_3_4_outputs_in_s_s_global`.
+/// Without this stronger ensures the bridge would deliver a witness the
+/// kernel cannot feed into Lemma 3.4 — Theorem 5.1's structured proof
+/// would have to re-axiomatise the property at the call site.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
 @framework(msfs, "MSFS §4 — (F_S) ⟹ formal S-definability (Lemma 3.4 hypothesis)")
@@ -280,7 +295,7 @@ public axiom msfs_f_s_implies_formal_s_definable(
     cond: &ConditionFS,
 ) -> &FormallySDefinable
     requires cond.has_phi_X()
-    ensures  true;
+    ensures  result.has_phi_x_witness();
 
 // =============================================================================
 // Step-2 intermediate axiom for Theorem 5.1's structured proof body
@@ -314,11 +329,23 @@ public axiom msfs_f_s_implies_formal_s_definable(
 ///   * `candidate: &LAbsCandidate` satisfying (F_S) ∧ (Π_4) (the
 ///     Theorem 5.1 hypotheses), and
 ///   * `ss_witness: &SSMembership` placing the candidate's underlying
-///     X in S_S^global ⊆ S_S (the output of `msfs_lemma_3_4_s_definability`),
+///     X in S_S^global ⊆ S_S — produced by `msfs_lemma_3_4_s_definability`
+///     (constructor) and certified by `msfs_lemma_3_4_outputs_in_s_s_global`
+///     (operational @theorem) at the call site,
 ///
 /// the identity morphism `id_X : X → X` is an `(∞, n)`-equivalence
 /// onto its image with target Y := X ∈ S_S<S>, *which is exactly the
 /// pattern that (Π_{4, S, n}) forbids*. Hence `false`.
+///
+/// **Architectural note (M0.7-A).** The signature here consumes the
+/// concrete S_S^global membership predicate — `is_in_s_s_global() &&
+/// closure_depth() >= 1` — rather than only the formal-S-definability
+/// witness. This makes the kernel-recheck trail honest: Theorem 5.1's
+/// proof body must produce an SSMembership AND discharge the Lemma 3.4
+/// operational corollary BEFORE the Π_4-violation step can fire. The
+/// pre-M0.7-A signature trivially accepted any FormallySDefinable
+/// witness without ever observing the S_S-membership content that the
+/// paper proof's "id_X has target in S_S" depends on.
 ///
 /// **Soundness scope.** This axiom captures step 2 of the paper proof
 /// verbatim. The (∞, n)-equivalence reasoning is the kernel-V3
@@ -326,14 +353,17 @@ public axiom msfs_f_s_implies_formal_s_definable(
 /// promoted to a `@theorem` with a constructive proof body invoking
 /// the kernel's `(∞, n)`-equivalence introduction rule. Until then it
 /// is an honest paper-cited axiom — the inference Theorem 5.1
-/// reduces to "Lemma 3.4 + this axiom + propositional contradiction".
+/// reduces to "Lemma 3.4 + this axiom + propositional contradiction",
+/// and *both* lemma-applications appear in the call chain.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
-@framework(msfs, "MSFS Theorem 5.1 step 2 — id_X is (∞,n)-equivalence onto image, violating (Π_4)")
+@framework(msfs, "MSFS Theorem 5.1 step 2 — id_X is (∞,n)-equivalence onto image with target in S_S^global, violating (Π_4)")
 public axiom msfs_id_x_violates_pi_4(
     candidate: &LAbsCandidate,
-    ss_witness: &FormallySDefinable,
+    ss_witness: &SSMembership,
 ) -> Bool
     requires candidate.cond_F_S().has_phi_X()
           && candidate.cond_Pi_4().is_irreducible_in_s_s()
+          && ss_witness.is_in_s_s_global()
+          && ss_witness.closure_depth() >= 1
     ensures false;

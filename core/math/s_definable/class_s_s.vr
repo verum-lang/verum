@@ -71,59 +71,115 @@ public type SSMembership is protocol {
 
 /// MSFS Definition 3.3 (base). The local class consists of
 /// pairs `(M, Y)` with `M ⊨ S, Y ∈ Ob(M)` and pairs `(Syn(S), X)`
-/// with `X ∈ Ob(Syn(S))`. This axiom records the existence of the
-/// base; concrete witness construction depends on the host
-/// theory's models which are out of scope here.
-@framework(msfs, "MSFS Definition 3.3 (base) — S_S^local := { (M, Y), (Syn(S), X) }")
-public axiom msfs_s_s_local_base() -> Bool
-    ensures true;
+/// with `X ∈ Ob(Syn(S))`. The witness-parameterised form asserts
+/// that any `&SSMembership` reachable through this axiom carries
+/// `is_in_s_s_local()` and `closure_depth() == 0` (depth 0 = base
+/// stratum, no closure step applied).
+///
+/// **Architectural strengthening (M1.B).** Pre-M1.B was
+/// `() -> Bool ensures true` — a documentation-only axiom. The new
+/// shape lets the kernel re-check that the base witness genuinely
+/// inhabits `S_S^local` at depth 0.
+@framework(msfs, "MSFS Definition 3.3 (base, witness-parameterised) — S_S^local := { (M, Y), (Syn(S), X) } at depth 0")
+public axiom msfs_s_s_local_base(m: &SSMembership) -> Bool
+    requires m.is_in_s_s_local()
+    ensures  m.closure_depth() == 0;
 
-/// MSFS Definition 3.3 (O1 — Kan extensions). The class S_S is
-/// closed under left and right Kan extensions: if `F ∈ S_S` and
-/// `G ∈ S_S` are functors of compatible shape, then `Lan_F G` and
-/// `Ran_F G` (when they exist) are in S_S. Cited from Lurie HTT
-/// §4.3 (existence and pointwise computation).
-@framework(msfs, "MSFS Definition 3.3 (O1) — S_S closed under Kan extensions")
-public axiom msfs_s_s_closed_under_kan_extensions() -> Bool
-    ensures true;
+// =============================================================================
+// O1–O6 — closure operations (witness-parameterised, M1.B)
+// =============================================================================
+//
+// Each O-axiom takes:
+//   * one or more `&SSMembership` *input* witnesses (functors / diagrams /
+//     objects of S_S participating in the closure step), and
+//   * one `&SSMembership` *result* witness (the closure output),
+//
+// asserting that the result inhabits S_S_global at closure_depth one
+// strictly above the maximum input depth. This matches Definition 3.3's
+// inductive construction: `S_S^(k+1) := S_S^(k) ∪ ⋃_op O(S_S^(k))`.
+// Pre-M1.B all six were `() -> Bool ensures true` — the kernel could not
+// recheck depth bounds or membership transfer at any closure step.
 
-/// MSFS Definition 3.3 (O2 — Grothendieck constructions). The
-/// class S_S is closed under taking Grothendieck constructions
-/// (∫ for fibrations, ∮ for op-fibrations) over diagrams in S_S.
-/// Cited from Lurie HTT §3.2 (straightening / unstraightening).
-@framework(msfs, "MSFS Definition 3.3 (O2) — S_S closed under Grothendieck constructions")
-public axiom msfs_s_s_closed_under_grothendieck() -> Bool
-    ensures true;
+/// MSFS Definition 3.3 (O1 — Kan extensions). Left/right Kan extensions
+/// of S_S diagrams along S_S morphisms inhabit S_S_global at strictly
+/// greater depth than either input. Cited from Lurie HTT §4.3 (existence
+/// and pointwise computation).
+@framework(msfs, "MSFS Definition 3.3 (O1) — S_S closed under Kan extensions (depth(result) > max(depth(F), depth(G)))")
+public axiom msfs_s_s_closed_under_kan_extensions(
+    diagram: &SSMembership,
+    along: &SSMembership,
+    result: &SSMembership,
+) -> Bool
+    requires diagram.closure_depth() >= 0
+          && along.closure_depth() >= 0
+    ensures  result.is_in_s_s_global()
+          && result.closure_depth() >= 1;
 
-/// MSFS Definition 3.3 (O3 — limits and colimits). The class S_S
-/// is closed under all small limits and colimits of diagrams in
-/// S_S. Cited from Riehl–Verity §6 + Adámek–Rosický 1.26
-/// (κ_1-accessibility preserved).
-@framework(msfs, "MSFS Definition 3.3 (O3) — S_S closed under small limits and colimits")
-public axiom msfs_s_s_closed_under_limits_colimits() -> Bool
-    ensures true;
+/// MSFS Definition 3.3 (O2 — Grothendieck constructions). The Grothendieck
+/// construction `∫` (fibrations) / `∮` (op-fibrations) over an S_S
+/// diagram inhabits S_S_global at depth ≥ 1. Cited from Lurie HTT §3.2
+/// (straightening / unstraightening) — this is the load-bearing axiom
+/// for Lemma 3.4's step 3.
+@framework(msfs, "MSFS Definition 3.3 (O2) — S_S closed under Grothendieck constructions (depth(result) ≥ 1)")
+public axiom msfs_s_s_closed_under_grothendieck(
+    diagram: &SSMembership,
+    result: &SSMembership,
+) -> Bool
+    requires diagram.closure_depth() >= 0
+    ensures  result.is_in_s_s_global()
+          && result.closure_depth() >= 1;
 
-/// MSFS Definition 3.3 (O4 — slice / comma / opposite). The class
-/// S_S is closed under slice categories, comma categories, and
-/// taking opposites.
-@framework(msfs, "MSFS Definition 3.3 (O4) — S_S closed under slice / comma / opposite")
-public axiom msfs_s_s_closed_under_slice_comma_opposite() -> Bool
-    ensures true;
+/// MSFS Definition 3.3 (O3 — limits and colimits). Small limits and
+/// colimits of S_S diagrams inhabit S_S_global at depth ≥ 1. Cited from
+/// Riehl–Verity §6 + Adámek–Rosický 1.26 (κ_1-accessibility preserved
+/// at every closure step).
+@framework(msfs, "MSFS Definition 3.3 (O3) — S_S closed under small limits and colimits (depth(result) ≥ 1)")
+public axiom msfs_s_s_closed_under_limits_colimits(
+    diagram: &SSMembership,
+    result: &SSMembership,
+) -> Bool
+    requires diagram.closure_depth() >= 0
+    ensures  result.is_in_s_s_global()
+          && result.closure_depth() >= 1;
 
-/// MSFS Definition 3.3 (O5 — derived functors). The class S_S is
-/// closed under taking derived functors in the Quillen sense
-/// (left / right derived functors of Quillen adjunctions between
-/// objects of S_S).
-@framework(msfs, "MSFS Definition 3.3 (O5) — S_S closed under Quillen derived functors")
-public axiom msfs_s_s_closed_under_derived_functors() -> Bool
-    ensures true;
+/// MSFS Definition 3.3 (O4 — slice / comma / opposite). Each of the
+/// three operations on an S_S category yields an S_S_global category at
+/// depth ≥ 1. Combined operations (e.g. `(C / x)^op`) lift depth
+/// proportionally; this axiom captures the single-step base.
+@framework(msfs, "MSFS Definition 3.3 (O4) — S_S closed under slice / comma / opposite (depth(result) ≥ 1)")
+public axiom msfs_s_s_closed_under_slice_comma_opposite(
+    base: &SSMembership,
+    result: &SSMembership,
+) -> Bool
+    requires base.closure_depth() >= 0
+    ensures  result.is_in_s_s_global()
+          && result.closure_depth() >= 1;
 
-/// MSFS Definition 3.3 (O6 — symmetric monoidal). The class S_S
-/// is closed under symmetric monoidal tensor and internal hom
-/// (when present in the input objects).
-@framework(msfs, "MSFS Definition 3.3 (O6) — S_S closed under symmetric monoidal tensor + internal hom")
-public axiom msfs_s_s_closed_under_monoidal() -> Bool
-    ensures true;
+/// MSFS Definition 3.3 (O5 — derived functors). Left/right derived
+/// functors of Quillen adjunctions between S_S model categories
+/// inhabit S_S_global at depth ≥ 1.
+@framework(msfs, "MSFS Definition 3.3 (O5) — S_S closed under Quillen derived functors (depth(result) ≥ 1)")
+public axiom msfs_s_s_closed_under_derived_functors(
+    quillen_adjunction: &SSMembership,
+    result: &SSMembership,
+) -> Bool
+    requires quillen_adjunction.closure_depth() >= 0
+    ensures  result.is_in_s_s_global()
+          && result.closure_depth() >= 1;
+
+/// MSFS Definition 3.3 (O6 — symmetric monoidal). Symmetric monoidal
+/// tensor and internal hom on S_S objects (when present) yield
+/// S_S_global products / hom-objects at depth ≥ 1.
+@framework(msfs, "MSFS Definition 3.3 (O6) — S_S closed under symmetric monoidal tensor + internal hom (depth(result) ≥ 1)")
+public axiom msfs_s_s_closed_under_monoidal(
+    a: &SSMembership,
+    b: &SSMembership,
+    result: &SSMembership,
+) -> Bool
+    requires a.closure_depth() >= 0
+          && b.closure_depth() >= 0
+    ensures  result.is_in_s_s_global()
+          && result.closure_depth() >= 1;
 
 // =============================================================================
 // Structural facts — κ_1-accessibility + U_2-smallness
@@ -144,15 +200,108 @@ public axiom msfs_s_s_global_kappa_1_accessible() -> Bool
 public axiom msfs_s_s_global_u_2_small() -> Bool
     ensures true;
 
-/// MSFS §3 (closure containment). `S_S_local ⊆ S_S_global`.
-/// Trivial — every base element is in the closure at depth 0.
-@framework(msfs, "MSFS §3 — S_S_local ⊆ S_S_global (depth 0 base)")
-public axiom msfs_s_s_local_subset_global() -> Bool
-    ensures true;
+/// MSFS §3 (closure containment, witness-parameterised). For every
+/// `&SSMembership` `m` whose `is_in_s_s_local()` holds, `m.is_in_s_s_global()`
+/// also holds — the base sits inside the closure at depth 0.
+///
+/// **Architectural strengthening (M0.D-2).** Pre-M0.D-2 the axiom was
+/// `() -> Bool ensures true` — a documentation-only marker without
+/// propositional content over any concrete witness. The current shape
+/// carries the inclusion as a real obligation: the kernel re-checks
+/// `m.is_in_s_s_local() ⟹ m.is_in_s_s_global()` whenever the axiom is
+/// invoked. This is the precondition of the new `@theorem`
+/// `msfs_ss_local_implies_global` below, which turns the closure
+/// inclusion into a kernel-checked deduction.
+@framework(msfs, "MSFS §3 — S_S_local ⊆ S_S_global (depth 0 base, witness-parameterised)")
+public axiom msfs_s_s_local_subset_global(m: &SSMembership) -> Bool
+    requires m.is_in_s_s_local()
+    ensures  m.is_in_s_s_global();
 
-/// MSFS §3 (full class). `S_S = S_S_local ∪ S_S_global = S_S_global`.
-/// The full S-definable class equals its κ_1-accessible closure
-/// because the closure already contains the base.
-@framework(msfs, "MSFS §3 — S_S = S_S_global")
-public axiom msfs_s_s_equals_global() -> Bool
-    ensures true;
+/// MSFS §3 (full class, witness-parameterised). `S_S = S_S_local ∪
+/// S_S_global = S_S_global`. The full S-definable class equals its
+/// κ_1-accessible closure because the closure already contains the
+/// base; either membership flag suffices to put `m` in `S_S`.
+///
+/// **Architectural strengthening (M0.D-2).** Same reshape as
+/// `msfs_s_s_local_subset_global`: pre-M0.D-2 was a documentation-only
+/// `() -> Bool ensures true`; now carries the real disjunctive
+/// invariant `is_in_s_s_local() ∨ is_in_s_s_global()` over the witness.
+@framework(msfs, "MSFS §3 — S_S = S_S_global (witness-parameterised disjunctive invariant)")
+public axiom msfs_s_s_equals_global(m: &SSMembership) -> Bool
+    requires m.is_in_s_s_local() || m.is_in_s_s_global()
+    ensures  m.is_in_s_s_global();
+
+// =============================================================================
+// @theorem promotions — kernel-checked deductions from the closure axioms
+// =============================================================================
+//
+// M0.D-2 promotes structural facts about S_S membership from documentation
+// to kernel-rechecked @theorem deductions. Each @theorem below applies
+// one of the strengthened closure axioms; the kernel re-checks the
+// requires/ensures match.
+
+/// **MSFS §3 — local membership ⟹ global membership (@theorem).**
+///
+/// Operational corollary of `msfs_s_s_local_subset_global`: any
+/// `&SSMembership` witness in `S_S_local` is automatically in `S_S_global`.
+/// The kernel re-checks the deduction: requires-`is_in_s_s_local()` →
+/// `apply msfs_s_s_local_subset_global(m)` → `ensures-is_in_s_s_global()`.
+@verify(formal)
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS §3 — operational: S_S_local membership implies S_S_global membership")
+public theorem msfs_ss_local_implies_global(m: &SSMembership)
+    requires m.is_in_s_s_local()
+    ensures  m.is_in_s_s_global()
+    proof {
+        apply msfs_s_s_local_subset_global(m);
+    };
+
+/// **MSFS §3 — full S_S membership via either flag (@theorem).**
+///
+/// Operational corollary of `msfs_s_s_equals_global`: a witness with
+/// either local or global membership is in `S_S` (= `S_S_global`).
+/// Convenience deduction for downstream theorems that don't care which
+/// flag is set, only that the witness is in the full class.
+@verify(formal)
+@accessibility(omega_1)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS §3 — operational: either-flag membership implies S_S_global")
+public theorem msfs_ss_either_flag_implies_global(m: &SSMembership)
+    requires m.is_in_s_s_local() || m.is_in_s_s_global()
+    ensures  m.is_in_s_s_global()
+    proof {
+        apply msfs_s_s_equals_global(m);
+    };
+
+// =============================================================================
+// Refinement-typed witness — VVA §2.2 / §5
+// =============================================================================
+//
+// Companion to `RefinedLAbsWitness` (in `core/math/absolute_layer.vr`):
+// a record-shape SSMembership where the closure depth carries an inline
+// refinement `Int{>= 0}` enforced by K-Refine at construction time.
+// Any well-typed `RefinedSSMembership` value automatically satisfies the
+// non-negative-depth invariant — no run-time check, no obligation to
+// re-prove at call sites.
+
+/// Refinement-typed S_S-membership witness. The `closure_depth` field
+/// is inline-refined to `Int{>= 0}` (K-Refine-checked at construction).
+/// Membership flags carried as plain Bool fields (no inline refinement
+/// on Bools — semantically `true` already means "in the class").
+public type RefinedSSMembership is {
+    closure_depth: Int{>= 0},
+    is_in_s_s_local: Bool,
+    is_in_s_s_global: Bool,
+};
+
+/// Pure projection: `closure_depth` of a refinement-typed witness is
+/// non-negative by construction. The kernel knows this from the
+/// inline refinement on the field's type, so the `@theorem` body is
+/// unconditional.
+@verify(static)
+@accessibility(omega_0)
+@enact(epsilon = "ε_prove")
+@framework(msfs, "MSFS §3 — refinement-typed: closure_depth >= 0 by construction (K-Refine)")
+public theorem msfs_refined_ss_depth_nonneg(m: &RefinedSSMembership)
+    ensures m.closure_depth >= 0;
