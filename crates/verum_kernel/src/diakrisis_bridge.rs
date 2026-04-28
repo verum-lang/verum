@@ -93,6 +93,14 @@ pub enum BridgeId {
     /// (σ_α from the Code_S morphism + π_α from
     /// Perform_{ε_math} naturality).
     EpsMuTauWitness,
+
+    /// Diakrisis Lemma 131.L4 — extended Drake reflection beyond
+    /// the Theorem 134.T tight κ_2 bound. K-Universe-Ascent V2 invokes
+    /// this admit for κ_n → κ_n stabilisation at n ≥ 3 (arbitrary
+    /// inaccessible tier) and for multi-step ascents (κ_s → κ_t with
+    /// t > s+1). The structural Drake-reflection algorithm beyond κ_2
+    /// is preprint-blocked.
+    DrakeReflectionExtended,
 }
 
 impl BridgeId {
@@ -103,6 +111,7 @@ impl BridgeId {
             Self::QuotientCanonicalRepresentative => "diakrisis-16.7",
             Self::CohesiveAdjunctionUnitCounit => "diakrisis-14.3",
             Self::EpsMuTauWitness => "diakrisis-A-3",
+            Self::DrakeReflectionExtended => "diakrisis-131.L4",
         }
     }
 
@@ -120,6 +129,9 @@ impl BridgeId {
             }
             Self::EpsMuTauWitness => {
                 "σ_α / π_α τ-witness for K-Eps-Mu naturality (Code_S + Perform_{ε_math})"
+            }
+            Self::DrakeReflectionExtended => {
+                "extended Drake reflection beyond κ_2 (Lemma 131.L4)"
             }
         }
     }
@@ -236,6 +248,19 @@ pub fn admit_eps_mu_tau_witness(
     term.clone()
 }
 
+/// Bridge invocation: extended Drake reflection beyond the κ_2
+/// tight-bound terminus (Diakrisis Lemma 131.L4).
+///
+/// K-Universe-Ascent V2 invokes this when verifying ascents that
+/// reach an inaccessible κ_n with n ≥ 3, or that span more than
+/// one tier in a single step (κ_s → κ_t with t > s+1).
+pub fn admit_drake_reflection_extended(
+    audit: &mut BridgeAudit,
+    context: impl Into<Text>,
+) {
+    audit.record(BridgeId::DrakeReflectionExtended, context);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +359,10 @@ mod tests {
             BridgeId::EpsMuTauWitness.as_audit_str(),
             "diakrisis-A-3"
         );
+        assert_eq!(
+            BridgeId::DrakeReflectionExtended.as_audit_str(),
+            "diakrisis-131.L4"
+        );
     }
 
     #[test]
@@ -350,6 +379,17 @@ mod tests {
         assert!(BridgeId::EpsMuTauWitness
             .description()
             .contains("τ-witness"));
+        assert!(BridgeId::DrakeReflectionExtended
+            .description()
+            .contains("Drake"));
+    }
+
+    #[test]
+    fn admit_drake_reflection_extended_records() {
+        let mut a = BridgeAudit::new();
+        admit_drake_reflection_extended(&mut a, "K-Universe-Ascent V2 callsite");
+        assert_eq!(a.admits().len(), 1);
+        assert_eq!(a.admits()[0].bridge, BridgeId::DrakeReflectionExtended);
     }
 
     #[test]

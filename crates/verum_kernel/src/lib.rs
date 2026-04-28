@@ -142,6 +142,8 @@ pub use round_trip::{canonical_form, check_round_trip, check_round_trip_v2};
 pub mod diakrisis_bridge;
 pub use diakrisis_bridge::{BridgeAdmit, BridgeAudit, BridgeId};
 
+pub use universe_ascent::{KappaTier, check_universe_ascent_v2};
+
 /// Cubical cofibration calculus — face-formula algebra + interval
 /// subsumption decision procedure (M-VVA-FU Sub-2.4-cubical, V1
 /// shipped 2026-04-28). Per VVA spec L579 the cubical cofibration
