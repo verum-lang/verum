@@ -52,6 +52,47 @@ public type MerkleError is
     | IndexOutOfRange(Int)
     | BadProofLength(Int);
 
+// Display + Debug + Eq for MerkleError — the standard
+// stdlib protocol impls.  Pre-fix had no impls at all,
+// so callers wanting to log/format/compare these errors
+// had to roll their own match block.
+
+implement Display for MerkleError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MerkleError.EmptyTree =>
+                f.write_str("Merkle operation on empty tree"),
+            MerkleError.IndexOutOfRange(i) =>
+                f.write_str(f"Merkle leaf index {i} out of range".as_str()),
+            MerkleError.BadProofLength(n) =>
+                f.write_str(f"Merkle inclusion proof has invalid length: {n}".as_str()),
+        }
+    }
+}
+
+implement Debug for MerkleError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MerkleError.EmptyTree            => f.write_str("EmptyTree"),
+            MerkleError.IndexOutOfRange(i)   =>
+                f.write_str(f"IndexOutOfRange({i})".as_str()),
+            MerkleError.BadProofLength(n)    =>
+                f.write_str(f"BadProofLength({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for MerkleError {
+    fn eq(&self, other: &MerkleError) -> Bool {
+        match (self, other) {
+            (MerkleError.EmptyTree, MerkleError.EmptyTree) => true,
+            (MerkleError.IndexOutOfRange(a), MerkleError.IndexOutOfRange(b)) => a == b,
+            (MerkleError.BadProofLength(a), MerkleError.BadProofLength(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Inclusion proof
 // =============================================================================
