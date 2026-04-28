@@ -39,12 +39,14 @@ mount core.database.postgres.wire.frame.{Frame, try_parse_tagged, TaggedReadOutc
 mount core.database.postgres.wire.frontend.{
     StartupParams, startup, simple_query, terminate, sasl_initial_response, sasl_response,
     cancel_request,
+    copy_data, copy_done, copy_fail,
 };
 mount core.database.postgres.wire.backend.{
     BackendMessage,
     BmAuth, BmParameterStatus, BmBackendKeyData, BmReadyForQuery,
     BmRowDescription, BmDataRow, BmCommandComplete, BmEmptyQueryResponse,
     BmError, BmNotice, BmNotification, BmParseComplete, BmBindComplete, BmCloseComplete,
+    BmCopyInResponse, BmCopyOutResponse, BmCopyData, BmCopyDone,
     NotificationResponse,
     BmNoData, BmPortalSuspend, BmUnknown,
     AuthRequest, AuthOk, AuthCleartextPassword, AuthMd5Password,
@@ -284,6 +286,195 @@ implement PgConnection {
     /// driver.  Returns `None` if the connection never reached Ready
     /// (server didn't emit BackendKeyData yet).
     public fn backend_key_view(&self) -> Maybe<(Int, Int)> { self.backend_key }
+
+    // -------------------------------------------------------------------------
+    // COPY FROM / TO — bulk-streaming protocol (spec §6.1.6)
+    // -------------------------------------------------------------------------
+    //
+    // Drives the protocol's COPY sub-state-machine end-to-end.  See
+    // `core.database.postgres.copy` for fluent builder helpers; the
+    // raw drivers here are what those builders forward to.
+
+    /// COPY FROM STDIN — issue `sql` (must be a `COPY ... FROM STDIN`
+    /// statement), pump each pre-formatted row body as a CopyData
+    /// frame, terminate with CopyDone.  Returns the server-reported
+    /// row count from the trailing CommandComplete.
+    public fn copy_in_bytes(
+        &mut self,
+        sql: &Text,
+        rows: &List<List<Byte>>,
+    ) -> Result<Int, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "copy_in requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = PcsBusy;
+        let payload = simple_query(sql);
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        // Drive until CopyInResponse — server may emit ParameterStatus
+        // / NoticeResponse first.
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCopyInResponse(_) => { break; }
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmNotice(_) => {}
+                BmError(d) => {
+                    // Drain to ReadyForQuery before surfacing error.
+                    let _ = drain_to_ready(self);
+                    return Err(dberr_from_pg(d));
+                }
+                _ => {
+                    let _ = drain_to_ready(self);
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "COPY_PROTOCOL_VIOLATION".clone(),
+                        message: "expected CopyInResponse".clone(),
+                        retryable: false,
+                    }));
+                }
+            }
+        }
+
+        // Stream rows.
+        let mut i: Int = 0;
+        while i < rows.len() {
+            let row = &rows[i];
+            let frame = copy_data(row.as_slice());
+            write_all(&mut self.stream, frame.as_slice())?;
+            i = i + 1;
+        }
+        let done = copy_done();
+        write_all(&mut self.stream, done.as_slice())?;
+
+        // Drive to CommandComplete + ReadyForQuery, capture row count.
+        let mut row_count: Int = 0;
+        let mut command_tag: Text = "".clone();
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCommandComplete(cc) => {
+                    command_tag = cc.tag;
+                    row_count = parse_copy_command_count(&command_tag);
+                }
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(row_count),
+        }
+    }
+
+    /// Convenience: send each row as a UTF-8 line, ensuring trailing
+    /// newline.  Equivalent to `copy_in_bytes` after newline
+    /// normalisation; the canonical entry point for TEXT-mode COPY.
+    public fn copy_in_text_lines(
+        &mut self,
+        sql: &Text,
+        rows: &List<Text>,
+    ) -> Result<Int, DbError> {
+        let mut bytes_rows: List<List<Byte>> = List.new();
+        let mut i: Int = 0;
+        while i < rows.len() {
+            let row = &rows[i];
+            let raw = row.as_bytes();
+            let mut buf: List<Byte> = List.with_capacity(raw.len() + 1);
+            let mut k: Int = 0;
+            while k < raw.len() { buf.push(raw[k]); k = k + 1; }
+            if buf.len() == 0 || buf[buf.len() - 1] != 0x0A_u8 as Byte {
+                buf.push(0x0A_u8 as Byte);
+            }
+            bytes_rows.push(buf);
+            i = i + 1;
+        }
+        self.copy_in_bytes(sql, &bytes_rows)
+    }
+
+    /// Abort an in-flight COPY FROM with a CopyFail message.  The
+    /// server logs `reason` and emits ErrorResponse on the existing
+    /// socket; this method drives the round-trip back to Ready and
+    /// returns the wrapped error.  Useful in client-side validation
+    /// failures mid-stream.
+    public fn copy_fail_in(&mut self, reason: &Text) -> Result<(), DbError> {
+        let frame = copy_fail(reason);
+        write_all(&mut self.stream, frame.as_slice())?;
+        let _ = drain_to_ready(self);
+        Ok(())
+    }
+
+    /// COPY TO STDOUT — issue `sql` (must be `COPY ... TO STDOUT`),
+    /// collect every CopyData chunk, return them.  For TEXT mode
+    /// each chunk is typically one row; the caller concatenates and
+    /// splits on newline to recover the row stream.
+    public fn copy_out_bytes(
+        &mut self,
+        sql: &Text,
+    ) -> Result<List<List<Byte>>, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "copy_out requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = PcsBusy;
+        let payload = simple_query(sql);
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        let mut chunks: List<List<Byte>> = List.new();
+        let mut diagnostic: Maybe<Diagnostic> = None;
+        let mut started: Bool = false;
+        let mut completed: Bool = false;
+
+        loop {
+            let msg = read_message(self)?;
+            match msg {
+                BmCopyOutResponse(_) => { started = true; }
+                BmCopyData { bytes } => { chunks.push(bytes); }
+                BmCopyDone => { completed = true; }
+                BmCommandComplete(_) => {}
+                BmError(d) => { diagnostic = Some(d); }
+                BmNotice(_) => {}
+                BmParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let _ = started;
+        let _ = completed;
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(chunks),
+        }
+    }
 
     // -------------------------------------------------------------------------
     // LISTEN / NOTIFY — async event surface (spec §6.1.7)
@@ -734,6 +925,44 @@ fn collect_formats(rd: &RowDescription) -> List<Int> {
         i = i + 1;
     }
     out
+}
+
+/// Drain backend frames until ReadyForQuery — used after error to
+/// resync the connection without surfacing the intermediate frames.
+fn drain_to_ready(conn: &mut PgConnection) -> Result<(), DbError> {
+    loop {
+        let msg = read_message(conn)?;
+        match msg {
+            BmReadyForQuery(s) => {
+                conn.tx_status = s;
+                conn.state = PcsReady;
+                return Ok(());
+            }
+            BmParameterStatus(ps) => {
+                conn.parameters.push((ps.name, ps.value));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Extract row count from a COPY CommandComplete tag.  Postgres
+/// emits "COPY N" where N is the integer row count.  Returns 0 on
+/// malformed tag (unrecognised; safer than panicking).
+fn parse_copy_command_count(tag: &Text) -> Int {
+    let raw = tag.as_bytes();
+    let mut i: Int = 0;
+    // Skip "COPY ".
+    while i < raw.len() && raw[i] != 0x20_u8 as Byte { i = i + 1; }
+    while i < raw.len() && raw[i] == 0x20_u8 as Byte { i = i + 1; }
+    let mut n: Int = 0;
+    while i < raw.len() {
+        let b = raw[i];
+        if b < 0x30_u8 as Byte || b > 0x39_u8 as Byte { break; }
+        n = n * 10 + ((b as Int) - 0x30);
+        i = i + 1;
+    }
+    n
 }
 
 /// Escape single quotes in a payload literal — `'` becomes `''` per

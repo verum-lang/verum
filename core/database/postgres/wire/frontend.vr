@@ -20,6 +20,7 @@ mount core.database.postgres.wire.frame.frame_untagged;
 mount core.database.postgres.wire.types.{
     FE_QUERY, FE_PARSE, FE_BIND, FE_DESCRIBE, FE_EXECUTE, FE_FLUSH,
     FE_SYNC, FE_TERMINATE, FE_CLOSE, FE_PASSWORD,
+    FE_COPY_DATA, FE_COPY_DONE, FE_COPY_FAIL,
     PROTO_V3_0,
 };
 
@@ -161,6 +162,43 @@ public fn sync() -> List<Byte> {
 
 public fn flush() -> List<Byte> {
     frame(FE_FLUSH, |_buf: &mut WireBuf| {})
+}
+
+// -----------------------------------------------------------------------------
+// COPY frames — bulk-streaming protocol (database.md §6.1.6)
+// -----------------------------------------------------------------------------
+//
+// After the server emits CopyInResponse, the client streams payload
+// in `CopyData` frames followed by a single `CopyDone` (success) or
+// `CopyFail` (abort with error message).  Each CopyData carries an
+// arbitrary chunk; the server resyncs at row boundaries internally
+// so the chunk size is purely a transport choice.
+
+/// CopyData (`d`) — chunk of payload bytes during a COPY FROM stream.
+/// Caller decides the chunk size; for TEXT-mode COPY each row should
+/// land in its own frame (one trailing newline) for cleanest server
+/// error reporting, but multiple rows per frame are accepted.
+public fn copy_data(bytes: &[Byte]) -> List<Byte> {
+    let owned = bytes_to_list(bytes);
+    frame(FE_COPY_DATA, |buf: &mut WireBuf| {
+        buf.put_bytes(owned.as_slice());
+    })
+}
+
+/// CopyDone (`c`) — terminate a COPY FROM stream successfully.
+/// Server then emits CommandComplete + ReadyForQuery.
+public fn copy_done() -> List<Byte> {
+    frame(FE_COPY_DONE, |_buf: &mut WireBuf| {})
+}
+
+/// CopyFail (`f`) — abort a COPY FROM stream with an error message.
+/// `reason` is logged server-side and propagated to the client as
+/// ErrorResponse.
+public fn copy_fail(reason: &Text) -> List<Byte> {
+    let s = reason.clone();
+    frame(FE_COPY_FAIL, |buf: &mut WireBuf| {
+        buf.put_cstr(&s);
+    })
 }
 
 // -----------------------------------------------------------------------------
