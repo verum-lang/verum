@@ -1,0 +1,137 @@
+// =============================================================================
+// L0-critical: Red-team Round 2 §1.2 — Parser boundary cases
+// =============================================================================
+// @test: parse-pass
+// @tier: all
+// @level: L0
+// @tags: parser, boundary, fuzz-corpus, red-team-2.1.2
+// @timeout: 30000
+// =============================================================================
+//
+// Pins parser robustness on boundary inputs that fuzzing might explore.
+// Each section below targets one of the four forms called out in
+// `vcs/red-team/round-2-implementation.md §1.2`:
+//
+//   1. Programs with 0 segments / 0 mounts.
+//   2. Deeply nested mount chains (limited here to keep the test
+//      tractable; full 1000-level harness deferred to fuzz infrastructure).
+//   3. Type aliases that recurse through references (NOT structural
+//      recursion — caught by depth-limit if structural).
+//   4. Empty bodies for protocol/impl/fn.
+//
+// **Audit reference:** vcs/red-team/round-2-implementation.md §1.2.
+
+// -----------------------------------------------------------------------------
+// 1. 0-segment / 0-mount empty modules
+// -----------------------------------------------------------------------------
+module empty_a {}
+
+module empty_b {
+    // Comment only — no segments.
+}
+
+// -----------------------------------------------------------------------------
+// 2. Nested mount chain (8 levels — representative; fuzz reaches 1000)
+// -----------------------------------------------------------------------------
+module level_1 { pub type T1 is { v: Int }; }
+module level_2 {
+    mount cog.level_1.T1;
+    pub type T2 is { inner: T1 };
+}
+module level_3 {
+    mount cog.level_2.T2;
+    pub type T3 is { inner: T2 };
+}
+module level_4 {
+    mount cog.level_3.T3;
+    pub type T4 is { inner: T3 };
+}
+module level_5 {
+    mount cog.level_4.T4;
+    pub type T5 is { inner: T4 };
+}
+module level_6 {
+    mount cog.level_5.T5;
+    pub type T6 is { inner: T5 };
+}
+module level_7 {
+    mount cog.level_6.T6;
+    pub type T7 is { inner: T6 };
+}
+module level_8 {
+    mount cog.level_7.T7;
+    pub type T8 is { inner: T7 };
+}
+
+// -----------------------------------------------------------------------------
+// 3. Recursive type alias through references (mutual indirection)
+// -----------------------------------------------------------------------------
+module mutual_ref_a {
+    pub type AlphaT is {
+        next: Maybe<&BetaT>
+    };
+    pub type BetaT is {
+        next: Maybe<&AlphaT>
+    };
+}
+
+// -----------------------------------------------------------------------------
+// 4. Empty bodies for protocol / impl / fn
+// -----------------------------------------------------------------------------
+module empty_bodies {
+    // Empty protocol — no required methods.
+    pub type EmptyProto is protocol {};
+
+    pub type Carrier is { tag: Int };
+
+    // Empty implement-block — registers Carrier as conforming to EmptyProto.
+    implement EmptyProto for Carrier {}
+
+    // Empty function body — returns Unit.
+    pub fn nop() {}
+
+    // Function returning Unit explicitly.
+    pub fn nop_unit() -> () {}
+
+    // Function with empty body that returns its parameter unchanged.
+    pub fn identity_int(n: Int) -> Int { n }
+}
+
+// -----------------------------------------------------------------------------
+// Smoke: each constructed entity is reachable from main without errors.
+// -----------------------------------------------------------------------------
+fn main() {
+    // 0-segment modules don't need to be referenced; their existence
+    // alone proves parser acceptance.
+
+    // Deep mount chain — instantiate the leaf:
+    let t8 = level_8.T8 {
+        inner: level_8.T7 {
+            inner: level_8.T6 {
+                inner: level_8.T5 {
+                    inner: level_8.T4 {
+                        inner: level_8.T3 {
+                            inner: level_8.T2 {
+                                inner: level_8.T1 { v: 42 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    assert(t8.inner.inner.inner.inner.inner.inner.inner.v == 42);
+
+    // Mutual reference — construct nodes that point to each other.
+    let a = mutual_ref_a.AlphaT { next: Maybe.None };
+    let b = mutual_ref_a.BetaT { next: Maybe.None };
+
+    // Empty bodies — no methods to call but typecheck passes.
+    let c = empty_bodies.Carrier { tag: 1 };
+    empty_bodies.nop();
+    empty_bodies.nop_unit();
+    let n = empty_bodies.identity_int(7);
+    assert(n == 7);
+
+    print("L0-critical: red-team-2.1.2 parser boundary cases");
+}

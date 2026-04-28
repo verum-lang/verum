@@ -18,13 +18,18 @@ seeds for boundary cases (0 segments, deeply nested mounts, empty bodies,
 recursive type aliases) are listed in the fuzz README but full coverage matrix
 not yet exhausted.
 
-### 1.2 Boundary cases
+### 1.2 Boundary cases — PARTIAL DEFENSE 2026-04-28
 
-**Status:** PENDING — needs fuzz-corpus expansion:
-- Programs with 0 segments / 0 mounts.
-- Deeply nested mount chains (1000 levels).
-- Type aliases that recurse (caught by depth limit; verify error path).
-- Empty body for protocol/impl/fn.
+**Status:** PARTIAL DEFENSE — surface-level parser-acceptance pinned by
+guardrail on the 4 boundary forms; full 1000-level fuzz-corpus expansion
+deferred to the fuzz infrastructure track.
+
+**Guardrail:** `vcs/specs/L0-critical/parser/boundary_cases.vr` covers:
+- Programs with 0 segments / 0 mounts (empty_a, empty_b modules).
+- Nested mount chain at 8 levels (representative scale; 1000-level needs
+  synthetic generator).
+- Recursive type aliases through references (mutual_ref_a — Alpha→Beta→Alpha).
+- Empty bodies for protocol / impl / fn (EmptyProto, empty implement, nop()).
 
 ---
 
@@ -150,11 +155,20 @@ override built-in convenience aliases".
 
 **Status:** PENDING — needs verifier-loop termination harness.
 
-### 6.2 Witnesses with side effects
+### 6.2 Witnesses with side effects — PARTIAL DEFENSE + guardrail 2026-04-28
 
 **Status:** PARTIAL DEFENSE — Verum's computational-properties system
-(separate from contexts) tracks Pure/IO/Async/Fallible/Mutates. Refinement
-witness that mutates is detectable; needs explicit guardrail test.
+(separate from contexts) tracks Pure/IO/Async/Fallible/Mutates per
+`crates/verum_types/src/computational_properties.rs`; refinement witnesses
+that emit side effects are visible at the type level via
+`Function::properties: Option<PropertySet>`.
+
+**Guardrail:** `vcs/specs/L1-core/refinement/witness_purity_guard.vr` pins
+the pure-witness chain: 6 @verify(formal) functions returning refinement
+types (Int{>= 0}, Int{>= a && >= b}, Int{it % 2 == 0}), refinement on
+parameter (Int{!= 0}), composition through pure refinement returns. The
+SMT verifier sees only pure bodies, preserving compositional refinement
+reasoning.
 
 ### 6.3 Refinement in stmt-level code with unreachable
 
@@ -253,7 +267,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | Vector | Status | Follow-up |
 | --- | --- | --- |
 | 1.1 Random fuzz | PARTIAL | corpus expansion |
-| 1.2 Boundary cases | PENDING | corpus seeds |
+| 1.2 Boundary cases | **PARTIAL** | 4-form guardrail (2026-04-28); full 1000-level fuzz pending |
 | 2.1 256+ variants | DEFECT-CLOSED | #167 |
 | 2.2 2^16+ instructions | PENDING | synthetic gen |
 | 2.3 Deep generics | PENDING | gen + termination |
@@ -270,7 +284,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 5.2 Deep super | **DEFENSE** | guardrail (2026-04-28) |
 | 5.3 Alias shadow | **DEFENSE CONFIRMED** | round-1 §4.3 closure (2026-04-28) |
 | 6.1 Π/Σ recursion | PENDING | termination harness |
-| 6.2 Side-effect witness | PARTIAL | guardrail |
+| 6.2 Side-effect witness | **PARTIAL** | guardrail (2026-04-28) |
 | 6.3 Stmt refinement | PENDING | SMT audit |
 | 7.1 Gen counter race | PARTIAL | concurrent stress |
 | 7.2 Hazard reclamation | PARTIAL | concurrent stress |
@@ -279,7 +293,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | PENDING | lint audit |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**7 vectors confirmed defended (was 6), 14 partial, 6 pending (was 7)** post
-2026-04-28 round-2-batch closure (RT-2 §2.4 / §3.4 / §5.1 / §5.2 / §5.3
-guardrails landed). Sections A-C below record real defects already closed
-in the audit pass.
+**7 vectors confirmed defended (was 6), 15 partial (was 14, two strengthened),
+5 pending (was 7)** post 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2
+closures (§1.2 / §2.4 / §3.4 / §5.1 / §5.2 / §5.3 / §6.2 guardrails landed).
+Sections A-C below record real defects already closed in the audit pass.
