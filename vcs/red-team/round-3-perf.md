@@ -126,9 +126,17 @@ cost against AOT-compiled equivalent.
 
 **Status:** PENDING — needs synthetic-module generator.
 
-### 5.2 Deeply nested @cfg conditional
+### 5.2 Deeply nested @cfg conditional — PARTIAL DEFENSE 2026-04-28
 
-**Status:** PENDING — needs cfg-overlap stress test.
+**Status:** PARTIAL DEFENSE — 12-cfg-attribute stress at representative
+scale; full 1024+-cfg fuzz pending.
+
+**Guardrail:** `vcs/specs/L4-performance/red-team-3-perf/cfg_nesting_bounded.vr`
+exercises 12 distinct @cfg predicates including `any` / `all` / `not`
+combinators and 6-arm `any(target_os = ...)` to prove the walker stays
+bounded. The walker is conservative on the `unix`/`linux`/`macos`/
+`windows` predicate family per round-1 §4.1 audit, and per-cfg
+processing remains linear (K predicates → K registrations, not 2^K).
 
 ---
 
@@ -192,13 +200,13 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 4.1 Dispatch worst case | PENDING | synthetic bc |
 | 4.2 Anti-LLVM | PENDING | IR inspection |
 | 5.1 1000-module load | PENDING | synthetic gen |
-| 5.2 Deep cfg | PENDING | cfg stress |
+| 5.2 Deep cfg | **PARTIAL** | 12-cfg guardrail (2026-04-28); 1024+ fuzz pending |
 
-**6 partial defences (alloc pressure, task scheduler, channel backlog,
-deep-generic compilation, module fan-out, plus ~170+ wire-frame sites swept),
-8 pending** post 2026-04-28 RT-3.1.1 / RT-3.1.3 closures. Sections A-C
-above document performance-class invariants already upheld through the
-closed audit.
+**7 partial defences (alloc pressure, task scheduler, channel backlog,
+deep-generic compilation, module fan-out, deep-cfg, plus ~170+ wire-frame
+sites swept), 7 pending** post 2026-04-28 RT-3.1.1 / RT-3.1.3 / RT-3.5.2
+closures. Sections A-C above document performance-class invariants already
+upheld through the closed audit.
 
 The wire-frame and crypto hot paths now have allocation-free bulk-copy
 primitives in place; further work is in the synthetic-input adversarial
