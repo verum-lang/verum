@@ -260,20 +260,21 @@ pub fn run_with_tier(
         0 => {
             // Tier 0: Direct interpretation via pipeline.
             //
-            // Mode policy (Verum execution-mode contract):
-            //   1. Interpreter — `.vr` file declares `fn main()`; run via VBC.
-            //   2. AOT (Tier 1) — same but compiled to native via LLVM.
-            //   3. Script — `.vr` file MUST start with a `#!` shebang line;
-            //      top-level statements are then folded into a synthesised
-            //      `__verum_script_main` wrapper. Files without shebang AND
-            //      without `fn main()` are rejected at entry-detection time
-            //      with a help message pointing at both options.
+            // For script-shaped sources (shebang at byte 0 or an inline
+            // `// /// script` frontmatter block) the entry path runs
+            // through `run_script_interpreted` which adds:
             //
-            // The single-file CLI entry intentionally does NOT force
-            // `script_mode = true`; the pipeline's `should_parse_as_script`
-            // helper drives mode selection from the file's content (shebang
-            // byte-prefix). Stdin and inline-`-e` sources without a path
-            // opt the flag on explicitly when those entry points land.
+            //   • frontmatter validation (compiler version constraint
+            //     against the running build),
+            //   • permission resolution (frontmatter ∪ CLI flags),
+            //   • persistent VBC cache (lookup-skip-compile on hit;
+            //     compile + serialise + store on miss),
+            //   • lockfile placeholder (populated as
+            //     dependency resolution lands).
+            //
+            // Plain `.vr` files (no shebang, no frontmatter) take the
+            // legacy path that just runs the pipeline — no cache, no
+            // ceremony, identical behaviour to before.
             let options = CompilerOptions {
                 input: input.clone(),
                 verify_mode: if skip_verify {
@@ -285,14 +286,23 @@ pub fn run_with_tier(
                 language_features: language_features.clone(),
                 ..Default::default()
             };
-            let mut session = Session::new(options);
-            let mut pipeline = CompilationPipeline::new(&mut session);
-            pipeline
-                .run_interpreter(args)
-                .map_err(|e| CliError::RuntimeError(e.to_string()))?;
 
-            if timings {
-                print_phase_timings(&session);
+            if is_script_shaped(&input) {
+                run_script_interpreted(&input, options, args, timings)?;
+            } else {
+                let mut session = Session::new(options);
+                {
+                    let mut pipeline = CompilationPipeline::new(&mut session);
+                    pipeline
+                        .run_interpreter(args)
+                        .map_err(|e| CliError::RuntimeError(e.to_string()))?;
+                }
+                if timings {
+                    print_phase_timings(&session);
+                }
+                if let Some(code) = session.take_exit_code() {
+                    std::process::exit(code);
+                }
             }
         }
         1 => {
@@ -385,6 +395,246 @@ pub fn run_with_tier(
     }
 
     Ok(())
+}
+
+/// Quick content sniff: does the file at `path` look like a Verum
+/// script? A script either starts with a `#!` shebang at byte 0
+/// (BOM-tolerant) OR carries an inline `// /// script` frontmatter
+/// block somewhere in its first ~4 KiB. Reading more than that is
+/// rare and not worth the latency — frontmatter conventionally
+/// appears immediately after the shebang.
+fn is_script_shaped(path: &std::path::Path) -> bool {
+    use std::fs::File;
+    use std::io::Read;
+    let mut f = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut buf = [0u8; 4096];
+    let n = match f.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    let head = &buf[..n];
+    // Shebang at byte 0 (with optional UTF-8 BOM).
+    if head.len() >= 2 && &head[..2] == b"#!" {
+        return true;
+    }
+    if head.len() >= 5 && &head[..3] == [0xEF, 0xBB, 0xBF] && &head[3..5] == b"#!" {
+        return true;
+    }
+    // Inline frontmatter marker. The line `// /// script` is the
+    // canonical opening of a PEP-723-style metadata block.
+    if let Ok(text) = std::str::from_utf8(head) {
+        for line in text.lines() {
+            if line.trim_start().starts_with("// /// script") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Compare the running compiler's version against a script's
+/// frontmatter `verum = "<spec>"` constraint. Returns Ok on match
+/// (or no constraint), Err with a human-actionable message on
+/// mismatch or unparseable spec.
+fn check_frontmatter_version(
+    fm: &crate::script::frontmatter::Frontmatter,
+) -> Result<(), CliError> {
+    let Some(spec) = fm.verum.as_deref() else {
+        return Ok(());
+    };
+    let req = match semver::VersionReq::parse(spec) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(CliError::InvalidArgument(format!(
+                "script frontmatter `verum = {spec:?}` is not a valid semver constraint: {e}"
+            )));
+        }
+    };
+    let cur_str = env!("CARGO_PKG_VERSION");
+    let cur = semver::Version::parse(cur_str).map_err(|e| {
+        CliError::Custom(format!(
+            "internal: compiler version {cur_str:?} is not valid semver: {e}"
+        ))
+    })?;
+    if !req.matches(&cur) {
+        return Err(CliError::InvalidArgument(format!(
+            "script requires `verum {spec}` but running compiler is {cur_str}.\n\
+             help: install a matching toolchain or relax the script's `verum` field."
+        )));
+    }
+    Ok(())
+}
+
+/// Script-mode interpreted run with full ScriptContext wiring:
+/// frontmatter version validation, CLI permission flag merge,
+/// persistent VBC cache lookup-and-store, and lockfile capture.
+///
+/// **Cache hit path** — deserialise the stored VBC and execute via
+/// `CompilationPipeline::run_compiled_vbc`, skipping every front-end
+/// phase (parse, typecheck, verify, codegen). Cold-start drops to
+/// roughly the cost of zstd decompression + interpreter setup.
+///
+/// **Cache miss path** — run the full pipeline, capture the produced
+/// `VbcModule` from the session, serialise to the on-disk cache
+/// directory keyed by `(source_hash, compiler_version, extra_flags)`,
+/// then continue executing the same in-memory module.
+///
+/// Cache failures are non-fatal: a corrupt entry, locked directory,
+/// or schema mismatch downgrades to the cache-miss path with a
+/// warning. Script execution is the primary contract; caching is an
+/// optimisation that must never block a working run.
+fn run_script_interpreted(
+    input: &std::path::Path,
+    mut options: CompilerOptions,
+    args: List<Text>,
+    timings: bool,
+) -> Result<(), CliError> {
+    use crate::script::cache::ScriptCache;
+    use crate::script::context::{ScriptContext, ScriptContextOptions};
+    use crate::script::permission_flags::PermissionFlags;
+
+    // 1. Build the ScriptContext: read source, hash, extract+validate
+    //    frontmatter, merge CLI permission flags, compute cache key.
+    let ctx_opts = ScriptContextOptions {
+        flags: PermissionFlags::default(),
+        compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+        extra_cache_flags: cache_flag_inputs(&options),
+    };
+    let ctx = ScriptContext::from_path(input, &ctx_opts).map_err(|e| {
+        CliError::Custom(format!("script context: {e}"))
+    })?;
+
+    // 2. Frontmatter version gate. A script with `verum = "X.Y"` that
+    //    doesn't match the running build fails fast with a clear
+    //    diagnostic instead of producing a confusing parse error
+    //    half a megabyte deeper into the pipeline.
+    if let Some(fm) = ctx.frontmatter.as_ref() {
+        check_frontmatter_version(fm)?;
+        if !fm.dependencies.is_empty() {
+            ui::warn(
+                "script frontmatter declares dependencies — registry \
+                 resolution lands separately; for now they are ignored",
+            );
+        }
+        if !fm.permissions.is_empty() {
+            ui::detail(
+                "Permissions",
+                &format!("{} declared (enforcement lands separately)", fm.permissions.len()),
+            );
+        }
+    }
+
+    // 3. Persistent VBC cache. Best-effort: cache-open failures fall
+    //    back to a cache-disabled run. Tier-aware cache keys (already
+    //    encoded in `ScriptContextOptions::extra_cache_flags`) ensure
+    //    `--verify-mode runtime` and `--verify-mode auto` runs don't
+    //    poison each other's cache.
+    let cache: Option<ScriptCache> = ScriptCache::at_default().ok();
+
+    // Cache hit short-circuit. Non-fatal on any error path (eviction
+    // races, schema mismatch, etc.) — fall through to a regular
+    // compile+run.
+    if let Some(c) = cache.as_ref() {
+        match ctx.cache_lookup(c) {
+            Ok(Some(entry)) => {
+                ui::status("Running", &format!("{} (cached VBC)", input.display()));
+                return execute_cached_vbc(input, options, args, &entry.vbc, timings);
+            }
+            Ok(None) => { /* miss — fall through */ }
+            Err(e) => ui::warn(&format!("script cache lookup failed: {e}")),
+        }
+    }
+
+    // 4. Cache miss: run the pipeline. The session captures the
+    //    compiled VBC via `record_compiled_vbc` so we can pull it
+    //    back here for cache-store.
+    options.input = input.to_path_buf();
+    ui::status("Running", &format!("{} (interpreter)", input.display()));
+    let mut session = Session::new(options);
+    {
+        let mut pipeline = CompilationPipeline::new(&mut session);
+        pipeline
+            .run_interpreter(args)
+            .map_err(|e| CliError::RuntimeError(e.to_string()))?;
+    }
+
+    if timings {
+        print_phase_timings(&session);
+    }
+
+    // 5. Cache store. Serialise the captured VBC module and persist.
+    //    Best-effort: a cache-write failure does not fail the run.
+    if let (Some(c), Some(vbc)) = (cache.as_ref(), session.take_compiled_vbc()) {
+        match verum_vbc::serialize::serialize_module_compressed(
+            &vbc,
+            verum_vbc::compression::CompressionOptions::zstd(),
+        ) {
+            Ok(bytes) => {
+                if let Err(e) = ctx.cache_store(c, &bytes) {
+                    ui::warn(&format!("script cache store failed: {e}"));
+                }
+            }
+            Err(e) => ui::warn(&format!("script VBC serialise failed: {e}")),
+        }
+    }
+
+    // 6. Translate the script's recorded exit code to process exit.
+    //    The pipeline records via `Session::record_exit_code` instead
+    //    of calling `process::exit` directly, so the cache-store step
+    //    above runs first. `None` here means the script returned `()`
+    //    or a non-numeric value — exit 0 by convention.
+    if let Some(code) = session.take_exit_code() {
+        std::process::exit(code);
+    }
+
+    Ok(())
+}
+
+/// Cache-hit fast-path: deserialise the stored VBC and run via the
+/// pipeline's `run_compiled_vbc` entry, which skips every front-end
+/// phase. The interpreter still applies all runtime semantics —
+/// CBGR, refinement asserts, intrinsic dispatch — so a cached run is
+/// observationally identical to a fresh compile.
+fn execute_cached_vbc(
+    input: &std::path::Path,
+    mut options: CompilerOptions,
+    args: List<Text>,
+    vbc_bytes: &[u8],
+    timings: bool,
+) -> Result<(), CliError> {
+    let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes).map_err(|e| {
+        CliError::Custom(format!("cached VBC deserialise failed: {e}"))
+    })?;
+    options.input = input.to_path_buf();
+    let mut session = Session::new(options);
+    {
+        let mut pipeline = CompilationPipeline::new(&mut session);
+        pipeline
+            .run_compiled_vbc(std::sync::Arc::new(vbc_module), args)
+            .map_err(|e| CliError::RuntimeError(e.to_string()))?;
+    }
+    if timings {
+        print_phase_timings(&session);
+    }
+    if let Some(code) = session.take_exit_code() {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+
+/// Stable cache-key contributors derived from CompilerOptions.
+/// Order matters — cache keys are deterministic over this slice. Any
+/// option that affects the produced VBC bytes must show up here, or
+/// runs with different settings will share a cache entry incorrectly.
+fn cache_flag_inputs(opts: &CompilerOptions) -> Vec<String> {
+    vec![
+        format!("verify={:?}", opts.verify_mode),
+        format!("opt={}", opts.optimization_level),
+        format!("script_mode={}", opts.script_mode),
+    ]
 }
 
 /// Print compilation phase timings from session metrics

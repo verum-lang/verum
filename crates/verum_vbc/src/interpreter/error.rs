@@ -56,6 +56,19 @@ pub enum InterpreterError {
     /// Stack underflow (pop on empty stack).
     StackUnderflow,
 
+    /// Cooperative process-termination signal.
+    ///
+    /// Raised by the `ProcessExit` extended sub-opcode handler so the
+    /// outer driver can run post-execution work (cache store, timing
+    /// flush, telemetry) before the OS terminates the process.
+    /// Carries the requested exit code.
+    ///
+    /// Strictly a control-flow signal — not an error. The pipeline
+    /// translates it into `Session::record_exit_code(code)` and
+    /// returns `Ok(())`; the CLI then calls `std::process::exit(code)`
+    /// after housekeeping.
+    ProcessExit(i32),
+
     /// Type mismatch in operation.
     TypeMismatch {
         /// Expected type name.
@@ -348,6 +361,9 @@ impl fmt::Display for InterpreterError {
             }
             Self::StackUnderflow => {
                 write!(f, "Stack underflow: cannot pop from empty call stack")
+            }
+            Self::ProcessExit(code) => {
+                write!(f, "Process exit requested with code {}", code)
             }
             Self::TypeMismatch {
                 expected,

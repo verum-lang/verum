@@ -101,6 +101,33 @@ pub struct Session {
     /// `Arc` so the switcher inside each phase can hold an owned handle
     /// without moving the session.
     routing_stats: std::sync::Arc<verum_smt::routing_stats::RoutingStats>,
+
+    /// Capture slot for the VBC module produced by the most recent
+    /// compilation. Populated by `phase_interpret_with_args` after
+    /// `compile_ast_to_vbc` succeeds, so the script-mode runner can
+    /// serialise the result into the persistent script cache without
+    /// re-running the pipeline.
+    ///
+    /// `None` until the first compile-and-run succeeds; `Some` after.
+    /// `Arc` so callers receive a cheap clone of the same module the
+    /// interpreter just executed — no double-allocation, no re-encode.
+    last_compiled_vbc:
+        Shared<RwLock<Option<std::sync::Arc<verum_vbc::module::VbcModule>>>>,
+
+    /// Process exit code requested by the most recent execution.
+    ///
+    /// `None` for `()` / `nil` / non-Int returns (CLI exits 0).
+    /// `Some(n)` for `Int` / `Bool` returns (CLI exits with `n`).
+    ///
+    /// Writing this field instead of calling `std::process::exit`
+    /// from inside the pipeline lets the CLI run post-execution work
+    /// — persisting the script cache, flushing telemetry, printing
+    /// timings — *before* the OS terminates the process. Without
+    /// this indirection a script that ends in `42` would `exit(42)`
+    /// from inside the interpreter, never reaching the cache-store
+    /// step, and the next invocation would re-pay the full
+    /// compile cost.
+    pending_exit_code: Shared<RwLock<Option<i32>>>,
 }
 
 impl Session {
@@ -132,7 +159,47 @@ impl Session {
             cfg_evaluator,
             cog_resolver: None,
             routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
+            last_compiled_vbc: Shared::new(RwLock::new(None)),
+            pending_exit_code: Shared::new(RwLock::new(None)),
         }
+    }
+
+    /// Record the VBC module produced by the most recent compilation.
+    /// Called by the pipeline immediately after `compile_ast_to_vbc`
+    /// succeeds. Overwrites any prior recording — the slot reflects
+    /// the latest run.
+    pub fn record_compiled_vbc(
+        &self,
+        module: std::sync::Arc<verum_vbc::module::VbcModule>,
+    ) {
+        *self.last_compiled_vbc.write() = Some(module);
+    }
+
+    /// Take the most recently compiled VBC module, leaving `None` in
+    /// the slot. Used by the script-mode runner after a successful
+    /// `run_interpreter` to serialise the result into the persistent
+    /// script cache. Returns `None` if no compilation captured a VBC
+    /// module — e.g., a `--check` run that never reached codegen.
+    pub fn take_compiled_vbc(
+        &self,
+    ) -> Option<std::sync::Arc<verum_vbc::module::VbcModule>> {
+        self.last_compiled_vbc.write().take()
+    }
+
+    /// Record an OS exit code requested by the most recent execution.
+    /// Pipeline code paths that surface a script's tail value (or a
+    /// `fn main() -> Int` return) call this; the CLI driver reads it
+    /// after post-run housekeeping and translates to
+    /// `std::process::exit`.
+    pub fn record_exit_code(&self, code: i32) {
+        *self.pending_exit_code.write() = Some(code);
+    }
+
+    /// Take the pending exit code, leaving `None` in the slot.
+    /// Returns `None` for runs that ended with `()` / `nil` /
+    /// non-numeric return — the CLI maps those to exit 0.
+    pub fn take_exit_code(&self) -> Option<i32> {
+        self.pending_exit_code.write().take()
     }
 
     /// Set the cross-cog resolver for external package imports.
@@ -254,6 +321,8 @@ impl Session {
             cfg_evaluator,
             cog_resolver: None,
             routing_stats: std::sync::Arc::new(verum_smt::routing_stats::RoutingStats::new()),
+            last_compiled_vbc: Shared::new(RwLock::new(None)),
+            pending_exit_code: Shared::new(RwLock::new(None)),
         }
     }
 

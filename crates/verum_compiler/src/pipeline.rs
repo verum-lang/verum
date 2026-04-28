@@ -5846,6 +5846,56 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Run interpreter mode
+    /// Execute a pre-compiled VBC module against the given args.
+    ///
+    /// Used by the script-mode persistent cache: on a cache hit the
+    /// runner deserialises the stored VBC bytes into a `VbcModule` and
+    /// calls this method, skipping every front-end phase (parse,
+    /// typecheck, verify, codegen) for a sub-millisecond cold start
+    /// of unchanged scripts.
+    ///
+    /// Behaviour matches `phase_interpret_with_args` post-compile —
+    /// builds a `VbcInterpreter`, resolves the entry function (`main`
+    /// with `__verum_script_main` fallback), executes with or without
+    /// the args list, and routes the terminal value through
+    /// `propagate_main_exit_code` for tier-parity with AOT.
+    pub fn run_compiled_vbc(
+        &mut self,
+        vbc_module: std::sync::Arc<verum_vbc::module::VbcModule>,
+        args: List<Text>,
+    ) -> Result<()> {
+        // Re-record the captured VBC so a subsequent
+        // `take_compiled_vbc()` still surfaces something — useful
+        // when the runner wants to refresh metadata even on cache hits.
+        self.session.record_compiled_vbc(vbc_module.clone());
+
+        let mut interpreter = VbcInterpreter::new(vbc_module);
+        let main_func_id = self.find_main_function_id(&interpreter.state.module)?;
+        let main_param_count = interpreter
+            .state
+            .module
+            .get_function(main_func_id)
+            .map(|f| f.params.len())
+            .unwrap_or(0);
+
+        if main_param_count == 0 || args.is_empty() {
+            info!("Executing cached VBC (no-args path)");
+            let result = interpreter.execute_function(main_func_id);
+            return self.finalize_run_result(result);
+        }
+
+        let rust_args: Vec<String> = args.iter().map(|t| t.to_string()).collect();
+        let args_value = interpreter
+            .alloc_string_list(&rust_args)
+            .map_err(|e| anyhow::anyhow!("Failed to allocate args: {:?}", e))?;
+        info!(
+            "Executing cached VBC with {} args",
+            rust_args.len()
+        );
+        let result = interpreter.call(main_func_id, &[args_value]);
+        self.finalize_run_result(result)
+    }
+
     pub fn run_interpreter(&mut self, args: List<Text>) -> Result<()> {
         // Load stdlib modules first (enables std.* imports)
         self.load_stdlib_modules()?;
@@ -10914,6 +10964,10 @@ impl<'s> CompilationPipeline<'s> {
         // Step 1: Compile AST to VBC
         let vbc_module = self.compile_ast_to_vbc(module)?;
 
+        // Capture for the script-mode persistent cache. See the matching
+        // capture in `phase_interpret_with_args` for the full rationale.
+        self.session.record_compiled_vbc(vbc_module.clone());
+
         // Emit VBC bytecode dump if requested
         if self.session.options().emit_vbc {
             let dump = verum_vbc::disassemble::disassemble_module(&vbc_module);
@@ -10952,17 +11006,7 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Executing main function via VBC interpreter (function ID: {})", main_func_id.0);
         let result = interpreter.execute_function(main_func_id);
-
-        match result {
-            Ok(value) => {
-                info!("VBC execution completed successfully: {:?}", value);
-                Self::propagate_main_exit_code(&value);
-                Ok(())
-            }
-            Err(e) => {
-                Err(anyhow::anyhow!("VBC execution error: {}", e))
-            }
-        }
+        self.finalize_run_result(result)
     }
 
     /// Tier-parity exit-code propagation.
@@ -10974,30 +11018,64 @@ impl<'s> CompilationPipeline<'s> {
     /// the process would exit 0, silently masking failures.
     ///
     /// Behaviour:
-    /// - `Int` value → `std::process::exit(value as i32)` (always, even 0,
-    ///   so the script's intended exit code wins over the implicit Rust
-    ///   `Ok(())` path that follows).
-    /// - `Bool` → 0 for true, 1 for false (Unix convention).
-    /// - `Unit` / `Nil` / anything else → no-op; the caller continues and
-    ///   the CLI returns 0 via its normal `Ok` path.
+    /// - `Int` value → record exit code = `value as i32`.
+    /// - `Bool` → record 0 for true, 1 for false (Unix convention).
+    /// - `Unit` / `Nil` / anything else → leave exit code as `None`,
+    ///   which the CLI maps to `0`.
+    ///
+    /// **Why record instead of `std::process::exit`?** The pipeline runs
+    /// inside a CLI driver that needs to perform post-execution work —
+    /// persisting the script-mode VBC cache, flushing telemetry, printing
+    /// `--timings` — *before* the OS terminates the process. Calling
+    /// `process::exit` from inside the interpreter would short-circuit
+    /// the cache-store step and force every script to re-pay the full
+    /// compile cost on its next invocation. The CLI takes the recorded
+    /// code from `Session::take_exit_code()` after housekeeping and
+    /// translates to `process::exit` there.
     ///
     /// Called from BOTH `phase_interpret` (no-args entry) and
     /// `phase_interpret_with_args` (args-aware entry) so behaviour is
     /// uniform across `verum run file.vr` and `verum run file.vr a b`.
     /// Script wrappers (`__verum_script_main`) pass through transparently:
     /// the parser lifts an unsemicoloned tail expression into the
-    /// wrapper's return slot, so a script ending in `42` exits 42 here.
-    fn propagate_main_exit_code(value: &verum_vbc::Value) {
+    /// wrapper's return slot, so a script ending in `42` records 42 here.
+    fn propagate_main_exit_code(&self, value: &verum_vbc::Value) {
         if value.is_int() {
             let code = value.as_i64() as i32;
-            std::process::exit(code);
+            self.session.record_exit_code(code);
+            return;
         }
         if value.is_bool() {
-            // Unix convention: true = success (0), false = failure (1).
-            std::process::exit(if value.as_bool() { 0 } else { 1 });
+            self.session.record_exit_code(if value.as_bool() { 0 } else { 1 });
         }
         // Unit / Nil / Float / Object / Pointer / String — no exit-code
-        // semantics. Caller's normal `Ok(())` path returns 0 to the OS.
+        // semantics. CLI defaults to 0.
+    }
+
+    /// Map an interpreter execution result into a pipeline result
+    /// while honouring the cooperative `ProcessExit` control-flow
+    /// signal raised by `exit(n)` calls. The interpreter returns
+    /// `Err(InterpreterError::ProcessExit(n))` so the driver can run
+    /// post-execution housekeeping (script-cache store, timing
+    /// flush, future telemetry) *before* the OS terminates. Any
+    /// other `Err` is a real runtime failure; `Ok` carries the
+    /// script's terminal value which feeds `propagate_main_exit_code`.
+    fn finalize_run_result(
+        &self,
+        result: verum_vbc::interpreter::InterpreterResult<verum_vbc::Value>,
+    ) -> Result<()> {
+        use verum_vbc::interpreter::InterpreterError;
+        match result {
+            Ok(value) => {
+                self.propagate_main_exit_code(&value);
+                Ok(())
+            }
+            Err(InterpreterError::ProcessExit(code)) => {
+                self.session.record_exit_code(code);
+                Ok(())
+            }
+            Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),
+        }
     }
 
     /// Phase 5b: Interpretation with arguments
@@ -11021,6 +11099,13 @@ impl<'s> CompilationPipeline<'s> {
         // Step 1: Compile AST to VBC
         let vbc_module = self.compile_ast_to_vbc(module)?;
 
+        // Capture for the script-mode persistent cache. The CLI runner
+        // pulls this back via `Session::take_compiled_vbc()` after a
+        // successful run and serialises it into the on-disk cache so
+        // the next invocation of an unchanged script can skip parse +
+        // typecheck + verify + codegen entirely.
+        self.session.record_compiled_vbc(vbc_module.clone());
+
         // Step 2: Create VBC interpreter
         let mut interpreter = VbcInterpreter::new(vbc_module);
 
@@ -11038,14 +11123,7 @@ impl<'s> CompilationPipeline<'s> {
             // main() takes no args — execute normally
             info!("Executing main function via VBC interpreter (no args accepted)");
             let result = interpreter.execute_function(main_func_id);
-            return match result {
-                Ok(value) => {
-                    info!("VBC execution completed successfully: {:?}", value);
-                    Self::propagate_main_exit_code(&value);
-                    Ok(())
-                }
-                Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),
-            };
+            return self.finalize_run_result(result);
         }
 
         // Step 5: Allocate args as List<Text> on interpreter heap and call main(args)
@@ -11055,15 +11133,7 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Executing main function with {} args via VBC interpreter", rust_args.len());
         let result = interpreter.call(main_func_id, &[args_value]);
-
-        match result {
-            Ok(value) => {
-                info!("VBC execution completed successfully: {:?}", value);
-                Self::propagate_main_exit_code(&value);
-                Ok(())
-            }
-            Err(e) => Err(anyhow::anyhow!("VBC execution error: {}", e)),
-        }
+        self.finalize_run_result(result)
     }
 
     /// Compile AST module to VBC module
