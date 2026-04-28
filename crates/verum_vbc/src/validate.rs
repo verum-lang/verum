@@ -525,11 +525,18 @@ impl<'a> Validator<'a> {
 
         match instr {
             // -----------------------------------------------------------
-            // Function-call cross-references — `func_id` in range.
+            // Function-call cross-references — `func_id` in range AND
+            // argument arity matches the target function's declared
+            // parameter count (round-2 §3.2 — closes the arity-
+            // mismatch attack at the load-time gate, replacing the
+            // codegen-only enforcement that the round-2 audit listed
+            // as the residual defense).
             // -----------------------------------------------------------
             Instruction::Call { dst, func_id, args } => {
                 if *func_id >= function_count {
                     self.errors.push(VbcError::InvalidFunctionId(*func_id));
+                } else {
+                    self.check_call_arity(*func_id, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg_range(*args, max_reg, &func_name);
@@ -537,6 +544,8 @@ impl<'a> Validator<'a> {
             Instruction::CallG { dst, func_id, type_args, args } => {
                 if *func_id >= function_count {
                     self.errors.push(VbcError::InvalidFunctionId(*func_id));
+                } else {
+                    self.check_call_arity(*func_id, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
                 for r in type_args {
@@ -547,6 +556,8 @@ impl<'a> Validator<'a> {
             Instruction::TailCall { func_id, args } => {
                 if *func_id >= function_count {
                     self.errors.push(VbcError::InvalidFunctionId(*func_id));
+                } else {
+                    self.check_call_arity(*func_id, args.count as u32, &func_name);
                 }
                 self.check_reg_range(*args, max_reg, &func_name);
             }
@@ -721,6 +732,41 @@ impl<'a> Validator<'a> {
                 context: context.to_string(),
             });
         }
+    }
+
+    /// Checks a `Call` / `TailCall` / `CallG` instruction's argument
+    /// arity matches the target function's declared parameter count.
+    ///
+    /// Closes round-2 §3.2 (Mismatched arity calls) at the load-time
+    /// gate.  Pre-fix the interpreter trusted the bytecode and read
+    /// `args.count` registers directly, copying them into the new
+    /// frame — a hand-crafted module with mismatched arity would
+    /// silently corrupt the callee's frame (extra args overwriting
+    /// callee locals, missing args reading uninitialised slots).
+    /// The codegen layer enforced arity, but only for compiler-
+    /// emitted bytecode; this check covers any-source bytecode.
+    fn check_call_arity(
+        &mut self,
+        func_id: u32,
+        arg_count: u32,
+        context: &str,
+    ) {
+        if let Some(target) = self.module.get_function(crate::FunctionId(func_id)) {
+            let expected = target.params.len() as u32;
+            if expected != arg_count {
+                self.errors.push(VbcError::InvalidInstructionEncoding {
+                    offset: 0,
+                    reason: format!(
+                        "call-arity mismatch in {}: target FunctionId({}) declares \
+                         {} parameters, but call site passes {}",
+                        context, func_id, expected, arg_count
+                    ),
+                });
+            }
+        }
+        // If `func_id` is OOR, the in-range check earlier reports
+        // `InvalidFunctionId`; the arity check is skipped to avoid
+        // double-reporting on the same defect.
     }
 
     /// Checks a contiguous register range against the function's
@@ -1110,5 +1156,35 @@ mod tests {
         let module = build_module_with_instr(good_new, 4, 1);
         validate_module(&module)
             .expect("New with builtin TypeId must validate cleanly");
+    }
+
+    #[test]
+    fn validator_rejects_call_with_arity_mismatch() {
+        // Hand-crafted bytecode: the target FunctionId(0) declares
+        // ZERO parameters (default `FunctionDescriptor`), but the
+        // call site passes 3 args.  Pre-fix the interpreter would
+        // copy 3 values into the callee's frame, corrupting locals
+        // beyond the formal parameter region.  The validator
+        // catches it at load time.
+        let mismatch_call = Instruction::Call {
+            dst: Reg(0),
+            func_id: 0,
+            args: RegRange { start: Reg(0), count: 3 },
+        };
+        let module = build_module_with_instr(mismatch_call, 4, 1);
+        let err = validate_module(&module).expect_err("must reject arity mismatch");
+        let any_err = |e: &VbcError| matches!(
+            e,
+            VbcError::InvalidInstructionEncoding { reason, .. }
+                if reason.contains("call-arity mismatch")
+        );
+        let has_err = any_err(&err)
+            || matches!(&err, VbcError::MultipleErrors(errs)
+                if errs.iter().any(any_err));
+        assert!(
+            has_err,
+            "expected arity-mismatch InvalidInstructionEncoding, got: {:?}",
+            err
+        );
     }
 }
