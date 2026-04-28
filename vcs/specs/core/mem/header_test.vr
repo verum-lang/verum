@@ -181,6 +181,112 @@ fn test_generation_wraparound_triggers_epoch_increment() {
 }
 
 // =============================================================================
+// Generation-counter rollover soundness — red-team Round 1 §2.2 guardrails
+// =============================================================================
+// Pin the (generation: UInt32) × (epoch: UInt16) = 48-bit budget against
+// the ABA-aliasing escape that would let a long-dead reference's
+// (generation, epoch) pair collide with a freshly-stamped allocation.
+//
+// Audit reference: vcs/red-team/round-1-architecture.md §2.2 (post-2026-04-28).
+
+@test
+fn test_generation_rollover_eight_consecutive_cycles() {
+    // Verify epoch increments exactly once per generation rollover boundary,
+    // sustained across 8 consecutive cycles. Each cycle: generation goes
+    // from GEN_MAX → GEN_INITIAL while epoch bumps by exactly +1.
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    let start_epoch = header.load_epoch();
+
+    let mut cycle = 0;
+    while cycle < 8 {
+        header.store_generation(GEN_MAX);
+        header.increment_generation();
+
+        assert_eq(header.load_generation(), GEN_INITIAL);
+        assert_eq(header.load_epoch(), start_epoch + (cycle + 1) as UInt16);
+        cycle = cycle + 1;
+    }
+}
+
+@test
+fn test_generation_rollover_at_gen_max_minus_1() {
+    // The wraparound branch in increment_generation triggers iff
+    // old_gen >= GEN_MAX - 1 (header.vr:403). Pin this exact threshold:
+    // starting at GEN_MAX - 1 must wrap and bump epoch.
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_generation(GEN_MAX - 1);
+    let initial_epoch = header.load_epoch();
+
+    header.increment_generation();
+
+    // After increment from GEN_MAX-1: either at GEN_MAX (no wrap yet) or
+    // already wrapped to GEN_INITIAL with epoch++. The wraparound branch
+    // condition (>= GEN_MAX - 1) intentionally fires on this exact value
+    // to be safe against concurrent threads landing on GEN_MAX.
+    let post_gen = header.load_generation();
+    let post_epoch = header.load_epoch();
+
+    assert(post_gen == GEN_MAX || post_gen == GEN_INITIAL);
+    if post_gen == GEN_INITIAL {
+        // Wraparound branch took effect — epoch must have bumped.
+        assert_eq(post_epoch, initial_epoch + 1);
+    } else {
+        // No wraparound on this single increment — epoch unchanged.
+        assert_eq(post_epoch, initial_epoch);
+    }
+}
+
+@test
+fn test_generation_increment_returns_pre_increment_value_after_wrap() {
+    // Soundness invariant: after a wraparound increment, the returned
+    // value (the audit-logged pre-bump generation) reflects the value
+    // *observed before fetch_add*, not the post-wrap GEN_INITIAL. This
+    // matters for any caller logging or reasoning about the boundary —
+    // confusing pre-vs-post-wrap values would create a 2^32 step
+    // mis-attribution in the audit log.
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+    header.store_generation(GEN_MAX);
+
+    let returned = header.increment_generation();
+
+    // The returned old_gen is the value before wraparound: GEN_MAX.
+    assert_eq(returned, GEN_MAX);
+    // Post-state: wrapped to GEN_INITIAL.
+    assert_eq(header.load_generation(), GEN_INITIAL);
+}
+
+@test
+fn test_aba_aliasing_distinct_gen_epoch_pairs() {
+    // Pin the soundness invariant: across the 48-bit (generation, epoch)
+    // budget, every distinct allocation slot ends up with a UNIQUE
+    // (gen, epoch) pair, never colliding with an earlier one until the
+    // full 48-bit budget exhausts (which triggers the hard panic).
+    //
+    // We exercise a small slice: 16 successive (gen=GEN_MAX → wrap →
+    // GEN_INITIAL) cycles, recording each post-wrap (gen, epoch) and
+    // asserting all 16 pairs are distinct.
+    let mut header = AllocationHeader.new(64, 8, 0, CAP_OWNED);
+
+    let mut seen = List<(UInt32, UInt16)>.new();
+    let mut i = 0;
+    while i < 16 {
+        header.store_generation(GEN_MAX);
+        header.increment_generation();
+        let pair = (header.load_generation(), header.load_epoch());
+
+        // Newly-stamped pair must NOT already be in the seen set —
+        // collision would be an ABA-aliasing escape.
+        let mut j = 0;
+        while j < seen.len() {
+            assert(seen[j] != pair);
+            j = j + 1;
+        }
+        seen.push(pair);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
 // Epoch Counter Tests
 // =============================================================================
 

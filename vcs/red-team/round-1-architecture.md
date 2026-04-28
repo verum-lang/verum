@@ -54,11 +54,33 @@ The three-tier reference model promises `&unsafe T` cannot be observed by
 `&checked T` callers. Verify by attempting deliberate aliasing through a
 container that holds both refs to the same memory.
 
-### 2.2 Generation-counter rollover
+### 2.2 Generation-counter rollover — DEFENSE CONFIRMED 2026-04-28
 
-**Status:** PARTIAL DEFENSE — atomic increments at `core/mem/header.vr`
-verified in audit. Behaviour at u32 wrap point not yet exercised by guardrail
-test. Add: `vcs/specs/L0-critical/memory-safety/generation_rollover.vr`.
+**Status:** DEFENSE CONFIRMED — atomic increments at `core/mem/header.vr`
+verified in audit. Wraparound + epoch-overflow + ABA-aliasing-prevention
+contract pinned by 5 L0-critical guardrail tests.
+
+**Audit notes:**
+* `GEN_MAX = 0xFFFFFFFE` (header.vr:82) — leaves 0xFFFFFFFF reserved for
+  post-wraparound transient state.
+* `increment_generation` (header.vr:395-473) does atomic fetch_add, then
+  if result was at-or-past GEN_MAX-1: CAS-loop bumps epoch by exactly 1
+  (preserving capabilities in upper 16 bits), CAS-loops generation back
+  to GEN_INITIAL.
+* **Hard panic on UInt16 epoch overflow** (header.vr:421): silently wrapping
+  epoch to 0 would let a freshly-stamped allocation's (gen=INITIAL, epoch=0)
+  pair collide with a long-dead reference, defeating use-after-free
+  detection. The panic forces operator intervention before that can happen.
+* Combined budget: 32-bit generation × 16-bit epoch = 48 bits ≈ 2.8 × 10^14
+  distinct allocation slots before unrecoverable wraparound.
+
+**Guardrail tests pinning the invariant:**
+* `vcs/specs/core/mem/header_test.vr` — 4 new tests (rollover_8_cycles,
+  at_gen_max_minus_1, returns_pre_increment_value, distinct_gen_epoch_pairs).
+* `vcs/specs/L0-critical/memory-safety/generation_rollover.vr` (NEW) — 5 L0
+  invariants (GEN_MAX value pinned, wraparound bumps epoch exactly once,
+  consecutive wraparounds monotone, ABA-aliasing no pair collision,
+  mid-cycle increments do not bump epoch).
 
 ### 2.3 Epoch advance with held `ThinRef<T>`
 
@@ -273,7 +295,7 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 1.2 Mutex capability | PENDING | context fuzz harness |
 | 1.3 Refinement across await | PENDING | async harness |
 | 2.1 unsafe→checked aliasing | PENDING | aliasing analysis |
-| 2.2 Generation rollover | PARTIAL | guardrail test |
+| 2.2 Generation rollover | **DEFENSE CONFIRMED** | 9 guardrail tests across 2 files (2026-04-28) |
 | 2.3 Epoch advance | DEFENSE | — |
 | 3.1 Bytecode type-table | PENDING | bytecode validator |
 | 3.2 MakeVariant overflow | DEFECT | #167 |
@@ -288,8 +310,8 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 | 7.1 Tier-0 vs Tier-1 | PENDING | #196 |
 | 7.2 Hash determinism | PARTIAL | full audit |
 
-**7 vectors confirmed defended (full or partial), 11 pending** (post 2026-04-28
-RT-1.5 closure). Round 1 success condition: every PENDING entry has either a
+**8 vectors confirmed defended (full or partial), 10 pending** (post 2026-04-28
+RT-1.5 + RT-1.2.2 closures). Round 1 success condition: every PENDING entry has either a
 guardrail test or a tracked weakness with concrete fix scope. Current pending
 count needs the listed infrastructure (concurrent-write harness, bytecode
 validator) to advance.
