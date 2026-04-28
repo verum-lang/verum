@@ -47,8 +47,30 @@ pub(in super::super) fn handle_extended(
             // Stdio flush happens at the driver boundary (just before
             // `process::exit`) so partial-line `print(...)` output is
             // not lost regardless of which path produced the exit.
+            //
+            // Permission gate: process termination is a script-level
+            // resource boundary just like FFI _exit / kill / fork. A
+            // script declaring `permissions = ["time"]` (no `run`)
+            // shouldn't be able to terminate the process — denying
+            // here mirrors the FFI-level enforcement in
+            // `ffi_extended.rs::check_ffi_permission`. Plain scripts
+            // with no permission policy installed pass the check
+            // unconditionally (router default is allow-all).
             let code_reg = super::bytecode_io::read_reg(state)?;
             let code = state.get_reg(code_reg).as_integer_compatible() as i32;
+            use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+            if state.check_permission(PermissionScope::Process, 0)
+                == PermissionDecision::Deny
+            {
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                let _ = std::io::stderr().flush();
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "permission denied: exit({code}) requires Process grant"
+                    ),
+                });
+            }
             Err(InterpreterError::ProcessExit(code))
         }
         None => Err(InterpreterError::NotImplemented {

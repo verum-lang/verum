@@ -17,12 +17,147 @@ use super::bytecode_io::*;
 use super::string_helpers::*;
 use super::method_dispatch::{monotonic_nanos_shared, realtime_nanos_shared};
 
+/// FFI symbol → permission scope mapping for the script-mode
+/// permission router. The interpreter's `RequiresPermission` flag
+/// only tags raw `syscall0..6`; on macOS / Windows scripts use FFI
+/// shims (`_exit`, `open`, `connect`, ...) instead, and they need
+/// gating too. This table is the closed-set of FFI primitives the
+/// runtime enforces against — every name listed here is a known
+/// resource boundary.
+///
+/// Returning `None` lets the FFI call through unconditionally
+/// (math, allocation, formatting, etc.). Returning `Some(scope)`
+/// triggers a `state.check_permission(scope, 0)` call before the
+/// FFI runtime is invoked. `target_id = 0` is the
+/// kind-only-coarse-mode placeholder; fine-grained per-target
+/// hashing is the SCRIPT-5c follow-on.
+fn ffi_symbol_permission_scope(
+    name: &str,
+) -> Option<crate::interpreter::permission::PermissionScope> {
+    use crate::interpreter::permission::PermissionScope;
+    match name {
+        // Process termination + control. Treated as Process
+        // because exit-on-deny is the user-visible failure shape
+        // and `permissions = ["run"]` reads naturally as "may
+        // change process state".
+        "_exit" | "exit" | "_Exit" | "exit_group" | "ExitProcess"
+        | "abort" | "_abort" | "raise" | "kill" | "killpg"
+        | "fork" | "vfork" | "execve" | "execv" | "execvp" | "execvpe"
+        | "posix_spawn" | "posix_spawnp" | "CreateProcessA" | "CreateProcessW"
+        | "TerminateProcess" => Some(PermissionScope::Process),
+
+        // Filesystem read/write/metadata.
+        "open" | "openat" | "creat" | "fopen" | "fopen64" | "freopen"
+        | "read" | "pread" | "pread64" | "readv" | "preadv"
+        | "write" | "pwrite" | "pwrite64" | "writev" | "pwritev"
+        | "unlink" | "unlinkat" | "remove" | "rename" | "renameat"
+        | "mkdir" | "mkdirat" | "rmdir"
+        | "stat" | "stat64" | "lstat" | "lstat64" | "fstat" | "fstat64"
+        | "fstatat" | "access" | "faccessat"
+        | "chmod" | "fchmod" | "fchmodat" | "chown" | "fchown" | "fchownat"
+        | "link" | "linkat" | "symlink" | "symlinkat" | "readlink" | "readlinkat"
+        | "truncate" | "ftruncate" | "truncate64" | "ftruncate64"
+        | "CreateFileA" | "CreateFileW" | "DeleteFileA" | "DeleteFileW"
+        | "ReadFile" | "WriteFile" | "MoveFileA" | "MoveFileW"
+        | "CreateDirectoryA" | "CreateDirectoryW" | "RemoveDirectoryA"
+        | "RemoveDirectoryW" => Some(PermissionScope::FileSystem),
+
+        // Network — sockets, DNS, send/recv.
+        "socket" | "bind" | "listen" | "accept" | "accept4"
+        | "connect" | "shutdown"
+        | "send" | "sendto" | "sendmsg" | "sendfile"
+        | "recv" | "recvfrom" | "recvmsg"
+        | "getaddrinfo" | "getnameinfo" | "gethostbyname" | "gethostbyaddr"
+        | "getsockopt" | "setsockopt" | "getsockname" | "getpeername"
+        | "WSAStartup" | "WSACleanup" | "WSASocketA" | "WSASocketW"
+        | "WSAConnect" | "WSASend" | "WSARecv" => Some(PermissionScope::Network),
+
+        // Memory primitives that bypass CBGR (raw mmap / brk / VirtualAlloc).
+        "mmap" | "mmap64" | "munmap" | "mprotect" | "madvise" | "mlock"
+        | "munlock" | "brk" | "sbrk"
+        | "VirtualAlloc" | "VirtualFree" | "VirtualProtect"
+        | "vm_allocate" | "vm_deallocate" | "mach_vm_allocate"
+        | "mach_vm_deallocate" => Some(PermissionScope::Memory),
+
+        // Cryptographic primitives that touch kernel RNG.
+        "getentropy" | "getrandom" | "arc4random" | "arc4random_buf"
+        | "RAND_bytes" | "BCryptGenRandom" | "RtlGenRandom" => {
+            Some(PermissionScope::Cryptography)
+        }
+
+        // Privileged time mutation. Observational time
+        // (`gettimeofday`, `clock_gettime`) is intentionally NOT
+        // gated — reading the clock is not a security boundary;
+        // setting it is.
+        "settimeofday" | "clock_settime" | "stime" | "adjtime"
+        | "SetSystemTime" | "SetLocalTime" => Some(PermissionScope::Time),
+
+        // Environment variable mutation as the script-level
+        // boundary. Reading is unrestricted; setting could
+        // affect child-process behaviour.
+        // Mapped to Process so a script-level `permissions =
+        // ["run"]` grant covers it (changing env affects child
+        // execve behaviour).
+        "setenv" | "unsetenv" | "putenv" | "clearenv"
+        | "SetEnvironmentVariableA" | "SetEnvironmentVariableW" => {
+            Some(PermissionScope::Process)
+        }
+
+        _ => None,
+    }
+}
+
+/// Inline guard: consult the permission router for this FFI call,
+/// raising `Panic` on Deny so the surrounding catch frame can
+/// pattern-match the failure. No-op for symbols not in the
+/// known-boundary table — those flow through unconditionally,
+/// preserving zero-cost dispatch for math / allocation / format
+/// FFIs that aren't security-relevant.
+///
+/// Stdio is flushed before the panic so the user sees any prior
+/// `print(...)` output even when the script terminates abruptly.
+fn check_ffi_permission(
+    state: &mut InterpreterState,
+    symbol_idx: u32,
+) -> InterpreterResult<()> {
+    // Resolve symbol name into an owned String so the immutable
+    // borrow on `state.module` ends before the mutable
+    // `check_permission` call below. Hot-path cost: one heap
+    // allocation per gated FFI call (rare; bypassed entirely for
+    // unmapped symbols via the `None` short-circuit).
+    let name: Option<String> = state
+        .module
+        .get_ffi_symbol(FfiSymbolId(symbol_idx))
+        .and_then(|sym| state.module.strings.get(sym.name))
+        .map(|s| s.to_string());
+    let Some(name) = name else { return Ok(()) };
+    let Some(scope) = ffi_symbol_permission_scope(name.as_str()) else {
+        return Ok(());
+    };
+    use crate::interpreter::permission::PermissionDecision;
+    // target_id = 0 is the coarse placeholder. Fine-grained per-target
+    // hashing (path bytes, host:port, etc.) is the SCRIPT-5c follow-on.
+    if state.check_permission(scope, 0) == PermissionDecision::Deny {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "permission denied: FFI call to `{}` requires {:?} grant",
+                name, scope
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Maximum allowed allocation/copy size for FFI memory operations (1 GiB).
 ///
 /// This cap prevents denial-of-service and memory-safety issues when untrusted
 /// register values are passed as sizes to raw memory operations
 /// (`CMemcpy`, `CMemset`, `CMemmove`, `CMemcmp`).
 const MAX_FFI_ALLOCATION_SIZE: usize = 1 << 30; // 1 GiB
+
 
 // Extended opcode handlers
 
@@ -1217,6 +1352,13 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // Collect argument values
             let args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
 
+            // Permission gate. Closes the macOS / Windows hole
+            // where FFI primitives (`_exit`, `open`, `connect`)
+            // would bypass the syscall-only `RequiresPermission`
+            // tagging on `syscall0..6`. No-op for non-boundary
+            // symbols — see `ffi_symbol_permission_scope`.
+            check_ffi_permission(state, symbol_idx)?;
+
             #[cfg(feature = "ffi")]
             {
                 let symbol_id = FfiSymbolId(symbol_idx);
@@ -1868,6 +2010,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
 
             let args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
 
+            // Permission gate — see CallFfiC arm for the rationale.
+            // Same boundary regardless of calling convention.
+            check_ffi_permission(state, symbol_idx)?;
+
             #[cfg(feature = "ffi")]
             {
                 let symbol_id = FfiSymbolId(symbol_idx);
@@ -2033,6 +2179,10 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             }
 
             let args: Vec<Value> = arg_regs.iter().map(|r| state.get_reg(*r)).collect();
+
+            // Permission gate — see CallFfiC arm for the rationale.
+            // Same boundary regardless of calling convention.
+            check_ffi_permission(state, symbol_idx)?;
 
             #[cfg(feature = "ffi")]
             {
