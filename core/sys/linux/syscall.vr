@@ -232,6 +232,28 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
     }
 }
 
+/// Raw-pointer pread — caller-owned buffer + explicit count.  Mirrors
+/// libsystem.safe_pread_raw; bypasses `&mut [Byte]` parameter coercion
+/// (RUNTIME-3-DEEPER sidestep).
+public fn pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_PREAD64,
+            fd.as_raw(),
+            buf as Int,
+            count,
+            offset,
+            0,
+            0,
+        )
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
 /// Atomic positional write — writes up to `buf.len()` bytes from `buf`
 /// to `fd` at `offset` without changing the file position. Maps to
 /// `pwrite64(2)` (SYS_PWRITE64). See `pread` for the atomicity contract.

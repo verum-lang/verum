@@ -1110,12 +1110,37 @@ public fn safe_pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int,
     }
 }
 
+/// Raw-pointer pread — caller-owned buffer.  Mirrors safe_open_raw;
+/// bypasses `&mut [Byte]` parameter coercion (RUNTIME-3-DEEPER).
+/// Caller passes the buffer's first byte and explicit byte count.
+public fn safe_pread_raw(fd: FileDesc, buf: &unsafe Byte, count: Int, offset: Int) -> Result<Int, OSError> {
+    let result = unsafe { pread(fd.0, buf, count, offset) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
 /// Write at explicit `offset` without moving the file cursor (POSIX `pwrite`).
 /// See `safe_pread` for the atomicity contract. Partial writes return
 /// `Ok(n)` with `n < buf.len()` — callers must loop until the full
 /// buffer lands if they need all-or-nothing semantics.
 public fn safe_pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError> {
     let result = unsafe { pwrite(fd.0, buf.as_ptr(), buf.len(), offset) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Raw-pointer pwrite — caller-owned buffer; bypasses `&[Byte]`
+/// parameter coercion path.
+public fn safe_pwrite_raw(fd: FileDesc, buf: &Byte, count: Int, offset: Int) -> Result<Int, OSError> {
+    let result = unsafe { pwrite(fd.0, buf, count, offset) };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
