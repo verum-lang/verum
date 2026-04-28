@@ -350,14 +350,21 @@ fn push_text(dst: &mut List<Byte>, src: &Text) {
 }
 
 fn push_int(dst: &mut List<Byte>, n: Int) {
-    // Int.MAX has 19 decimal digits; 24 is comfortable.
+    // Int.MIN-safe via UInt64 magnitude. Int.MAX has 19 decimal
+    // digits, Int.MIN's magnitude is 2^63 = 20 digits — both fit in
+    // the 24-byte buffer.
     let mut buf: List<Byte> = List.with_capacity(24);
-    let mut x = if n < 0 { -n } else { n };
-    if x == 0 { buf.push('0' as Byte); }
-    while x > 0 {
-        let d = (x % 10) as Byte;
+    if n == 0 { buf.push('0' as Byte); }
+    let mut x: UInt64 = if n < 0 {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
+    if n < 0 { dst.push('-' as Byte); }
+    while x > 0_u64 {
+        let d = (x % 10_u64) as Byte;
         buf.push(('0' as Byte) + d);
-        x = x / 10;
+        x = x / 10_u64;
     }
     let mut i: Int = buf.len() - 1;
     while i >= 0 { dst.push(buf[i]); i = i - 1; }

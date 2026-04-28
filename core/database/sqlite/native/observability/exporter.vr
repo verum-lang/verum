@@ -220,13 +220,18 @@ fn append_text(dst: &mut Text, s: &Text) {
 }
 
 fn append_int64(dst: &mut Text, n: Int64) {
+    // Int.MIN-safe via UInt64 magnitude.
     if n == 0_i64 { dst.push_byte(48 as Byte); return; }
     let mut digits: List<Byte> = List.new();
-    let mut x: Int64 = if n < 0_i64 { -n } else { n };
-    while x > 0_i64 {
-        let d: Byte = ((x as Int) % 10) as Byte;
+    let mut x: UInt64 = if n < 0_i64 {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
+    while x > 0_u64 {
+        let d: Byte = (x % 10_u64) as Byte;
         digits.push(d + (48 as Byte));
-        x = x / 10_i64;
+        x = x / 10_u64;
     }
     if n < 0_i64 { dst.push_byte(45 as Byte); }
     let mut i: Int = digits.len() - 1;
