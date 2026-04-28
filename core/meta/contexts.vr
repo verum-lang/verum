@@ -1944,6 +1944,51 @@ public type SchemaErrorSeverity is
     | Warning
     | Info;
 
+implement Display for SchemaErrorSeverity {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Error   => "error",
+            Warning => "warning",
+            Info    => "info",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for SchemaErrorSeverity {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Error   => "Error",
+            Warning => "Warning",
+            Info    => "Info",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for SchemaErrorSeverity {
+    fn eq(&self, other: &SchemaErrorSeverity) -> Bool {
+        match (self, other) {
+            (Error,   Error)   => true,
+            (Warning, Warning) => true,
+            (Info,    Info)    => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for SchemaError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"schema {self.severity}: {self.message}".as_str())
+    }
+}
+
+implement Debug for SchemaError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"SchemaError {{ message: {self.message}, severity: {self.severity:?}, suggestion: {self.suggestion:?} }}".as_str())
+    }
+}
+
 // =============================================================================
 // DepGraph Context (Dependency Analysis)
 // =============================================================================

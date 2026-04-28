@@ -121,6 +121,40 @@ public type RawRecoveryError is
     | Timeout
     | InnerError(Error);
 
+implement Display for RawRecoveryError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MaxRetriesExceeded => f.write_str("recovery: max retries exceeded"),
+            CircuitOpen        => f.write_str("recovery: circuit open"),
+            Timeout            => f.write_str("recovery: operation timed out"),
+            InnerError(e)      => f.write_str(f"recovery: inner error ({e})".as_str()),
+        }
+    }
+}
+
+implement Debug for RawRecoveryError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            MaxRetriesExceeded => f.write_str("MaxRetriesExceeded"),
+            CircuitOpen        => f.write_str("CircuitOpen"),
+            Timeout            => f.write_str("Timeout"),
+            InnerError(e)      => f.write_str(f"InnerError({e:?})".as_str()),
+        }
+    }
+}
+
+implement Eq for RawRecoveryError {
+    fn eq(&self, other: &RawRecoveryError) -> Bool {
+        match (self, other) {
+            (MaxRetriesExceeded, MaxRetriesExceeded) => true,
+            (CircuitOpen,        CircuitOpen)        => true,
+            (Timeout,            Timeout)            => true,
+            (InnerError(_),      InnerError(_))      => true,  // Error has no Eq — best-effort tag-equal
+            _ => false,
+        }
+    }
+}
+
 /// Spawn a supervised task.
 ///
 /// Requires: Supervisor runtime
