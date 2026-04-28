@@ -618,7 +618,17 @@ fn run_script_interpreted(
     if let Some(fm) = ctx.frontmatter.as_ref() {
         check_frontmatter_version(fm)?;
         if !fm.dependencies.is_empty() {
-            script_cog_resolver = Some(resolve_script_dependencies(fm, input)?);
+            let resolved = resolve_script_dependencies(fm, input)?;
+            // Persist the resolved dependency set as a sidecar
+            // lockfile (`<script>.lock`). On a freshly-introduced
+            // dependency this writes a new file; on subsequent
+            // runs the existing lockfile is verified against the
+            // current source hash + compiler version + resolved
+            // grants, and rewritten when the inputs have drifted.
+            // The lockfile is the authoritative pinned record for
+            // reproducibility / drift detection across machines.
+            persist_script_lockfile(&ctx, input, &resolved.locked)?;
+            script_cog_resolver = Some(resolved.resolver);
         }
     }
 
@@ -784,12 +794,20 @@ fn execute_cached_vbc(
 /// scope for the script-mode work. We surface a clear warning and
 /// continue without registering those entries — the script may
 /// still work if it doesn't actually `mount` the unresolved cog.
+/// Outcome of resolving a script's `dependencies = [...]` frontmatter.
+struct ResolvedDeps {
+    resolver: verum_modules::cog_resolver::CogResolver,
+    locked: Vec<crate::script::lockfile::LockedDep>,
+}
+
 fn resolve_script_dependencies(
     fm: &crate::script::frontmatter::Frontmatter,
     script_path: &std::path::Path,
-) -> Result<verum_modules::cog_resolver::CogResolver, CliError> {
+) -> Result<ResolvedDeps, CliError> {
     use crate::script::frontmatter::DepSpec;
+    use crate::script::lockfile::LockedDep;
     let mut resolver = verum_modules::cog_resolver::CogResolver::new();
+    let mut locked: Vec<LockedDep> = Vec::new();
     let script_dir = script_path
         .parent()
         .map(|p| p.to_path_buf())
@@ -814,7 +832,14 @@ fn resolve_script_dependencies(
                     ))
                 })?;
                 let version = long.version.clone().unwrap_or_else(|| "0.0.0".to_string());
-                resolver.register_cog(long.name.as_str(), version.as_str(), canonical);
+                let integrity = compute_path_cog_integrity(&canonical);
+                resolver.register_cog(long.name.as_str(), version.as_str(), canonical.clone());
+                locked.push(LockedDep {
+                    name: long.name.clone(),
+                    version,
+                    source: format!("path+{}", canonical.display()),
+                    integrity,
+                });
                 path_count += 1;
             }
             // Long-form with no path → registry / git resolution
@@ -841,7 +866,77 @@ fn resolve_script_dependencies(
              resolution (not yet wired) — they will be ignored at runtime"
         ));
     }
-    Ok(resolver)
+    Ok(ResolvedDeps { resolver, locked })
+}
+
+/// Persist (or verify+refresh) a script's resolved dependencies as
+/// a sidecar `<script>.lock` next to the source.
+///
+/// **First run** (no lockfile present) → write a fresh lockfile
+/// from `locked_deps`.
+///
+/// **Subsequent run** (lockfile exists) → call `verify_against` to
+/// detect drift in `(source_hash, compiler_version)`. On stale,
+/// rewrite. Always re-hash on every run so a deps swap (path
+/// repointed, integrity changed) is reflected in the lockfile —
+/// drift must be observable, not silent.
+///
+/// I/O failures are non-fatal: the script run is the contract;
+/// the lockfile is reproducibility metadata. A read-only mount or
+/// a permission glitch warns and continues.
+fn persist_script_lockfile(
+    ctx: &crate::script::context::ScriptContext,
+    script_path: &std::path::Path,
+    locked_deps: &[crate::script::lockfile::LockedDep],
+) -> Result<(), CliError> {
+    use crate::script::lockfile::ScriptLockfile;
+    let path = ScriptLockfile::sidecar_path(script_path);
+    let mut fresh = ctx.fresh_lockfile(locked_deps.to_vec());
+    if let Err(e) = fresh.write_to(&path) {
+        ui::warn(&format!(
+            "could not write lockfile {}: {e}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Hash a path-form cog's source tree into a stable integrity
+/// digest for the lockfile. blake3 over a sorted catalogue of
+/// `(relative_path, content_hash)` pairs — moving the cog dir or
+/// touching whitespace inside any `.vr` file changes the digest;
+/// ordering of `read_dir` results does not. Best-effort: I/O
+/// errors collapse to an empty digest so a momentarily-unreadable
+/// file doesn't fail the entire script run.
+fn compute_path_cog_integrity(root: &std::path::Path) -> String {
+    let mut entries: Vec<(String, [u8; 32])> = Vec::new();
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, [u8; 32])>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else if path.extension().is_some_and(|e| e == "vr") {
+                let rel = path
+                    .strip_prefix(root)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| path.display().to_string());
+                if let Ok(bytes) = std::fs::read(&path) {
+                    let mut h = [0u8; 32];
+                    h.copy_from_slice(blake3::hash(&bytes).as_bytes());
+                    out.push((rel, h));
+                }
+            }
+        }
+    }
+    walk(root, root, &mut entries);
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut hasher = blake3::Hasher::new();
+    for (rel, h) in &entries {
+        hasher.update(rel.as_bytes());
+        hasher.update(h);
+    }
+    hasher.finalize().to_hex().to_string()
 }
 
 /// Build a permission policy from a script's `ScriptContext`.
