@@ -264,7 +264,19 @@ public fn CreateFileW(
     template_file: Handle,
 ) -> Handle;
 
-/// Read from a file
+// Win32 BOOL is `typedef int BOOL;` (Int32). Verum's `Bool` lowers to
+// LLVM `i1`; an i1 truncation of i32 BOOL takes bit 0 only — correct
+// for canonical 0/1 BOOL values but silent-failure for non-canonical
+// even-non-zero returns (e.g., 2 → bit 0 = 0 → Verum false, BUG).
+// Migrating to `Int32` at the extern boundary, with caller-side
+// `result != 0` check, makes the BOOL → bool conversion ABI-correct.
+// T0.4.5 — applied to externs called from core/ (ReadFile / WriteFile /
+// FlushFileBuffers); the other Win32 BOOL extern decls in this file
+// are not exercised by core code paths and remain `Bool` for now (see
+// task T0.4.5 for the rationale and re-opening triggers).
+
+/// Read from a file. C: `BOOL ReadFile(HANDLE, LPVOID, DWORD, LPDWORD,
+/// LPOVERLAPPED);` — BOOL is `int`; non-zero return means success.
 @extern("kernel32.dll")
 public fn ReadFile(
     file: Handle,
@@ -272,9 +284,10 @@ public fn ReadFile(
     number_of_bytes_to_read: UInt32,
     number_of_bytes_read: &mut UInt32,
     overlapped: &mut Overlapped,
-) -> Bool;
+) -> Int32;
 
-/// Write to a file
+/// Write to a file. C: `BOOL WriteFile(HANDLE, LPCVOID, DWORD, LPDWORD,
+/// LPOVERLAPPED);` — same BOOL convention as `ReadFile`.
 @extern("kernel32.dll")
 public fn WriteFile(
     file: Handle,
@@ -282,7 +295,7 @@ public fn WriteFile(
     number_of_bytes_to_write: UInt32,
     number_of_bytes_written: &mut UInt32,
     overlapped: &mut Overlapped,
-) -> Bool;
+) -> Int32;
 
 /// Get overlapped result
 @extern("kernel32.dll")
@@ -334,7 +347,9 @@ public fn GetFileSizeEx(
 
 /// Flush file buffers
 @extern("kernel32.dll")
-public fn FlushFileBuffers(file: Handle) -> Bool;
+/// Flush a file's in-memory buffers to disk.
+/// C: `BOOL FlushFileBuffers(HANDLE);` — BOOL is `int`.
+public fn FlushFileBuffers(file: Handle) -> Int32;
 
 // =============================================================================
 // Byte-range File Locking
