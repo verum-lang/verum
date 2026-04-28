@@ -84,6 +84,61 @@ public type PqError is
     | BackendUnavailable
     | DecapsulationFailure;
 
+// Display + Debug + Eq for PqError.  DecapsulationFailure
+// Display surfaces no detail — implicit-rejection KEMs
+// (FIPS 203 §6.3) require constant-time, value-blind
+// failure to prevent oracle attacks.
+
+implement Display for PqError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PqError.InvalidKeyLength { expected, actual } =>
+                f.write_str(f"ML-KEM invalid key length: expected={expected} actual={actual}".as_str()),
+            PqError.InvalidCiphertextLength { expected, actual } =>
+                f.write_str(f"ML-KEM invalid ciphertext length: expected={expected} actual={actual}".as_str()),
+            PqError.RngFailed =>
+                f.write_str("ML-KEM random number generator failed"),
+            PqError.BackendUnavailable =>
+                f.write_str("ML-KEM backend intrinsic not available"),
+            PqError.DecapsulationFailure =>
+                f.write_str("ML-KEM decapsulation failed"),
+        }
+    }
+}
+
+implement Debug for PqError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PqError.InvalidKeyLength { expected, actual } =>
+                f.write_str(f"InvalidKeyLength {{ expected: {expected}, actual: {actual} }}".as_str()),
+            PqError.InvalidCiphertextLength { expected, actual } =>
+                f.write_str(f"InvalidCiphertextLength {{ expected: {expected}, actual: {actual} }}".as_str()),
+            PqError.RngFailed             => f.write_str("RngFailed"),
+            PqError.BackendUnavailable    => f.write_str("BackendUnavailable"),
+            PqError.DecapsulationFailure  => f.write_str("DecapsulationFailure"),
+        }
+    }
+}
+
+implement Eq for PqError {
+    fn eq(&self, other: &PqError) -> Bool {
+        match (self, other) {
+            (
+                PqError.InvalidKeyLength { expected: ea, actual: aa },
+                PqError.InvalidKeyLength { expected: eb, actual: ab },
+            ) => ea == eb && aa == ab,
+            (
+                PqError.InvalidCiphertextLength { expected: ea, actual: aa },
+                PqError.InvalidCiphertextLength { expected: eb, actual: ab },
+            ) => ea == eb && aa == ab,
+            (PqError.RngFailed, PqError.RngFailed) => true,
+            (PqError.BackendUnavailable, PqError.BackendUnavailable) => true,
+            (PqError.DecapsulationFailure, PqError.DecapsulationFailure) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Key material + encapsulation
 // =============================================================================

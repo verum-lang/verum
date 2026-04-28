@@ -137,6 +137,62 @@ public type RsaError is
     /// Backend intrinsic not available.
     | BackendNotReady;
 
+// Display + Debug + Eq for RsaError.  VerificationFailed
+// Display deliberately surfaces no detail — RSA-PSS
+// verification failure cannot leak field-level info
+// (oracle / timing attack surface, RFC 8017 §8.1
+// security considerations).
+
+implement Display for RsaError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            RsaError.Malformed(msg) => {
+                f.write_str("RSA signature malformed: ")?;
+                f.write_str(msg.as_str())
+            },
+            RsaError.InvalidPublicKey(msg) => {
+                f.write_str("RSA public key rejected: ")?;
+                f.write_str(msg.as_str())
+            },
+            RsaError.VerificationFailed =>
+                f.write_str("RSA signature verification failed"),
+            RsaError.BackendNotReady =>
+                f.write_str("RSA backend intrinsic not available"),
+        }
+    }
+}
+
+implement Debug for RsaError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            RsaError.Malformed(msg) => {
+                f.write_str("Malformed(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            RsaError.InvalidPublicKey(msg) => {
+                f.write_str("InvalidPublicKey(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            RsaError.VerificationFailed => f.write_str("VerificationFailed"),
+            RsaError.BackendNotReady    => f.write_str("BackendNotReady"),
+        }
+    }
+}
+
+implement Eq for RsaError {
+    fn eq(&self, other: &RsaError) -> Bool {
+        match (self, other) {
+            (RsaError.Malformed(a), RsaError.Malformed(b)) => a == b,
+            (RsaError.InvalidPublicKey(a), RsaError.InvalidPublicKey(b)) => a == b,
+            (RsaError.VerificationFailed, RsaError.VerificationFailed) => true,
+            (RsaError.BackendNotReady, RsaError.BackendNotReady) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Verify — RSA-PSS (RFC 8017 §8.1)
 // =============================================================================
