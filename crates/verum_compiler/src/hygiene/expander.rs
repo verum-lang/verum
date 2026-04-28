@@ -799,14 +799,32 @@ impl QuoteExpander {
                     (const_val, type_name)
                 }
                 Err(err_msg) => {
-                    // Evaluation failed - record as violation but continue
-                    self.violations.push(HygieneViolation::InvalidQuoteSyntax {
+                    // Evaluation failed.  Under `strict_mode = true` we
+                    // abort the lift with a typed error so the caller
+                    // sees an immediate hygiene violation rather than a
+                    // degraded `LiftedValue { const_value: None }` that
+                    // looks like a deferred-evaluation case.  Under
+                    // lenient mode we record the violation and continue
+                    // (the caller is expected to inspect
+                    // `take_violations()` and decide its own policy).
+                    //
+                    // Pre-fix `config.strict_mode` was inert — the
+                    // field defaulted to `true` (claiming strict
+                    // enforcement) but the expander never read it, so
+                    // every lift failure silently degraded to the
+                    // deferred-eval shape.  Now the strict flag has
+                    // actual teeth.
+                    let v = HygieneViolation::InvalidQuoteSyntax {
                         message: Text::from(format!(
                             "lift evaluation failed: {}",
                             err_msg
                         )),
                         span,
-                    });
+                    };
+                    if self.config.strict_mode {
+                        return Err(v);
+                    }
+                    self.violations.push(v);
                     (Maybe::None, Maybe::None)
                 }
             }
@@ -2192,7 +2210,43 @@ mod tests {
     }
 
     #[test]
-    fn test_lift_with_evaluator_error() {
+    fn test_lift_with_evaluator_error_lenient() {
+        // Under lenient mode (`strict_mode = false`), a failed lift
+        // evaluation is recorded as a violation and the lift returns
+        // `Ok(LiftedValue { const_value: None, ty: None })` so the
+        // caller can decide whether to fail the whole expansion or
+        // continue with the deferred-eval shape.
+        let context = HygieneContext::new();
+        let lenient = ExpansionConfig {
+            strict_mode: false,
+            ..ExpansionConfig::default()
+        };
+        let mut expander = QuoteExpander::new(context, lenient)
+            .with_lift_evaluator(Box::new(|_expr| {
+                Err(Text::from("evaluation error"))
+            }));
+
+        expander.enter_quote(0, Span::default()).unwrap();
+
+        let result = expander.lift_value(&make_test_expr(), Span::default());
+
+        assert!(result.is_ok(), "lenient mode must collect-and-continue");
+        let lifted = result.unwrap();
+        assert!(matches!(lifted.const_value, Maybe::None));
+        assert!(matches!(lifted.ty, Maybe::None));
+        assert!(
+            expander.has_violations(),
+            "lenient mode must record the violation for caller inspection",
+        );
+    }
+
+    #[test]
+    fn test_lift_with_evaluator_error_strict_aborts() {
+        // Under strict mode (`strict_mode = true` — the default), a
+        // failed lift evaluation aborts immediately with a typed
+        // error.  Pre-fix the field was inert and lenient was the
+        // only behaviour available.  Pin the new strict path so a
+        // regression to the inert-field state is caught.
         let context = HygieneContext::new();
         let mut expander = QuoteExpander::with_default_config(context)
             .with_lift_evaluator(Box::new(|_expr| {
@@ -2203,11 +2257,25 @@ mod tests {
 
         let result = expander.lift_value(&make_test_expr(), Span::default());
 
-        // Should succeed but with no const value and a recorded violation
-        assert!(result.is_ok());
-        let lifted = result.unwrap();
-        assert!(matches!(lifted.const_value, Maybe::None));
-        assert!(expander.has_violations());
+        match result {
+            Err(HygieneViolation::InvalidQuoteSyntax { ref message, .. }) => {
+                assert!(
+                    message.as_str().contains("lift evaluation failed"),
+                    "strict-mode violation must carry the failure context, got: {:?}",
+                    message,
+                );
+            }
+            other => panic!(
+                "expected strict-mode abort with InvalidQuoteSyntax, got: {:?}",
+                other,
+            ),
+        }
+        // Strict mode aborts before pushing the violation to the
+        // collection — the caller sees the Err directly.
+        assert!(
+            !expander.has_violations(),
+            "strict mode must abort BEFORE accumulating the violation",
+        );
     }
 
     #[test]
