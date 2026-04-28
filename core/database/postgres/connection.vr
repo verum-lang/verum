@@ -38,6 +38,7 @@ mount core.database.postgres.error.dberr_from_pg;
 mount core.database.postgres.wire.frame.{Frame, try_parse_tagged, TaggedReadOutcome};
 mount core.database.postgres.wire.frontend.{
     StartupParams, startup, simple_query, terminate, sasl_initial_response, sasl_response,
+    cancel_request,
 };
 mount core.database.postgres.wire.backend.{
     BackendMessage,
@@ -271,6 +272,65 @@ implement PgConnection {
         }
     }
 
+    /// Read the (process_id, secret_key) pair captured at startup.
+    /// Used by `cancel_running_query` and any external CancelRequest
+    /// driver.  Returns `None` if the connection never reached Ready
+    /// (server didn't emit BackendKeyData yet).
+    public fn backend_key_view(&self) -> Maybe<(Int, Int)> { self.backend_key }
+
+    /// Look up a server-reported parameter (e.g. `server_version`,
+    /// `server_encoding`, `client_encoding`).  Returns `None` if the
+    /// server never sent that ParameterStatus message.  Used by the
+    /// cancel driver and by tracing/diagnostics.
+    public fn parameter(&self, name: &Text) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.parameters.len() {
+            if self.parameters[i].0 == name.clone() {
+                return Some(self.parameters[i].1.clone());
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Issue a CancelRequest against this connection's backend.  Per
+    /// Postgres protocol §6.1.7 the cancel must travel on a SEPARATE
+    /// TCP connection (the in-flight query holds the original socket
+    /// busy).  The destination host/port + (pid, secret_key) come
+    /// from the connection's startup state.
+    ///
+    /// This call:
+    ///   1. Opens a fresh TCP socket to `host`:`port`.
+    ///   2. Sends one CancelRequest frame.
+    ///   3. Closes the cancel socket (the server does not respond).
+    ///
+    /// The original connection is unaffected — the in-flight query
+    /// will surface as `ErrorResponse { sql_state: "57014" }`
+    /// (query_canceled) on its existing socket and then return to
+    /// Ready state.  Race notes: if the server completes the query
+    /// before the cancel arrives, the cancel is silently ignored —
+    /// matches Postgres semantics.
+    ///
+    /// The connection itself is NOT mutated by this call; the caller
+    /// can keep using `self` for further queries after the cancel
+    /// reply lands on it.
+    public fn cancel_running_query(&self, host: &Text, port: Int)
+        -> Result<(), DbError>
+    {
+        let key = match self.backend_key {
+            Some(k) => k,
+            None    => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "NO_BACKEND_KEY".clone(),
+                    message: "cancel_running_query: BackendKeyData was never received".clone(),
+                    retryable: false,
+                }));
+            }
+        };
+        cancel_running_query_at(host, port, key.0, key.1)
+    }
+
     /// Orderly shutdown — sends Terminate then closes the underlying
     /// TCP stream. Affine: the value is moved out so further use is
     /// a compile error.
@@ -284,6 +344,40 @@ implement PgConnection {
         self.state = PcsClosed;
         Ok(())
     }
+}
+
+// -----------------------------------------------------------------------------
+// Standalone CancelRequest driver
+// -----------------------------------------------------------------------------
+//
+// Module-level so callers that hold the (host, port, pid, secret_key)
+// tuple in some non-PgConnection form (logged from a worker, fetched
+// from a pool reservation, etc.) can issue a cancel without
+// reconstructing a full PgConnection value.
+
+/// Open a fresh TCP socket, write one CancelRequest, close.  The
+/// server never sends a reply — closing immediately after the write
+/// is the protocol-correct behaviour.
+public fn cancel_running_query_at(
+    host: &Text,
+    port: Int,
+    process_id: Int,
+    secret_key: Int,
+) -> Result<(), DbError> {
+    let target = format_host_port(host, port);
+    let mut sock = match TcpStream.connect(target.as_str()) {
+        Ok(s)  => s,
+        Err(_) => {
+            return Err(DbError.ConnectionFailed {
+                source: core.database.common.error.ConnectionErrorKind.CekConnectRefused,
+                adapter: AdPostgres,
+            });
+        }
+    };
+    let payload = cancel_request(process_id, secret_key);
+    let _ = write_all(&mut sock, payload.as_slice());
+    // Close the cancel socket — server doesn't reply on CancelRequest.
+    Ok(())
 }
 
 public type SimpleQueryResult is {
