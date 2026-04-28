@@ -192,6 +192,90 @@ fn encode_page_size(n: Int) -> Result<UInt16, Text> {
 // Parse / serialize
 // -----------------------------------------------------------------------------
 
+/// Parse a 100-byte SQLite header from a `List<Byte>` directly.
+/// Mirrors `parse_header` byte-for-byte but takes the buffer as a
+/// borrowed `List` reference so callers don't have to construct a
+/// `&[Byte]` slice — bypasses the Tier-0 interpreter's slice-arg
+/// coercion path (RUNTIME-3-INTERP).  Diagnostic harness uses this
+/// surface; production code paths can use either form.
+public fn parse_header_from_list(buf: &List<Byte>) -> Result<DatabaseHeader, Text> {
+    if buf.len() < DB_HEADER_SIZE {
+        return Err("db_header: short buffer".clone());
+    }
+    // Magic check — bytes 0..15 must match exactly.
+    let expected = "SQLite format 3\0";
+    let magic_bytes = expected.as_bytes();
+    let mut i: Int = 0;
+    while i < 16 {
+        if buf[i] != magic_bytes[i] {
+            return Err("db_header: bad magic".clone());
+        }
+        i = i + 1;
+    }
+    let ps_raw = (((buf[16] as UInt16) << 8) | (buf[17] as UInt16));
+    let page_size = match canon_page_size(ps_raw) {
+        Ok(n)  => n,
+        Err(e) => { return Err(e); }
+    };
+    let fw = match file_format_from_u8(buf[18]) {
+        Ok(f)  => f, Err(e) => { return Err(e); }
+    };
+    let fr = match file_format_from_u8(buf[19]) {
+        Ok(f)  => f, Err(e) => { return Err(e); }
+    };
+    let reserved = buf[20];
+    if buf[21] != (64 as Byte) { return Err("db_header: max_embedded_payload must be 64".clone()); }
+    if buf[22] != (32 as Byte) { return Err("db_header: min_embedded_payload must be 32".clone()); }
+    if buf[23] != (32 as Byte) { return Err("db_header: leaf_payload must be 32".clone()); }
+    let change_counter = read_u32_be_list(buf, 24);
+    let size_pages     = read_u32_be_list(buf, 28);
+    let first_free     = read_u32_be_list(buf, 32);
+    let freelist_count = read_u32_be_list(buf, 36);
+    let cookie         = read_u32_be_list(buf, 40);
+    let schema_fmt     = read_u32_be_list(buf, 44);
+    if schema_fmt < 1_u32 || schema_fmt > 4_u32 {
+        return Err("db_header: schema_format must be in [1, 4]".clone());
+    }
+    let cache_size_raw = read_u32_be_list(buf, 48);
+    let largest_root   = read_u32_be_list(buf, 52);
+    let text_enc_raw   = read_u32_be_list(buf, 56);
+    let text_encoding  = match text_encoding_from_u32(text_enc_raw) {
+        Ok(t)  => t, Err(e) => { return Err(e); }
+    };
+    let user_version           = read_u32_be_list(buf, 60);
+    let incremental_vacuum     = read_u32_be_list(buf, 64);
+    let application_id         = read_u32_be_list(buf, 68);
+    let version_valid_for      = read_u32_be_list(buf, 92);
+    let sqlite_version_number  = read_u32_be_list(buf, 96);
+    Ok(DatabaseHeader {
+        page_size:               page_size,
+        file_format_write:       fw,
+        file_format_read:        fr,
+        reserved_space:          reserved,
+        file_change_counter:     change_counter,
+        db_size_pages:           size_pages,
+        first_freelist_page:     first_free,
+        freelist_pages_count:    freelist_count,
+        schema_cookie:           cookie,
+        schema_format:           schema_fmt,
+        default_cache_size:      cache_size_raw,
+        largest_root_btree_page: largest_root,
+        text_encoding:           text_encoding,
+        user_version:            user_version,
+        incremental_vacuum:      incremental_vacuum,
+        application_id:          application_id,
+        version_valid_for:       version_valid_for,
+        sqlite_version_number:   sqlite_version_number,
+    })
+}
+
+fn read_u32_be_list(buf: &List<Byte>, off: Int) -> UInt32 {
+    ((buf[off]     as UInt32) << 24)
+    | ((buf[off + 1] as UInt32) << 16)
+    | ((buf[off + 2] as UInt32) << 8)
+    |  (buf[off + 3] as UInt32)
+}
+
 /// Parse a 100-byte SQLite header. Rejects malformed magic, invalid
 /// page_size, unknown file_format, unknown text_encoding. Every field
 /// on the returned `DatabaseHeader` is known-valid.
