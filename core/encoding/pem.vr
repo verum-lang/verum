@@ -82,7 +82,32 @@ public type PemError is
       NoBlockFound
     | MismatchedLabels(Text)
     | Base64Failed
-    | Malformed(Text);
+    | Malformed(Text)
+    | TooLarge(Int);
+
+/// Hard cap on a single PEM block's base64 body length (bytes BEFORE
+/// decode). 16 MiB is well above any realistic certificate / key blob:
+///
+///   * X.509 leaf cert         ~  1-3 KiB
+///   * Full chain (3-5 certs)  ~  4-15 KiB
+///   * RSA-4096 PKCS#8 key     ~  3-4 KiB
+///   * ECDSA P-256 key         ~  240 bytes
+///   * Largest sensible bundle ~ 200 KiB (fat CA bundles)
+///
+/// 16 MiB is "absurdly conservative" — anything past it is a DoS
+/// attempt against the base64 decoder + DER parser allocator.
+public const PEM_MAX_BODY_BYTES: Int = 16 * 1024 * 1024;
+
+/// Hard cap on total input size for `decode_all` — prevents a hostile
+/// caller from feeding a multi-GB stream of empty preamble that
+/// `find_sub` would scan linearly forever.
+public const PEM_MAX_INPUT_BYTES: Int = 64 * 1024 * 1024;
+
+/// Hard cap on a single PEM label length. RFC 7468 §3 labels are
+/// short ASCII strings; 256 bytes is two orders of magnitude above
+/// every published label. A multi-MB "label" is a parser-confusion
+/// attempt.
+pub const PEM_MAX_LABEL_BYTES: Int = 256;
 
 // =============================================================================
 // Encode
@@ -144,11 +169,6 @@ public fn encode_bundle(blocks: &List<PemBlock>) -> Text {
 public fn decode_one(input: &Text) -> Result<PemBlock, PemError> {
     let blocks = decode_all(input)?;
     if blocks.len() == 0 { return Err(PemError.NoBlockFound); }
-    let mut out = PemBlock {
-        label: blocks[0].label.clone(),
-        contents: blocks[0].contents.clone(),
-    };
-    let _ = out;
     Ok(PemBlock {
         label: blocks[0].label.clone(),
         contents: blocks[0].contents.clone(),
@@ -161,6 +181,9 @@ public fn decode_one(input: &Text) -> Result<PemBlock, PemError> {
 /// decides whether that's empty-bundle-is-ok).
 public fn decode_all(input: &Text) -> Result<List<PemBlock>, PemError> {
     let bytes = input.as_bytes();
+    if bytes.len() > PEM_MAX_INPUT_BYTES {
+        return Err(PemError.TooLarge(bytes.len()));
+    }
     let begin_marker = b"-----BEGIN ";
     let end_marker   = b"-----END ";
     let dashes       = b"-----";
@@ -179,6 +202,10 @@ public fn decode_all(input: &Text) -> Result<List<PemBlock>, PemError> {
                     None    => return Err(PemError.Malformed(
                         Text.from("missing closing dashes in BEGIN"))),
                 };
+                if label_end_pos - label_start > PEM_MAX_LABEL_BYTES {
+                    return Err(PemError.Malformed(
+                        Text.from("BEGIN label exceeds PEM_MAX_LABEL_BYTES")));
+                }
                 let label_begin = slice_text(bytes, label_start, label_end_pos);
                 let body_start = label_end_pos + dashes.len();
 
@@ -189,6 +216,12 @@ public fn decode_all(input: &Text) -> Result<List<PemBlock>, PemError> {
                     None    => return Err(PemError.Malformed(
                         Text.from("missing -----END marker"))),
                 };
+                // Body-size cap: refuse to base64-decode a multi-GiB blob.
+                // The decoder would allocate ~0.75 × body_len bytes for
+                // the result; an unbounded body is a memory-DoS vector.
+                if end_pos - body_start > PEM_MAX_BODY_BYTES {
+                    return Err(PemError.TooLarge(end_pos - body_start));
+                }
                 let end_label_start = end_pos + end_marker.len();
                 let end_label_end = find_sub(bytes, dashes, end_label_start);
                 let end_label_end_pos = match end_label_end {
@@ -196,6 +229,10 @@ public fn decode_all(input: &Text) -> Result<List<PemBlock>, PemError> {
                     None    => return Err(PemError.Malformed(
                         Text.from("missing closing dashes in END"))),
                 };
+                if end_label_end_pos - end_label_start > PEM_MAX_LABEL_BYTES {
+                    return Err(PemError.Malformed(
+                        Text.from("END label exceeds PEM_MAX_LABEL_BYTES")));
+                }
                 let end_label = slice_text(bytes, end_label_start, end_label_end_pos);
 
                 if !text_eq(&label_begin, &end_label) {
