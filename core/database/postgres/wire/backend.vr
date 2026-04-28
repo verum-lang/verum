@@ -26,6 +26,7 @@ mount core.database.postgres.wire.types.{
     BE_PARSE_COMPLETE, BE_BIND_COMPLETE, BE_CLOSE_COMPLETE,
     BE_PARAMETER_DESC, BE_NO_DATA, BE_PORTAL_SUSPEND,
     BE_NEGOTIATE_PROTO,
+    BE_COPY_IN, BE_COPY_OUT, BE_COPY_DATA, BE_COPY_DONE,
     AUTH_OK, AUTH_CLEARTEXT_PASSWORD, AUTH_MD5_PASSWORD,
     AUTH_SASL, AUTH_SASL_CONTINUE, AUTH_SASL_FINAL,
     TX_IDLE, TX_IN_TX, TX_FAILED,
@@ -371,6 +372,48 @@ public fn parse_error_response(payload: List<Byte>) -> Result<Diagnostic, Backen
 // BackendMessage discriminant — top-level parser dispatch.
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// COPY frames (database.md §6.1.6)
+// -----------------------------------------------------------------------------
+//
+// CopyInResponse / CopyOutResponse:
+//     i8   format   — 0 text, 1 binary
+//     i16  num_columns
+//     i16  per_column_format[num_columns]
+//
+// CopyData: opaque payload.  CopyDone: empty.
+
+public type CopyFormat is CfText | CfBinary;
+
+public type CopyResponse is {
+    format: CopyFormat,
+    column_formats: List<Int>,    // 0 / 1 per column; matches FmtText / FmtBinary
+};
+
+fn parse_copy_response(payload: List<Byte>) -> Result<CopyResponse, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let fmt_byte = match r.read_u8() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 1, available: 0 }); }
+    };
+    let n = match r.read_i16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+    };
+    let mut cols: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        let f = match r.read_i16_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+        };
+        cols.push(f);
+        i = i + 1;
+    }
+    let fmt: CopyFormat = if fmt_byte == 1_u8 { CfBinary } else { CfText };
+    Ok(CopyResponse { format: fmt, column_formats: cols })
+}
+
 public type BackendMessage is
       BmAuth(AuthRequest)
     | BmParameterStatus(ParameterStatus)
@@ -383,6 +426,10 @@ public type BackendMessage is
     | BmError(Diagnostic)
     | BmNotice(Diagnostic)
     | BmNotification(NotificationResponse)
+    | BmCopyInResponse(CopyResponse)
+    | BmCopyOutResponse(CopyResponse)
+    | BmCopyData { bytes: List<Byte> }
+    | BmCopyDone
     | BmParseComplete
     | BmBindComplete
     | BmCloseComplete
@@ -407,6 +454,10 @@ public fn parse_backend(frame: Frame, data_row_formats: &List<Int>) -> Result<Ba
     if tag == BE_ERROR_RESPONSE   { return Ok(BmError(parse_error_response(payload)?)); }
     if tag == BE_NOTICE_RESPONSE  { return Ok(BmNotice(parse_error_response(payload)?)); }
     if tag == BE_NOTIFICATION     { return Ok(BmNotification(parse_notification_response(payload)?)); }
+    if tag == BE_COPY_IN          { return Ok(BmCopyInResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_OUT         { return Ok(BmCopyOutResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_DATA        { return Ok(BmCopyData { bytes: payload }); }
+    if tag == BE_COPY_DONE        { return Ok(BmCopyDone); }
     if tag == BE_PARSE_COMPLETE   { return Ok(BmParseComplete); }
     if tag == BE_BIND_COMPLETE    { return Ok(BmBindComplete); }
     if tag == BE_CLOSE_COMPLETE   { return Ok(BmCloseComplete); }

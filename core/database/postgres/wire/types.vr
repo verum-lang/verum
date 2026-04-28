@@ -60,6 +60,8 @@ public const BE_PORTAL_SUSPEND:  Byte = 0x73 as Byte;     // 's'
 public const BE_COPY_IN:         Byte = 0x47 as Byte;     // 'G'
 public const BE_COPY_OUT:        Byte = 0x48 as Byte;     // 'H'
 public const BE_COPY_BOTH:       Byte = 0x57 as Byte;     // 'W'
+public const BE_COPY_DATA:       Byte = 0x64 as Byte;     // 'd' (shares with FE_COPY_DATA)
+public const BE_COPY_DONE:       Byte = 0x63 as Byte;     // 'c' (shares with FE_COPY_DONE)
 public const BE_FUNCTION_RESULT: Byte = 0x56 as Byte;     // 'V'
 public const BE_NEGOTIATE_PROTO: Byte = 0x76 as Byte;     // 'v'
 

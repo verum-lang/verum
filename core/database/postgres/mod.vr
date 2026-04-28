@@ -35,6 +35,7 @@ public module extended;
 public module pool;
 public module introspect;
 public module transaction;
+public module copy;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -46,7 +47,11 @@ public mount .connection.{
     connect,
     cancel_running_query_at,
 };
-public mount .wire.backend.{NotificationResponse};
+public mount .wire.backend.{NotificationResponse, CopyResponse, CopyFormat, CfText, CfBinary};
+public mount .copy.{
+    CopyInBuilder, CopyOutBuilder,
+    copy_in, copy_out,
+};
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
 public mount .stmt_cache.{StmtCache, CacheEntry};
