@@ -1313,6 +1313,18 @@ implement Text {
 
     /// Parse to Int directly (returns 0 on parse failure).
     /// Convenience method for cases where error handling is not needed.
+    ///
+    /// Pre-fix bug: the previous implementation accumulated
+    /// magnitude in a signed `Int` and rejected `val < 0` as
+    /// wrap-around. That correctly bailed on positive overflow
+    /// but ALSO rejected `"-9223372036854775808"` (Int.MIN) — a
+    /// valid Int representation whose magnitude is one greater
+    /// than `Int.MAX`. Round-tripping `Int.MIN` through
+    /// `from_int` ⇄ `to_int` returned `0` instead of `Int.MIN`.
+    /// Now accumulates magnitude in `UInt64` (mirroring
+    /// `parse_int_radix`) and range-checks at the end with a
+    /// sign-aware threshold; `Int.MIN` reconstructs via the
+    /// explicit two's-complement special case.
     public fn to_int(&self) -> Int {
         let bytes = self.as_bytes();
         let blen = bytes.len();
@@ -1333,27 +1345,43 @@ implement Text {
         } else if i < blen && bytes[i] == 43 {
             i = i + 1;
         }
-        let mut val: Int = 0;
-        // SOUNDNESS: Int.MAX (2^63-1) is 19 digits wide. Cap iteration
-        // count so a hostile 100-digit input cannot drive `val * 10`
-        // past overflow before the digit-class check fails. to_int
-        // contract is "0 on parse failure"; overflow is a parse
-        // failure for our purposes — bail with 0 just like a non-digit.
+        // Accumulate magnitude in UInt64 so `Int.MIN`'s magnitude
+        // (2^63 = one greater than `Int.MAX`) round-trips. Cap
+        // digits at 20 (UInt64.MAX is 20 digits) so a hostile
+        // 100-digit input bails fast rather than churning the
+        // per-step guard 100 times.
+        let mut mag: UInt64 = 0_u64;
         let mut consumed: Int = 0;
         while i < blen {
             let b = bytes[i];
             if b >= 48 && b <= 57 {
-                if consumed >= 19 { return 0; }
-                if val > 922_337_203_685_477_580 { return 0; }   // Int.MAX/10
-                val = val * 10 + (b as Int - 48);
-                if val < 0 { return 0; }                          // wrap-around
+                if consumed >= 20 { return 0; }
+                let digit: UInt64 = (b as Int - 48) as UInt64;
+                // Per-step overflow guard against UInt64.MAX.
+                if mag > 1_844_674_407_370_955_161_u64 { return 0; }   // UInt64.MAX/10
+                let next = mag * 10_u64 + digit;
+                if next < mag { return 0; }                              // wrap (defensive)
+                mag = next;
                 consumed = consumed + 1;
                 i = i + 1;
             } else {
                 break;
             }
         }
-        if neg { 0 - val } else { val }
+        // Range-check before signed cast — sign-aware thresholds.
+        if neg {
+            // Int.MIN magnitude == 2^63 == 9_223_372_036_854_775_808.
+            if mag > 9_223_372_036_854_775_808_u64 { return 0; }
+            if mag == 9_223_372_036_854_775_808_u64 {
+                -9_223_372_036_854_775_808                              // Int.MIN reconstruction
+            } else {
+                0 - (mag as Int)
+            }
+        } else {
+            // Int.MAX == 2^63 - 1 == 9_223_372_036_854_775_807.
+            if mag > 9_223_372_036_854_775_807_u64 { return 0; }
+            mag as Int
+        }
     }
 
     /// Parse Text to Float (pure Verum, returns 0.0 on invalid input).
@@ -1958,6 +1986,13 @@ implement Text {
 
     /// Try to parse as Int, returning None on failure.
     ///
+    /// Mirrors `to_int` for digit / sign / whitespace handling but
+    /// surfaces failure as `None`. Accumulates magnitude in
+    /// `UInt64` so `Int.MIN`'s magnitude (2^63 = `Int.MAX + 1`)
+    /// round-trips — pre-fix, the signed accumulator rejected
+    /// `"-9223372036854775808"` as an apparent wrap-around even
+    /// though it is the valid encoding of `Int.MIN`.
+    ///
     /// # Example
     /// ```verum
     /// assert_eq("42".try_to_int(), Some(42));
@@ -1989,19 +2024,21 @@ implement Text {
         if i >= blen || bytes[i] < 48 || bytes[i] > 57 {
             return None;
         }
-        let mut val: Int = 0;
+        let mut mag: UInt64 = 0_u64;
         let mut has_digits = false;
-        // SOUNDNESS: cap digit count + per-step pre-multiply guard.
-        // 19 digits is the width of Int.MAX (2^63-1). A 100-digit
-        // hostile input would otherwise overflow `val * 10` silently.
+        // 20 = digit count of UInt64.MAX. Cap iteration so a hostile
+        // 100-digit input bails fast rather than churning the
+        // per-step guard 100 times.
         let mut consumed: Int = 0;
         while i < blen {
             let b = bytes[i];
             if b >= 48 && b <= 57 {
-                if consumed >= 19 { return None; }
-                if val > 922_337_203_685_477_580 { return None; }   // Int.MAX/10
-                val = val * 10 + (b as Int - 48);
-                if val < 0 { return None; }                          // wrap-around
+                if consumed >= 20 { return None; }
+                let digit: UInt64 = (b as Int - 48) as UInt64;
+                if mag > 1_844_674_407_370_955_161_u64 { return None; }   // UInt64.MAX/10
+                let next = mag * 10_u64 + digit;
+                if next < mag { return None; }                              // wrap (defensive)
+                mag = next;
                 has_digits = true;
                 consumed = consumed + 1;
                 i = i + 1;
@@ -2021,7 +2058,18 @@ implement Text {
         if !has_digits {
             return None;
         }
-        if neg { Some(0 - val) } else { Some(val) }
+        // Range-check before signed cast — sign-aware thresholds.
+        if neg {
+            if mag > 9_223_372_036_854_775_808_u64 { return None; }
+            if mag == 9_223_372_036_854_775_808_u64 {
+                Some(-9_223_372_036_854_775_808)                              // Int.MIN
+            } else {
+                Some(0 - (mag as Int))
+            }
+        } else {
+            if mag > 9_223_372_036_854_775_807_u64 { return None; }
+            Some(mag as Int)
+        }
     }
 
     /// Try to parse as Float, returning None on failure.
