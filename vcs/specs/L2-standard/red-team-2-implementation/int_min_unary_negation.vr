@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, int-min, unary-negation, format
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173 — Int.MIN
+// unary-negation recipe class).
+//
+// Two's-complement negation `-n` for `n == Int.MIN` overflows
+// back to `Int.MIN` (since `-Int.MIN > Int.MAX`). Naïve
+// `if n < 0 { n = -n; }; while n > 0 { ... }` patterns silently
+// produced `-` followed by no digits when given `Int.MIN`,
+// because the negate did nothing and the `while n > 0` loop
+// skipped entirely.
+//
+// The audit-pinned recipe is the bit-flip pattern
+// `(((!n) as UInt64) + 1_u64)` from `sqlite_version_fmt::int_to_text`,
+// applied to every formatter that handles negatives. Documented in
+// `core/text/format.vr::int_to_text` docstring as "Handles every
+// `Int` including `Int.MIN`".
+//
+// This test pins the contract by comparing `int_to_text(Int.MIN)`
+// against the known string and verifying it has the right
+// magnitude.
+
+mount core.text.format.{int_to_text, int_to_text_radix};
+
+// Int.MIN = -9_223_372_036_854_775_808 (two's complement i64).
+// Magnitude is 2^63, exactly representable as UInt64.
+fn int_to_text_int_min_decimal() {
+    let s = int_to_text(Int.MIN);
+    assert(s == "-9223372036854775808",
+           "Int.MIN must format to its full magnitude with leading sign");
+}
+
+fn int_to_text_int_max_decimal() {
+    let s = int_to_text(Int.MAX);
+    assert(s == "9223372036854775807",
+           "Int.MAX must format without sign");
+}
+
+fn int_to_text_zero_decimal() {
+    let s = int_to_text(0);
+    assert(s == "0", "0 → \"0\"");
+}
+
+fn int_to_text_negative_one_decimal() {
+    let s = int_to_text(-1);
+    assert(s == "-1", "-1 → \"-1\"");
+}
+
+// Radix variants — the bit-flip pattern is duplicated in
+// int_to_text_radix; pin Int.MIN handling there too.
+fn int_to_text_radix_int_min_hex() {
+    let s = int_to_text_radix(Int.MIN, 16);
+    // Magnitude in hex: 8000000000000000.
+    assert(s == "-8000000000000000",
+           "Int.MIN hex must be -8000000000000000");
+}
+
+fn int_to_text_radix_int_min_binary() {
+    let s = int_to_text_radix(Int.MIN, 2);
+    // 1 followed by 63 zeros.
+    assert(s.len() == 65,    // "-" + 64 chars
+           "Int.MIN binary length must be 65");
+    let bytes = s.as_bytes();
+    assert(bytes[0] == ('-' as Byte), "first char must be -");
+    assert(bytes[1] == ('1' as Byte), "next char must be 1 (top bit)");
+    let mut i: Int = 2;
+    while i < bytes.len() {
+        assert(bytes[i] == ('0' as Byte),
+               f"binary digit at {i} must be 0");
+        i = i + 1;
+    }
+}
+
+// Sanity: small negative + radix.
+fn int_to_text_radix_negative_small() {
+    let s = int_to_text_radix(-42, 16);
+    assert(s == "-2a", "-42 hex = -2a");
+}
+
+fn main() {
+    int_to_text_int_min_decimal();
+    int_to_text_int_max_decimal();
+    int_to_text_zero_decimal();
+    int_to_text_negative_one_decimal();
+    int_to_text_radix_int_min_hex();
+    int_to_text_radix_int_min_binary();
+    int_to_text_radix_negative_small();
+}
