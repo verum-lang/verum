@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, dishonest-comment, sqlite, type-coercion
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrail (#173) for the
+// dishonest-comment-class fix in
+// core/database/sqlite/native/l2_record/type_coercion.vr (commit ac6b6a5d).
+//
+// Original bug: parse_int64's docstring claimed "SQLite wraps; we
+// mirror that" but `sqlite3Atoi64` actually returns TOO_BIG and the
+// caller promotes to REAL. Pre-fix, hostile text input like
+// `99999999999999999999` silently wrapped to a small Int and got
+// stored as VInt — defeating SQLite's documented INTEGER → REAL
+// affinity promotion.
+//
+// Post-fix: parse_int64 saturates (correctness floor); the new
+// parse_int64_checked returns Maybe<Int64>; coerce_to_integer /
+// coerce_to_numeric route to VReal on out-of-Int64 input.
+//
+// This test pins both surfaces:
+//   1. parse_int64_checked rejects hostile input.
+//   2. parse_int64 saturates rather than wraps.
+//   3. The coercion path correctly promotes to VReal.
+
+mount core.database.sqlite.native.l2_record.type_coercion.{
+    CoercionSqliteValue, VInt, VReal, VText, VNull, VBlob,
+    parse_int64, parse_int64_checked, coerce,
+};
+mount core.database.sqlite.native.l2_record.affinity.Affinity;
+
+// Hostile input: 20 nines — 10^20 - 1 > Int64.MAX = 9_223_372_036_854_775_807.
+fn parse_int64_checked_rejects_overflow() {
+    let res = parse_int64_checked(&Text.from("99999999999999999999"));
+    match res {
+        Some(_) => panic("20-digit overflow MUST be rejected"),
+        None    => {},
+    }
+}
+
+// Boundary: Int64.MAX itself is 19 digits, within range, must work.
+fn parse_int64_checked_int64_max_works() {
+    let res = parse_int64_checked(&Text.from("9223372036854775807"));
+    match res {
+        Some(v) => assert(v == 9_223_372_036_854_775_807_i64),
+        None    => panic("Int64.MAX exact must round-trip"),
+    }
+}
+
+// Negative Int64.MIN = -9_223_372_036_854_775_808.
+fn parse_int64_checked_int64_min_works() {
+    let res = parse_int64_checked(&Text.from("-9223372036854775808"));
+    match res {
+        Some(v) => assert(v == -9_223_372_036_854_775_808_i64),
+        None    => panic("Int64.MIN exact must round-trip"),
+    }
+}
+
+// Saturating parse_int64: hostile input MUST yield Int64.MAX
+// (positive overflow) or Int64.MIN (negative overflow), NEVER a
+// silently wrapped small value.
+fn parse_int64_saturates_positive() {
+    let v = parse_int64(&Text.from("99999999999999999999"));
+    assert(v == 9_223_372_036_854_775_807_i64,
+           "positive overflow must saturate at Int64.MAX, not wrap");
+}
+
+fn parse_int64_saturates_negative() {
+    let v = parse_int64(&Text.from("-99999999999999999999"));
+    assert(v == -9_223_372_036_854_775_808_i64,
+           "negative overflow must saturate at Int64.MIN, not wrap");
+}
+
+// Affinity coercion: hostile text under INTEGER affinity MUST land
+// as VReal, NOT VInt with a wrapped value. Mirrors SQLite's
+// documented INTEGER → REAL fallback.
+fn integer_affinity_promotes_overflow_to_real() {
+    let val = VText(Text.from("99999999999999999999"));
+    let coerced = coerce(val, Affinity.Integer);
+    match coerced {
+        VInt(_) => panic("INTEGER affinity on overflow MUST NOT silently wrap to VInt"),
+        VReal(_) => {}, // expected — matches SQLite
+        VText(_) => panic("INTEGER affinity on overflow must promote to VReal, not stay VText"),
+        _ => panic("unexpected coercion result"),
+    }
+}
+
+fn numeric_affinity_promotes_overflow_to_real() {
+    let val = VText(Text.from("99999999999999999999"));
+    let coerced = coerce(val, Affinity.Numeric);
+    match coerced {
+        VInt(_) => panic("NUMERIC affinity on overflow MUST NOT silently wrap to VInt"),
+        VReal(_) => {},
+        VText(_) => panic("NUMERIC affinity on overflow must promote to VReal"),
+        _ => panic("unexpected coercion result"),
+    }
+}
+
+// Sanity: in-range INTEGER affinity preserves VInt.
+fn integer_affinity_preserves_in_range_int() {
+    let val = VText(Text.from("42"));
+    let coerced = coerce(val, Affinity.Integer);
+    match coerced {
+        VInt(n) => assert(n == 42_i64),
+        _       => panic("in-range integer text must coerce to VInt"),
+    }
+}
+
+fn main() {
+    parse_int64_checked_rejects_overflow();
+    parse_int64_checked_int64_max_works();
+    parse_int64_checked_int64_min_works();
+    parse_int64_saturates_positive();
+    parse_int64_saturates_negative();
+    integer_affinity_promotes_overflow_to_real();
+    numeric_affinity_promotes_overflow_to_real();
+    integer_affinity_preserves_in_range_int();
+}

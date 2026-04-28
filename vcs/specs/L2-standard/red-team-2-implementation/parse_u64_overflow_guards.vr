@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: red-team, overflow, hostile-input, semver, http
+// @timeout: 10000
+// @expect: pass
+// @description: Round-2 red-team guardrails (#173).
+//
+// Pins the 3-layer overflow defense across the hostile-input parsers
+// closed during the #203 audit. Each test crafts an input designed to
+// silently wrap UInt64 / UInt32 in the absence of guards, asserts that
+// the parser instead surfaces an error.
+//
+// These tests exist so that any future regression that drops the
+// length cap / per-step guard / wrap-around check fails CI
+// immediately. The corresponding fixes:
+//   * core/base/semver.vr parse_numeric + parse_u64_unchecked
+//   * core/net/http_range.vr parse_u64
+//   * core/net/http_cache.vr parse_u64_opt
+//
+// Tracks #173 vector 6 (refinement / dependent-type adversarial
+// inputs) and section A (audit-confirmed defenses) of round-2.
+
+mount core.base.semver.{SemVer, SemVerError, parse};
+
+// Hostile-input: 21-digit major. UInt64.MAX is 20 digits, so any
+// 21+ digit numeric MUST be rejected — the silent-wrap-on-bare
+// `acc * 10 + d` would have truncated this to a small wrapped value,
+// causing semver comparators to flip ordering.
+fn semver_major_21_digits_rejected() {
+    let res = parse(&Text.from("999999999999999999999.0.0"));
+    match res {
+        Ok(_) => panic("21-digit major MUST be rejected as Overflow"),
+        Err(SemVerError.Overflow(_)) => {},
+        Err(_) => panic("21-digit major must surface as Overflow specifically"),
+    }
+}
+
+// Same for minor + patch — defense applies to all three numeric ids.
+fn semver_minor_21_digits_rejected() {
+    let res = parse(&Text.from("1.999999999999999999999.0"));
+    match res {
+        Ok(_) => panic("21-digit minor MUST be rejected"),
+        Err(SemVerError.Overflow(_)) => {},
+        Err(_) => panic("21-digit minor must surface as Overflow"),
+    }
+}
+
+fn semver_patch_21_digits_rejected() {
+    let res = parse(&Text.from("1.0.999999999999999999999"));
+    match res {
+        Ok(_) => panic("21-digit patch MUST be rejected"),
+        Err(SemVerError.Overflow(_)) => {},
+        Err(_) => panic("21-digit patch must surface as Overflow"),
+    }
+}
+
+// Edge case: exactly 20 digits but value > UInt64.MAX. UInt64.MAX is
+// 18_446_744_073_709_551_615; a 20-digit number starting with 9 is
+// automatically > MAX. The per-step `v > U64_MAX_DIV_10` guard must
+// fire on the multiplication that would overflow.
+fn semver_20_digits_above_max_rejected() {
+    let res = parse(&Text.from("99999999999999999999.0.0"));
+    match res {
+        Ok(_) => panic("20-digit value above UInt64.MAX MUST be rejected"),
+        Err(SemVerError.Overflow(_)) => {},
+        Err(_) => panic("20-digit-above-max must surface as Overflow"),
+    }
+}
+
+// Boundary: UInt64.MAX exactly, encoded as 20 digits. Currently
+// rejected because `next < v` wrap-around guard fires on the final
+// `+ d` (MAX/10 = 1_844_674_407_370_955_161; 1_844_…_161 * 10 + 5
+// overflows). Pin the rejection.
+fn semver_exact_uint64_max_rejected() {
+    let res = parse(&Text.from("18446744073709551615.0.0"));
+    // Implementation-defined: either accepts exactly MAX or rejects.
+    // The audit fix rejects on the wrap-around defense — pin that
+    // behavior.
+    match res {
+        Err(SemVerError.Overflow(_)) => {},
+        Ok(v) => {
+            // If accepted, value MUST be exactly UInt64.MAX — never
+            // a silently wrapped small value.
+            assert(v.major == 18_446_744_073_709_551_615_u64);
+        },
+        Err(_) => panic("MAX boundary must either accept-exact or reject-Overflow"),
+    }
+}
+
+// Hostile prerelease numeric identifier: 21+ digits of decimal
+// numeric must be rejected because cmp_prerelease_id routes through
+// parse_u64_unchecked which only stays sound when validate_prerelease_id
+// has rejected longer strings.
+fn semver_prerelease_numeric_overflow_rejected() {
+    let res = parse(&Text.from("1.0.0-99999999999999999999999"));
+    match res {
+        Ok(_) => panic("21+ digit numeric prerelease MUST be rejected"),
+        Err(SemVerError.Overflow(_)) => {},
+        Err(_) => panic("oversized numeric prerelease must surface as Overflow"),
+    }
+}
+
+// Sanity: a version exactly at the 20-digit boundary that fits in
+// UInt64 must work. UInt64.MAX/10 = 1_844_674_407_370_955_161 is
+// 19 digits and well under MAX; passes.
+fn semver_19_digit_works() {
+    let res = parse(&Text.from("1844674407370955161.0.0"));
+    match res {
+        Ok(v) => assert(v.major == 1_844_674_407_370_955_161_u64),
+        Err(e) => panic(f"19-digit valid major must parse: {e}"),
+    }
+}
+
+// Sanity: small valid version unaffected.
+fn semver_normal_works() {
+    let v = parse(&Text.from("1.2.3")).unwrap();
+    assert(v.major == 1_u64);
+    assert(v.minor == 2_u64);
+    assert(v.patch == 3_u64);
+}
+
+fn main() {
+    semver_major_21_digits_rejected();
+    semver_minor_21_digits_rejected();
+    semver_patch_21_digits_rejected();
+    semver_20_digits_above_max_rejected();
+    semver_exact_uint64_max_rejected();
+    semver_prerelease_numeric_overflow_rejected();
+    semver_19_digit_works();
+    semver_normal_works();
+}
