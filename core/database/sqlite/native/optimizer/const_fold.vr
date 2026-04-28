@@ -45,10 +45,47 @@ fn is_integer_load(e: &OpEntry) -> Bool {
     opcode_name(&e.op) == "Integer".clone()
 }
 
+// Overflow predicates — bail out of folding on overflow so the runtime
+// produces SQLite's spec-defined integer-overflow error rather than
+// either crashing the SQL compiler (debug builds panic on Int overflow)
+// or baking a wrapped value into the compiled program (release builds
+// would silently emit `Some(wrapped)`). Same `base.None` convention as
+// the divide-by-zero / Int.MIN÷-1 bailouts already present.
+fn add_would_overflow(a: Int, b: Int) -> Bool {
+    if b > 0 { a > Int.MAX - b }
+    else     { a < Int.MIN - b }
+}
+
+fn sub_would_overflow(a: Int, b: Int) -> Bool {
+    if b > 0      { a < Int.MIN + b }
+    else if b < 0 { a > Int.MAX + b }
+    else          { false }
+}
+
+fn mul_would_overflow(a: Int, b: Int) -> Bool {
+    if a == 0 || b == 0 { return false; }
+    // Int.MIN cases: |Int.MIN| = 2^63 saturates Int width, so
+    // Int.MIN * b overflows for any b ∉ {0, 1}; symmetric for `a`.
+    if a == Int.MIN { return b != 1; }
+    if b == Int.MIN { return a != 1; }
+    let abs_a = if a < 0 { -a } else { a };
+    let abs_b = if b < 0 { -b } else { b };
+    abs_a > Int.MAX / abs_b
+}
+
 fn fold_op(name: &Text, a: Int, b: Int) -> base.Maybe<Int> {
-    if name == &"Add".clone()       { return base.Some(a + b); }
-    if name == &"Subtract".clone()  { return base.Some(a - b); }
-    if name == &"Multiply".clone()  { return base.Some(a * b); }
+    if name == &"Add".clone() {
+        if add_would_overflow(a, b) { return base.None; }
+        return base.Some(a + b);
+    }
+    if name == &"Subtract".clone() {
+        if sub_would_overflow(a, b) { return base.None; }
+        return base.Some(a - b);
+    }
+    if name == &"Multiply".clone() {
+        if mul_would_overflow(a, b) { return base.None; }
+        return base.Some(a * b);
+    }
     if name == &"Divide".clone()    {
         if b == 0 { return base.None; }
         // Int.MIN / -1 overflows on x86 (#DE / SIGFPE); aarch64
@@ -66,8 +103,19 @@ fn fold_op(name: &Text, a: Int, b: Int) -> base.Maybe<Int> {
     }
     if name == &"BitAnd".clone()    { return base.Some(a & b); }
     if name == &"BitOr".clone()     { return base.Some(a | b); }
-    if name == &"ShiftLeft".clone() { return base.Some(a << b); }
-    if name == &"ShiftRight".clone(){ return base.Some(a >> b); }
+    // Shifts: SQL spec says shift counts ≥ 64 (or negative) are UB at
+    // the language level — bail out of folding rather than bake an
+    // implementation-defined value. The runtime VDBE Shift opcodes
+    // already mask the count, but const_fold can't know which width
+    // the runtime path uses across operand types.
+    if name == &"ShiftLeft".clone() {
+        if b < 0 || b >= 64 { return base.None; }
+        return base.Some(a << b);
+    }
+    if name == &"ShiftRight".clone() {
+        if b < 0 || b >= 64 { return base.None; }
+        return base.Some(a >> b);
+    }
     base.None
 }
 
