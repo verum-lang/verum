@@ -366,6 +366,182 @@ pub mod agda {
     }
 }
 
+/// Dedukti (λΠ-modulo) proof-term lowerer (V1). Dedukti is the
+/// universal proof-assistant interchange format — encodes Lean,
+/// Coq, Agda, HOL via λΠ-calculus modulo β/η + rewrite rules.
+pub mod dedukti {
+    use super::*;
+
+    pub fn lower_term(t: &CoreTerm) -> String {
+        match t {
+            CoreTerm::Var(name) => name.as_str().to_string(),
+
+            CoreTerm::Universe(UniverseLevel::Prop) => "prop".to_string(),
+            CoreTerm::Universe(UniverseLevel::Concrete(n)) => {
+                if *n == 0 { "Type".to_string() } else { format!("(Type {})", n) }
+            }
+            CoreTerm::Universe(UniverseLevel::Variable(name)) => name.as_str().to_string(),
+            CoreTerm::Universe(UniverseLevel::Succ(_)) => "(s _)".to_string(),
+            CoreTerm::Universe(UniverseLevel::Max(_, _)) => "(max _ _)".to_string(),
+
+            // Dedukti: `binder : Domain -> Codomain` is dependent product.
+            CoreTerm::Pi { binder, domain, codomain } => {
+                format!(
+                    "{} : {} -> {}",
+                    binder.as_str(),
+                    lower_term(domain.as_ref()),
+                    lower_term(codomain.as_ref())
+                )
+            }
+
+            // Dedukti: `binder : Domain => body` is λ-abstraction.
+            CoreTerm::Lam { binder, domain, body } => {
+                format!(
+                    "{} : {} => {}",
+                    binder.as_str(),
+                    lower_term(domain.as_ref()),
+                    lower_term(body.as_ref())
+                )
+            }
+
+            CoreTerm::App(f, a) => {
+                format!("({} {})", lower_term(f.as_ref()), lower_term(a.as_ref()))
+            }
+
+            CoreTerm::Refl(_) => "refl".to_string(),
+
+            CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
+
+            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+                format!(
+                    "(sig ({}) ({} : {} => {}))",
+                    lower_term(fst_ty.as_ref()),
+                    binder.as_str(),
+                    lower_term(fst_ty.as_ref()),
+                    lower_term(snd_ty.as_ref())
+                )
+            }
+            CoreTerm::Pair(a, b) => {
+                format!("(pair {} {})", lower_term(a.as_ref()), lower_term(b.as_ref()))
+            }
+            CoreTerm::Fst(p) => format!("(proj1 {})", lower_term(p.as_ref())),
+            CoreTerm::Snd(p) => format!("(proj2 {})", lower_term(p.as_ref())),
+
+            CoreTerm::PathTy { carrier, lhs, rhs } => {
+                format!(
+                    "(eq {} {} {})",
+                    lower_term(carrier.as_ref()),
+                    lower_term(lhs.as_ref()),
+                    lower_term(rhs.as_ref())
+                )
+            }
+
+            CoreTerm::SmtProof(_) => "(* smt-proof — replay via verum *)".to_string(),
+
+            CoreTerm::Inductive { path, .. } => path.as_str().replace('.', "__"),
+
+            CoreTerm::Refine { base, binder, predicate } => {
+                format!(
+                    "(refine ({}) ({} : {} => {}))",
+                    lower_term(base.as_ref()),
+                    binder.as_str(),
+                    lower_term(base.as_ref()),
+                    lower_term(predicate.as_ref())
+                )
+            }
+
+            other => format!("(* unsupported: {} *)", constructor_name(other)),
+        }
+    }
+}
+
+/// Metamath proof-term lowerer (V1). Metamath uses a minimalist
+/// substitution-based proof-checking model — every step is a label
+/// + substitution. We lower CoreTerm to a Metamath-style label
+/// chain that downstream tools can translate into the actual
+/// `$p ... $.` proof block.
+pub mod metamath {
+    use super::*;
+
+    pub fn lower_term(t: &CoreTerm) -> String {
+        match t {
+            CoreTerm::Var(name) => name.as_str().to_string(),
+
+            CoreTerm::Universe(UniverseLevel::Prop) => "wff".to_string(),
+            CoreTerm::Universe(UniverseLevel::Concrete(n)) => {
+                if *n == 0 { "set".to_string() } else { format!("class{}", n) }
+            }
+            CoreTerm::Universe(UniverseLevel::Variable(name)) => name.as_str().to_string(),
+            CoreTerm::Universe(UniverseLevel::Succ(_)) => "succU".to_string(),
+            CoreTerm::Universe(UniverseLevel::Max(_, _)) => "maxU".to_string(),
+
+            CoreTerm::Pi { binder, domain, codomain } => {
+                format!(
+                    "( wpi {} {} {} )",
+                    binder.as_str(),
+                    lower_term(domain.as_ref()),
+                    lower_term(codomain.as_ref())
+                )
+            }
+
+            CoreTerm::Lam { binder, domain, body } => {
+                format!(
+                    "( wlam {} {} {} )",
+                    binder.as_str(),
+                    lower_term(domain.as_ref()),
+                    lower_term(body.as_ref())
+                )
+            }
+
+            CoreTerm::App(f, a) => {
+                format!("( wapp {} {} )", lower_term(f.as_ref()), lower_term(a.as_ref()))
+            }
+
+            CoreTerm::Refl(t) => format!("( wrefl {} )", lower_term(t.as_ref())),
+
+            CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
+
+            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+                format!(
+                    "( wsigma {} {} {} )",
+                    binder.as_str(),
+                    lower_term(fst_ty.as_ref()),
+                    lower_term(snd_ty.as_ref())
+                )
+            }
+            CoreTerm::Pair(a, b) => {
+                format!("( wpair {} {} )", lower_term(a.as_ref()), lower_term(b.as_ref()))
+            }
+            CoreTerm::Fst(p) => format!("( wfst {} )", lower_term(p.as_ref())),
+            CoreTerm::Snd(p) => format!("( wsnd {} )", lower_term(p.as_ref())),
+
+            CoreTerm::PathTy { carrier, lhs, rhs } => {
+                format!(
+                    "( weq {} {} {} )",
+                    lower_term(carrier.as_ref()),
+                    lower_term(lhs.as_ref()),
+                    lower_term(rhs.as_ref())
+                )
+            }
+
+            CoreTerm::SmtProof(_) => "( wsmt )".to_string(),
+
+            CoreTerm::Inductive { path, .. } => path.as_str().replace('.', "_"),
+
+            CoreTerm::Refine { base, binder, predicate } => {
+                format!(
+                    "( wrefine {} {} {} )",
+                    binder.as_str(),
+                    lower_term(base.as_ref()),
+                    lower_term(predicate.as_ref())
+                )
+            }
+
+            other => format!("( ?{} )", constructor_name(other)),
+        }
+    }
+}
+
 /// Diagnostic helper: name an unsupported constructor for the
 /// fallback comment. Lists every CoreTerm variant by string tag.
 fn constructor_name(t: &CoreTerm) -> &'static str {
@@ -580,5 +756,90 @@ mod tests {
         };
         assert_eq!(lean::lower_term(&id_pi), "(x : Nat) → Nat");
         assert_eq!(lean::lower_term(&id_lam), "fun (x : Nat) => x");
+    }
+
+    // ---- Dedukti lowering ----
+
+    #[test]
+    fn dedukti_var() {
+        assert_eq!(dedukti::lower_term(&var("x")), "x");
+    }
+
+    #[test]
+    fn dedukti_pi_uses_arrow() {
+        let pi = CoreTerm::Pi {
+            binder: Text::from("x"),
+            domain: Heap::new(var("Nat")),
+            codomain: Heap::new(var("Bool")),
+        };
+        assert_eq!(dedukti::lower_term(&pi), "x : Nat -> Bool");
+    }
+
+    #[test]
+    fn dedukti_lambda_uses_double_arrow() {
+        let lam = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(var("Nat")),
+            body: Heap::new(var("x")),
+        };
+        assert_eq!(dedukti::lower_term(&lam), "x : Nat => x");
+    }
+
+    #[test]
+    fn dedukti_refl_lowercase() {
+        assert_eq!(dedukti::lower_term(&CoreTerm::Refl(Heap::new(var("a")))), "refl");
+    }
+
+    #[test]
+    fn dedukti_inductive_dot_to_double_underscore() {
+        let ind = CoreTerm::Inductive {
+            path: Text::from("core.math.Set"),
+            args: verum_common::List::new(),
+        };
+        // Dedukti identifiers can't contain dots; mangle to __.
+        assert_eq!(dedukti::lower_term(&ind), "core__math__Set");
+    }
+
+    // ---- Metamath lowering ----
+
+    #[test]
+    fn metamath_var() {
+        assert_eq!(metamath::lower_term(&var("ph")), "ph");
+    }
+
+    #[test]
+    fn metamath_pi_uses_wpi_label() {
+        let pi = CoreTerm::Pi {
+            binder: Text::from("x"),
+            domain: Heap::new(var("nat")),
+            codomain: Heap::new(var("bool")),
+        };
+        assert_eq!(metamath::lower_term(&pi), "( wpi x nat bool )");
+    }
+
+    #[test]
+    fn metamath_lambda_uses_wlam_label() {
+        let lam = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(var("nat")),
+            body: Heap::new(var("x")),
+        };
+        assert_eq!(metamath::lower_term(&lam), "( wlam x nat x )");
+    }
+
+    #[test]
+    fn metamath_refl_uses_wrefl() {
+        assert_eq!(
+            metamath::lower_term(&CoreTerm::Refl(Heap::new(var("a")))),
+            "( wrefl a )"
+        );
+    }
+
+    #[test]
+    fn metamath_universe_concrete_zero_is_set() {
+        assert_eq!(
+            metamath::lower_term(&CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            "set"
+        );
     }
 }
