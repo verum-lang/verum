@@ -64,6 +64,81 @@ public type StreamTransitionError is
     | InvalidTransition { state: StreamState, event: Text }
     | OverflowedStreamId;
 
+fn stream_state_name(s: &StreamState) -> Text {
+    match s {
+        StreamState.Idle             => "Idle".clone(),
+        StreamState.ReservedLocal    => "ReservedLocal".clone(),
+        StreamState.ReservedRemote   => "ReservedRemote".clone(),
+        StreamState.Open             => "Open".clone(),
+        StreamState.HalfClosedLocal  => "HalfClosedLocal".clone(),
+        StreamState.HalfClosedRemote => "HalfClosedRemote".clone(),
+        StreamState.Closed           => "Closed".clone(),
+    }
+}
+
+fn stream_state_tag(s: &StreamState) -> Int {
+    match s {
+        StreamState.Idle             => 0,
+        StreamState.ReservedLocal    => 1,
+        StreamState.ReservedRemote   => 2,
+        StreamState.Open             => 3,
+        StreamState.HalfClosedLocal  => 4,
+        StreamState.HalfClosedRemote => 5,
+        StreamState.Closed           => 6,
+    }
+}
+
+implement Display for StreamState {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(stream_state_name(self).as_str())
+    }
+}
+
+implement Debug for StreamState {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(stream_state_name(self).as_str())
+    }
+}
+
+implement Eq for StreamState {
+    fn eq(&self, other: &StreamState) -> Bool {
+        stream_state_tag(self) == stream_state_tag(other)
+    }
+}
+
+implement Display for StreamTransitionError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidTransition { state, event } =>
+                f.write_str(f"HTTP/2 stream invalid transition from {state} on {event}".as_str()),
+            OverflowedStreamId =>
+                f.write_str("HTTP/2 stream id overflow"),
+        }
+    }
+}
+
+implement Debug for StreamTransitionError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidTransition { state, event } =>
+                f.write_str(f"InvalidTransition {{ state: {state:?}, event: {event} }}".as_str()),
+            OverflowedStreamId =>
+                f.write_str("OverflowedStreamId"),
+        }
+    }
+}
+
+implement Eq for StreamTransitionError {
+    fn eq(&self, other: &StreamTransitionError) -> Bool {
+        match (self, other) {
+            (InvalidTransition { state: sa, event: ea },
+             InvalidTransition { state: sb, event: eb }) => sa == sb && ea == eb,
+            (OverflowedStreamId, OverflowedStreamId) => true,
+            _ => false,
+        }
+    }
+}
+
 public type StreamFsm is {
     stream_id: UInt32,
     state: StreamState,
