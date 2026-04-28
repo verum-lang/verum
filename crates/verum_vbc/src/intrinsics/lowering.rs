@@ -3102,6 +3102,51 @@ impl IntrinsicLowering {
                 })
             }
 
+            InlineSequenceId::RegexFind => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![
+                        MlirAttr {
+                            name: "callee".to_string(),
+                            value: MlirAttrValue::String("__verum_regex_find".to_string()),
+                        },
+                    ],
+                    result_types: vec![MlirType::Ptr],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+
+            InlineSequenceId::RegexReplace => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![
+                        MlirAttr {
+                            name: "callee".to_string(),
+                            value: MlirAttrValue::String("__verum_regex_replace".to_string()),
+                        },
+                    ],
+                    result_types: vec![MlirType::Ptr],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+
+            InlineSequenceId::RegexCaptures => {
+                self.emit(MlirOp {
+                    name: "llvm.call".to_string(),
+                    attrs: vec![
+                        MlirAttr {
+                            name: "callee".to_string(),
+                            value: MlirAttrValue::String("__verum_regex_captures".to_string()),
+                        },
+                    ],
+                    result_types: vec![MlirType::Ptr],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
+
             // =====================================================================
             // Type Introspection Operations
             // =====================================================================
@@ -4419,6 +4464,9 @@ impl IntrinsicLowering {
             TensorExtSubOpcode::GlobalAllocator => "verum.mem.global_allocator",
             TensorExtSubOpcode::MemNewId => "verum.mem.new_id",
             TensorExtSubOpcode::MemAllocTensor => "verum.mem.alloc_tensor",
+            TensorExtSubOpcode::RegexFind => "verum.regex.find",
+            TensorExtSubOpcode::RegexReplace => "verum.regex.replace",
+            TensorExtSubOpcode::RegexCaptures => "verum.regex.captures",
         };
 
         self.emit(MlirOp {

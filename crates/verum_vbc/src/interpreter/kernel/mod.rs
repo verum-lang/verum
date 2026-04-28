@@ -3088,6 +3088,82 @@ mod tests {
         assert!(caps.simd_width >= 1);
     }
 
+    // ============================================================
+    // Regex single-match / capture dispatch tests (#25 close-out)
+    // ============================================================
+
+    #[test]
+    fn test_dispatch_regex_find_single_match() {
+        // Returns the first match — distinct from find_all which
+        // returns the full list.
+        assert_eq!(
+            dispatch_regex_find(r"\d+", "abc123def456"),
+            Some("123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dispatch_regex_find_no_match() {
+        assert_eq!(dispatch_regex_find(r"\d+", "abc"), None);
+    }
+
+    #[test]
+    fn test_dispatch_regex_find_invalid_pattern() {
+        // Mirrors the error-collapse semantics of find_all.
+        assert_eq!(dispatch_regex_find("[unclosed", "abc"), None);
+    }
+
+    #[test]
+    fn test_dispatch_regex_replace_first_only() {
+        // Only the FIRST match is replaced — distinct from replace_all.
+        assert_eq!(
+            dispatch_regex_replace(r"\d+", "a1b2c3", "X"),
+            Some("aXb2c3".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dispatch_regex_replace_no_match_returns_input() {
+        // No match is not an error: returns the input unchanged.
+        assert_eq!(
+            dispatch_regex_replace(r"\d+", "abc", "X"),
+            Some("abc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_dispatch_regex_replace_invalid_pattern() {
+        assert_eq!(dispatch_regex_replace("[unclosed", "abc", "X"), None);
+    }
+
+    #[test]
+    fn test_dispatch_regex_captures_groups() {
+        // result[0] = whole match, result[1..] = capture groups.
+        let caps = dispatch_regex_captures(r"(\d+)-(\w+)", "id-42-foo extra")
+            .expect("capture should succeed");
+        assert_eq!(caps.len(), 3);
+        assert_eq!(caps[0], "42-foo");
+        assert_eq!(caps[1], "42");
+        assert_eq!(caps[2], "foo");
+    }
+
+    #[test]
+    fn test_dispatch_regex_captures_no_match() {
+        assert!(dispatch_regex_captures(r"(\d+)-(\w+)", "no digits here").is_none());
+    }
+
+    #[test]
+    fn test_dispatch_regex_captures_optional_group_missing() {
+        // Non-participating groups become empty strings.
+        let caps = dispatch_regex_captures(r"(a)(b)?(c)", "ac")
+            .expect("capture should succeed");
+        assert_eq!(caps.len(), 4);
+        assert_eq!(caps[0], "ac");
+        assert_eq!(caps[1], "a");
+        assert_eq!(caps[2], "");
+        assert_eq!(caps[3], "c");
+    }
+
     #[test]
     fn test_u32_binop_add() {
         use crate::interpreter::tensor::tensor_from_slice;

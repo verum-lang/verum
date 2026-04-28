@@ -23,18 +23,21 @@
 //
 // # Available operations
 //
-// Today the following four intrinsics are wired end-to-end:
-// `is_match`, `find_all`, `replace_all`, `split`. The interpreter kernel
-// (verum_vbc/src/interpreter/kernel/mod.rs) hosts the dispatchers; the
-// intrinsic registry (verum_vbc/src/intrinsics/registry.rs) advertises them
-// under the canonical lowercase names `regex_is_match`, `regex_find_all`,
-// `regex_replace_all`, `regex_split`.
+// All seven core intrinsics are wired end-to-end:
+//   * `is_match` — boolean test
+//   * `find_all` — all matches as a list
+//   * `replace_all` — replace every match
+//   * `split` — split on the pattern
+//   * `find` — first match only (`Maybe<Text>`)
+//   * `replace` — replace first match only
+//   * `captures` — capture groups of the first match
 //
-// First-match variants (`find`, `replace`, `captures`) are tracked but not
-// yet wired — they require new TensorSubOpcode/InlineSequenceId values plus
-// dispatchers. Until they land, prefer the `_all`-family or use
-// `find_all().first()` / `replace_all` with a regex anchored to the leading
-// match position.
+// The interpreter kernel (verum_vbc/src/interpreter/kernel/mod.rs) hosts the
+// dispatchers; the intrinsic registry (verum_vbc/src/intrinsics/registry.rs)
+// advertises them under the canonical lowercase names. The bulk variants
+// occupy `TensorSubOpcode` 0xE0..=0xE3; the single-match variants live in
+// `TensorExtSubOpcode` 0x0A..=0x0C because the regex-dedicated 0xE4 slot in
+// `TensorSubOpcode` was filled by tensor-creation ops before they landed.
 // =============================================================================
 
 module regex;
@@ -96,6 +99,31 @@ implement Regex {
         regex_split(self.pattern, text)
     }
 
+    /// Find the first match of the pattern in the text.
+    /// Returns `None` if no match.
+    public fn find(&self, text: Text) -> Maybe<Text> {
+        regex_find(self.pattern, text)
+    }
+
+    /// Replace the first match with the replacement string.
+    /// Returns the input unchanged if no match. Supports `$N`
+    /// capture-group back-references in `replacement`.
+    public fn replace(&self, text: Text, replacement: Text) -> Text {
+        regex_replace(self.pattern, text, replacement)
+    }
+
+    /// Run the pattern against `text` and return the ordered group
+    /// captures of the first match.
+    ///
+    /// Layout: `result[0]` is always the whole match; `result[i]`
+    /// for `i >= 1` is the i-th `(group)` capture. Non-participating
+    /// groups appear as empty strings — callers that want
+    /// `Maybe<Text>` per group should re-check membership against
+    /// the pattern's group count. Returns `None` if no match.
+    public fn captures(&self, text: Text) -> Maybe<List<Text>> {
+        regex_captures(self.pattern, text)
+    }
+
     /// Returns the original pattern string.
     public fn as_str(&self) -> Text {
         self.pattern
@@ -120,3 +148,12 @@ public fn regex_replace_all(pattern: Text, text: Text, replacement: Text) -> Tex
 
 @intrinsic("regex_split")
 public fn regex_split(pattern: Text, text: Text) -> List<Text>;
+
+@intrinsic("regex_find")
+public fn regex_find(pattern: Text, text: Text) -> Maybe<Text>;
+
+@intrinsic("regex_replace")
+public fn regex_replace(pattern: Text, text: Text, replacement: Text) -> Text;
+
+@intrinsic("regex_captures")
+public fn regex_captures(pattern: Text, text: Text) -> Maybe<List<Text>>;
