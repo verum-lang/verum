@@ -427,8 +427,7 @@ fn parse_protected(bstr: &[Byte]) -> Result<CoseHeaders, CoseError> {
 // =============================================================================
 
 fn slice_to_vec(src: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = 0;
-    while i < src.len() { out.push(src[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(src.len());
+    out.extend_from_slice(src);
     out
 }
