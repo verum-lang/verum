@@ -188,9 +188,20 @@ impl<'a> RecursiveParser<'a> {
     /// well-known name `__verum_script_main` against
     /// `Module::is_script()` and uses it as the script's entry
     /// point (P1.3).
+    ///
+    /// **Tail-expression semantics.** Following the standard
+    /// Verum / Rust block-as-expression rule, when the last collected
+    /// statement is an expression-statement *without* a trailing
+    /// semicolon, lift it into the wrapper block's tail-expression slot
+    /// so its value becomes the wrapper's return value. The interpreter's
+    /// exit-code propagation (`pipeline::propagate_main_exit_code`) then
+    /// surfaces an `Int` tail value as the process exit status, making
+    /// scripts like `print("done"); 42` produce exit-code 42 — natural
+    /// and Unix-friendly without an explicit `exit()` call. Statements
+    /// with `;` keep their void semantics (their value is discarded).
     fn synthesize_script_main(
         &self,
-        stmts: Vec<verum_ast::Stmt>,
+        mut stmts: Vec<verum_ast::Stmt>,
         first_stmt_span: Span,
     ) -> Item {
         // Span the wrapper across every statement we collected.
@@ -200,9 +211,24 @@ impl<'a> RecursiveParser<'a> {
             .unwrap_or(first_stmt_span);
         let span = Span::new(first_stmt_span.start, last_span.end, self.file_id);
 
+        // Tail-expression lift: if the final collected statement is an
+        // unsemicoloned expression-stmt, move its expression into the
+        // block's `expr` slot so the wrapper returns its value.
+        let mut tail_expr: Maybe<verum_common::Heap<verum_ast::Expr>> = Maybe::None;
+        if matches!(
+            stmts.last().map(|s| &s.kind),
+            Some(verum_ast::StmtKind::Expr { has_semi: false, .. })
+        ) {
+            if let Some(last) = stmts.pop() {
+                if let verum_ast::StmtKind::Expr { expr, .. } = last.kind {
+                    tail_expr = Maybe::Some(verum_common::Heap::new(expr));
+                }
+            }
+        }
+
         let body = verum_ast::Block {
             stmts: List::from(stmts),
-            expr: Maybe::None,
+            expr: tail_expr,
             span,
         };
         let func = FunctionDecl {
