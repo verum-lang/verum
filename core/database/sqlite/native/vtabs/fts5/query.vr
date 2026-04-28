@@ -216,11 +216,19 @@ fn parse_atom(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabPar
 }
 
 fn parse_int_text(t: &Text) -> Int {
+    // FTS5 query strings are user-supplied — apply 3-layer overflow
+    // defense. Saturate at 0 on bad/oversized input (caller treats
+    // 0 as "not a number"; consistent with the original behaviour
+    // for a non-digit input which broke out of the loop returning
+    // accumulated bytes seen so far).
     let bs = t.as_bytes();
+    if bs.len() > 19 { return 0; }
     let mut n: Int = 0;
     let mut i: Int = 0;
     while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+        if n > 922_337_203_685_477_580 { return 0; }
         n = n * 10 + ((bs[i] as Int) - 48);
+        if n < 0 { return 0; }
         i = i + 1;
     }
     n
