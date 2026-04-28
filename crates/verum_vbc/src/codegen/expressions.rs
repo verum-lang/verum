@@ -15709,9 +15709,58 @@ impl VbcCodegen {
         args: &[Reg],
         dest: Reg,
     ) -> CodegenResult<()> {
-        use crate::intrinsics::registry::CodegenStrategy;
+        use crate::intrinsics::registry::{CodegenStrategy, IntrinsicCategory, IntrinsicHint};
 
         let intrinsic = info.intrinsic;
+
+        // #12 / P3.2 — auto-emit a PermissionAssert prologue for
+        // every intrinsic carrying `RequiresPermission`. The
+        // single-instruction shape needs no branching machinery
+        // here: the dispatch handler raises a typed panic on
+        // Deny, the rest of the codegen continues unchanged.
+        //
+        // scope_tag derivation:
+        //   IntrinsicCategory::Syscall   → 0 (PermissionScope::Syscall)
+        //
+        // target_id derivation:
+        //   For raw syscallN intrinsics the first argument
+        //   register holds the syscall number, which is the
+        //   stable target identifier within the Syscall scope.
+        //   The pin tests
+        //   (test_syscall_intrinsics_require_permission /
+        //    test_observational_intrinsics_skip_permission) keep
+        //   this mapping load-bearing — any new tagged category
+        //   triggers a deliberate match-arm extension here, not
+        //   a silent "ungated" emission.
+        if intrinsic.hints.contains(&IntrinsicHint::RequiresPermission) {
+            let (scope_tag, target_reg) = match intrinsic.category {
+                IntrinsicCategory::Syscall => {
+                    let target = args.first().copied().unwrap_or(Reg(0));
+                    (0_u8, target)
+                }
+                // Future tagged categories must extend this
+                // mapping. The pin test on
+                // `RequiresPermission` ensures no untagged
+                // syscall-like intrinsic slips through; if a
+                // *new* category gets tagged, the registry
+                // pin will direct attention here.
+                _ => {
+                    return Err(CodegenError::new(CodegenErrorKind::Internal(
+                        format!(
+                            "intrinsic `{}` carries RequiresPermission but \
+                             category {:?} is not yet wired to a permission \
+                             scope (#12 / P3.2 follow-up — extend the match \
+                             in emit_intrinsic_instructions)",
+                            intrinsic.name, intrinsic.category
+                        ),
+                    )));
+                }
+            };
+            self.ctx.emit(Instruction::PermissionAssert {
+                scope_tag,
+                target_id: target_reg,
+            });
+        }
 
         match &intrinsic.strategy {
             CodegenStrategy::DirectOpcode(opcode) => {
