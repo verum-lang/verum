@@ -568,6 +568,22 @@ pub struct InterpreterState {
     /// etc.) and checked against `config.max_instructions`. This prevents infinite
     /// loops that span nested dispatch calls from bypassing the instruction limit.
     pub global_instruction_count: u64,
+
+    /// Permission router for intrinsic gating (#12 / P3.2).
+    ///
+    /// Every `Syscall`-category intrinsic — and any other
+    /// intrinsic tagged with `IntrinsicHint::RequiresPermission`
+    /// — routes through here before dispatching the underlying
+    /// handler. The default-constructed router is allow-all,
+    /// preserving prior interpreter behaviour for unmigrated
+    /// embedders; production hosts wire a policy via
+    /// `set_permission_policy` to gate gated operations.
+    ///
+    /// Boxed so the router's per-call allocations (the backing
+    /// HashMap) don't bloat the InterpreterState by-value
+    /// footprint and so embedders that don't need gating pay no
+    /// heap cost beyond the Box itself.
+    pub permission_router: Box<crate::interpreter::permission::PermissionRouter>,
 }
 
 /// Tracks a marshalled FFI array buffer for writeback after C calls.
@@ -2189,6 +2205,9 @@ impl InterpreterState {
             ffi_array_buffers: Vec::new(),
             pending_drops: Vec::new(),
             global_instruction_count: 0,
+            permission_router: Box::new(
+                crate::interpreter::permission::PermissionRouter::allow_all(),
+            ),
         }
     }
 
@@ -2202,6 +2221,49 @@ impl InterpreterState {
             // No external runtime dependency required
             self.runtime_ctx_initialized = true;
         }
+    }
+
+    /// Route a permission check through the interpreter's
+    /// router (#12 / P3.2). Hot-path inline so the common
+    /// allow-all / one-entry-cache-hit case lowers to a couple
+    /// of compares + a return.
+    ///
+    /// Codegen for tagged intrinsics emits a call equivalent to
+    /// this on entry to the handler; a `Deny` return short-
+    /// circuits the syscall into a `PermissionDenied` error
+    /// without invoking the underlying operation.
+    #[inline]
+    pub fn check_permission(
+        &mut self,
+        scope: crate::interpreter::permission::PermissionScope,
+        target_id: crate::interpreter::permission::PermissionTargetId,
+    ) -> crate::interpreter::permission::PermissionDecision {
+        self.permission_router.check(scope, target_id)
+    }
+
+    /// Install a host-supplied permission policy on the running
+    /// interpreter. Subsequent permission checks consult the
+    /// policy on cache miss; cached entries from the prior
+    /// policy survive — call `clear_permission_cache` to drop
+    /// them.
+    pub fn set_permission_policy<F>(&mut self, policy: F)
+    where
+        F: Fn(
+                crate::interpreter::permission::PermissionScope,
+                crate::interpreter::permission::PermissionTargetId,
+            ) -> crate::interpreter::permission::PermissionDecision
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.permission_router.set_policy(policy);
+    }
+
+    /// Drop every cached permission decision. Used when a host
+    /// rotates capabilities or when test code wants a clean
+    /// router state between scenarios.
+    pub fn clear_permission_cache(&mut self) {
+        self.permission_router.clear_cache();
     }
 
     /// Loads an additional module.
@@ -2308,6 +2370,11 @@ impl InterpreterState {
         self.cbgr_mutable_ptrs.clear();
         self.stats = ExecutionStats::default();
         self.global_instruction_count = 0;
+        // Permission cache is per-execution: a fresh interpreter
+        // pass shouldn't inherit stale Allow/Deny decisions from
+        // a previous run. The configured policy callback is
+        // preserved.
+        self.permission_router.clear_cache();
     }
 
     /// Records an instruction execution (for profiling).
@@ -2743,6 +2810,94 @@ mod tests {
         assert!(state.call_stack.is_empty());
         assert_eq!(state.registers.top(), 0);
         assert_eq!(state.stats.instructions, 0);
+    }
+
+    // =====================================================================
+    // #12 / P3.2 — InterpreterState permission router integration.
+    // =====================================================================
+
+    #[test]
+    fn test_default_permission_router_is_allow_all() {
+        let mut state = InterpreterState::new(test_module());
+        // Without an installed policy the router permits every check.
+        assert!(!state.permission_router.has_policy());
+        assert_eq!(
+            state.check_permission(
+                crate::interpreter::permission::PermissionScope::Syscall,
+                42,
+            ),
+            crate::interpreter::permission::PermissionDecision::Allow,
+        );
+    }
+
+    #[test]
+    fn test_set_permission_policy_gates_subsequent_checks() {
+        use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+        let mut state = InterpreterState::new(test_module());
+        state.set_permission_policy(|scope, target| match (scope, target) {
+            (PermissionScope::Syscall, n) if n >= 100 => PermissionDecision::Deny,
+            _ => PermissionDecision::Allow,
+        });
+        assert_eq!(
+            state.check_permission(PermissionScope::Syscall, 42),
+            PermissionDecision::Allow
+        );
+        assert_eq!(
+            state.check_permission(PermissionScope::Syscall, 200),
+            PermissionDecision::Deny
+        );
+        // Cached deny short-circuits — policy not reinvoked for repeats.
+        for _ in 0..50 {
+            assert_eq!(
+                state.check_permission(PermissionScope::Syscall, 200),
+                PermissionDecision::Deny
+            );
+        }
+        assert_eq!(state.permission_router.stats.policy_invocations, 2);
+        assert_eq!(state.permission_router.stats.denials, 51);
+    }
+
+    #[test]
+    fn test_reset_clears_permission_cache_but_keeps_policy() {
+        use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+        let mut state = InterpreterState::new(test_module());
+        let invocations = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+        let inv2 = invocations.clone();
+        state.set_permission_policy(move |_, _| {
+            *inv2.lock().unwrap() += 1;
+            PermissionDecision::Allow
+        });
+        state.check_permission(PermissionScope::Network, 1);
+        state.check_permission(PermissionScope::Network, 1);
+        assert_eq!(*invocations.lock().unwrap(), 1);
+
+        state.reset();
+
+        // Policy survives reset; cache is wiped, so a repeat
+        // request consults the policy again.
+        assert!(state.permission_router.has_policy());
+        state.check_permission(PermissionScope::Network, 1);
+        assert_eq!(
+            *invocations.lock().unwrap(),
+            2,
+            "reset must invalidate the permission cache"
+        );
+    }
+
+    #[test]
+    fn test_clear_permission_cache_method() {
+        use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+        let mut state = InterpreterState::new(test_module());
+        let invocations = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+        let inv2 = invocations.clone();
+        state.set_permission_policy(move |_, _| {
+            *inv2.lock().unwrap() += 1;
+            PermissionDecision::Allow
+        });
+        state.check_permission(PermissionScope::Memory, 7);
+        state.clear_permission_cache();
+        state.check_permission(PermissionScope::Memory, 7);
+        assert_eq!(*invocations.lock().unwrap(), 2);
     }
 
     #[test]
