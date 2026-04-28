@@ -87,7 +87,7 @@ mod safe_interpolation;
 mod stmt;
 mod ty;
 
-use verum_ast::{FileId, Item, Module, Span};
+use verum_ast::{CogKind, FileId, Item, Module, Span};
 use verum_common::{List, Text};
 use verum_lexer::{Lexer, Token, TokenKind};
 
@@ -239,7 +239,17 @@ impl FastParser {
 
                 // Explicitly convert Vec to List
                 let items_list: List<Item> = items.into_iter().collect();
-                Ok(Module::new(items_list, file_id, span))
+                let mut module = Module::new(items_list, file_id, span);
+                // Auto-tag script modules so the entry-detection fallback
+                // recognises the synthesised `__verum_script_main` wrapper
+                // as the program entry. Single source of truth: every caller
+                // that opts into script-mode parsing automatically gets the
+                // tag. `set_on_module` is idempotent — callers that re-tag
+                // explicitly remain correct.
+                if script_mode {
+                    CogKind::Script.set_on_module(&mut module);
+                }
+                Ok(module)
             }
             Err(e) => {
                 // Collect all errors
