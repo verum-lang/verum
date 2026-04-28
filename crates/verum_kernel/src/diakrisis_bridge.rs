@@ -158,6 +158,7 @@ pub struct BridgeAudit {
 }
 
 impl BridgeAudit {
+    /// Construct an empty `BridgeAudit` — no recorded admits.
     pub fn new() -> Self {
         Self { admits: Vec::new() }
     }
