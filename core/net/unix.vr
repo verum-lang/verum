@@ -80,6 +80,40 @@ implement UnixError {
             _ => UnixError.IoError(f"{e}"),
         }
     }
+
+    /// Lift a `UnixError` into the cross-stdlib `IoError`
+    /// (`StreamError`) used by the async / poll surfaces.
+    ///
+    /// Each typed variant maps to the closest semantic
+    /// `IoErrorKind`; the original detail is preserved
+    /// through the `message` field.  Pre-#103, async
+    /// adapters (`poll_shutdown` / `poll_*`) collapsed
+    /// every UnixError into `IoError.Other(f"{e}")`,
+    /// throwing away the variant tag and forcing
+    /// downstream callers to substring-match the message
+    /// string.  Now downstream `match err.kind { … }`
+    /// works directly on the typed kinds.
+    public fn to_io_error(self) -> IoError {
+        match self {
+            UnixError.IoError(msg) =>
+                IoError { kind: IoErrorKind.Other,            message: Some(msg) },
+            UnixError.PathTooLong { limit, actual } =>
+                IoError {
+                    kind:    IoErrorKind.InvalidInput,
+                    message: Some(f"unix path exceeds platform limit: limit={limit} actual={actual}"),
+                },
+            UnixError.InvalidPath(msg) =>
+                IoError { kind: IoErrorKind.InvalidInput,     message: Some(msg) },
+            UnixError.PermissionDenied =>
+                IoError { kind: IoErrorKind.PermissionDenied, message: None },
+            UnixError.PathInUse(msg) =>
+                IoError { kind: IoErrorKind.AlreadyExists,    message: Some(msg) },
+            UnixError.NotFound(msg) =>
+                IoError { kind: IoErrorKind.NotFound,         message: Some(msg) },
+            UnixError.PeerClosed =>
+                IoError { kind: IoErrorKind.NotConnected,     message: None },
+        }
+    }
 }
 
 // =============================================================================
@@ -351,7 +385,7 @@ implement AsyncWrite for UnixStream {
     fn poll_shutdown(&mut self, _cx: &mut Context) -> Poll<Result<(), IoError>> {
         match self.shutdown(ShutdownKind.Write) {
             Ok(()) => Poll.Ready(Ok(())),
-            Err(e) => Poll.Ready(Err(IoError.Other(f"{e}"))),
+            Err(e) => Poll.Ready(Err(e.to_io_error())),
         }
     }
 }
