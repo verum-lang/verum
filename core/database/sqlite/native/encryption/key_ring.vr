@@ -120,9 +120,8 @@ implement KeyRing {
 }
 
 fn clone_entry(e: &KeyEntry) -> KeyEntry {
-    let mut mat: List<Byte> = List.new();
-    let mut i: Int = 0;
-    while i < e.material.len() { mat.push(e.material[i]); i = i + 1; }
+    let mut mat: List<Byte> = List.with_capacity(e.material.len());
+    mat.extend_from_slice(e.material.as_slice());
     KeyEntry {
         key_id: e.key_id,
         material: mat,

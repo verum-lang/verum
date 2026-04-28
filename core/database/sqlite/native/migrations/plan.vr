@@ -171,9 +171,8 @@ fn toposort(steps: &List<Migration>) -> Result<List<Migration>, MigrationPlanErr
 }
 
 fn clone_migration(m: &Migration) -> Migration {
-    let mut deps: List<Int> = List.new();
-    let mut i: Int = 0;
-    while i < m.depends_on.len() { deps.push(m.depends_on[i]); i = i + 1; }
+    let mut deps: List<Int> = List.with_capacity(m.depends_on.len());
+    deps.extend_from_slice(m.depends_on.as_slice());
     let down = match &m.down_sql {
         Some(s) => Some(s.clone()),
         None    => None,

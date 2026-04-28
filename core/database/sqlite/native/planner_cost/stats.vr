@@ -208,13 +208,12 @@ fn clone_bucket(b: &HistogramBucket) -> HistogramBucket {
 }
 
 fn clone_index(idx: &IndexStats) -> IndexStats {
-    let mut tuple: List<Int64> = List.new();
-    let mut i: Int = 0;
-    while i < idx.tuple_card.len() { tuple.push(idx.tuple_card[i]); i = i + 1; }
-    let mut hist: List<List<HistogramBucket>> = List.new();
+    let mut tuple: List<Int64> = List.with_capacity(idx.tuple_card.len());
+    tuple.extend_from_slice(idx.tuple_card.as_slice());
+    let mut hist: List<List<HistogramBucket>> = List.with_capacity(idx.histograms.len());
     let mut k: Int = 0;
     while k < idx.histograms.len() {
-        let mut inner: List<HistogramBucket> = List.new();
+        let mut inner: List<HistogramBucket> = List.with_capacity(idx.histograms[k].len());
         let mut j: Int = 0;
         while j < idx.histograms[k].len() { inner.push(clone_bucket(&idx.histograms[k][j])); j = j + 1; }
         hist.push(inner);
