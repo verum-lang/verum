@@ -261,6 +261,40 @@ impl Repl {
             return Ok(format!("{} {} item(s) defined", "✓".green(), count).into());
         }
 
+        // 2b. Script-mode top-level statements: let-bindings, defer,
+        // expression-statements, sequences thereof. Parses through
+        // the same `parse_module_script_str` that drives `verum
+        // hello.vr`, so what works at the REPL prompt also works in
+        // a script file. The synthesised `__verum_script_main`
+        // wrapper signals that real statements were present (a
+        // pure-decl input would have been caught by branch 2 above).
+        // The input is wrapped in a fresh REPL function and
+        // executed; captured stdout is returned. State persistence
+        // across snippets (so `let x = 1` in one prompt visible to
+        // the next) is REPL-state infrastructure — landed
+        // separately.
+        let lexer = Lexer::new(trimmed, file_id);
+        let _ = lexer; // re-create below; the previous lexer was consumed
+        if let Ok(module) = parser.parse_module_script_str(trimmed, file_id) {
+            let has_wrapper = module.items.iter().any(|i| {
+                if let verum_ast::ItemKind::Function(f) = &i.kind {
+                    f.name.as_str() == "__verum_script_main"
+                } else {
+                    false
+                }
+            });
+            if has_wrapper {
+                self.eval_counter += 1;
+                let func_name = format!("__repl_script_{}", self.eval_counter);
+                let wrapper = format!(
+                    "fn {}() {{\n    {}\n}}\n",
+                    func_name, trimmed
+                );
+                let stdout = self.compile_and_run(&wrapper, &func_name)?;
+                return Ok(stdout.into());
+            }
+        }
+
         // 3. Bare expression → wrap in __repl_main_N() and execute.
         if parser.parse_expr_str(trimmed, file_id).is_ok() {
             self.eval_counter += 1;
