@@ -680,12 +680,15 @@ implement UnixStream {
     public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
         // struct ucred { pid_t pid; uid_t uid; gid_t gid; }; — 12 bytes
         // SOL_SOCKET = 1, SO_PEERCRED = 17
-        const SOL_SOCKET: Int = 1;
-        const SO_PEERCRED: Int = 17;
+        const SOL_SOCKET: Int32 = 1;
+        const SO_PEERCRED: Int32 = 17;
         let mut buf = [0_u8; 12];
-        let mut len: Int = 12;
+        let mut len: UInt32 = 12;
+        // C: `int getsockopt(int sockfd, int level, int optname,
+        //                    void *optval, socklen_t *optlen);`
+        // T0.4.2 Phase 2 — `int` → Int32, `socklen_t *` → &mut UInt32.
         @intrinsic("libc.getsockopt")
-        fn getsockopt(fd: Int, level: Int, optname: Int, val: &mut Byte, len: &mut Int) -> Int;
+        fn getsockopt(fd: Int32, level: Int32, optname: Int32, val: &mut Byte, len: &mut UInt32) -> Int32;
         let rc = getsockopt(self.fd, SOL_SOCKET, SO_PEERCRED,
                             &mut buf[0], &mut len);
         if rc != 0 {
