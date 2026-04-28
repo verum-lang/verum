@@ -64,9 +64,19 @@ public type CodedPreference is {
 // Parsers
 // =============================================================================
 
+/// Hard cap on the number of comma-separated entries in any
+/// content-negotiation header. CVE-2011-3192-class hostile-input
+/// fan-out: a peer sending `Accept: */*,*/*,...` with thousands
+/// of entries forces the parser to allocate per-entry MediaRangeSpec
+/// values + perform downstream q-value sort. RFC 7231 doesn't
+/// mandate a cap; nginx caps at ~100 by default. 256 is a generous
+/// middle ground that exceeds every reasonable client need.
+public const MAX_NEGOTIATION_ENTRIES: Int = 256;
+
 public fn parse_accept(header: &Text) -> List<MediaRangeSpec> {
     let mut out: List<MediaRangeSpec> = [];
     let segs = split_commas(header.as_bytes());
+    if segs.len() > MAX_NEGOTIATION_ENTRIES { return out; }
     let mut i: Int = 0;
     while i < segs.len() {
         let seg = trim_ws(segs[i].as_slice());
@@ -91,6 +101,7 @@ public fn parse_accept_language(header: &Text) -> List<CodedPreference> {
 fn parse_coded(header: &Text) -> List<CodedPreference> {
     let mut out: List<CodedPreference> = [];
     let segs = split_commas(header.as_bytes());
+    if segs.len() > MAX_NEGOTIATION_ENTRIES { return out; }
     let mut i: Int = 0;
     while i < segs.len() {
         let seg = trim_ws(segs[i].as_slice());
