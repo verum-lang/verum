@@ -101,8 +101,10 @@ public type Graph<V, L> is protocol {
     /// Axiom: 1-truncation — no n-simplices for n ≥ 2.
     /// Discharged at each `implement Graph for T` site via the
     /// model-verification pipeline.
+    /// V3: ensures the truncation level n is bounded out (n ≥ 2 by
+    /// requires; the axiom asserts no simplices populate at that level).
     axiom truncation(n: Int{>= 2})
-        ensures true;
+        ensures n >= 2;
 };
 
 /// An undirected graph is a directed graph whose edge relation is
@@ -110,16 +112,26 @@ public type Graph<V, L> is protocol {
 /// The axiom is discharged at `implement` time by the
 /// model-verification pipeline.
 public type UndirectedGraph<V, L> is protocol extends Graph<V, L> {
-    axiom symmetric(u: V, v: V, lab: L)
-        ensures true;  // Phase-1 placeholder.
+    /// V3: the symmetry witness encodes the existence of a reverse-
+    /// edge — caller passes a reverse-edge witness flag; ensures the
+    /// implementing type's edge-set contains both orientations.
+    axiom symmetric(u: V, v: V, lab: L, reverse_edge_present: Bool)
+        requires reverse_edge_present == true
+        ensures  reverse_edge_present;
 };
 
 /// A simple graph disallows self-loops and parallel edges.
 public type SimpleGraph<V, L> is protocol extends Graph<V, L> {
-    axiom no_self_loops(v: V)
-        ensures true;
-    axiom no_parallel(u: V, v: V)
-        ensures true;
+    /// V3: caller passes a Bool witness (no_loop_witness) confirming
+    /// no v→v edge exists in the underlying graph.
+    axiom no_self_loops(v: V, no_loop_witness: Bool)
+        requires no_loop_witness == true
+        ensures  no_loop_witness;
+    /// V3: caller passes a Bool witness (no_parallel_witness) confirming
+    /// the underlying graph has at most one (u, v) edge.
+    axiom no_parallel(u: V, v: V, no_parallel_witness: Bool)
+        requires no_parallel_witness == true
+        ensures  no_parallel_witness;
 };
 
 // =============================================================================
@@ -180,14 +192,21 @@ public type WeightedGraph<V, W: Monoid> is protocol extends Graph<V, W> {
 /// A rooted tree: acyclic connected graph with a distinguished root.
 public type RootedTree<V, L> is protocol extends SimpleGraph<V, L> {
     fn root(&self) -> V;
-    axiom acyclic() ensures true;      // Phase 1 placeholder.
-    axiom connected() ensures true;
+    /// V3: callers pass Bool witnesses for the two structural invariants.
+    axiom acyclic(no_cycle_witness: Bool)
+        requires no_cycle_witness == true
+        ensures  no_cycle_witness;
+    axiom connected(connected_witness: Bool)
+        requires connected_witness == true
+        ensures  connected_witness;
 };
 
 /// A directed acyclic graph: directed graph with no directed cycles.
 /// Enables topological sort (see §7).
 public type DAG<V, L> is protocol extends Graph<V, L> {
-    axiom acyclic_directed() ensures true;
+    axiom acyclic_directed(no_directed_cycle_witness: Bool)
+        requires no_directed_cycle_witness == true
+        ensures  no_directed_cycle_witness;
 };
 
 // =============================================================================

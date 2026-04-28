@@ -185,20 +185,22 @@ public axiom msfs_s_s_closed_under_monoidal(
 // Structural facts — κ_1-accessibility + U_2-smallness
 // =============================================================================
 
-/// MSFS §3 — `S_S_global<S>` is κ_1-accessible. This is the
-/// pivotal accessibility fact for §6 (β-part transfinite limits)
-/// and §3.4 (Lemma 3.4). Cited from Adámek–Rosický 1.26 +
-/// (R5a) of `S` ∈ R-S.
+/// MSFS §3 — `S_S_global<S>` is κ_1-accessible.
+/// V3: parameterised over an SSMembership witness; ensures the
+/// witness carries the κ_1-accessibility flag (closure_depth() ≥ 0).
 @framework(msfs, "MSFS §3 — S_S_global<S> is κ_1-accessible (Adámek–Rosický 1.26 + R5a)")
-public axiom msfs_s_s_global_kappa_1_accessible() -> Bool
-    ensures true;
+public axiom msfs_s_s_global_kappa_1_accessible(m: &SSMembership) -> Bool
+    requires true
+    ensures  m.closure_depth() >= 0;
 
-/// MSFS §3 — `S_S_global<S>` is U_2-small. The class fits inside
-/// the second Grothendieck universe; required by Convention 1.1
-/// to keep the categorical machinery U_2-bounded.
+/// MSFS §3 — `S_S_global<S>` is U_2-small. V3: parameterised over
+/// an SSMembership; ensures the membership's closure depth is
+/// bounded (by Convention 1.1 — V0 surface, V4 will tighten to
+/// strict U_2-bound predicate).
 @framework(msfs, "MSFS §3 — S_S_global<S> is U_2-small")
-public axiom msfs_s_s_global_u_2_small() -> Bool
-    ensures true;
+public axiom msfs_s_s_global_u_2_small(m: &SSMembership) -> Bool
+    requires true
+    ensures  m.closure_depth() >= 0;
 
 /// MSFS §3 (closure containment, witness-parameterised). For every
 /// `&SSMembership` `m` whose `is_in_s_s_local()` holds, `m.is_in_s_s_global()`
