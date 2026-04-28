@@ -71,14 +71,53 @@ public type UnixError is
     | PeerClosed;
 
 implement UnixError {
+    /// Map a POSIX errno into the closest typed `UnixError`
+    /// variant.  POSIX-stable codes match identically on
+    /// Linux and Darwin; codes that diverge between
+    /// platforms (ECONNRESET, ENOTCONN, ENAMETOOLONG) are
+    /// gated by @cfg matches that ship the per-platform
+    /// integer values.  Unknown errnos fall through to
+    /// `IoError(<formatted>)` so the caller still sees the
+    /// raw code in the message.
     public fn from_os_error(e: OsError) -> UnixError {
+        // POSIX-stable mappings — same integer values on
+        // Linux and Darwin.
         match e.code {
-            1 => UnixError.PermissionDenied,           // EPERM
-            2 => UnixError.NotFound(f"{e}"),           // ENOENT
-            13 => UnixError.PermissionDenied,          // EACCES
-            17 => UnixError.PathInUse(f"{e}"),         // EEXIST
-            _ => UnixError.IoError(f"{e}"),
+            1 => return UnixError.PermissionDenied,             // EPERM
+            2 => return UnixError.NotFound(f"{e}"),             // ENOENT
+            13 => return UnixError.PermissionDenied,            // EACCES
+            17 => return UnixError.PathInUse(f"{e}"),           // EEXIST
+            32 => return UnixError.PeerClosed,                  // EPIPE — write to closed peer
+            _ => {}
         }
+
+        // Platform-specific mappings — codes that drift.
+        @cfg(target_os = "linux")
+        {
+            match e.code {
+                36  => return UnixError.PathTooLong {           // ENAMETOOLONG
+                    limit: SUN_PATH_MAX,
+                    actual: 0,
+                },
+                104 => return UnixError.PeerClosed,             // ECONNRESET
+                107 => return UnixError.PeerClosed,             // ENOTCONN
+                _ => {}
+            }
+        }
+        @cfg(target_os = "macos")
+        {
+            match e.code {
+                63 => return UnixError.PathTooLong {            // ENAMETOOLONG
+                    limit: SUN_PATH_MAX,
+                    actual: 0,
+                },
+                54 => return UnixError.PeerClosed,              // ECONNRESET
+                57 => return UnixError.PeerClosed,              // ENOTCONN
+                _ => {}
+            }
+        }
+
+        UnixError.IoError(f"{e}")
     }
 
     /// Lift a `UnixError` into the cross-stdlib `IoError`
