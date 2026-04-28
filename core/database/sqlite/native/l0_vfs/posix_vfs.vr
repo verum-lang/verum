@@ -196,6 +196,16 @@ fn sys_unlink(path: &[Byte]) -> Result<(), OSError> {
     platform_libsystem.safe_unlink(path)
 }
 
+@cfg(target_os = "linux")
+fn sys_unlink_raw(path: &Byte) -> Result<(), OSError> {
+    platform_syscall.unlink_raw(path)
+}
+
+@cfg(target_os = "macos")
+fn sys_unlink_raw(path: &Byte) -> Result<(), OSError> {
+    platform_libsystem.safe_unlink_raw(path)
+}
+
 // -----------------------------------------------------------------------------
 // PosixFile methods (not part of the protocol surface — for tests/tools)
 // -----------------------------------------------------------------------------
@@ -420,14 +430,19 @@ implement VfsProtocol for PosixVfs {
     }
 
     fn delete(&self, path: &Text, sync_dir: Bool) -> Result<(), VfsError> {
-        let cp = to_c_path(path);
-        match sys_unlink(&cp) {
+        // Same RUNTIME-3-DEEPER sidestep as `open` above: build the
+        // NUL-terminated path locally and call the raw &Byte entry.
+        let raw = path.as_bytes();
+        let mut path_buf: [Byte; 4096] = [0 as Byte; 4096];
+        let n = if raw.len() < 4095 { raw.len() } else { 4095 };
+        let mut i: Int = 0;
+        while i < n { path_buf[i] = raw[i]; i = i + 1; }
+        path_buf[n] = 0 as Byte;
+
+        match sys_unlink_raw(path_buf.as_ptr() as &Byte) {
             Ok(_)  => {
                 if sync_dir {
-                    // Best-effort directory sync on the parent. Extract
-                    // parent by trimming trailing components — a simple
-                    // loop suffices; proper path manipulation lands with
-                    // core.fs.Path.
+                    // Best-effort directory sync on the parent.
                     let parent = parent_of(path);
                     let parent_cp = to_c_path(&parent);
                     let _ = durability.sync_directory(&parent_cp);

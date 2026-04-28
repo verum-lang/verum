@@ -834,6 +834,19 @@ public fn unlink(path: &[Byte]) -> Result<(), OSError> {
     }
 }
 
+/// Raw-pointer unlink — caller-owned NUL-terminated buffer.  Mirrors
+/// `open_raw`; bypasses `&[Byte]` parameter coercion (RUNTIME-3-DEEPER).
+public fn unlink_raw(path: &Byte) -> Result<(), OSError> {
+    let result = unsafe {
+        syscall_raw(SYS_UNLINKAT, AT_FDCWD, path as Int, 0, 0, 0, 0)
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(())
+    }
+}
+
 /// Rename a file or directory.
 public fn rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     let mut old_buf = [0_u8; 4096];

@@ -1531,6 +1531,19 @@ public fn safe_unlink(path: &[Byte]) -> Result<(), OSError> {
     }
 }
 
+/// Raw-pointer unlink — caller-owned NUL-terminated buffer.  Mirrors
+/// safe_open_raw; bypasses `&[Byte]` parameter coercion under the
+/// Tier-0 interpreter (RUNTIME-3-DEEPER sidestep).
+public fn safe_unlink_raw(path: &Byte) -> Result<(), OSError> {
+    let result = unsafe { unlink(path) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
 /// Rename a file or directory
 public fn safe_rename(oldpath: &[Byte], newpath: &[Byte]) -> Result<(), OSError> {
     let old_p: &Byte = transmute(oldpath);
