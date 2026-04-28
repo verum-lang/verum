@@ -30,10 +30,23 @@ public fn sub_overflows(a: Int64, b: Int64) -> Bool {
 public fn mul_overflows(a: Int64, b: Int64) -> Bool {
     if a == 0_i64 { return false; }
     if b == 0_i64 { return false; }
-    // Special case: INT64_MIN * -1 overflows.
-    if a == int64_min() && b == -1_i64 { return true; }
-    if b == int64_min() && a == -1_i64 { return true; }
+    // Special case: INT64_MIN multiplied by anything other than 0 or 1
+    // overflows (its magnitude 2^63 already saturates Int64). The
+    // historical `abs_a = -a` for `a == Int64.MIN` wrapped back to
+    // Int64.MIN (still negative), and the subsequent
+    // `abs_a > int64_max() / abs_b` check returned FALSE because
+    // negative-Int64 is never > positive-Int64 — `mul_overflows(MIN, 2)`
+    // wrongly reported "no overflow". Detect Int64.MIN explicitly
+    // BEFORE taking the abs.
+    if a == int64_min() {
+        return b != 1_i64;
+    }
+    if b == int64_min() {
+        return a != 1_i64;
+    }
     // General: |a * b| > INT64_MAX iff |a| > INT64_MAX / |b|.
+    // Both operands are now in `(int64_min(), int64_max()]` so the
+    // negate is well-defined.
     let abs_a = if a < 0_i64 { -a } else { a };
     let abs_b = if b < 0_i64 { -b } else { b };
     abs_a > int64_max() / abs_b
