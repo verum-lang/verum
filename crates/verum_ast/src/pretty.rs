@@ -1545,6 +1545,13 @@ impl PrettyPrinter {
                 }
                 self.write("}");
             }
+            // #5 / P1.5 — relative file mount renders the source-
+            // relative path verbatim. The leading `./` or `../`
+            // distinguishes it from a module path on a single
+            // pretty-print pass.
+            MountTreeKind::File { path, .. } => {
+                self.write(path.as_str());
+            }
         }
     }
 

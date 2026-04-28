@@ -1570,6 +1570,30 @@ pub enum MountTreeKind {
         prefix: Path,
         trees: List<MountTree>,
     },
+    /// Relative file-path mount: `mount ./foo.vr;` or
+    /// `mount ../shared/util.vr as Util;` (#5 / P1.5).
+    ///
+    /// Distinguishes file-system-relative module loading from
+    /// the module-path lookup used by `Path` / `Glob` /
+    /// `Nested`. The string carries the literal source-relative
+    /// path as written; resolution into a concrete module
+    /// happens in the module loader using `Session::cog_root`
+    /// and the importing source file's directory as the
+    /// resolution base.
+    ///
+    /// Path constraints (enforced at parse time):
+    ///   * must start with `./` or `../`
+    ///   * must end with `.vr`
+    ///   * must NOT contain `\0`, `\n`, `\r`
+    ///   * must NOT escape the cog root via excessive `..`
+    File {
+        /// Source-relative path as written, e.g. `./foo.vr` or
+        /// `../shared/util.vr`. Preserved verbatim so error
+        /// messages can quote the original spelling.
+        path: Text,
+        /// Span of the path token for diagnostics.
+        span: Span,
+    },
 }
 
 impl Spanned for MountTree {

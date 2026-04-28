@@ -3757,6 +3757,19 @@ impl VbcCodegen {
                     results.extend(child_results);
                 }
             }
+            // #5 / P1.5 — file-relative mount carries the
+            // resolved file path as the literal `path` field;
+            // the loader uses it directly without going
+            // through module-path → file-path translation.
+            // This extractor is for resolving module-path
+            // mounts to candidate files, so File mounts simply
+            // contribute themselves verbatim as a single-
+            // segment "path" (the loader downstream will
+            // recognise the leading `./` / `../` and treat it
+            // as a literal source-relative path).
+            MountTreeKind::File { path, .. } => {
+                results.push(vec![path.as_str().to_string()]);
+            }
         }
         results
     }
@@ -5102,6 +5115,12 @@ impl VbcCodegen {
 
                 Ok(())
             }
+            // #5 / P1.5 — file-relative mount aliases are
+            // already wired by the session loader (which
+            // registers each loaded file as a module under
+            // the alias). The VBC codegen import-aliasing
+            // pass doesn't add another mapping.
+            MountTreeKind::File { .. } => Ok(()),
         }
     }
 
