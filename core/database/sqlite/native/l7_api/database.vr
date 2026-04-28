@@ -79,6 +79,91 @@ public type DbError is
     | DbStmtError(StmtError)
     | DbUnsupported(Text);
 
+implement Display for DbError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DbOk                  => f.write_str("OK"),
+            DbGeneric(m)          => f.write_str(f"sqlite: {m}".as_str()),
+            DbBusy                => f.write_str("sqlite database busy"),
+            DbLocked              => f.write_str("sqlite database locked"),
+            DbOutOfMemory         => f.write_str("sqlite out of memory"),
+            DbReadonly            => f.write_str("sqlite database read-only"),
+            DbInterrupted         => f.write_str("sqlite operation interrupted"),
+            DbIoError(m)          => f.write_str(f"sqlite I/O error: {m}".as_str()),
+            DbCorrupt(m)          => f.write_str(f"sqlite corruption: {m}".as_str()),
+            DbFull                => f.write_str("sqlite database full"),
+            DbCannotOpen(m)       => f.write_str(f"sqlite cannot open: {m}".as_str()),
+            DbConstraint(m)       => f.write_str(f"sqlite constraint failed: {m}".as_str()),
+            DbDataTypeMismatch    => f.write_str("sqlite data type mismatch"),
+            DbMisuse(m)           => f.write_str(f"sqlite library misuse: {m}".as_str()),
+            DbAuthDenied          => f.write_str("sqlite authorization denied"),
+            DbBindRange(i)        => f.write_str(f"sqlite bind index {i} out of range".as_str()),
+            DbNotADatabase        => f.write_str("sqlite file is not a database"),
+            DbCompileError(e)     => f.write_str(f"{e}".as_str()),
+            DbConnectionError(e)  => f.write_str(f"{e}".as_str()),
+            DbStmtError(e)        => f.write_str(f"{e}".as_str()),
+            DbUnsupported(m)      => f.write_str(f"sqlite unsupported: {m}".as_str()),
+        }
+    }
+}
+
+implement Debug for DbError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            DbOk                  => f.write_str("DbOk"),
+            DbGeneric(m)          => f.write_str(f"DbGeneric({m})".as_str()),
+            DbBusy                => f.write_str("DbBusy"),
+            DbLocked              => f.write_str("DbLocked"),
+            DbOutOfMemory         => f.write_str("DbOutOfMemory"),
+            DbReadonly            => f.write_str("DbReadonly"),
+            DbInterrupted         => f.write_str("DbInterrupted"),
+            DbIoError(m)          => f.write_str(f"DbIoError({m})".as_str()),
+            DbCorrupt(m)          => f.write_str(f"DbCorrupt({m})".as_str()),
+            DbFull                => f.write_str("DbFull"),
+            DbCannotOpen(m)       => f.write_str(f"DbCannotOpen({m})".as_str()),
+            DbConstraint(m)       => f.write_str(f"DbConstraint({m})".as_str()),
+            DbDataTypeMismatch    => f.write_str("DbDataTypeMismatch"),
+            DbMisuse(m)           => f.write_str(f"DbMisuse({m})".as_str()),
+            DbAuthDenied          => f.write_str("DbAuthDenied"),
+            DbBindRange(i)        => f.write_str(f"DbBindRange({i})".as_str()),
+            DbNotADatabase        => f.write_str("DbNotADatabase"),
+            DbCompileError(e)     => f.write_str(f"DbCompileError({e:?})".as_str()),
+            DbConnectionError(e)  => f.write_str(f"DbConnectionError({e:?})".as_str()),
+            DbStmtError(e)        => f.write_str(f"DbStmtError({e:?})".as_str()),
+            DbUnsupported(m)      => f.write_str(f"DbUnsupported({m})".as_str()),
+        }
+    }
+}
+
+implement Eq for DbError {
+    fn eq(&self, other: &DbError) -> Bool {
+        match (self, other) {
+            (DbOk,                    DbOk)                    => true,
+            (DbGeneric(a),            DbGeneric(b))            => a == b,
+            (DbBusy,                  DbBusy)                  => true,
+            (DbLocked,                DbLocked)                => true,
+            (DbOutOfMemory,           DbOutOfMemory)           => true,
+            (DbReadonly,              DbReadonly)              => true,
+            (DbInterrupted,           DbInterrupted)           => true,
+            (DbIoError(a),            DbIoError(b))            => a == b,
+            (DbCorrupt(a),            DbCorrupt(b))            => a == b,
+            (DbFull,                  DbFull)                  => true,
+            (DbCannotOpen(a),         DbCannotOpen(b))         => a == b,
+            (DbConstraint(a),         DbConstraint(b))         => a == b,
+            (DbDataTypeMismatch,      DbDataTypeMismatch)      => true,
+            (DbMisuse(a),             DbMisuse(b))             => a == b,
+            (DbAuthDenied,            DbAuthDenied)            => true,
+            (DbBindRange(a),          DbBindRange(b))          => a == b,
+            (DbNotADatabase,          DbNotADatabase)          => true,
+            (DbCompileError(a),       DbCompileError(b))       => a == b,
+            (DbConnectionError(a),    DbConnectionError(b))    => a == b,
+            (DbStmtError(a),          DbStmtError(b))          => a == b,
+            (DbUnsupported(a),        DbUnsupported(b))        => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Map ConnectionError → DbError for the facade layer.
 public fn db_error_from_conn(e: ConnectionError) -> DbError {
     match e {

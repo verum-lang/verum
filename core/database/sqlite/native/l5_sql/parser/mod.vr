@@ -27,7 +27,8 @@ public module misc;
 public module stmt;
 
 public mount .token_stream.{
-    SqlTokenStream, ParseError,
+    SqlTokenStream,
+    SqlParseError as ParseError,
     stream_new, parse_error,
 };
 
