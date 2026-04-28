@@ -174,6 +174,7 @@ use handlers::gpu::{
 use handlers::cubical::handle_cubical_extended;
 use handlers::tensor_extended::handle_tensor_extended;
 use handlers::ml_extended::handle_ml_extended;
+use handlers::extended::handle_extended;
 
 // ============================================================================
 // Dispatch Result
@@ -253,7 +254,8 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0x18] = handle_inc;         // Inc = 0x18
     table[0x19] = handle_dec;         // Dec = 0x19
     table[0x1A] = handle_cvt_toi;     // CvtToI = 0x1A (dynamic int conversion)
-    // 0x1B-0x1F: Reserved integer arithmetic
+    // 0x1B-0x1E: Reserved integer arithmetic
+    table[0x1F] = handle_extended;    // Extended = 0x1F (#167 Part A)
 
     // ========================================================================
     // Float Arithmetic (0x20-0x2F) - matches instruction.rs

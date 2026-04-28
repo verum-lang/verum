@@ -54,9 +54,9 @@ use crate::encoding::{
 use crate::error::{VbcError, VbcResult};
 use crate::instruction::{
     BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp,
-    FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg, TensorBinaryOp,
-    TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp, TensorReduceOp,
-    TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
+    ExtendedSubOpcode, FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg,
+    TensorBinaryOp, TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp,
+    TensorReduceOp, TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
 };
 #[cfg(test)]
 use crate::instruction::RegRange;
@@ -2471,6 +2471,15 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         }
 
         // ====================================================================
+        // Generic Extended (#167 Part A)
+        // ====================================================================
+        Instruction::Extended { sub_op, operands } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(*sub_op);
+            output.extend_from_slice(operands);
+        }
+
+        // ====================================================================
         // Logging Extended
         // ====================================================================
         Instruction::LogExtended { sub_op, operands } => {
@@ -4705,6 +4714,20 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             Ok(Instruction::MemExtended {
                 sub_op,
                 operands: vec![], // Operands decoded by interpreter
+            })
+        }
+
+        // ====================================================================
+        // Generic Extended Operations (#167 Part A)
+        // ====================================================================
+        Opcode::Extended => {
+            // Sub-op byte selects the extended-instruction kind; operands
+            // are consumed by the dispatch handler at execution time
+            // (matches the convention of every other *Extended opcode).
+            let sub_op = decode_u8(data, offset)?;
+            Ok(Instruction::Extended {
+                sub_op,
+                operands: vec![],
             })
         }
 
@@ -7380,5 +7403,62 @@ mod tests {
             value: Reg(2),
             proof_hash: 0,
         });
+    }
+
+    // ========================================================================
+    // Generic Extended (#167 Part A)
+    // ========================================================================
+
+    #[test]
+    fn test_extended_opcode_byte_value() {
+        // Pin the opcode byte assignment.  The reserved IntArith1F slot
+        // (0x1F) was repurposed for the general-purpose Extended scheme.
+        assert_eq!(Opcode::Extended.to_byte(), 0x1F);
+        assert_eq!(Opcode::Extended.mnemonic(), "EXTENDED");
+    }
+
+    #[test]
+    fn test_extended_reserved_subop_roundtrip() {
+        // Sub-op 0x00 is the reserved forward-compat anchor.
+        // Encoder is allowed to emit it; decoder must accept it.
+        // Operands are consumed by the dispatch handler at runtime.
+        test_roundtrip(&Instruction::Extended {
+            sub_op: 0x00,
+            operands: vec![],
+        });
+    }
+
+    #[test]
+    fn test_extended_unknown_subop_roundtrip() {
+        // Future sub-ops (e.g. 0x01 = MakeVariantTyped, #146 Phase 3)
+        // round-trip through the generic Instruction::Extended carrier
+        // even before they have a dedicated typed variant.  The decoder
+        // intentionally returns operands=vec![] because operand bytes
+        // are consumed by the sub-op-specific handler at execution time.
+        let instr = Instruction::Extended {
+            sub_op: 0x42,
+            operands: vec![],
+        };
+        let mut encoded = Vec::new();
+        encode_instruction(&instr, &mut encoded);
+        // Wire format: [0x1F (Extended)] [0x42 (sub_op)]
+        assert_eq!(encoded, vec![0x1F, 0x42]);
+
+        let mut offset = 0;
+        let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
+        assert_eq!(offset, encoded.len());
+        assert_eq!(decoded, instr);
+    }
+
+    #[test]
+    fn test_extended_subopcode_enum() {
+        // Pin ExtendedSubOpcode::Reserved = 0x00 invariant.
+        assert_eq!(ExtendedSubOpcode::Reserved.to_byte(), 0x00);
+        assert_eq!(
+            ExtendedSubOpcode::from_byte(0x00),
+            Some(ExtendedSubOpcode::Reserved)
+        );
+        assert_eq!(ExtendedSubOpcode::from_byte(0xFF), None);
+        assert_eq!(ExtendedSubOpcode::Reserved.mnemonic(), "EXT_RESERVED");
     }
 }
