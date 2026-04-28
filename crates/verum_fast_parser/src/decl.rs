@@ -21,7 +21,7 @@ use verum_ast::ffi::{
     Ownership,
 };
 use verum_ast::{
-    Expr, ExprKind, Ident, Item, ItemKind, LiteralKind, Span, Type, TypeKind,
+    Expr, ExprKind, Ident, Item, ItemKind, LiteralKind, Span, Spanned, Type, TypeKind,
     decl::*,
     ty::{GenericParam, Path, PathSegment, WhereClause, WherePredicate, WherePredicateKind},
 };
@@ -37,10 +37,19 @@ use crate::parser::{ParseResult, RecursiveParser};
 
 impl<'a> RecursiveParser<'a> {
     /// Parse a complete module (list of top-level items).
+    ///
+    /// When [`Self::script_mode`] is on, top-level statements
+    /// (let-bindings, expression-statements, defer, …) are also
+    /// accepted and folded into a single synthesised
+    /// `__verum_script_main` `FunctionDecl` (P1.2). The function
+    /// is appended after the regular items so source order
+    /// `decl ; stmt ; decl ; stmt` survives unchanged.
     pub fn parse_module(&mut self) -> ParseResult<Vec<Item>> {
         // MEMORY OPTIMIZATION: Pre-allocate reasonable capacity based on typical module sizes
         // Most modules have 10-100 items, 64 is a good starting point
         let mut items = Vec::with_capacity(64);
+        let mut script_stmts: Vec<verum_ast::Stmt> = Vec::new();
+        let script_start = self.stream.current_span();
 
         while !self.stream.at_end() && self.tick() {
             let pos_before = self.stream.position();
@@ -50,11 +59,52 @@ impl<'a> RecursiveParser<'a> {
             self.pending_star = false;
             self.pending_ampersand = false;
 
+            // Script-mode short-circuit: if the current token is an
+            // unmistakable statement-starter (let / defer / errdefer
+            // / provide), parse it as a statement directly so the
+            // item-vs-statement disambiguator never has to recover
+            // from a parse failure. Item-keywords (fn / type / const
+            // / mount / static / implement / context / extern /
+            // pure / async / meta) keep flowing through `parse_item`
+            // which is also the path `parse_stmt` itself uses for
+            // local items inside blocks.
+            if self.script_mode && self.is_script_stmt_starter() {
+                match self.parse_stmt() {
+                    Ok(stmt) => {
+                        script_stmts.push(stmt);
+                        if self.is_aborted() { break; }
+                        continue;
+                    }
+                    Err(e) => {
+                        self.error(e);
+                        self.synchronize();
+                        if self.stream.position() == pos_before && !self.stream.at_end() {
+                            self.stream.advance();
+                        }
+                        if self.is_aborted() { break; }
+                        continue;
+                    }
+                }
+            }
+
             match self.parse_item() {
                 Ok(item) => {
                     items.push(item);
                 }
                 Err(e) => {
+                    // In script mode, retry as a statement before
+                    // surfacing the item-parse error — this catches
+                    // expression-statements (`print(x);`,
+                    // `do_thing();`) that can't be discriminated by
+                    // a single look-ahead token.
+                    if self.script_mode && self.stream.position() == pos_before {
+                        if let Ok(stmt) = self.parse_stmt() {
+                            script_stmts.push(stmt);
+                            if self.is_aborted() { break; }
+                            continue;
+                        }
+                    }
+
                     self.error(e);
                     self.synchronize();
 
@@ -78,6 +128,13 @@ impl<'a> RecursiveParser<'a> {
                 "parsing aborted due to safety limit (possible infinite loop)",
                 Span::new(0, 0, self.file_id),
             ));
+        }
+
+        // Script mode: if any top-level statements were collected,
+        // synthesise the `__verum_script_main` wrapper now so the
+        // pipeline downstream sees a regular fn-decl item.
+        if self.script_mode && !script_stmts.is_empty() {
+            items.push(self.synthesize_script_main(script_stmts, script_start));
         }
 
         // Root fix for Issue #5 (parser error duplication):
@@ -104,6 +161,78 @@ impl<'a> RecursiveParser<'a> {
         let result = self.parse_item_inner();
         self.exit_recursion();
         result
+    }
+
+    /// Script-mode discriminator: does the current token unambiguously
+    /// begin a statement (rather than an item)? The four keywords
+    /// `let` / `defer` / `errdefer` / `provide` are the unambiguous
+    /// starters — every other case (item-keywords, expression
+    /// statements, attribute-prefixed items / stmts) falls through
+    /// to the `parse_item` → fallback `parse_stmt` ladder.
+    fn is_script_stmt_starter(&self) -> bool {
+        matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Let)
+                | Some(TokenKind::Defer)
+                | Some(TokenKind::Errdefer)
+                | Some(TokenKind::Provide)
+        )
+    }
+
+    /// Synthesise the `__verum_script_main` wrapper that holds every
+    /// top-level statement collected during script-mode parsing.
+    ///
+    /// The wrapper is a regular private `FunctionDecl` so all
+    /// downstream passes (resolver, type-check, codegen) treat it
+    /// uniformly. The compiler entry-detection pass recognises the
+    /// well-known name `__verum_script_main` against
+    /// `Module::is_script()` and uses it as the script's entry
+    /// point (P1.3).
+    fn synthesize_script_main(
+        &self,
+        stmts: Vec<verum_ast::Stmt>,
+        first_stmt_span: Span,
+    ) -> Item {
+        // Span the wrapper across every statement we collected.
+        let last_span = stmts
+            .last()
+            .map(|s| s.span())
+            .unwrap_or(first_stmt_span);
+        let span = Span::new(first_stmt_span.start, last_span.end, self.file_id);
+
+        let body = verum_ast::Block {
+            stmts: List::from(stmts),
+            expr: Maybe::None,
+            span,
+        };
+        let func = FunctionDecl {
+            visibility: Visibility::Private,
+            is_async: false,
+            is_meta: false,
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_unsafe: false,
+            is_transparent: false,
+            extern_abi: Maybe::None,
+            is_variadic: false,
+            name: Ident::new(Text::from("__verum_script_main"), span),
+            generics: List::new(),
+            params: List::new(),
+            return_type: Maybe::None,
+            throws_clause: Maybe::None,
+            std_attr: Maybe::None,
+            contexts: List::new(),
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            attributes: List::new(),
+            body: Maybe::Some(verum_ast::decl::FunctionBody::Block(body)),
+            span,
+        };
+        Item::new(ItemKind::Function(func), span)
     }
 
     fn parse_item_inner(&mut self) -> ParseResult<Item> {

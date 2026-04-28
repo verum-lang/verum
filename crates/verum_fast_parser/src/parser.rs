@@ -315,6 +315,17 @@ pub struct RecursiveParser<'a> {
     recursion_depth: usize,
     /// When true, `$ident` splice expressions are allowed (inside meta rule bodies).
     pub in_meta_body: bool,
+    /// Script-mode flag (P1.2): when set, [`Self::parse_module`] accepts
+    /// top-level statements alongside items and synthesises a single
+    /// `__verum_script_main` `FunctionDecl` carrying every collected
+    /// statement in source order.
+    ///
+    /// The flag is OFF by default so library / binary modules (the
+    /// vast majority) keep their stricter top-level grammar.
+    /// Enable via [`Self::set_script_mode`] from the lexer / pipeline
+    /// when the source begins with a `#!` shebang or carries the
+    /// `@![__verum_kind("script")]` attribute.
+    pub script_mode: bool,
 }
 
 impl<'a> RecursiveParser<'a> {
@@ -338,7 +349,24 @@ impl<'a> RecursiveParser<'a> {
             comprehension_depth: 0,
             recursion_depth: 0,
             in_meta_body: false,
+            script_mode: false,
         }
+    }
+
+    /// Enable script-mode top-level parsing.
+    ///
+    /// In script mode, [`Self::parse_module`] accepts statements
+    /// (let-bindings, expressions, defer, …) alongside items and
+    /// synthesises every collected statement into a single
+    /// `__verum_script_main` `FunctionDecl`. The pipeline turns
+    /// the flag on for sources that opened with a `#!` shebang
+    /// (P1.1 lexer hook) or whose preamble carries the
+    /// `@![__verum_kind("script")]` attribute.
+    ///
+    /// Library / binary parsing leaves this off so the stricter
+    /// grammar (decls only) keeps its tight error messages.
+    pub fn set_script_mode(&mut self, enabled: bool) {
+        self.script_mode = enabled;
     }
 
     /// Create a new parser with attribute validation enabled.
