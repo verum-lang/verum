@@ -42,9 +42,10 @@ use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::ty::{PathSegment, RefinementPredicate as AstRefinementPredicate, Type as AstType, TypeKind};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_kernel::{
-    BridgeAudit, CoreTerm, KernelError, UniverseTier, canonical_form,
+    BridgeAudit, CoreTerm, KappaTier, KernelError, UniverseTier, canonical_form,
     check_eps_mu_coherence, check_eps_mu_coherence_v3_final, check_refine_omega,
     check_round_trip, check_round_trip_v2, check_universe_ascent,
+    check_universe_ascent_v2,
 };
 use verum_types::refinement::{RefinementBinding, RefinementPredicate as TypesRefinementPredicate};
 use verum_types::ty::Type as TypesType;
@@ -288,6 +289,30 @@ impl KernelRecheck {
         // rhs is consumed via the to_vec() copy above; explicitly drop.
         let _ = rhs;
         out
+    }
+
+    /// V2 K-Universe-Ascent recheck — extends the V0 façade to the
+    /// arbitrary κ-tower domain (KappaN(n) for n ≥ 1) with explicit
+    /// Diakrisis Lemma 131.L4 bridge admit for ascents beyond κ_2.
+    ///
+    /// Strictly stronger than [`Self::universe_ascent`] (which
+    /// operates on the V0 3-tier domain {Truncated, Kappa1, Kappa2}):
+    /// V0-decidable pairs produce empty audit; κ_n for n ≥ 3 and
+    /// multi-step ascents produce a `DrakeReflectionExtended` admit.
+    /// Tier inversions are still rejected uniformly.
+    pub fn universe_ascent_v2(
+        source: KappaTier,
+        target: KappaTier,
+        context: &str,
+    ) -> Result<BridgeAudit, KernelRecheckError> {
+        let mut audit = BridgeAudit::new();
+        match check_universe_ascent_v2(source, target, &mut audit, context) {
+            Ok(()) => Ok(audit),
+            Err(err) => Err(KernelRecheckError::UniverseAscent {
+                context: Text::from(context),
+                source: err,
+            }),
+        }
     }
 
     /// V1 convenience — directly recheck a refinement type
@@ -1936,5 +1961,110 @@ mod tests {
         b.record(verum_kernel::BridgeId::ConfluenceOfModalRewrite, "ctx-shared");
         let merged = KernelRecheck::merge_audits(a, b);
         assert_eq!(merged.admits().len(), 1, "dup must collapse");
+    }
+
+    // -------------------------------------------------------------------------
+    // K-Universe-Ascent V2 façade tests (#35)
+    // -------------------------------------------------------------------------
+
+    use verum_kernel::KappaTier;
+
+    #[test]
+    fn universe_ascent_v2_admits_v0_pair_with_empty_audit() {
+        // κ_1 → κ_2 — canonical V0 ascent; V2 must produce empty audit.
+        let audit = KernelRecheck::universe_ascent_v2(
+            KappaTier::KappaN(1), KappaTier::KappaN(2), "κ_1→κ_2"
+        ).unwrap();
+        assert!(audit.is_decidable(),
+            "V0-decidable κ_1→κ_2 must produce empty V2 audit");
+    }
+
+    #[test]
+    fn universe_ascent_v2_admits_kappa_3_via_drake_extended() {
+        // κ_3 → κ_3 — beyond Theorem 134.T tight bound.
+        let audit = KernelRecheck::universe_ascent_v2(
+            KappaTier::KappaN(3), KappaTier::KappaN(3), "κ_3 reflexive"
+        ).unwrap();
+        assert!(!audit.is_decidable(),
+            "κ_3 → κ_3 must invoke DrakeReflectionExtended bridge");
+        assert_eq!(audit.admits().len(), 1);
+        assert_eq!(audit.admits()[0].bridge,
+            verum_kernel::BridgeId::DrakeReflectionExtended);
+    }
+
+    #[test]
+    fn universe_ascent_v2_admits_multi_step_via_drake_extended() {
+        // κ_1 → κ_5 — multi-step jump.
+        let audit = KernelRecheck::universe_ascent_v2(
+            KappaTier::KappaN(1), KappaTier::KappaN(5), "κ_1→κ_5"
+        ).unwrap();
+        assert_eq!(audit.admits().len(), 1);
+    }
+
+    #[test]
+    fn universe_ascent_v2_rejects_tier_inversion() {
+        let err = KernelRecheck::universe_ascent_v2(
+            KappaTier::KappaN(2), KappaTier::KappaN(1), "κ_2→κ_1 inversion"
+        ).unwrap_err();
+        match err {
+            KernelRecheckError::UniverseAscent { .. } => {} // expected
+            other => panic!("expected UniverseAscent error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn universe_ascent_v2_rejects_truncated_to_kappa() {
+        let err = KernelRecheck::universe_ascent_v2(
+            KappaTier::Truncated, KappaTier::KappaN(1), "Trunc→κ_1"
+        ).unwrap_err();
+        assert!(matches!(err, KernelRecheckError::UniverseAscent { .. }));
+    }
+
+    #[test]
+    fn full_audit_aggregation_pipeline_combines_per_rule_audits() {
+        // Compose three rule invocations into a single audit:
+        //   - K-Round-Trip V2 with Modal-Idem (decidable, empty)
+        //   - K-Eps-Mu V3-final non-identity (A-3 admit)
+        //   - K-Universe-Ascent V2 κ_3 → κ_3 (131.L4 admit)
+        // Aggregate via merge_audits.
+        let f = core_var("F");
+
+        // Rule 1: Modal-Idem (empty audit).
+        let bbf = CoreTerm::ModalBox(verum_common::Heap::new(
+            CoreTerm::ModalBox(verum_common::Heap::new(f.clone()))));
+        let bf = CoreTerm::ModalBox(verum_common::Heap::new(f));
+        let a1 = KernelRecheck::round_trip_v2(&bbf, &bf, "rule-1").unwrap();
+        assert!(a1.is_decidable());
+
+        // Rule 2: K-Eps-Mu non-identity (A-3 admit).
+        let m_alpha = CoreTerm::App(
+            verum_common::Heap::new(core_var("F")),
+            verum_common::Heap::new(core_var("x")));
+        let alpha_rhs = CoreTerm::App(
+            verum_common::Heap::new(core_var("x")),
+            verum_common::Heap::new(core_var("F")));
+        let lhs2 = CoreTerm::EpsilonOf(verum_common::Heap::new(m_alpha));
+        let rhs2 = CoreTerm::AlphaOf(verum_common::Heap::new(
+            CoreTerm::EpsilonOf(verum_common::Heap::new(alpha_rhs))));
+        let a2 = KernelRecheck::eps_mu_v3_final(&lhs2, &rhs2, "rule-2").unwrap();
+        assert_eq!(a2.admits().len(), 1);
+
+        // Rule 3: Universe-Ascent V2 κ_3 → κ_3 (131.L4 admit).
+        let a3 = KernelRecheck::universe_ascent_v2(
+            KappaTier::KappaN(3), KappaTier::KappaN(3), "rule-3"
+        ).unwrap();
+        assert_eq!(a3.admits().len(), 1);
+
+        // Merge all three into one composite audit. Two distinct
+        // bridges should appear (A-3 + 131.L4); rule-1's empty
+        // audit contributes nothing.
+        let merged = KernelRecheck::merge_audits(a1, a2);
+        let merged = KernelRecheck::merge_audits(merged, a3);
+        assert_eq!(merged.admits().len(), 2,
+            "aggregate audit must record both A-3 and 131.L4");
+        let bridges = merged.bridges();
+        let names: Vec<&str> = bridges.iter().copied().collect();
+        assert!(names.contains(&"diakrisis-A-3"));
+        assert!(names.contains(&"diakrisis-131.L4"));
     }
 }
