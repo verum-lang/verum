@@ -89,6 +89,37 @@ public type CoalesceError is
     | ShortHeaderNotLast
     | MultipleShortHeaders;
 
+implement Display for CoalesceError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PacketBuildFailed(reason) => f.write_str(f"QUIC coalesce: packet build failed ({reason})".as_str()),
+            ShortHeaderNotLast        => f.write_str("QUIC coalesce: short-header packet not last in datagram"),
+            MultipleShortHeaders      => f.write_str("QUIC coalesce: multiple short-header packets in datagram"),
+        }
+    }
+}
+
+implement Debug for CoalesceError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PacketBuildFailed(reason) => f.write_str(f"PacketBuildFailed({reason})".as_str()),
+            ShortHeaderNotLast        => f.write_str("ShortHeaderNotLast"),
+            MultipleShortHeaders      => f.write_str("MultipleShortHeaders"),
+        }
+    }
+}
+
+implement Eq for CoalesceError {
+    fn eq(&self, other: &CoalesceError) -> Bool {
+        match (self, other) {
+            (PacketBuildFailed(a),  PacketBuildFailed(b))  => a == b,
+            (ShortHeaderNotLast,    ShortHeaderNotLast)    => true,
+            (MultipleShortHeaders,  MultipleShortHeaders)  => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // assemble()
 // =============================================================================

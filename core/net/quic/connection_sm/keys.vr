@@ -31,6 +31,34 @@ public type QuicKeyError is
       HkdfFailure
     | BadKeyLength(Int);
 
+implement Display for QuicKeyError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            HkdfFailure       => f.write_str("QUIC keys: HKDF derivation failed"),
+            BadKeyLength(n)   => f.write_str(f"QUIC keys: bad key length {n}".as_str()),
+        }
+    }
+}
+
+implement Debug for QuicKeyError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            HkdfFailure       => f.write_str("HkdfFailure"),
+            BadKeyLength(n)   => f.write_str(f"BadKeyLength({n})".as_str()),
+        }
+    }
+}
+
+implement Eq for QuicKeyError {
+    fn eq(&self, other: &QuicKeyError) -> Bool {
+        match (self, other) {
+            (HkdfFailure,    HkdfFailure)    => true,
+            (BadKeyLength(a), BadKeyLength(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// Derive `QuicSpaceKeys` (AEAD key + IV + HP key) from a TLS traffic
 /// secret per RFC 9001 §5.1. `aead_key_len` is determined by the
 /// negotiated cipher suite (16 for AES-128-GCM, 32 for AES-256-GCM or

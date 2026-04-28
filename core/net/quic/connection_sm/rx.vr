@@ -54,6 +54,56 @@ public type RxError is
     | AeadFailure
     | UnknownPacketType;
 
+// AeadFailure surfaces no detail — RFC 9001 §5.4
+// value-blind packet decryption (same oracle discipline
+// as QuicAeadError / TokenError / TLS 1.3 record AEAD).
+
+implement Display for RxError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                => f.write_str("QUIC rx: truncated packet"),
+            InvalidHeaderForm        => f.write_str("QUIC rx: invalid header form"),
+            UnsupportedVersion(v)    => f.write_str(f"QUIC rx: unsupported version 0x{v:x}".as_str()),
+            InvalidCidLength(n)      => f.write_str(f"QUIC rx: invalid CID length {n}".as_str()),
+            VarintFailure            => f.write_str("QUIC rx: varint decode failed"),
+            SampleUnavailable        => f.write_str("QUIC rx: header-protection sample unavailable"),
+            AeadFailure              => f.write_str("QUIC rx: packet AEAD open failed"),
+            UnknownPacketType        => f.write_str("QUIC rx: unknown packet type"),
+        }
+    }
+}
+
+implement Debug for RxError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Truncated                => f.write_str("Truncated"),
+            InvalidHeaderForm        => f.write_str("InvalidHeaderForm"),
+            UnsupportedVersion(v)    => f.write_str(f"UnsupportedVersion(0x{v:x})".as_str()),
+            InvalidCidLength(n)      => f.write_str(f"InvalidCidLength({n})".as_str()),
+            VarintFailure            => f.write_str("VarintFailure"),
+            SampleUnavailable        => f.write_str("SampleUnavailable"),
+            AeadFailure              => f.write_str("AeadFailure"),
+            UnknownPacketType        => f.write_str("UnknownPacketType"),
+        }
+    }
+}
+
+implement Eq for RxError {
+    fn eq(&self, other: &RxError) -> Bool {
+        match (self, other) {
+            (Truncated,             Truncated)             => true,
+            (InvalidHeaderForm,     InvalidHeaderForm)     => true,
+            (UnsupportedVersion(a), UnsupportedVersion(b)) => a == b,
+            (InvalidCidLength(a),   InvalidCidLength(b))   => a == b,
+            (VarintFailure,         VarintFailure)         => true,
+            (SampleUnavailable,     SampleUnavailable)     => true,
+            (AeadFailure,           AeadFailure)           => true,
+            (UnknownPacketType,     UnknownPacketType)     => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Parsed inbound packet (decrypted)
 // =============================================================================

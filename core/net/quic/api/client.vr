@@ -107,6 +107,46 @@ public type QuicClientError is
     | StreamOpen(QuicStreamError)
     | Closed;
 
+implement Display for QuicClientError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicClientError.Resolve(reason)    => f.write_str(f"QUIC client: DNS resolve failed ({reason})".as_str()),
+            QuicClientError.UdpBind(reason)    => f.write_str(f"QUIC client: UDP bind failed ({reason})".as_str()),
+            QuicClientError.Handshake(reason)  => f.write_str(f"QUIC client: handshake failed ({reason})".as_str()),
+            QuicClientError.Timeout            => f.write_str("QUIC client: connect timeout"),
+            QuicClientError.StreamOpen(e)      => f.write_str(f"QUIC client stream open: {e}".as_str()),
+            QuicClientError.Closed             => f.write_str("QUIC client: closed"),
+        }
+    }
+}
+
+implement Debug for QuicClientError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QuicClientError.Resolve(reason)    => f.write_str(f"Resolve({reason})".as_str()),
+            QuicClientError.UdpBind(reason)    => f.write_str(f"UdpBind({reason})".as_str()),
+            QuicClientError.Handshake(reason)  => f.write_str(f"Handshake({reason})".as_str()),
+            QuicClientError.Timeout            => f.write_str("Timeout"),
+            QuicClientError.StreamOpen(e)      => f.write_str(f"StreamOpen({e:?})".as_str()),
+            QuicClientError.Closed             => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for QuicClientError {
+    fn eq(&self, other: &QuicClientError) -> Bool {
+        match (self, other) {
+            (QuicClientError.Resolve(a),     QuicClientError.Resolve(b))     => a == b,
+            (QuicClientError.UdpBind(a),     QuicClientError.UdpBind(b))     => a == b,
+            (QuicClientError.Handshake(a),   QuicClientError.Handshake(b))   => a == b,
+            (QuicClientError.Timeout,        QuicClientError.Timeout)        => true,
+            (QuicClientError.StreamOpen(a),  QuicClientError.StreamOpen(b))  => a == b,
+            (QuicClientError.Closed,         QuicClientError.Closed)         => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // QuicClient
 // =============================================================================

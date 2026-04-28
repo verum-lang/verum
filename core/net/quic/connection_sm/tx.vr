@@ -50,6 +50,42 @@ public type TxError is
     | BufferTooLarge
     | SampleUnavailable;
 
+implement Display for TxError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            FrameEncodeFailed   => "QUIC tx: frame encode failed",
+            AeadFailed          => "QUIC tx: AEAD seal failed",
+            BufferTooLarge      => "QUIC tx: packet buffer too large",
+            SampleUnavailable   => "QUIC tx: header-protection sample unavailable",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for TxError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            FrameEncodeFailed   => "FrameEncodeFailed",
+            AeadFailed          => "AeadFailed",
+            BufferTooLarge      => "BufferTooLarge",
+            SampleUnavailable   => "SampleUnavailable",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for TxError {
+    fn eq(&self, other: &TxError) -> Bool {
+        match (self, other) {
+            (FrameEncodeFailed, FrameEncodeFailed) => true,
+            (AeadFailed,        AeadFailed)        => true,
+            (BufferTooLarge,    BufferTooLarge)    => true,
+            (SampleUnavailable, SampleUnavailable) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Build Long-header packet (Initial / Handshake / 0-RTT)
 // =============================================================================
