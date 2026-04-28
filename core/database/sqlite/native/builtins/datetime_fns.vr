@@ -325,9 +325,17 @@ fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
         else if bs[0] == (43 as Byte) { i = 1; }
         let mut n: Int = 0;
         let mut had_digit: Bool = false;
+        let mut digit_count: Int = 0;
+        // Three-layer overflow defense — `lo` is a user-supplied
+        // datetime modifier (e.g. "+5 days"). Cap digit count at
+        // 19 (Int.MAX) plus per-step + post-add overflow guards.
         while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+            if digit_count >= 19 { return None; }
+            if n > 922_337_203_685_477_580 { return None; }    // Int.MAX / 10
             n = n * 10 + ((bs[i] as Int) - 48);
+            if n < 0 { return None; }                           // wrap-around
             had_digit = true;
+            digit_count = digit_count + 1;
             i = i + 1;
         }
         if had_digit && i < bs.len() && bs[i] == (32 as Byte) { i = i + 1; }

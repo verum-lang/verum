@@ -237,11 +237,19 @@ fn slice_text(t: &Text, lo: Int, hi: Int) -> Text {
 fn parse_int_text(t: &Text) -> Maybe<Int> {
     let bs = t.as_bytes();
     if bs.len() == 0 { return None; }
+    // Three-layer overflow defense (matches the recipe codified in
+    // #70-#74). Modifier arguments arrive from user-supplied SQL —
+    // a long-digit input is either a typo or an attempt to wrap
+    // `acc * 10 + d` past Int.MAX into a small-magnitude value that
+    // slips past downstream range checks (e.g. month/day validators).
+    if bs.len() > 19 { return None; }
     let mut i: Int = 0;
     let mut acc: Int = 0;
     while i < bs.len() {
         if bs[i] < (48 as Byte) || bs[i] > (57 as Byte) { return None; }
+        if acc > 922_337_203_685_477_580 { return None; }   // Int.MAX / 10
         acc = acc * 10 + ((bs[i] - (48 as Byte)) as Int);
+        if acc < 0 { return None; }                          // wrap-around guard
         i = i + 1;
     }
     Some(acc)
