@@ -52,6 +52,30 @@ mount core.collections.map.{Map};
 public type TopoError is
       Cycle(List<Text>);     // textual trace of the first cycle found
 
+implement Display for TopoError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Cycle(trace) => f.write_str(f"toposort: cycle detected through {trace.len()} nodes".as_str()),
+        }
+    }
+}
+
+implement Debug for TopoError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Cycle(trace) => f.write_str(f"Cycle(<{trace.len()} nodes>)".as_str()),
+        }
+    }
+}
+
+implement Eq for TopoError {
+    fn eq(&self, other: &TopoError) -> Bool {
+        match (self, other) {
+            (Cycle(a), Cycle(b)) => a == b,
+        }
+    }
+}
+
 // =============================================================================
 // Graph
 // =============================================================================

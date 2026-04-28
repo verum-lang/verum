@@ -262,6 +262,33 @@ implement Debug for WriteError {
     }
 }
 
+implement Display for WriteError {
+    fn fmt(&self, f: &mut TextFormatter) -> Result<(), FormatError> {
+        match self.kind {
+            Io         => f.write_str("write: I/O error"),
+            BufferFull => f.write_str("write: buffer full"),
+            Encoding   => f.write_str("write: encoding error"),
+        }
+    }
+}
+
+implement Eq for WriteErrorKind {
+    fn eq(&self, other: &WriteErrorKind) -> Bool {
+        match (self, other) {
+            (Io,         Io)         => true,
+            (BufferFull, BufferFull) => true,
+            (Encoding,   Encoding)   => true,
+            _ => false,
+        }
+    }
+}
+
+implement Eq for WriteError {
+    fn eq(&self, other: &WriteError) -> Bool {
+        self.kind == other.kind
+    }
+}
+
 // =============================================================================
 // FormatResult - Standard formatting result type
 // =============================================================================
