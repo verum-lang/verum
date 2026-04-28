@@ -70,6 +70,37 @@ public type SessionSchemaError is
     | AlreadyExists(name: Text)
     | InvalidMetadata(why: Text);
 
+implement Display for SessionSchemaError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(name)         => f.write_str(f"sqlite session schema: not found ({name})".as_str()),
+            AlreadyExists(name)    => f.write_str(f"sqlite session schema: already exists ({name})".as_str()),
+            InvalidMetadata(why)   => f.write_str(f"sqlite session schema: invalid metadata ({why})".as_str()),
+        }
+    }
+}
+
+implement Debug for SessionSchemaError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(name)         => f.write_str(f"NotFound(name: {name})".as_str()),
+            AlreadyExists(name)    => f.write_str(f"AlreadyExists(name: {name})".as_str()),
+            InvalidMetadata(why)   => f.write_str(f"InvalidMetadata(why: {why})".as_str()),
+        }
+    }
+}
+
+implement Eq for SessionSchemaError {
+    fn eq(&self, other: &SessionSchemaError) -> Bool {
+        match (self, other) {
+            (NotFound(a),         NotFound(b))         => a == b,
+            (AlreadyExists(a),    AlreadyExists(b))    => a == b,
+            (InvalidMetadata(a),  InvalidMetadata(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // SchemaCache
 // -----------------------------------------------------------------------------

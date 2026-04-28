@@ -41,6 +41,39 @@ public type UriError is
     | UeMalformedQuery
     | UeEmptyPath;
 
+implement Display for UriError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            UeBadScheme      => "sqlite URI: bad scheme",
+            UeMalformedQuery => "sqlite URI: malformed query",
+            UeEmptyPath      => "sqlite URI: empty path",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for UriError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            UeBadScheme      => "UeBadScheme",
+            UeMalformedQuery => "UeMalformedQuery",
+            UeEmptyPath      => "UeEmptyPath",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for UriError {
+    fn eq(&self, other: &UriError) -> Bool {
+        match (self, other) {
+            (UeBadScheme,      UeBadScheme)      => true,
+            (UeMalformedQuery, UeMalformedQuery) => true,
+            (UeEmptyPath,      UeEmptyPath)      => true,
+            _ => false,
+        }
+    }
+}
+
 public fn uri_error_name(e: &UriError) -> Text {
     match e {
         UeBadScheme       => "bad_scheme".clone(),

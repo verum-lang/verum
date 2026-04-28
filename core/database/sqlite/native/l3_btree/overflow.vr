@@ -55,6 +55,37 @@ public type OverflowError is
     | InvalidPayload
     | TooManyPages(count: Int);
 
+implement Display for OverflowError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidBudget     => f.write_str("sqlite overflow: invalid local-payload budget"),
+            InvalidPayload    => f.write_str("sqlite overflow: invalid payload"),
+            TooManyPages(c)   => f.write_str(f"sqlite overflow: too many pages ({c})".as_str()),
+        }
+    }
+}
+
+implement Debug for OverflowError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidBudget     => f.write_str("InvalidBudget"),
+            InvalidPayload    => f.write_str("InvalidPayload"),
+            TooManyPages(c)   => f.write_str(f"TooManyPages(count: {c})".as_str()),
+        }
+    }
+}
+
+implement Eq for OverflowError {
+    fn eq(&self, other: &OverflowError) -> Bool {
+        match (self, other) {
+            (InvalidBudget,    InvalidBudget)    => true,
+            (InvalidPayload,   InvalidPayload)   => true,
+            (TooManyPages(a),  TooManyPages(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Layout math
 // -----------------------------------------------------------------------------

@@ -51,6 +51,40 @@ public type BtreeError is
     | IoError(msg: Text)
     | Corrupt(msg: Text);
 
+implement Display for BtreeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidRootPage(pn) => f.write_str(f"sqlite btree: invalid root page {pn}".as_str()),
+            InvalidPageSize(ps) => f.write_str(f"sqlite btree: invalid page size {ps}".as_str()),
+            IoError(msg)        => f.write_str(f"sqlite btree I/O error: {msg}".as_str()),
+            Corrupt(msg)        => f.write_str(f"sqlite btree corruption: {msg}".as_str()),
+        }
+    }
+}
+
+implement Debug for BtreeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            InvalidRootPage(pn) => f.write_str(f"InvalidRootPage(pn: {pn})".as_str()),
+            InvalidPageSize(ps) => f.write_str(f"InvalidPageSize(ps: {ps})".as_str()),
+            IoError(msg)        => f.write_str(f"IoError(msg: {msg})".as_str()),
+            Corrupt(msg)        => f.write_str(f"Corrupt(msg: {msg})".as_str()),
+        }
+    }
+}
+
+implement Eq for BtreeError {
+    fn eq(&self, other: &BtreeError) -> Bool {
+        match (self, other) {
+            (InvalidRootPage(a), InvalidRootPage(b)) => a == b,
+            (InvalidPageSize(a), InvalidPageSize(b)) => a == b,
+            (IoError(a),         IoError(b))         => a == b,
+            (Corrupt(a),         Corrupt(b))         => a == b,
+            _ => false,
+        }
+    }
+}
+
 public type Btree is {
     kind: BtreeKind,
     root_page: Int,

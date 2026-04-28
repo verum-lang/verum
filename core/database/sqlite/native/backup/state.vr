@@ -34,6 +34,43 @@ public type BackupError is
     | BeSchemaChanged(Text)         // source schema changed mid-backup
     | BeNotEnoughSpace(Int64);
 
+implement Display for BackupError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeSourceClosed       => f.write_str("sqlite backup: source database closed"),
+            BeTargetReadOnly     => f.write_str("sqlite backup: target database read-only"),
+            BeIoError(m)         => f.write_str(f"sqlite backup I/O error: {m}".as_str()),
+            BeSchemaChanged(m)   => f.write_str(f"sqlite backup: source schema changed mid-backup ({m})".as_str()),
+            BeNotEnoughSpace(b)  => f.write_str(f"sqlite backup: not enough space ({b} bytes)".as_str()),
+        }
+    }
+}
+
+implement Debug for BackupError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BeSourceClosed       => f.write_str("BeSourceClosed"),
+            BeTargetReadOnly     => f.write_str("BeTargetReadOnly"),
+            BeIoError(m)         => f.write_str(f"BeIoError({m})".as_str()),
+            BeSchemaChanged(m)   => f.write_str(f"BeSchemaChanged({m})".as_str()),
+            BeNotEnoughSpace(b)  => f.write_str(f"BeNotEnoughSpace({b})".as_str()),
+        }
+    }
+}
+
+implement Eq for BackupError {
+    fn eq(&self, other: &BackupError) -> Bool {
+        match (self, other) {
+            (BeSourceClosed,        BeSourceClosed)        => true,
+            (BeTargetReadOnly,      BeTargetReadOnly)      => true,
+            (BeIoError(a),          BeIoError(b))          => a == b,
+            (BeSchemaChanged(a),    BeSchemaChanged(b))    => a == b,
+            (BeNotEnoughSpace(a),   BeNotEnoughSpace(b))   => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Phase
 // -----------------------------------------------------------------------------

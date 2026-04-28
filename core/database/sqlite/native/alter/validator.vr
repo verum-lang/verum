@@ -40,6 +40,46 @@ public type AlterValidationError is
     | VePrimaryKey(Text, Text)
     | VeForeignKey(Text, Text);
 
+implement Display for AlterValidationError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            VeNoSuchTable(t)              => f.write_str(f"sqlite ALTER: no such table {t}".as_str()),
+            VeNoSuchColumn(t, c)          => f.write_str(f"sqlite ALTER: no such column {t}.{c}".as_str()),
+            VeDuplicateName(n)            => f.write_str(f"sqlite ALTER: duplicate name {n}".as_str()),
+            VeNotNullWithoutDefault(t, c) => f.write_str(f"sqlite ALTER {t}.{c}: NOT NULL without DEFAULT on populated table".as_str()),
+            VePrimaryKey(t, c)            => f.write_str(f"sqlite ALTER {t}.{c}: cannot alter PRIMARY KEY column".as_str()),
+            VeForeignKey(t, c)            => f.write_str(f"sqlite ALTER {t}.{c}: would break inbound foreign key".as_str()),
+        }
+    }
+}
+
+implement Debug for AlterValidationError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            VeNoSuchTable(t)              => f.write_str(f"VeNoSuchTable({t})".as_str()),
+            VeNoSuchColumn(t, c)          => f.write_str(f"VeNoSuchColumn({t}, {c})".as_str()),
+            VeDuplicateName(n)            => f.write_str(f"VeDuplicateName({n})".as_str()),
+            VeNotNullWithoutDefault(t, c) => f.write_str(f"VeNotNullWithoutDefault({t}, {c})".as_str()),
+            VePrimaryKey(t, c)            => f.write_str(f"VePrimaryKey({t}, {c})".as_str()),
+            VeForeignKey(t, c)            => f.write_str(f"VeForeignKey({t}, {c})".as_str()),
+        }
+    }
+}
+
+implement Eq for AlterValidationError {
+    fn eq(&self, other: &AlterValidationError) -> Bool {
+        match (self, other) {
+            (VeNoSuchTable(a),                VeNoSuchTable(b))                => a == b,
+            (VeNoSuchColumn(ta, ca),          VeNoSuchColumn(tb, cb))          => ta == tb && ca == cb,
+            (VeDuplicateName(a),              VeDuplicateName(b))              => a == b,
+            (VeNotNullWithoutDefault(ta, ca), VeNotNullWithoutDefault(tb, cb)) => ta == tb && ca == cb,
+            (VePrimaryKey(ta, ca),            VePrimaryKey(tb, cb))            => ta == tb && ca == cb,
+            (VeForeignKey(ta, ca),            VeForeignKey(tb, cb))            => ta == tb && ca == cb,
+            _ => false,
+        }
+    }
+}
+
 public fn error_kind(e: &AlterValidationError) -> Text {
     match e {
         VeNoSuchTable(_)            => "no_such_table".clone(),

@@ -59,6 +59,37 @@ public type RecoveryError is
     | BadMagic
     | ZeroPageSize;
 
+implement Display for RecoveryError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ShortFile(n)  => f.write_str(f"sqlite recovery: short file ({n} bytes available)".as_str()),
+            BadMagic      => f.write_str("sqlite recovery: bad magic number"),
+            ZeroPageSize  => f.write_str("sqlite recovery: zero page size"),
+        }
+    }
+}
+
+implement Debug for RecoveryError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ShortFile(n)  => f.write_str(f"ShortFile({n})".as_str()),
+            BadMagic      => f.write_str("BadMagic"),
+            ZeroPageSize  => f.write_str("ZeroPageSize"),
+        }
+    }
+}
+
+implement Eq for RecoveryError {
+    fn eq(&self, other: &RecoveryError) -> Bool {
+        match (self, other) {
+            (ShortFile(a), ShortFile(b)) => a == b,
+            (BadMagic,     BadMagic)     => true,
+            (ZeroPageSize, ZeroPageSize) => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Main entry point
 // -----------------------------------------------------------------------------

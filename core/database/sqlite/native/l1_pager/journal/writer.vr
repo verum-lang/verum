@@ -41,6 +41,49 @@ public type WalWriteError is
     | WweBadPageSize { found: Int }
     | WweClosed;
 
+implement Display for WalWriteError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WweIo(e) =>
+                f.write_str(f"sqlite WAL write I/O error: {e}".as_str()),
+            WweShortWrite { wanted, written } =>
+                f.write_str(f"sqlite WAL short write: wanted {wanted}, wrote {written}".as_str()),
+            WweBadPageSize { found } =>
+                f.write_str(f"sqlite WAL bad page size: {found}".as_str()),
+            WweClosed =>
+                f.write_str("sqlite WAL writer closed"),
+        }
+    }
+}
+
+implement Debug for WalWriteError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            WweIo(e) =>
+                f.write_str(f"WweIo({e})".as_str()),
+            WweShortWrite { wanted, written } =>
+                f.write_str(f"WweShortWrite {{ wanted: {wanted}, written: {written} }}".as_str()),
+            WweBadPageSize { found } =>
+                f.write_str(f"WweBadPageSize {{ found: {found} }}".as_str()),
+            WweClosed =>
+                f.write_str("WweClosed"),
+        }
+    }
+}
+
+implement Eq for WalWriteError {
+    fn eq(&self, other: &WalWriteError) -> Bool {
+        match (self, other) {
+            (WweIo(a),    WweIo(b)) => a == b,
+            (WweShortWrite { wanted: wa, written: ra },
+             WweShortWrite { wanted: wb, written: rb }) => wa == wb && ra == rb,
+            (WweBadPageSize { found: a }, WweBadPageSize { found: b }) => a == b,
+            (WweClosed,   WweClosed) => true,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // WalWriter
 // -----------------------------------------------------------------------------

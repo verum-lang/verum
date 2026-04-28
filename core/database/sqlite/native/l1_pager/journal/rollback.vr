@@ -74,6 +74,44 @@ public type RollbackError is
     | BadChecksum(page_no: UInt32, expected: UInt32, actual: UInt32)
     | PageSizeMismatch(expected: UInt32, got: UInt32);
 
+implement Display for RollbackError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadMagic =>
+                f.write_str("sqlite rollback journal: bad magic"),
+            ShortBuffer =>
+                f.write_str("sqlite rollback journal: short buffer"),
+            BadChecksum(pn, exp, act) =>
+                f.write_str(f"sqlite rollback journal: bad checksum on page {pn} (expected {exp}, got {act})".as_str()),
+            PageSizeMismatch(exp, got) =>
+                f.write_str(f"sqlite rollback journal: page size mismatch (expected {exp}, got {got})".as_str()),
+        }
+    }
+}
+
+implement Debug for RollbackError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadMagic                  => f.write_str("BadMagic"),
+            ShortBuffer               => f.write_str("ShortBuffer"),
+            BadChecksum(pn, e, a)     => f.write_str(f"BadChecksum(page_no: {pn}, expected: {e}, actual: {a})".as_str()),
+            PageSizeMismatch(e, g)    => f.write_str(f"PageSizeMismatch(expected: {e}, got: {g})".as_str()),
+        }
+    }
+}
+
+implement Eq for RollbackError {
+    fn eq(&self, other: &RollbackError) -> Bool {
+        match (self, other) {
+            (BadMagic,    BadMagic)    => true,
+            (ShortBuffer, ShortBuffer) => true,
+            (BadChecksum(pa, ea, aa), BadChecksum(pb, eb, ab)) => pa == pb && ea == eb && aa == ab,
+            (PageSizeMismatch(ea, ga), PageSizeMismatch(eb, gb)) => ea == eb && ga == gb,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Header serialise / parse
 // -----------------------------------------------------------------------------

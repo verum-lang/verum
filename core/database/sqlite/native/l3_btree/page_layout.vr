@@ -134,6 +134,37 @@ public type PageLayoutError is
     | BadKind(raw: Byte)
     | BadCellCount(count: UInt16, max_cells: Int);
 
+implement Display for PageLayoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ShortBuffer                => f.write_str("sqlite btree page: short buffer"),
+            BadKind(raw)               => f.write_str(f"sqlite btree page: bad kind byte {raw}".as_str()),
+            BadCellCount(count, max)   => f.write_str(f"sqlite btree page: bad cell count {count} (max {max})".as_str()),
+        }
+    }
+}
+
+implement Debug for PageLayoutError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ShortBuffer                => f.write_str("ShortBuffer"),
+            BadKind(raw)               => f.write_str(f"BadKind(raw: {raw})".as_str()),
+            BadCellCount(count, max)   => f.write_str(f"BadCellCount(count: {count}, max_cells: {max})".as_str()),
+        }
+    }
+}
+
+implement Eq for PageLayoutError {
+    fn eq(&self, other: &PageLayoutError) -> Bool {
+        match (self, other) {
+            (ShortBuffer,            ShortBuffer)            => true,
+            (BadKind(a),             BadKind(b))             => a == b,
+            (BadCellCount(ca, ma),   BadCellCount(cb, mb))   => ca == cb && ma == mb,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Big-endian helpers
 // -----------------------------------------------------------------------------

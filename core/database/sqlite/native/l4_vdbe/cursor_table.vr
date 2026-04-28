@@ -193,6 +193,40 @@ public type CursorTableError is
     | WrongKind(cursor_id: Int, expected: Text)
     | WriteOnReadOnly(cursor_id: Int);
 
+implement Display for CursorTableError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoSuchSlot(id)            => f.write_str(f"sqlite VDBE cursor: no such slot {id}".as_str()),
+            AlreadyOpen(id)           => f.write_str(f"sqlite VDBE cursor: slot {id} already open".as_str()),
+            WrongKind(id, expected)   => f.write_str(f"sqlite VDBE cursor {id}: wrong kind, expected {expected}".as_str()),
+            WriteOnReadOnly(id)       => f.write_str(f"sqlite VDBE cursor {id}: write on read-only cursor".as_str()),
+        }
+    }
+}
+
+implement Debug for CursorTableError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NoSuchSlot(id)            => f.write_str(f"NoSuchSlot(cursor_id: {id})".as_str()),
+            AlreadyOpen(id)           => f.write_str(f"AlreadyOpen(cursor_id: {id})".as_str()),
+            WrongKind(id, expected)   => f.write_str(f"WrongKind(cursor_id: {id}, expected: {expected})".as_str()),
+            WriteOnReadOnly(id)       => f.write_str(f"WriteOnReadOnly(cursor_id: {id})".as_str()),
+        }
+    }
+}
+
+implement Eq for CursorTableError {
+    fn eq(&self, other: &CursorTableError) -> Bool {
+        match (self, other) {
+            (NoSuchSlot(a),          NoSuchSlot(b))          => a == b,
+            (AlreadyOpen(a),         AlreadyOpen(b))         => a == b,
+            (WrongKind(ia, ea),      WrongKind(ib, eb))      => ia == ib && ea == eb,
+            (WriteOnReadOnly(a),     WriteOnReadOnly(b))     => a == b,
+            _ => false,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Cursor table
 // -----------------------------------------------------------------------------

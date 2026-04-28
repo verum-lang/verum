@@ -48,6 +48,37 @@ public type SavepointError is
     | Empty
     | BadName(reason: Text);
 
+implement Display for SavepointError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(name)  => f.write_str(f"sqlite savepoint not found: {name}".as_str()),
+            Empty           => f.write_str("sqlite savepoint stack empty"),
+            BadName(reason) => f.write_str(f"sqlite savepoint bad name: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for SavepointError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(name)  => f.write_str(f"NotFound(name: {name})".as_str()),
+            Empty           => f.write_str("Empty"),
+            BadName(reason) => f.write_str(f"BadName(reason: {reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for SavepointError {
+    fn eq(&self, other: &SavepointError) -> Bool {
+        match (self, other) {
+            (NotFound(a), NotFound(b)) => a == b,
+            (Empty,       Empty)       => true,
+            (BadName(a),  BadName(b))  => a == b,
+            _ => false,
+        }
+    }
+}
+
 /// LIFO savepoint stack. Call `push`, `release`, `rollback_to`.
 public type PagerSavepointStack is {
     entries: List<Savepoint>,

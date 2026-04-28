@@ -14,6 +14,36 @@ mount core.database.sqlite.native.views.spec.{ViewDef};
 
 public type ViewStoreError is VseDuplicateName | VseNotFound;
 
+implement Display for ViewStoreError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            VseDuplicateName => "sqlite view: duplicate name",
+            VseNotFound      => "sqlite view: not found",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for ViewStoreError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            VseDuplicateName => "VseDuplicateName",
+            VseNotFound      => "VseNotFound",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for ViewStoreError {
+    fn eq(&self, other: &ViewStoreError) -> Bool {
+        match (self, other) {
+            (VseDuplicateName, VseDuplicateName) => true,
+            (VseNotFound,      VseNotFound)      => true,
+            _ => false,
+        }
+    }
+}
+
 public type ViewStore is { views: List<ViewDef> };
 
 public fn view_store_new() -> ViewStore { ViewStore { views: List.new() } }

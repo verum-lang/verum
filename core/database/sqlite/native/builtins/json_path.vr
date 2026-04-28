@@ -42,6 +42,42 @@ public type PathParseError is
     | PpUnclosedBracket
     | PpInvalidIndex;
 
+implement Display for PathParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            PpEmpty            => "JSON path: empty",
+            PpMissingDollar    => "JSON path: missing leading $",
+            PpUnclosedBracket  => "JSON path: unclosed [",
+            PpInvalidIndex     => "JSON path: invalid index",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Debug for PathParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            PpEmpty            => "PpEmpty",
+            PpMissingDollar    => "PpMissingDollar",
+            PpUnclosedBracket  => "PpUnclosedBracket",
+            PpInvalidIndex     => "PpInvalidIndex",
+        };
+        f.write_str(s)
+    }
+}
+
+implement Eq for PathParseError {
+    fn eq(&self, other: &PathParseError) -> Bool {
+        match (self, other) {
+            (PpEmpty,           PpEmpty)           => true,
+            (PpMissingDollar,   PpMissingDollar)   => true,
+            (PpUnclosedBracket, PpUnclosedBracket) => true,
+            (PpInvalidIndex,    PpInvalidIndex)    => true,
+            _ => false,
+        }
+    }
+}
+
 public fn parse_path(s: &Text) -> base.Result<List<PathSeg>, PathParseError> {
     let bs = s.as_bytes();
     if bs.len() == 0 { return Err(PpEmpty); }
