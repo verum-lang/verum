@@ -278,21 +278,6 @@ implement PgConnection {
     /// (server didn't emit BackendKeyData yet).
     public fn backend_key_view(&self) -> Maybe<(Int, Int)> { self.backend_key }
 
-    /// Look up a server-reported parameter (e.g. `server_version`,
-    /// `server_encoding`, `client_encoding`).  Returns `None` if the
-    /// server never sent that ParameterStatus message.  Used by the
-    /// cancel driver and by tracing/diagnostics.
-    public fn parameter(&self, name: &Text) -> Maybe<Text> {
-        let mut i: Int = 0;
-        while i < self.parameters.len() {
-            if self.parameters[i].0 == name.clone() {
-                return Some(self.parameters[i].1.clone());
-            }
-            i = i + 1;
-        }
-        None
-    }
-
     /// Issue a CancelRequest against this connection's backend.  Per
     /// Postgres protocol §6.1.7 the cancel must travel on a SEPARATE
     /// TCP connection (the in-flight query holds the original socket
