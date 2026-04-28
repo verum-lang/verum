@@ -172,9 +172,8 @@ implement<V: Clone> Trie<V> {
         }
         match best {
             Some((len, v)) => {
-                let mut prefix: List<Byte> = [];
-                let mut k: Int = 0;
-                while k < len { prefix.push(key[k]); k = k + 1; }
+                let mut prefix: List<Byte> = List.with_capacity(len);
+                prefix.extend_from_slice(&key[..len]);
                 Some((prefix, v))
             },
             None => None,
@@ -188,9 +187,8 @@ implement<V: Clone> Trie<V> {
         let mut out: List<(List<Byte>, V)> = [];
         match self.walk_to(prefix) {
             Some(sub) => {
-                let mut base: List<Byte> = [];
-                let mut i: Int = 0;
-                while i < prefix.len() { base.push(prefix[i]); i = i + 1; }
+                let mut base: List<Byte> = List.with_capacity(prefix.len());
+                base.extend_from_slice(prefix);
                 collect_entries(sub, &base, &mut out);
             },
             None => {},
