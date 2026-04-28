@@ -442,10 +442,41 @@ impl LockOrderingVerifier {
         lock_id: &LockTypeId,
         location: SourceLocation,
     ) -> LockOrderingResult<()> {
-        // Check if lock type is known
+        // Check if lock type is known.
+        //
+        // Three policy gates compose here:
+        //
+        //   * `require_levels` (declaration-layer): the lock TYPE must
+        //     have a `@lock_level` annotation registered.  A type
+        //     without a level can't be ordered against anything else,
+        //     so under `require_levels = true` we surface the
+        //     declaration gap as `MissingLockLevel` — a directed error
+        //     that points the user at the unannotated type definition.
+        //
+        //   * `strict_mode` (use-layer): even when we don't require
+        //     declaration coverage globally, the use-site for an
+        //     unknown lock is still suspect — strict mode promotes the
+        //     skip-and-pass to `UnknownLock`.
+        //
+        //   * Default (lenient): unknown lock + neither flag set →
+        //     `Ok(())`, skip verification.  The caller has decided
+        //     the analysis is best-effort and missing annotations
+        //     don't gate compilation.
+        //
+        // Pre-fix `require_levels` was an inert config field — the
+        // verifier never read it.  This wiring closes the same
+        // architectural anti-pattern documented for the bytecode
+        // validator + content/dependency hash + validate_on_extract:
+        // a public field claims a security/safety contract that no
+        // code path enforced.
         let lock_level = match self.registry.get_level(lock_id) {
             Maybe::Some(level) => level,
             Maybe::None => {
+                if self.config.require_levels {
+                    return Err(LockOrderingError::MissingLockLevel {
+                        lock_type: lock_id.qualified_name(),
+                    });
+                }
                 if self.config.strict_mode {
                     return Err(LockOrderingError::UnknownLock {
                         lock_type: lock_id.qualified_name(),
@@ -611,5 +642,98 @@ mod tests {
 
         let cycles = graph.detect_cycles();
         assert!(!cycles.is_empty(), "Should detect cycle");
+    }
+
+    // -------------------------------------------------------------------------
+    // require_levels gate — pin the three-gate policy on unknown locks.
+    //
+    // Pre-fix the field was inert; this test asserts each gate's distinct
+    // outcome on the same input (an unregistered lock type at use-site).
+    // -------------------------------------------------------------------------
+
+    fn make_verifier_with(
+        require_levels: bool,
+        strict_mode: bool,
+    ) -> LockOrderingVerifier {
+        let cfg = LockOrderingConfig {
+            require_levels,
+            detect_cycles: false,
+            strict_mode,
+        };
+        LockOrderingVerifier::with_config(cfg)
+    }
+
+    fn dummy_loc() -> SourceLocation {
+        SourceLocation {
+            file: Text::from(""),
+            line: 0,
+            column: 0,
+        }
+    }
+
+    #[test]
+    fn require_levels_true_rejects_unregistered_lock_with_missing_lock_level() {
+        let mut v = make_verifier_with(/*require_levels=*/ true, /*strict=*/ false);
+        let unknown = LockTypeId::new("user", "UndeclaredMutex");
+        let held = HeldLocks::new();
+        match v.verify_acquisition(&held, &unknown, dummy_loc()) {
+            Err(LockOrderingError::MissingLockLevel { lock_type }) => {
+                assert!(
+                    lock_type.as_str().contains("UndeclaredMutex"),
+                    "MissingLockLevel must carry the qualified type name; got {:?}",
+                    lock_type,
+                );
+            }
+            other => panic!(
+                "expected MissingLockLevel under require_levels=true, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn strict_mode_true_with_levels_off_rejects_unknown_lock() {
+        // require_levels=false, strict_mode=true: use-site unknown
+        // surfaces as UnknownLock (not MissingLockLevel — the
+        // declaration-layer gate is off).
+        let mut v = make_verifier_with(/*require_levels=*/ false, /*strict=*/ true);
+        let unknown = LockTypeId::new("user", "UndeclaredMutex");
+        let held = HeldLocks::new();
+        match v.verify_acquisition(&held, &unknown, dummy_loc()) {
+            Err(LockOrderingError::UnknownLock { .. }) => {}
+            other => panic!(
+                "expected UnknownLock under strict_mode=true (require_levels=false), got: {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn lenient_mode_skips_unknown_lock() {
+        // Both gates off — the analysis runs in best-effort mode and
+        // an unknown lock simply skips verification.
+        let mut v = make_verifier_with(/*require_levels=*/ false, /*strict=*/ false);
+        let unknown = LockTypeId::new("user", "UndeclaredMutex");
+        let held = HeldLocks::new();
+        v.verify_acquisition(&held, &unknown, dummy_loc())
+            .expect("lenient mode must skip-and-pass on unknown lock");
+    }
+
+    #[test]
+    fn require_levels_takes_precedence_over_strict_mode() {
+        // Both gates on — require_levels (the declaration-layer
+        // diagnostic) wins because MissingLockLevel points at the
+        // type definition, which is more actionable than UnknownLock
+        // pointing at a use site.
+        let mut v = make_verifier_with(/*require_levels=*/ true, /*strict=*/ true);
+        let unknown = LockTypeId::new("user", "UndeclaredMutex");
+        let held = HeldLocks::new();
+        match v.verify_acquisition(&held, &unknown, dummy_loc()) {
+            Err(LockOrderingError::MissingLockLevel { .. }) => {}
+            other => panic!(
+                "expected MissingLockLevel to take precedence, got: {:?}",
+                other
+            ),
+        }
     }
 }
