@@ -89,14 +89,23 @@ fn hex_digit(n: Byte) -> Byte {
 }
 
 fn render_int64(n: Int64) -> Text {
+    // Int.MIN-safe via UInt64 magnitude. Previously `if neg { -n }`
+    // wrapped Int64.MIN back to itself; the digit loop never entered
+    // and the export rendered "-" with no magnitude — a real data-
+    // loss bug for any DB column containing Int64.MIN written through
+    // the export path.
     if n == 0_i64 { return "0".clone(); }
     let mut digits: List<Byte> = List.new();
     let neg = n < 0_i64;
-    let mut x: Int64 = if neg { -n } else { n };
-    while x > 0_i64 {
-        let d: Byte = ((x as Int) % 10) as Byte;
+    let mut x: UInt64 = if neg {
+        (((!n) as UInt64) + 1_u64)
+    } else {
+        n as UInt64
+    };
+    while x > 0_u64 {
+        let d: Byte = (x % 10_u64) as Byte;
         digits.push(d + (48 as Byte));
-        x = x / 10_i64;
+        x = x / 10_u64;
     }
     let mut out = Text.new();
     if neg { out.push_byte(45 as Byte); }
