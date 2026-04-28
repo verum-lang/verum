@@ -93,16 +93,17 @@ extern {
     /// C: `int fstat(int fd, struct stat *buf)`. T0.4.2 fix.
     fn fstat(fd: Int32, buf: &unsafe DarwinStat) -> Int32;
 
-    /// Get file status (path)
-    fn stat(path: &Byte, buf: &unsafe DarwinStat) -> Int;
+    /// Get file status (path). C: `int stat(const char *path, struct stat *buf);`.
+    fn stat(path: &Byte, buf: &unsafe DarwinStat) -> Int32;
 
-    /// Get file status (symlink)
-    fn lstat(path: &Byte, buf: &unsafe DarwinStat) -> Int;
+    /// Get file status (symlink). C: `int lstat(const char *path,
+    /// struct stat *buf);`.
+    fn lstat(path: &Byte, buf: &unsafe DarwinStat) -> Int32;
 
     /// Probe path accessibility — `int access(const char *path, int amode)`.
     /// `amode` is `F_OK | R_OK | W_OK | X_OK`. Returns 0 on success, -1
     /// with errno on failure (EACCES means "no access").
-    fn access(path: &Byte, amode: Int) -> Int;
+    fn access(path: &Byte, amode: Int32) -> Int32;
 
     /// Scatter read. C: `ssize_t readv(int fd, const struct iovec *iov, int iovcnt)`.
     /// fd / iovcnt are POSIX `int` (32-bit); ssize_t is i64.
@@ -326,21 +327,24 @@ extern {
     // Time
     // =========================================================================
 
-    /// Get time of day
-    public fn gettimeofday(tv: &mut DarwinTimeval, tz: &unsafe Byte) -> Int;
+    /// Get time of day. C: `int gettimeofday(struct timeval *tv,
+    /// struct timezone *tz);`.
+    public fn gettimeofday(tv: &mut DarwinTimeval, tz: &unsafe Byte) -> Int32;
 
     /// Get clock time (POSIX). C: `int clock_gettime(clockid_t, struct timespec *)`.
     /// `clockid_t` is `int32` on macOS. T0.4 fix.
     public fn clock_gettime(clk_id: Int32, tp: &mut DarwinTimespec) -> Int32;
 
-    /// Sleep (nanoseconds)
-    public fn nanosleep(rqtp: &DarwinTimespec, rmtp: &mut DarwinTimespec) -> Int;
+    /// Sleep (nanoseconds). C: `int nanosleep(const struct timespec *rqtp,
+    /// struct timespec *rmtp);`.
+    public fn nanosleep(rqtp: &DarwinTimespec, rmtp: &mut DarwinTimespec) -> Int32;
 
     /// Get monotonic time (mach)
     public fn mach_absolute_time() -> UInt64;
 
-    /// Get time base info (mach)
-    public fn mach_timebase_info(info: &mut MachTimebaseInfo) -> Int;
+    /// Get time base info (mach). C: `kern_return_t mach_timebase_info(...)`.
+    /// `kern_return_t` is `int32` on macOS.
+    public fn mach_timebase_info(info: &mut MachTimebaseInfo) -> Int32;
 
     // =========================================================================
     // Sockets
@@ -426,16 +430,19 @@ extern {
     // Directory Operations
     // =========================================================================
 
-    /// Create directory
-    fn mkdir(path: &Byte, mode: Int) -> Int;
+    /// Create directory. C: `int mkdir(const char *path, mode_t mode);`.
+    /// `mode_t` is `uint16_t` historically, `uint32_t` on modern Darwin —
+    /// promoted to `UInt32` for ABI safety.
+    fn mkdir(path: &Byte, mode: UInt32) -> Int32;
 
-    /// Remove directory
-    fn rmdir(path: &Byte) -> Int;
+    /// Remove directory. C: `int rmdir(const char *path);`.
+    fn rmdir(path: &Byte) -> Int32;
 
-    /// Change current directory
-    fn chdir(path: &Byte) -> Int;
+    /// Change current directory. C: `int chdir(const char *path);`.
+    fn chdir(path: &Byte) -> Int32;
 
-    /// Get current directory
+    /// Get current directory. C: `char *getcwd(char *buf, size_t size);`.
+    /// `size` is size_t (kept Int per file convention).
     fn getcwd(buf: &unsafe Byte, size: Int) -> &Byte;
 
     /// Open directory
@@ -444,32 +451,36 @@ extern {
     /// Read directory entry
     public fn readdir(dirp: &DIR) -> &Dirent;
 
-    /// Close directory
-    public fn closedir(dirp: &DIR) -> Int;
+    /// Close directory. C: `int closedir(DIR *dirp);`.
+    public fn closedir(dirp: &DIR) -> Int32;
 
     // =========================================================================
     // Filesystem Operations
     // =========================================================================
 
-    /// Remove a file
-    fn unlink(path: &Byte) -> Int;
+    /// Remove a file. C: `int unlink(const char *pathname);`.
+    fn unlink(path: &Byte) -> Int32;
 
-    /// Create a hard link
-    fn link(src: &Byte, dst: &Byte) -> Int;
+    /// Create a hard link. C: `int link(const char *oldpath, const char *newpath);`.
+    fn link(src: &Byte, dst: &Byte) -> Int32;
 
-    /// Rename a file or directory
+    /// Rename a file or directory. C: `int rename(const char *old,
+    /// const char *new);`.
     @ffi_name("rename")
-    fn rename_ffi(oldpath: &Byte, newpath: &Byte) -> Int;
+    fn rename_ffi(oldpath: &Byte, newpath: &Byte) -> Int32;
 
-    /// Create a symbolic link
+    /// Create a symbolic link. C: `int symlink(const char *target,
+    /// const char *linkpath);`.
     @ffi_name("symlink")
-    fn symlink_ffi(src: &Byte, dst: &Byte) -> Int;
+    fn symlink_ffi(src: &Byte, dst: &Byte) -> Int32;
 
-    /// Read a symbolic link
+    /// Read a symbolic link. C: `ssize_t readlink(const char *pathname,
+    /// char *buf, size_t bufsiz);`. Returns ssize_t (signed; -1 on error,
+    /// kept as Int per file convention).
     fn readlink(path: &Byte, buf: &unsafe Byte, bufsize: Int) -> Int;
 
-    /// Change file mode
-    fn chmod(path: &Byte, mode: Int) -> Int;
+    /// Change file mode. C: `int chmod(const char *path, mode_t mode);`.
+    fn chmod(path: &Byte, mode: UInt32) -> Int32;
 
     // =========================================================================
     // Environment Variables
@@ -527,24 +538,28 @@ extern {
     // Error Handling
     // =========================================================================
 
-    /// Get errno location
-    fn __error() -> &mut Int;
+    /// Get errno location. C: `int *__error(void);` (Darwin) — returns
+    /// a pointer to the thread-local C `int` errno slot. Declaring as
+    /// `&mut Int` would dereference 8 bytes including 4 bytes of unrelated
+    /// adjacent TLS data; `&mut Int32` reads exactly the 4 bytes the C
+    /// library writes.
+    fn __error() -> &mut Int32;
 
-    /// String error
-    fn strerror(errnum: Int) -> &Byte;
+    /// String error. C: `char *strerror(int errnum);`.
+    fn strerror(errnum: Int32) -> &Byte;
 
     // =========================================================================
     // Dynamic Loading
     // =========================================================================
 
-    /// Open dynamic library
-    fn dlopen(filename: &Byte, flags: Int) -> &unsafe Byte;
+    /// Open dynamic library. C: `void *dlopen(const char *path, int mode);`.
+    fn dlopen(filename: &Byte, flags: Int32) -> &unsafe Byte;
 
     /// Get symbol
     fn dlsym(handle: &unsafe Byte, symbol: &Byte) -> &unsafe Byte;
 
-    /// Close dynamic library
-    fn dlclose(handle: &unsafe Byte) -> Int;
+    /// Close dynamic library. C: `int dlclose(void *handle);`.
+    fn dlclose(handle: &unsafe Byte) -> Int32;
 
     /// Get error
     fn dlerror() -> &Byte;
@@ -980,25 +995,19 @@ public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
 // Safe Wrapper Functions
 // =============================================================================
 
-/// Get the last error number
+/// Get the last error number.
+///
+/// `__error()` is now declared as returning `&mut Int32` (the precise C
+/// type `int *`), so the deref reads exactly the four bytes libc owns.
+/// The historical mask-and-sign-extend workaround for the i64-deref-of-
+/// `int*` bug (#108) is folded into the FFI declaration itself.
 public fn errno() -> Int {
-    // libc errno is C `int` (32-bit) but Verum's deref reads 64 bits.
-    // The four bytes adjacent to the thread-local errno slot are
-    // unrelated TLS data, which leak into the upper half. Mask to
-    // 32 bits and sign-extend so callers see a clean small integer.
-    // See #108 — generic AOT extern-call sign-extension.
-    let raw = unsafe { *__error() };
-    let lo32 = raw & 0xFFFFFFFF;
-    if (lo32 & 0x80000000) != 0 {
-        lo32 - 0x100000000
-    } else {
-        lo32
-    }
+    unsafe { *__error() as Int }
 }
 
 /// Set the error number
 public fn set_errno(err: Int) {
-    unsafe { *__error() = err; }
+    unsafe { *__error() = err as Int32; }
 }
 
 /// Read from file descriptor (safe wrapper) - takes a mutable slice
