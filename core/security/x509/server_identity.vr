@@ -110,8 +110,7 @@ fn parse_ip_literal(s: &Text) -> Maybe<List<Byte>> {
             let arr: [Byte; 16] = addr.octets();
             // IPv6 = exactly 16 bytes.
             let mut bytes: List<Byte> = List.with_capacity(16);
-            let mut i: Int = 0;
-            while i < 16 { bytes.push(arr[i]); i = i + 1; }
+            bytes.extend_from_slice(&arr[..]);
             Some(bytes)
         },
         Err(_) => None,

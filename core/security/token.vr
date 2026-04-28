@@ -68,8 +68,7 @@ public fn generate_bytes(len_bytes: Int) -> List<Byte> {
     while out.len() < n {
         fill_secure_array(&mut tmp);
         let take = if (n - out.len()) >= 32 { 32 } else { n - out.len() };
-        let mut i: Int = 0;
-        while i < take { out.push(tmp[i]); i = i + 1; }
+        out.extend_from_slice(&tmp[..take]);
     }
     out
 }
