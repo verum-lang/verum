@@ -13,6 +13,43 @@ public type KubeConfigError is
     | NoAuth(Text)
     | IoError(Text);
 
+implement Display for KubeConfigError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(p)         => f.write_str(f"kubeconfig not found: {p}".as_str()),
+            InvalidYaml(reason) => f.write_str(f"kubeconfig invalid YAML: {reason}".as_str()),
+            ContextNotFound(c)  => f.write_str(f"kubeconfig context not found: {c}".as_str()),
+            NoAuth(reason)      => f.write_str(f"kubeconfig: no resolvable auth ({reason})".as_str()),
+            IoError(reason)     => f.write_str(f"kubeconfig I/O error: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for KubeConfigError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(p)         => f.write_str(f"NotFound({p})".as_str()),
+            InvalidYaml(reason) => f.write_str(f"InvalidYaml({reason})".as_str()),
+            ContextNotFound(c)  => f.write_str(f"ContextNotFound({c})".as_str()),
+            NoAuth(reason)      => f.write_str(f"NoAuth({reason})".as_str()),
+            IoError(reason)     => f.write_str(f"IoError({reason})".as_str()),
+        }
+    }
+}
+
+implement Eq for KubeConfigError {
+    fn eq(&self, other: &KubeConfigError) -> Bool {
+        match (self, other) {
+            (NotFound(a),         NotFound(b))         => a == b,
+            (InvalidYaml(a),      InvalidYaml(b))      => a == b,
+            (ContextNotFound(a),  ContextNotFound(b))  => a == b,
+            (NoAuth(a),           NoAuth(b))           => a == b,
+            (IoError(a),          IoError(b))          => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Cluster endpoint
 // =============================================================================

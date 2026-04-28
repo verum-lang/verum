@@ -23,3 +23,73 @@ public type XdsError is
     | Cancelled
     /// Stream closed normally by peer.
     | Closed;
+
+// AuthFailed Display surfaces no detail beyond the kind tag —
+// xDS auth uses mTLS / SPIFFE so leaking which check failed
+// (cert chain vs SAN match vs SVID validity) is the same
+// oracle-attack discipline carried across from TlsError /
+// CipherError.
+
+implement Display for XdsError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionLost(r)                   =>
+                f.write_str(f"xDS connection lost: {r}".as_str()),
+            AuthFailed(_)                       =>
+                f.write_str("xDS authentication failed"),
+            InvalidResource { type_url, reason } =>
+                f.write_str(f"xDS invalid resource {type_url}: {reason}".as_str()),
+            Nack { message, detail }            =>
+                f.write_str(f"xDS NACK: {message} ({detail})".as_str()),
+            OverLimit { limit }                 =>
+                f.write_str(f"xDS resource count exceeds limit {limit}".as_str()),
+            UnsupportedType(t)                  =>
+                f.write_str(f"xDS unsupported resource type: {t}".as_str()),
+            Cancelled                           =>
+                f.write_str("xDS stream cancelled"),
+            Closed                              =>
+                f.write_str("xDS stream closed by peer"),
+        }
+    }
+}
+
+implement Debug for XdsError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ConnectionLost(r)                   =>
+                f.write_str(f"ConnectionLost({r})".as_str()),
+            AuthFailed(r)                       =>
+                f.write_str(f"AuthFailed({r})".as_str()),
+            InvalidResource { type_url, reason } =>
+                f.write_str(f"InvalidResource {{ type_url: {type_url}, reason: {reason} }}".as_str()),
+            Nack { message, detail }            =>
+                f.write_str(f"Nack {{ message: {message}, detail: {detail} }}".as_str()),
+            OverLimit { limit }                 =>
+                f.write_str(f"OverLimit {{ limit: {limit} }}".as_str()),
+            UnsupportedType(t)                  =>
+                f.write_str(f"UnsupportedType({t})".as_str()),
+            Cancelled                           =>
+                f.write_str("Cancelled"),
+            Closed                              =>
+                f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for XdsError {
+    fn eq(&self, other: &XdsError) -> Bool {
+        match (self, other) {
+            (ConnectionLost(a),    ConnectionLost(b))    => a == b,
+            (AuthFailed(a),        AuthFailed(b))        => a == b,
+            (InvalidResource { type_url: ta, reason: ra },
+             InvalidResource { type_url: tb, reason: rb }) => ta == tb && ra == rb,
+            (Nack { message: ma, detail: da },
+             Nack { message: mb, detail: db })           => ma == mb && da == db,
+            (OverLimit { limit: a }, OverLimit { limit: b }) => a == b,
+            (UnsupportedType(a),   UnsupportedType(b))   => a == b,
+            (Cancelled,            Cancelled)            => true,
+            (Closed,               Closed)               => true,
+            _ => false,
+        }
+    }
+}

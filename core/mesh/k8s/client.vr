@@ -33,6 +33,64 @@ public type KubeError is
     | BadApiResponse(Text)
     | Cancelled;
 
+implement Display for KubeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(r)             => f.write_str(f"kube: not found ({r})".as_str()),
+            Unauthorized(r)         => f.write_str(f"kube: unauthorized ({r})".as_str()),
+            Forbidden(r)            => f.write_str(f"kube: forbidden ({r})".as_str()),
+            Conflict(r)             => f.write_str(f"kube: conflict ({r})".as_str()),
+            ServerError { status, message } =>
+                f.write_str(f"kube server error {status}: {message}".as_str()),
+            InvalidResource(r)      => f.write_str(f"kube: invalid resource ({r})".as_str()),
+            RequestTimeout          => f.write_str("kube: request timeout"),
+            RateLimited { retry_after } =>
+                f.write_str(f"kube: rate-limited (retry after {retry_after})".as_str()),
+            BadApiResponse(r)       => f.write_str(f"kube: bad API response ({r})".as_str()),
+            Cancelled               => f.write_str("kube: request cancelled"),
+        }
+    }
+}
+
+implement Debug for KubeError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NotFound(r)             => f.write_str(f"NotFound({r})".as_str()),
+            Unauthorized(r)         => f.write_str(f"Unauthorized({r})".as_str()),
+            Forbidden(r)            => f.write_str(f"Forbidden({r})".as_str()),
+            Conflict(r)             => f.write_str(f"Conflict({r})".as_str()),
+            ServerError { status, message } =>
+                f.write_str(f"ServerError {{ status: {status}, message: {message} }}".as_str()),
+            InvalidResource(r)      => f.write_str(f"InvalidResource({r})".as_str()),
+            RequestTimeout          => f.write_str("RequestTimeout"),
+            RateLimited { retry_after } =>
+                f.write_str(f"RateLimited {{ retry_after: {retry_after:?} }}".as_str()),
+            BadApiResponse(r)       => f.write_str(f"BadApiResponse({r})".as_str()),
+            Cancelled               => f.write_str("Cancelled"),
+        }
+    }
+}
+
+implement Eq for KubeError {
+    fn eq(&self, other: &KubeError) -> Bool {
+        match (self, other) {
+            (NotFound(a),        NotFound(b))        => a == b,
+            (Unauthorized(a),    Unauthorized(b))    => a == b,
+            (Forbidden(a),       Forbidden(b))       => a == b,
+            (Conflict(a),        Conflict(b))        => a == b,
+            (ServerError { status: sa, message: ma },
+             ServerError { status: sb, message: mb }) => sa == sb && ma == mb,
+            (InvalidResource(a), InvalidResource(b)) => a == b,
+            (RequestTimeout,     RequestTimeout)     => true,
+            (RateLimited { retry_after: a },
+             RateLimited { retry_after: b })         => a == b,
+            (BadApiResponse(a),  BadApiResponse(b))  => a == b,
+            (Cancelled,          Cancelled)          => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // ListOptions + watch events
 // =============================================================================
