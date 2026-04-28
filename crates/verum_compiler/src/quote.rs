@@ -3869,6 +3869,17 @@ fn emit_mount_tree(tree: &verum_ast::decl::MountTree, stream: &mut TokenStream) 
             }
             stream.push(Token::new(TokenKind::RBrace, tree.span));
         }
+        // #5 / P1.5 — file-relative mount surfaces as a single
+        // text-literal token carrying the source-relative
+        // path. The downstream parser of the quoted output
+        // recognises the leading `./` / `../` and routes back
+        // to MountTreeKind::File at parse time.
+        MountTreeKind::File { path, span } => {
+            stream.push(Token::new(
+                TokenKind::Text(path.as_str().to_string().into()),
+                *span,
+            ));
+        }
     }
 }
 

@@ -4971,6 +4971,12 @@ impl<'s> CompilationPipeline<'s> {
             }
             MountTreeKind::Glob(path) => extract_path(path),
             MountTreeKind::Nested { prefix, .. } => extract_path(prefix),
+            // #5 / P1.5 — file-relative mount surfaces the
+            // file path verbatim. The session loader resolves
+            // it to a concrete file before this extractor
+            // runs, so the literal path is the cleanest
+            // identifier we can return.
+            MountTreeKind::File { path, .. } => path.as_str().to_string(),
         }
     }
 
@@ -8457,6 +8463,13 @@ impl<'s> CompilationPipeline<'s> {
             MountTreeKind::Path(path) => path,
             MountTreeKind::Glob(path) => path,
             MountTreeKind::Nested { prefix, .. } => prefix,
+            // #5 / P1.5 — file-relative mount.  The session
+            // loader has already resolved the file at this
+            // point; surface the literal path as the module
+            // identifier so downstream logging / diagnostics
+            // can refer to it. Returning early avoids
+            // returning a synthesized empty Path.
+            MountTreeKind::File { path, .. } => return path.clone(),
         };
 
         // Get the path segments
@@ -11414,6 +11427,11 @@ impl<'s> CompilationPipeline<'s> {
                         MountTreeKind::Path(p) => p,
                         MountTreeKind::Glob(p) => p,
                         MountTreeKind::Nested { prefix, .. } => prefix,
+                        // #5 / P1.5 — file-relative mounts are
+                        // not module-path candidates; the
+                        // session loader handles their
+                        // resolution upstream of this pass.
+                        MountTreeKind::File { .. } => continue,
                     };
                     // Extract the dotted form of the mount path,
                     // preserving the special leading-segment variants

@@ -1446,6 +1446,10 @@ fn mount_root_path(mount: &verum_ast::MountDecl) -> Option<String> {
         verum_ast::MountTreeKind::Path(p) => p,
         verum_ast::MountTreeKind::Glob(p) => p,
         verum_ast::MountTreeKind::Nested { prefix, .. } => prefix,
+        // #5 / P1.5 — file-relative mount has no module-path
+        // root; the lint engine's architecture-violation
+        // checks only apply to module-path mounts.
+        verum_ast::MountTreeKind::File { .. } => return None,
     };
     Some(path_segments_to_string(path))
 }
@@ -2542,6 +2546,13 @@ fn walk_mount_tree(tree: &verum_ast::MountTree, prefix: &[String], out: &mut Vec
             for t in trees {
                 walk_mount_tree(t, &new_prefix, out);
             }
+        }
+        // #5 / P1.5 — file-relative mounts contribute the
+        // literal file path so the corpus walker can still
+        // detect references and feed them into the lint
+        // engine's reachability analysis.
+        MountTreeKind::File { path, .. } => {
+            out.push(path.as_str().to_string());
         }
     }
 }

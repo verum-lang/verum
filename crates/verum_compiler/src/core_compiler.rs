@@ -314,6 +314,15 @@ fn collect_import_exports(tree: &verum_ast::MountTree, exports: &mut HashSet<Str
                 collect_import_exports(sub_tree, exports);
             }
         }
+        // #5 / P1.5 — file-relative mount: only the alias (if
+        // any) becomes a name in the importing scope; the
+        // file's own exports are visible through the alias's
+        // module-namespace, not through this collector.
+        MountTreeKind::File { .. } => {
+            if let Some(alias) = &tree.alias.as_ref() {
+                exports.insert(alias.name.to_string());
+            }
+        }
     }
 }
 
@@ -545,6 +554,11 @@ fn validate_import_tree(
                 }
             }
         }
+        // #5 / P1.5 — file-relative mounts are validated by
+        // the session loader (which reads the .vr file before
+        // the import-validation pass runs).  No module-export
+        // table to consult here.
+        MountTreeKind::File { .. } => {}
     }
 }
 
