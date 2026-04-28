@@ -111,9 +111,16 @@ impl MetaLinter {
             self.analyze_body_with_context(body, &mut result, &mut ctx);
         }
 
-        // Check for recursion after analyzing the body
-        self.safety
-            .check_unbounded_recursion(&ctx, func.span, &mut result);
+        // Check for recursion after analyzing the body.  Gated on
+        // `check_performance` — the flag was previously inert (set
+        // but never read), so disabling it had no effect.  Now
+        // `permissive()` and other configurations that opt out of
+        // performance lints actually skip the recursion warning,
+        // matching the documented contract.
+        if self.config.check_performance {
+            self.safety
+                .check_unbounded_recursion(&ctx, func.span, &mut result);
+        }
 
         // Validate annotations
         if has_safe_attr && !result.is_safe {
@@ -288,9 +295,15 @@ impl MetaLinter {
                 self.safety
                     .check_unwrap_expect(method_name, expr.span, result);
 
-                // Check for non-deterministic methods
-                self.safety
-                    .check_non_deterministic(method_name, expr.span, result);
+                // Check for non-deterministic methods.  Gated on
+                // `check_determinism` — the flag was previously
+                // inert; now `permissive()` (which sets
+                // `check_determinism = false`) actually skips the
+                // `now()` / `random()` warning.
+                if self.config.check_determinism {
+                    self.safety
+                        .check_non_deterministic(method_name, expr.span, result);
+                }
 
                 // Check for I/O methods
                 if self.security.is_io_method(method_name) {
