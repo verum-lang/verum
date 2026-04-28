@@ -137,8 +137,37 @@ impl FastParser {
         self.parse_module_internal(lexer, file_id, Some(source))
     }
 
+    /// Parse a complete module in **script mode** (P1.2).
+    ///
+    /// In script mode, top-level statements (let-bindings, expression
+    /// statements, defer / errdefer / provide) are accepted alongside
+    /// regular items. Every collected statement is folded into a
+    /// synthesised `__verum_script_main` function appended to the
+    /// module — downstream passes treat it like any other private
+    /// function. The compiler entry-detection pass uses
+    /// `Module::is_script()` (set via the `@![__verum_kind("script")]`
+    /// attribute) to recognise the wrapper as the script's entry
+    /// point in P1.3.
+    pub fn parse_module_script_str(&self, source: &str, file_id: FileId) -> ParseResult<Module> {
+        let lexer = Lexer::new(source, file_id);
+        self.parse_module_internal_with_script_mode(lexer, file_id, Some(source), true)
+    }
+
     /// Internal parsing implementation with optional source text for error analysis.
     fn parse_module_internal(&self, lexer: Lexer, file_id: FileId, source: Option<&str>) -> ParseResult<Module> {
+        self.parse_module_internal_with_script_mode(lexer, file_id, source, false)
+    }
+
+    /// Internal parsing implementation with explicit script-mode flag.
+    /// All other entry points funnel through here so the script-mode
+    /// switch lives in exactly one place.
+    fn parse_module_internal_with_script_mode(
+        &self,
+        lexer: Lexer,
+        file_id: FileId,
+        source: Option<&str>,
+        script_mode: bool,
+    ) -> ParseResult<Module> {
         // Collect tokens from lexer, tracking position for error analysis
         let mut tokens = List::new();
         let mut last_end: u32 = 0;
@@ -192,6 +221,7 @@ impl FastParser {
 
         // Use RecursiveParser for module parsing
         let mut parser = RecursiveParser::new(&tokens_with_eof, file_id);
+        parser.set_script_mode(script_mode);
 
         match parser.parse_module() {
             Ok(items) => {
