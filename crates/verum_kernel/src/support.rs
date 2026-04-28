@@ -1561,3 +1561,314 @@ pub fn replay_smt_cert_with_obligation(
     }
     replay_smt_cert(ctx, cert)
 }
+
+// =============================================================================
+// K-Refine V3 — boolean conjunction helpers for refine-of-refine fold.
+// =============================================================================
+
+/// Canonical name of the boolean conjunction connective. Kept as a
+/// single source of truth so the K-Refine fold (which builds the
+/// conjoined predicate) and the recogniser (which detects already-
+/// folded shapes for idempotence) agree byte-for-byte.
+pub const CONJUNCTION_NAME: &str = "∧";
+
+/// Build the canonical Bool conjunction `p1 ∧ p2` as a CoreTerm.
+///
+/// Internally the conjunction is encoded as a curried application
+/// `App(App(Var("∧"), p1), p2)` rather than a dedicated AST variant,
+/// so existing kernel infrastructure (substitute, free_vars,
+/// normalize) treats it uniformly with other binary operators.
+///
+/// **Idempotence**: `make_conjunction(p, p)` does NOT collapse to
+/// `p` — that would require knowing the predicate has Bool type,
+/// which the kernel re-checker enforces at refinement-formation
+/// time.  The K-Refine V3 fold relies on this: it calls
+/// `make_conjunction` only after both predicates have already
+/// passed the V0 K-Refine-Form gate.
+pub fn make_conjunction(p1: &CoreTerm, p2: &CoreTerm) -> CoreTerm {
+    let conn = CoreTerm::Var(Text::from(CONJUNCTION_NAME));
+    CoreTerm::App(
+        Heap::new(CoreTerm::App(Heap::new(conn), Heap::new(p1.clone()))),
+        Heap::new(p2.clone()),
+    )
+}
+
+/// Recognise a canonical conjunction shape `p1 ∧ p2` produced by
+/// [`make_conjunction`]. Returns `Some((p1, p2))` on match, `None`
+/// otherwise. Used by the K-Refine V3 fold to keep iteration
+/// idempotent (a fold that produced `Refine(B, p1 ∧ p2)` must NOT
+/// re-fold against any further predicate without first recognising
+/// the existing conjunction shape).
+pub fn is_conjunction(t: &CoreTerm) -> Option<(&CoreTerm, &CoreTerm)> {
+    if let CoreTerm::App(outer, p2) = t {
+        if let CoreTerm::App(conn, p1) = outer.as_ref() {
+            if let CoreTerm::Var(name) = conn.as_ref() {
+                if name.as_str() == CONJUNCTION_NAME {
+                    return Some((p1.as_ref(), p2.as_ref()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// K-Refine V3 fold:
+///
+///   `Refine(Refine(B, x: p₁), x: p₂)`  →  `Refine(B, x: p₁ ∧ p₂)`
+///
+/// When the outer and inner binders differ, the inner predicate is
+/// alpha-renamed to use the outer binder so the conjunction is
+/// well-scoped (substitute(p₁, inner_binder, Var(outer_binder))).
+///
+/// Returns `Some(folded)` when the term has the canonical
+/// nested-Refine shape; `None` otherwise. Idempotent under
+/// composition: applying twice produces the same shape (the second
+/// application sees `Refine(B, p₁ ∧ p₂)` which is no longer
+/// `Refine(Refine, _)` — fold doesn't trigger).
+///
+/// Soundness: the fold preserves the refinement semantics —
+/// `{ x : { y : B | p₁(y) } | p₂(x) }`  ≡  `{ x : B | p₁(x) ∧ p₂(x) }`
+/// for every `x : B` in the underlying type theory (predicate-
+/// extensionality + BHK conjunction = pair-of-proofs).
+pub fn fold_refine_of_refine(term: &CoreTerm) -> Option<CoreTerm> {
+    let (outer_base, outer_binder, outer_pred) = match term {
+        CoreTerm::Refine { base, binder, predicate } => {
+            (base.as_ref(), binder, predicate.as_ref())
+        }
+        _ => return None,
+    };
+    let (inner_base, inner_binder, inner_pred) = match outer_base {
+        CoreTerm::Refine { base, binder, predicate } => {
+            (base.as_ref(), binder, predicate.as_ref())
+        }
+        _ => return None,
+    };
+    // Alpha-rename inner predicate to use the outer binder when the
+    // names differ. The substitute helper is name-respecting and
+    // skips inside binders that capture the same name, so renaming
+    // the inner predicate is a structural rewrite without scope leaks.
+    let renamed_inner_pred = if outer_binder == inner_binder {
+        inner_pred.clone()
+    } else {
+        let outer_var = CoreTerm::Var(outer_binder.clone());
+        substitute(inner_pred, inner_binder.as_str(), &outer_var)
+    };
+    let conjoined = make_conjunction(&renamed_inner_pred, outer_pred);
+    Some(CoreTerm::Refine {
+        base: Heap::new(inner_base.clone()),
+        binder: outer_binder.clone(),
+        predicate: Heap::new(conjoined),
+    })
+}
+
+#[cfg(test)]
+mod conjunction_tests {
+    use super::*;
+
+    fn var(n: &str) -> CoreTerm {
+        CoreTerm::Var(Text::from(n))
+    }
+
+    #[test]
+    fn make_conjunction_builds_curried_app() {
+        let p = var("p");
+        let q = var("q");
+        let c = make_conjunction(&p, &q);
+        match c {
+            CoreTerm::App(outer, q_actual) => {
+                assert_eq!(q_actual.as_ref(), &q);
+                match outer.as_ref() {
+                    CoreTerm::App(conn, p_actual) => {
+                        assert_eq!(p_actual.as_ref(), &p);
+                        assert!(matches!(conn.as_ref(),
+                            CoreTerm::Var(name) if name.as_str() == CONJUNCTION_NAME));
+                    }
+                    _ => panic!("inner is not App"),
+                }
+            }
+            _ => panic!("outer is not App"),
+        }
+    }
+
+    #[test]
+    fn is_conjunction_recognises_make_conjunction() {
+        let p = var("p");
+        let q = var("q");
+        let c = make_conjunction(&p, &q);
+        let (p_back, q_back) = is_conjunction(&c).expect("must recognise");
+        assert_eq!(p_back, &p);
+        assert_eq!(q_back, &q);
+    }
+
+    #[test]
+    fn is_conjunction_rejects_unrelated_app() {
+        let app = CoreTerm::App(
+            Heap::new(var("f")),
+            Heap::new(var("x")),
+        );
+        assert!(is_conjunction(&app).is_none());
+    }
+
+    #[test]
+    fn is_conjunction_rejects_var() {
+        assert!(is_conjunction(&var("p")).is_none());
+    }
+
+    #[test]
+    fn fold_refine_of_refine_collapses_same_binder() {
+        let b = var("Int");
+        let p = var("p");
+        let q = var("q");
+        let inner = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("x"),
+            predicate: Heap::new(p.clone()),
+        };
+        let outer = CoreTerm::Refine {
+            base: Heap::new(inner),
+            binder: Text::from("x"),
+            predicate: Heap::new(q.clone()),
+        };
+        let folded = fold_refine_of_refine(&outer).expect("must fold");
+        match folded {
+            CoreTerm::Refine { base, binder, predicate } => {
+                assert_eq!(base.as_ref(), &b);
+                assert_eq!(binder.as_str(), "x");
+                let (p_back, q_back) = is_conjunction(predicate.as_ref())
+                    .expect("predicate is conjunction");
+                assert_eq!(p_back, &p);
+                assert_eq!(q_back, &q);
+            }
+            _ => panic!("not Refine"),
+        }
+    }
+
+    #[test]
+    fn fold_refine_alpha_renames_inner_binder() {
+        // Refine(Refine(B, y: p(y)), x: q(x))
+        //   →  Refine(B, x: p(x) ∧ q(x))
+        let b = var("Int");
+        let inner = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("y"),
+            predicate: Heap::new(CoreTerm::App(
+                Heap::new(var("p")),
+                Heap::new(var("y")),
+            )),
+        };
+        let outer = CoreTerm::Refine {
+            base: Heap::new(inner),
+            binder: Text::from("x"),
+            predicate: Heap::new(CoreTerm::App(
+                Heap::new(var("q")),
+                Heap::new(var("x")),
+            )),
+        };
+        let folded = fold_refine_of_refine(&outer).expect("must fold");
+        match folded {
+            CoreTerm::Refine { base, binder, predicate } => {
+                assert_eq!(base.as_ref(), &b);
+                assert_eq!(binder.as_str(), "x");
+                let (p_x, q_x) = is_conjunction(predicate.as_ref())
+                    .expect("predicate is conjunction");
+                // p(y) → p(x) — y was renamed to x.
+                match p_x {
+                    CoreTerm::App(head, arg) => {
+                        assert_eq!(head.as_ref(), &var("p"));
+                        assert_eq!(arg.as_ref(), &var("x"),
+                            "inner binder y must be alpha-renamed to x");
+                    }
+                    _ => panic!("p_x is not App"),
+                }
+                match q_x {
+                    CoreTerm::App(head, arg) => {
+                        assert_eq!(head.as_ref(), &var("q"));
+                        assert_eq!(arg.as_ref(), &var("x"));
+                    }
+                    _ => panic!("q_x is not App"),
+                }
+            }
+            _ => panic!("not Refine"),
+        }
+    }
+
+    #[test]
+    fn fold_refine_returns_none_on_non_nested() {
+        // Refine(B, x: p) — single-level refinement, no fold.
+        let r = CoreTerm::Refine {
+            base: Heap::new(var("Int")),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("p")),
+        };
+        assert!(fold_refine_of_refine(&r).is_none(),
+            "single Refine must not fold");
+    }
+
+    #[test]
+    fn fold_refine_returns_none_on_non_refine() {
+        assert!(fold_refine_of_refine(&var("foo")).is_none());
+    }
+
+    #[test]
+    fn fold_refine_idempotent_under_repeated_application() {
+        // After folding once, the result is Refine(B, p ∧ q) — a
+        // single Refine, so a second fold returns None.
+        let b = var("Int");
+        let inner = CoreTerm::Refine {
+            base: Heap::new(b),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("p")),
+        };
+        let outer = CoreTerm::Refine {
+            base: Heap::new(inner),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("q")),
+        };
+        let folded_once = fold_refine_of_refine(&outer).expect("first fold");
+        let folded_twice = fold_refine_of_refine(&folded_once);
+        assert!(folded_twice.is_none(),
+            "second fold must be a no-op (idempotence)");
+    }
+
+    #[test]
+    fn fold_refine_three_level_collapses_recursively_when_called_twice() {
+        // Refine(Refine(Refine(B, x: p), x: q), x: r)
+        //   first fold: Refine(Refine(B, x: p ∧ q), x: r)  -- WAIT
+        // Actually the fold is OUTERMOST-only: it folds the top two
+        // levels. To fully collapse a 3-level stack the caller must
+        // iterate. We pin the OUTERMOST-once contract here.
+        let b = var("Int");
+        let l1 = CoreTerm::Refine {
+            base: Heap::new(b.clone()),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("p")),
+        };
+        let l2 = CoreTerm::Refine {
+            base: Heap::new(l1),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("q")),
+        };
+        let l3 = CoreTerm::Refine {
+            base: Heap::new(l2),
+            binder: Text::from("x"),
+            predicate: Heap::new(var("r")),
+        };
+        // First fold collapses outermost two levels:
+        // Refine(Refine(B, x: p), x: q ∧ r)
+        let folded_outer = fold_refine_of_refine(&l3).expect("outer fold");
+        // The base of the outermost Refine should now BE a Refine
+        // (the inner that wasn't yet collapsed).
+        match &folded_outer {
+            CoreTerm::Refine { base, predicate, .. } => {
+                assert!(matches!(base.as_ref(), CoreTerm::Refine { .. }),
+                    "after one fold, base must still be a Refine for 3-level case");
+                let (p_q, r) = is_conjunction(predicate.as_ref())
+                    .expect("outer predicate is q ∧ r");
+                // After alpha-rename, p_q should be q (NOT q ∧ r) and r is r.
+                assert_eq!(p_q, &var("q"), "outer fold's lhs is q (renamed inner)");
+                assert_eq!(r, &var("r"));
+            }
+            _ => panic!("not Refine"),
+        }
+    }
+}

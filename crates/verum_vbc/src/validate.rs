@@ -380,6 +380,7 @@ impl<'a> Validator<'a> {
         let function_count = self.module.functions.len() as u32;
         let constant_count = self.module.constants.len() as u32;
         let string_count = self.module.strings.len() as u32;
+        let type_count = self.module.types.len() as u32;
 
         for func_desc in &self.module.functions {
             self.validate_function_bytecode(
@@ -387,6 +388,7 @@ impl<'a> Validator<'a> {
                 function_count,
                 constant_count,
                 string_count,
+                type_count,
             );
         }
     }
@@ -399,6 +401,7 @@ impl<'a> Validator<'a> {
         function_count: u32,
         constant_count: u32,
         string_count: u32,
+        type_count: u32,
     ) {
         let func_start = func.bytecode_offset as usize;
         let func_end = func_start + func.bytecode_length as usize;
@@ -471,6 +474,7 @@ impl<'a> Validator<'a> {
                 function_count,
                 constant_count,
                 string_count,
+                type_count,
                 &mut pending_jumps,
             );
         }
@@ -510,6 +514,7 @@ impl<'a> Validator<'a> {
         function_count: u32,
         constant_count: u32,
         string_count: u32,
+        type_count: u32,
         pending_jumps: &mut Vec<(u32, u32)>,
     ) {
         // Helper closures to keep the per-variant arms tidy.
@@ -660,6 +665,37 @@ impl<'a> Validator<'a> {
             Instruction::Panic { message_id } => {
                 if *message_id >= string_count {
                     self.errors.push(VbcError::InvalidStringId(*message_id));
+                }
+            }
+
+            // -----------------------------------------------------------
+            // Type-table cross-references — `New` / `NewG` allocate
+            // an instance of a type indexed by `type_id`.  Built-in
+            // type IDs (LIST, MAP, SET, ARRAY, INT, ...) live in a
+            // reserved low-numbered range; user types start at
+            // `TypeId::FIRST_USER` and go up to `module.types.len()`.
+            //
+            // We accept any built-in type unconditionally (validated
+            // by `TypeId::is_builtin()`); user types must index into
+            // the module's type table.  Crafted bytecode pointing at
+            // a non-existent user type would otherwise surface only
+            // when the runtime tried to consult the type's layout.
+            // -----------------------------------------------------------
+            Instruction::New { dst, type_id, field_count: _ } => {
+                let tid = TypeId(*type_id);
+                if !tid.is_builtin() && self.module.get_type(tid).is_none() {
+                    self.errors.push(VbcError::InvalidTypeId(*type_id));
+                }
+                self.check_reg(*dst, max_reg, &func_name);
+            }
+            Instruction::NewG { dst, type_id, type_args } => {
+                let tid = TypeId(*type_id);
+                if !tid.is_builtin() && self.module.get_type(tid).is_none() {
+                    self.errors.push(VbcError::InvalidTypeId(*type_id));
+                }
+                self.check_reg(*dst, max_reg, &func_name);
+                for r in type_args {
+                    self.check_reg(*r, max_reg, &func_name);
                 }
             }
 
@@ -1038,5 +1074,41 @@ mod tests {
             || matches!(&err, VbcError::MultipleErrors(errs)
                 if errs.iter().any(|e| matches!(e, VbcError::JumpOutOfBounds { .. })));
         assert!(has_err, "expected JumpOutOfBounds for Switch case, got: {:?}", err);
+    }
+
+    #[test]
+    fn validator_rejects_new_with_oor_user_type_id() {
+        // `New { type_id: 9999 }` references a user-type past the
+        // type-table end (the test module declares zero user types,
+        // so any user-range TypeId is out of range).  Built-in
+        // TypeIds (< FIRST_USER) are accepted unconditionally.
+        let bad_new = Instruction::New {
+            dst: Reg(0),
+            type_id: 9999,
+            field_count: 0,
+        };
+        let module = build_module_with_instr(bad_new, 4, 1);
+        let err = validate_module(&module).expect_err("must reject");
+        let has_err = matches!(&err, VbcError::InvalidTypeId(9999))
+            || matches!(&err, VbcError::MultipleErrors(errs)
+                if errs.iter().any(|e| matches!(e, VbcError::InvalidTypeId(9999))));
+        assert!(has_err, "expected InvalidTypeId(9999), got: {:?}", err);
+    }
+
+    #[test]
+    fn validator_accepts_new_with_builtin_type_id() {
+        // Built-in types (TypeId::LIST, MAP, SET, etc. — id < 16)
+        // are always valid.  Pin this — a regression that lost the
+        // is_builtin() short-circuit would flag every `New` against
+        // a builtin type.  TypeId::INT = 2 is a representative
+        // builtin.
+        let good_new = Instruction::New {
+            dst: Reg(0),
+            type_id: 2, // TypeId::INT
+            field_count: 0,
+        };
+        let module = build_module_with_instr(good_new, 4, 1);
+        validate_module(&module)
+            .expect("New with builtin TypeId must validate cleanly");
     }
 }
