@@ -583,8 +583,42 @@ public fn plan_statement_with_schema(
         SSelect(ref sel) => plan_select_with_schema(sel, schema),
         SUpdate(ref upd) => plan_update_with_schema(upd, schema),
         SDelete(ref del) => plan_delete_with_schema(del, schema),
+        SInsert(ref ins) => plan_insert_with_schema(ins, schema),
         _ => plan_statement(stmt),
     }
+}
+
+fn plan_insert_with_schema(
+    ins: &InsertStmt,
+    schema: &SchemaCache,
+) -> Result<PlanNode, PlanError> {
+    let source = match ins.source {
+        IsValues(ref rows) => {
+            let cloned = clone_rows(rows);
+            let col_count = if cloned.len() == 0 { 0 } else { cloned[0].len() };
+            PnValues(cloned, col_count)
+        }
+        IsDefault => PnValues(List.new(), 0),
+        IsSelect(ref sel) => {
+            // INSERT ... SELECT delegates to the SELECT planner so the
+            // sub-query gets full FROM/WHERE/JOIN/GROUP BY/ORDER BY
+            // resolution.  The PnInsert wrapper below treats the result
+            // as a row stream — column count is determined by the
+            // SELECT's projection, validated against the INSERT column
+            // list (or table schema if no explicit column list) downstream
+            // by the codegen.
+            match plan_select_with_schema(sel, schema) {
+                Ok(p)  => p,
+                Err(e) => { return Err(e); }
+            }
+        }
+    };
+    Ok(PnInsert(
+        clone_table_ref(&ins.table),
+        clone_text_list(&ins.columns),
+        Heap(source),
+        clone_opt_on_conflict(&ins.on_conflict),
+    ))
 }
 
 fn plan_update_with_schema(
