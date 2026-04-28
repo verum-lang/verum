@@ -308,6 +308,46 @@ impl CogKind {
         }
         Self::Library
     }
+
+    /// Mark `module` as having this kind by appending the synthetic
+    /// `@![__verum_kind("<tag>")]` attribute. Used by the parser /
+    /// pipeline when a `#!` shebang or explicit kind annotation is
+    /// observed, and by tests that need to construct a kind-tagged
+    /// module without going through the full lexer pipeline.
+    ///
+    /// Idempotent: any existing `@![__verum_kind(...)]` attribute is
+    /// removed first so the latest tag wins. The synthetic attribute
+    /// stores the tag as a string-literal expression — the exact same
+    /// shape the lexer pipeline emits — so [`Self::of`]'s
+    /// debug-string round-trip succeeds.
+    pub fn set_on_module(self, module: &mut Module) {
+        // Drop any prior __verum_kind attribute so the tag is unique.
+        let kept: List<crate::attr::Attribute> = module
+            .attributes
+            .iter()
+            .filter(|attr| attr.name.as_str() != Self::ATTR_NAME)
+            .cloned()
+            .collect();
+        let span = module.span;
+        let tag_text = verum_common::Text::from(self.as_tag());
+        let tag_expr = crate::expr::Expr::new(
+            crate::expr::ExprKind::Literal(crate::Literal::new(
+                crate::LiteralKind::Text(crate::literal::StringLit::Regular(tag_text)),
+                span,
+            )),
+            span,
+        );
+        let mut args: List<crate::expr::Expr> = List::new();
+        args.push(tag_expr);
+        let attr = crate::attr::Attribute::new(
+            verum_common::Text::from(Self::ATTR_NAME),
+            verum_common::Maybe::Some(args),
+            span,
+        );
+        let mut attrs: List<crate::attr::Attribute> = kept;
+        attrs.push(attr);
+        module.attributes = attrs;
+    }
 }
 
 #[cfg(test)]

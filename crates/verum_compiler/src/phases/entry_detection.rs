@@ -117,7 +117,35 @@ impl EntryDetectionPhase {
             })
             .next();
 
-        let main_fn = match main_fn {
+        // P1.3: script-mode fallback. When no `main` exists but at
+        // least one module is a script (`@![__verum_kind("script")]`
+        // or shebang), the parser will have synthesised
+        // `__verum_script_main` from the top-level statements. Use
+        // it as the entry point. The compile is "wrong-but-honest"
+        // for non-script sources that genuinely lack `main` — those
+        // still see the original "No main function found" error.
+        let script_entry = if main_fn.is_none() {
+            modules
+                .iter()
+                .filter(|m| m.is_script())
+                .flat_map(|m| &m.items)
+                .filter_map(|item| {
+                    if let ItemKind::Function(func) = &item.kind {
+                        if func.name.as_str() == "__verum_script_main" {
+                            Some(func)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .next()
+        } else {
+            None
+        };
+
+        let main_fn = match main_fn.or(script_entry) {
             Some(func) => func,
             None => {
                 let diag = DiagnosticBuilder::new(Severity::Error)
@@ -936,5 +964,117 @@ mod tests {
 
         assert!(phase.context_groups.contains_key(&Text::from("MyGroup")));
         assert!(phase.context_groups[&Text::from("MyGroup")].contains(&Text::from("Ctx1")));
+    }
+
+    // P1.3: script-mode entry detection.
+    // Helper to build a minimal Module with the given items + script-kind tag.
+
+    fn fid() -> verum_ast::FileId {
+        verum_ast::FileId::new(0)
+    }
+
+    fn dummy_span() -> verum_ast::Span {
+        verum_ast::Span::new(0, 0, fid())
+    }
+
+    fn empty_block() -> verum_ast::expr::Block {
+        verum_ast::expr::Block::empty(dummy_span())
+    }
+
+    fn build_fn(name: &str, is_async: bool) -> verum_ast::Item {
+        let func = verum_ast::decl::FunctionDecl {
+            visibility: verum_ast::decl::Visibility::Private,
+            is_async,
+            is_meta: false,
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_unsafe: false,
+            is_transparent: false,
+            extern_abi: verum_common::Maybe::None,
+            is_variadic: false,
+            name: verum_ast::Ident::new(Text::from(name), dummy_span()),
+            generics: List::new(),
+            params: List::new(),
+            return_type: verum_common::Maybe::None,
+            throws_clause: verum_common::Maybe::None,
+            std_attr: verum_common::Maybe::None,
+            contexts: List::new(),
+            generic_where_clause: verum_common::Maybe::None,
+            meta_where_clause: verum_common::Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            attributes: List::new(),
+            body: verum_common::Maybe::Some(verum_ast::decl::FunctionBody::Block(empty_block())),
+            span: dummy_span(),
+        };
+        verum_ast::Item::new(verum_ast::ItemKind::Function(func), dummy_span())
+    }
+
+    fn make_module(items: Vec<verum_ast::Item>, script: bool) -> Module {
+        let items_list: List<verum_ast::Item> = items.into_iter().collect();
+        let mut module = Module::new(items_list, fid(), dummy_span());
+        if script {
+            verum_ast::CogKind::Script.set_on_module(&mut module);
+        }
+        module
+    }
+
+    #[test]
+    fn test_entry_script_main_used_when_no_main_in_script_module() {
+        let phase = EntryDetectionPhase::new();
+        let module = make_module(vec![build_fn("__verum_script_main", false)], true);
+        let modules = vec![module];
+        let cfg = phase
+            .detect_entry_point(&modules)
+            .expect("script entry should be discovered");
+        assert!(matches!(cfg, MainConfig::Sync));
+    }
+
+    #[test]
+    fn test_entry_script_main_ignored_in_non_script_module() {
+        // A non-script module that happens to define __verum_script_main
+        // (unlikely, but possible) MUST NOT be treated as the entry —
+        // only modules tagged as Script can pin __verum_script_main.
+        let phase = EntryDetectionPhase::new();
+        let module = make_module(vec![build_fn("__verum_script_main", false)], false);
+        let modules = vec![module];
+        let result = phase.detect_entry_point(&modules);
+        assert!(
+            result.is_err(),
+            "non-script module with __verum_script_main must still error \
+             out without a real `main`"
+        );
+    }
+
+    #[test]
+    fn test_entry_main_takes_precedence_over_script_main() {
+        // If a script-mode module ALSO declares an explicit `main`,
+        // the explicit one wins — that lets users gradually migrate
+        // a script to a regular main without a parser flip.
+        let phase = EntryDetectionPhase::new();
+        let module = make_module(
+            vec![
+                build_fn("__verum_script_main", false),
+                build_fn("main", true), // async — distinguishes from script_main
+            ],
+            true,
+        );
+        let modules = vec![module];
+        let cfg = phase.detect_entry_point(&modules).expect("entry found");
+        // explicit `main` is async → MainConfig::Async
+        assert!(matches!(cfg, MainConfig::Async));
+    }
+
+    #[test]
+    fn test_entry_no_main_no_script_errors_clearly() {
+        // Pure-decl library module without main — original behaviour
+        // preserved: error with the "Add 'fn main()..." help.
+        let phase = EntryDetectionPhase::new();
+        let module = make_module(vec![build_fn("helper", false)], false);
+        let modules = vec![module];
+        let result = phase.detect_entry_point(&modules);
+        assert!(result.is_err());
     }
 }
