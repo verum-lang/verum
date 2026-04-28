@@ -1,0 +1,25 @@
+# AOT lenient-skip waiver registry — tracks #176 phase A.
+#
+# Each entry MUST name a tracking task or known-resolution-WIP. The
+# CI gate at `vcs/gates/aot_lenient_skip.sh` enforces that the total
+# count of skips in the latest CI run is ≤ baseline (recorded in
+# `vcs/aot_skip_baseline.txt`).
+#
+# When the underlying defect lands and the corresponding waiver
+# can be removed, also decrement the baseline. The ratchet's
+# end-state is `baseline = 0` and this file empty.
+#
+# Format:
+#   [[waivers]]
+#   class = "missing-intrinsic" | "wrong-number-of-args" | "undefined-variable" | "other"
+#   module = "fully.qualified.module.path"
+#   fn = "function_name"
+#   error_class = "<exact text the codegen reports>"
+#   tracking_task = "#NNN"   # tracking task ID
+#   notes = "free-form context"
+#
+# Initial state — empty registry. As #176 phase A populates the
+# 107 skips into named waivers, entries land here; the gate will
+# tighten its tracking-task-required policy as a follow-up phase.
+
+# (registry is intentionally empty — initial #176 phase A snapshot)

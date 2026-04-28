@@ -171,7 +171,7 @@ endef
 .PHONY: watch clean clean-all clean-cache clean-reports install-tools check-tools update-tools
 .PHONY: validate validate-specs validate-config validate-thresholds validate-grammar
 .PHONY: differential diff-all diff-cross-tier diff-randomized diff-memory diff-interp-vs-aot diff-interp-vs-aot-verbose diff-red-team
-.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation
+.PHONY: production-readiness gate-diagnostic gate-soundness gate-documentation gate-aot-skip
 
 # =============================================================================
 # Default Target
@@ -1015,11 +1015,28 @@ gate-documentation:
 	$(call PROGRESS,Running documentation gate (#198 gate 5)...)
 	@bash $(VCS_ROOT)/gates/documentation.sh
 
+# Run AOT-lenient-skip ratchet gate (#176).
+# Reads vcs/aot_skip_snapshot.txt (produced by CI's full-corpus AOT
+# pass) and compares against vcs/aot_skip_baseline.txt; fails on
+# regression past the baseline.
+gate-aot-skip:
+	$(call PROGRESS,Running AOT lenient-skip ratchet gate (#176)...)
+	@bash $(VCS_ROOT)/gates/aot_lenient_skip.sh
+
 # Aggregator — runs every shipped gate. Future gates wire here too.
 # Currently green → all 7 gates pass; red → at least one gate failed
 # (printed above). Per #198 spec, the aggregator returns non-zero on
 # any red gate so CI can block the merge.
+#
+# Note: gate-aot-skip is excluded from the default aggregator until
+# CI starts producing snapshot files; can be enabled via
+# `make production-readiness-with-aot-skip` once the snapshot
+# pipeline lands.
 production-readiness: gate-diagnostic gate-soundness gate-documentation diff-red-team
+
+# Aggregator that includes gate-aot-skip — for use by CI runs that
+# produce vcs/aot_skip_snapshot.txt before invoking.
+production-readiness-with-aot-skip: production-readiness gate-aot-skip
 	$(call SUCCESS,Production-readiness gates: all shipped gates passed)
 
 diff-red-team: build
