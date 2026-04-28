@@ -36,12 +36,30 @@ fn is_ident_byte(b: u8) -> Bool {
 }
 
 fn parse_digits(bytes: &List<u8>, start: Int) -> Int {
+    // SQL `?N` parameter-index extraction during rendering. Caller
+    // is the SQL renderer feeding statement text — cap at 6 digits
+    // to match the SQL lexer's SQLITE_LIMIT_VARIABLE_NUMBER ceiling
+    // (32766) so a hostile statement can't smuggle an out-of-range
+    // index past the renderer.
     let mut i: Int = start;
     let mut out: Int = 0;
+    let mut digit_count: Int = 0;
     while i < bytes.len() {
         let b = bytes[i];
         if b < (0x30 as u8) || b > (0x39 as u8) { break; }
+        if digit_count >= 6 {
+            // Saturate at 32767 (one past the hard limit so the
+            // resolver rejects). Consume the rest of the digit run
+            // so the cursor advances past the malformed token.
+            while i < bytes.len() {
+                let bb = bytes[i];
+                if bb < (0x30 as u8) || bb > (0x39 as u8) { break; }
+                i = i + 1;
+            }
+            return 32767;
+        }
         out = (out * 10) + ((b - (0x30 as u8)) as Int);
+        digit_count = digit_count + 1;
         i = i + 1;
     }
     out

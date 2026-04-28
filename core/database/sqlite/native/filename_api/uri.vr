@@ -100,11 +100,15 @@ public fn interpret_int64(v: &Text, default: Int64) -> Int64 {
     if bs[0] == (0x2D as u8) { sign = -1 as Int64; i = 1; }
     else if bs[0] == (0x2B as u8) { i = 1; }
     if i >= bs.len() { return default; }
+    // SQLite URI parameter — hostile-input territory. 3-layer defense.
+    if (bs.len() - i) > 19 { return default; }
     let mut out: Int64 = 0 as Int64;
     while i < bs.len() {
         let b = bs[i];
         if b < (0x30 as u8) || b > (0x39 as u8) { return default; }
+        if out > 922_337_203_685_477_580_i64 { return default; }
         out = (out * 10_i64) + ((b - (0x30 as u8)) as Int64);
+        if out < 0_i64 { return default; }
         i = i + 1;
     }
     out * sign

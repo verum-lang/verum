@@ -160,14 +160,29 @@ fn resolve_path(root: &SqlJsonValue, path: &Text) -> Maybe<SqlJsonValue> {
             };
         } else if b == (91 as Byte) {  // [N]
             i = i + 1;
+            // JSON-path bracket index from user SQL — apply 3-layer
+            // overflow defense so `$[99999999999999999999]` can't
+            // wrap idx past Int.MAX into a small positive value
+            // that would land inside `items.len()`.
             let mut idx: Int = 0;
+            let mut digit_count: Int = 0;
+            let mut overflowed: Bool = false;
             while i < bs.len() && bs[i] != (93 as Byte) {
                 if bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
-                    idx = idx * 10 + ((bs[i] as Int) - 48);
+                    if !overflowed {
+                        if digit_count >= 19 || idx > 922_337_203_685_477_580 {
+                            overflowed = true;
+                        } else {
+                            idx = idx * 10 + ((bs[i] as Int) - 48);
+                            if idx < 0 { overflowed = true; }
+                            digit_count = digit_count + 1;
+                        }
+                    }
                 }
                 i = i + 1;
             }
             if i < bs.len() && bs[i] == (93 as Byte) { i = i + 1; }
+            if overflowed { return None; }
             cur = match cur {
                 JArray(items) => {
                     if idx < 0 || idx >= items.len() { return None; }
