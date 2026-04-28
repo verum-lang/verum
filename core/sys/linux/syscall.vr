@@ -370,9 +370,12 @@ public fn nanosleep_ts(req: &Timespec, rem: Maybe<&mut Timespec>) -> Result<(), 
 }
 
 /// Get random bytes from the kernel.
-public fn getrandom(buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
+/// C: `ssize_t getrandom(void *buf, size_t buflen, unsigned int flags);`
+/// — `flags` is `unsigned int` (UInt32), matching GRND_NONBLOCK / GRND_RANDOM
+/// bit constants which fit in the low 32 bits.
+public fn getrandom(buf: &mut [Byte], flags: UInt32) -> Result<Int, OSError> {
     let result = unsafe {
-        syscall_raw(SYS_GETRANDOM, buf.as_ptr() as Int, buf.len(), flags, 0, 0, 0)
+        syscall_raw(SYS_GETRANDOM, buf.as_ptr() as Int, buf.len(), flags as Int, 0, 0, 0)
     };
     if result < 0 {
         Err(OSError.from_code(-result as Int))
@@ -386,9 +389,11 @@ public fn getrandom(buf: &mut [Byte], flags: Int) -> Result<Int, OSError> {
 // =============================================================================
 
 /// Generic ioctl syscall wrapper.
-public fn ioctl(fd: FileDesc, request: Int, arg: Int) -> Result<Int, OSError> {
+/// C: `int ioctl(int fd, unsigned long request, ...);` — `request` is
+/// `unsigned long` (UInt64 on 64-bit Linux); `arg` is variadic so kept as Int.
+public fn ioctl(fd: FileDesc, request: UInt64, arg: Int) -> Result<Int, OSError> {
     let result = unsafe {
-        syscall_raw(SYS_IOCTL, fd.as_raw(), request, arg, 0, 0, 0)
+        syscall_raw(SYS_IOCTL, fd.as_raw(), request as Int, arg, 0, 0, 0)
     };
     if result < 0 {
         Err(OSError.from_code(-result as Int))
