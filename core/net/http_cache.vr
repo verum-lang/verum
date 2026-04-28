@@ -338,14 +338,13 @@ fn is_ws(b: Byte) -> Bool {
 }
 
 fn slice_vec(src: &[Byte], start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = start;
-    while i < end { out.push(src[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    out.extend_from_slice(&src[start..end]);
     out
 }
 
 fn to_lower_bytes(src: &[Byte]) -> List<Byte> {
-    let mut out: List<Byte> = [];
+    let mut out: List<Byte> = List.with_capacity(src.len());
     let mut i: Int = 0;
     while i < src.len() {
         let c = src[i];
@@ -369,9 +368,9 @@ fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
 
 fn trim_quotes(src: List<Byte>) -> List<Byte> {
     if src.len() >= 2 && src[0] == ('"' as Byte) && src[src.len() - 1] == ('"' as Byte) {
-        let mut out: List<Byte> = [];
-        let mut i: Int = 1;
-        while i < src.len() - 1 { out.push(src[i]); i = i + 1; }
+        let inner_len = src.len() - 2;
+        let mut out: List<Byte> = List.with_capacity(inner_len);
+        out.extend_from_slice(&src.as_slice()[1..src.len() - 1]);
         return out;
     }
     src
@@ -379,12 +378,18 @@ fn trim_quotes(src: List<Byte>) -> List<Byte> {
 
 fn parse_u64_opt(src: &List<Byte>) -> Maybe<UInt64> {
     if src.len() == 0 { return None; }
+    // Cache-Control directive values arrive over the wire — apply
+    // 3-layer overflow defense (UInt64.MAX is 20 decimal digits).
+    if src.len() > 20 { return None; }
     let mut v: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < src.len() {
         let c = src[i];
         if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
-        v = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        if v > 1_844_674_407_370_955_161_u64 { return None; }    // UInt64.MAX / 10
+        let next = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        if next < v { return None; }
+        v = next;
         i = i + 1;
     }
     Some(v)

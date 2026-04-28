@@ -198,6 +198,5 @@ fn push_decimal_byte(out: &mut List<Byte>, b: Byte) {
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }

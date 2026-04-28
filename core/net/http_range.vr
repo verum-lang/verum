@@ -296,9 +296,8 @@ fn trim_ws(src: &[Byte]) -> List<Byte> {
 }
 
 fn slice_range(src: &[Byte], start: Int, end: Int) -> List<Byte> {
-    let mut out: List<Byte> = [];
-    let mut i: Int = start;
-    while i < end { out.push(src[i]); i = i + 1; }
+    let mut out: List<Byte> = List.with_capacity(end - start);
+    out.extend_from_slice(&src[start..end]);
     out
 }
 
@@ -328,6 +327,14 @@ fn parse_u64(src: &List<Byte>) -> Result<UInt64, RangeError> {
     if src.len() == 0 {
         return Err(RangeError.Malformed(Text.from("empty number")));
     }
+    // 3-layer overflow defense — Range headers arrive over the wire from
+    // hostile clients. UInt64.MAX is exactly 20 decimal digits; reject
+    // anything longer up front, per-step `v > MAX/10` guard, and a final
+    // post-add wrap-around check.
+    if src.len() > 20 {
+        return Err(RangeError.Malformed(
+            Text.from_utf8_unchecked(src.as_slice())));
+    }
     let mut v: UInt64 = 0_u64;
     let mut i: Int = 0;
     while i < src.len() {
@@ -336,15 +343,23 @@ fn parse_u64(src: &List<Byte>) -> Result<UInt64, RangeError> {
             return Err(RangeError.Malformed(
                 Text.from_utf8_unchecked(src.as_slice())));
         }
-        v = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        if v > 1_844_674_407_370_955_161_u64 {        // UInt64.MAX / 10
+            return Err(RangeError.Malformed(
+                Text.from_utf8_unchecked(src.as_slice())));
+        }
+        let next = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        if next < v {
+            return Err(RangeError.Malformed(
+                Text.from_utf8_unchecked(src.as_slice())));
+        }
+        v = next;
         i = i + 1;
     }
     Ok(v)
 }
 
 fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
-    let mut i: Int = 0;
-    while i < src.len() { dst.push(src[i]); i = i + 1; }
+    dst.extend_from_slice(src);
 }
 
 fn push_u64(dst: &mut List<Byte>, n: UInt64) {

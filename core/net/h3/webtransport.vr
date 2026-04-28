@@ -285,8 +285,7 @@ implement WtBidirectional {
             return Err(H3Error.WriteAfterFinish);
         }
         let mut b = self.send_buf.lock();
-        let mut i: Int = 0;
-        while i < bytes.len() { b.push(bytes[i]); i = i + 1; }
+        b.extend_from_slice(bytes);
         Ok(())
     }
 
@@ -350,8 +349,7 @@ implement WtUnidirectional {
             return Err(H3Error.WriteAfterFinish);
         }
         let mut b = self.send_buf.lock();
-        let mut i: Int = 0;
-        while i < bytes.len() { b.push(bytes[i]); i = i + 1; }
+        b.extend_from_slice(bytes);
         Ok(())
     }
 
