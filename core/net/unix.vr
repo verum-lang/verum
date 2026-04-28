@@ -155,6 +155,66 @@ implement UnixError {
     }
 }
 
+// Display + Debug for UnixError — adds the standard
+// stdlib formatting protocols so callers can log, format,
+// or pattern-match on the error's textual form without
+// each call site rolling its own match block.
+
+implement Display for UnixError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnixError.IoError(msg)            => f.write_str(msg.as_str()),
+            UnixError.PathTooLong { limit, actual } =>
+                f.write_str(f"unix path exceeds platform limit: limit={limit} actual={actual}".as_str()),
+            UnixError.InvalidPath(msg)        => {
+                f.write_str("invalid unix path: ")?;
+                f.write_str(msg.as_str())
+            },
+            UnixError.PermissionDenied        => f.write_str("permission denied"),
+            UnixError.PathInUse(msg)          => {
+                f.write_str("unix path in use: ")?;
+                f.write_str(msg.as_str())
+            },
+            UnixError.NotFound(msg)           => {
+                f.write_str("unix path not found: ")?;
+                f.write_str(msg.as_str())
+            },
+            UnixError.PeerClosed              => f.write_str("peer closed connection"),
+        }
+    }
+}
+
+implement Debug for UnixError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UnixError.IoError(msg) => {
+                f.write_str("IoError(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            UnixError.PathTooLong { limit, actual } =>
+                f.write_str(f"PathTooLong {{ limit: {limit}, actual: {actual} }}".as_str()),
+            UnixError.InvalidPath(msg) => {
+                f.write_str("InvalidPath(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            UnixError.PermissionDenied => f.write_str("PermissionDenied"),
+            UnixError.PathInUse(msg) => {
+                f.write_str("PathInUse(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            UnixError.NotFound(msg) => {
+                f.write_str("NotFound(")?;
+                f.write_str(msg.as_str())?;
+                f.write_str(")")
+            },
+            UnixError.PeerClosed => f.write_str("PeerClosed"),
+        }
+    }
+}
+
 // =============================================================================
 // sockaddr_un — POSIX Unix-domain address
 // =============================================================================
