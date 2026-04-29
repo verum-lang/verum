@@ -162,19 +162,15 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
                 }
             };
 
-            let obligation = LadderObligation {
-                item_name: item_name.clone(),
-                declared_strategy: typed_strategy,
-                obligation_text: Text::from("(elaborated obligation pending V1)"),
-                timeout_ms: None,
-                // V0 surface: kernel re-check + SMT plumbing land
-                // empty. The trivial-tautology decider handles the
-                // dispatch when these are absent.
-                core_term: verum_common::Maybe::None,
-                expected_type: verum_common::Maybe::None,
-                axiom_registry: None,
-                smt_assertions: Vec::new(),
-            };
+            // V0 CLI surface: kernel re-check + SMT plumbing
+            // construction lands in a separate elaboration pass.
+            // The trivial-tautology decider handles the dispatch
+            // when typed payloads are absent.
+            let obligation = LadderObligation::text(
+                item_name.clone(),
+                typed_strategy,
+                "(elaborated obligation pending V1)",
+            );
             let verdict = dispatcher.dispatch(&obligation);
             totals.record(&verdict);
             records.push(VerdictRecord {
