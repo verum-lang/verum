@@ -343,11 +343,20 @@ pub fn encode_string(s: &str, output: &mut Vec<u8>) {
 #[inline]
 pub fn decode_string(data: &[u8], offset: &mut usize) -> VbcResult<String> {
     let len = decode_varint(data, offset)? as usize;
-    if *offset + len > data.len() {
+    // `*offset + len` can wrap usize when `len` decodes from a
+    // hostile varint near `usize::MAX`.  In release builds the
+    // overflow wraps silently, producing a small wrapped value
+    // that *passes* the bounds check `... > data.len()` while
+    // the slice `data[*offset..*offset + len]` would then read
+    // from the wrong region (or, for a wrap that lands on a
+    // valid offset, alias previously-read bytes).  Use
+    // `checked_add` to surface the overflow as `eof`.
+    let end = offset.checked_add(len).ok_or_else(|| VbcError::eof(*offset, len))?;
+    if end > data.len() {
         return Err(VbcError::eof(*offset, len));
     }
-    let bytes = &data[*offset..*offset + len];
-    *offset += len;
+    let bytes = &data[*offset..end];
+    *offset = end;
 
     String::from_utf8(bytes.to_vec()).map_err(|e| VbcError::InvalidUtf8 {
         offset: (*offset - len) as u32,
@@ -359,11 +368,13 @@ pub fn decode_string(data: &[u8], offset: &mut usize) -> VbcResult<String> {
 #[inline]
 pub fn decode_bytes(data: &[u8], offset: &mut usize) -> VbcResult<Vec<u8>> {
     let len = decode_varint(data, offset)? as usize;
-    if *offset + len > data.len() {
+    // Same overflow defense as `decode_string` above.
+    let end = offset.checked_add(len).ok_or_else(|| VbcError::eof(*offset, len))?;
+    if end > data.len() {
         return Err(VbcError::eof(*offset, len));
     }
-    let bytes = data[*offset..*offset + len].to_vec();
-    *offset += len;
+    let bytes = data[*offset..end].to_vec();
+    *offset = end;
     Ok(bytes)
 }
 
@@ -589,6 +600,29 @@ mod tests {
         let mut cursor = Cursor::new(&overflow_data[..]);
         let result = read_varint(&mut cursor);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_string_rejects_offset_overflow() {
+        // Hostile encoding: a varint length near usize::MAX followed
+        // by a tiny payload.  Pre-fix `*offset + len` wraps usize and
+        // the wrapped value passes the `> data.len()` check, opening
+        // a path to read from the wrong region.  Post-fix
+        // `checked_add` rejects via `Eof`.
+        //
+        // u64::MAX encodes as [0xff×9, 0x01].  Decoded as usize this
+        // is u64::MAX → adding any positive *offset overflows.
+        let mut data: Vec<u8> = vec![0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        // Advance offset by some amount before the decode, so that
+        // *offset > 0 and overflow is reachable on the addition.
+        data.push(b'X');
+        let mut offset = 1;
+        let r = decode_string(&data, &mut offset);
+        assert!(r.is_err(), "decode_string must reject overflow-claiming length");
+
+        let mut offset = 1;
+        let r = decode_bytes(&data, &mut offset);
+        assert!(r.is_err(), "decode_bytes must reject overflow-claiming length");
     }
 
     #[test]
