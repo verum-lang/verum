@@ -53,8 +53,8 @@ implement OptimizationPass for MoveChain {
         while i + 1 < stream.len() {
             let opt_a = stream.entry(i);
             let opt_b = stream.entry(i + 1);
-            let a = match opt_a { base.Some(x) => x, base.None => { break; } };
-            let b = match opt_b { base.Some(x) => x, base.None => { break; } };
+            let a = match opt_a { Some(x) => x, None => { break; } };
+            let b = match opt_b { Some(x) => x, None => { break; } };
             // Only collapse pure SCopy chains (Move/Copy have side
             // effects on counts via p3=count).
             if is_scopy(&a) && is_scopy(&b) && a.p2 == b.p1 {
@@ -81,7 +81,7 @@ fn register_used_after(stream: &OpStream, from: Int, reg: Int) -> Bool {
     let mut k: Int = from;
     while k < stream.len() {
         let opt = stream.entry(k);
-        let entry = match opt { base.Some(e) => e, base.None => { return false; } };
+        let entry = match opt { Some(e) => e, None => { return false; } };
         if reads_register(&entry, reg) { return true; }
         // Once the register is overwritten, the prior value is dead.
         if overwrites_register(&entry, reg) { return false; }

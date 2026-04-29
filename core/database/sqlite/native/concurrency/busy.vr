@@ -31,7 +31,7 @@ public type RetryDecision is
 // -----------------------------------------------------------------------------
 
 public type BusyPolicy is protocol {
-    fn name(&self) -> base.Text;
+    fn name(&self) -> Text;
     /// `attempt` starts at 0 (just before the first busy hit).
     fn decide(&self, attempt: Int) -> RetryDecision;
 };
@@ -44,7 +44,7 @@ public type NoRetry is { unit: Bool };
 public fn no_retry() -> NoRetry { NoRetry { unit: true } }
 
 implement BusyPolicy for NoRetry {
-    fn name(&self) -> base.Text { "no_retry".clone() }
+    fn name(&self) -> Text { "no_retry".clone() }
     fn decide(&self, _attempt: Int) -> RetryDecision { RdGiveUp }
 }
 
@@ -62,7 +62,7 @@ public fn constant_retry(max_attempts: Int, sleep_ns: Int64) -> ConstantRetry {
 }
 
 implement BusyPolicy for ConstantRetry {
-    fn name(&self) -> base.Text { "constant".clone() }
+    fn name(&self) -> Text { "constant".clone() }
     fn decide(&self, attempt: Int) -> RetryDecision {
         if attempt >= self.max_attempts { return RdGiveUp; }
         RdRetryAfter(self.sleep_ns)
@@ -100,7 +100,7 @@ public fn exponential_retry(
 }
 
 implement BusyPolicy for ExponentialRetry {
-    fn name(&self) -> base.Text { "exponential".clone() }
+    fn name(&self) -> Text { "exponential".clone() }
     fn decide(&self, attempt: Int) -> RetryDecision {
         if attempt >= self.max_attempts { return RdGiveUp; }
         let mut sleep: Int64 = self.base_ns;

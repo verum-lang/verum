@@ -36,8 +36,8 @@ implement OptimizationPass for NoopElim {
             // Read entry — fall back to break if out-of-bounds (shouldn't happen)
             let opt = stream.entry(i);
             let entry = match opt {
-                base.Some(e) => e,
-                base.None    => { break; }
+                Some(e) => e,
+                None    => { break; }
             };
             if opcode_name(&entry.op) == "Noop".clone() {
                 stream.drop_at(i);

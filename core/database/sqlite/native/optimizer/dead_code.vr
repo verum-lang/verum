@@ -44,22 +44,22 @@ fn is_terminator(op: &OpcodeKind) -> Bool {
         || nm == "HaltUserError".clone() || nm == "HaltIfNull".clone()
 }
 
-fn jump_target(e: &OpEntry) -> base.Maybe<Int> {
+fn jump_target(e: &OpEntry) -> Maybe<Int> {
     let nm = opcode_name(&e.op);
     if nm == "Goto".clone() || nm == "Init".clone() || nm == "Once".clone()
         || nm == "Jump".clone() {
-        return base.Some(e.p1);
+        return Some(e.p1);
     }
     if nm == "Eq".clone() || nm == "Ne".clone() || nm == "Lt".clone()
         || nm == "Le".clone() || nm == "Gt".clone() || nm == "Ge".clone() {
-        return base.Some(e.p3);
+        return Some(e.p3);
     }
     if nm == "If".clone() || nm == "IfNot".clone() || nm == "IfNull".clone()
         || nm == "NotNull".clone() || nm == "IfPos".clone()
         || nm == "IfNeg".clone() || nm == "IfZero".clone() {
-        return base.Some(e.p2);
+        return Some(e.p2);
     }
-    base.None
+    None
 }
 
 fn falls_through(op: &OpcodeKind) -> Bool {
@@ -94,7 +94,7 @@ implement OptimizationPass for DeadCodeElim {
             while k < last { new_wl.push(worklist[k]); k = k + 1; }
             worklist = new_wl;
             let opt = stream.entry(pc);
-            let entry = match opt { base.Some(e) => e, base.None => { continue; } };
+            let entry = match opt { Some(e) => e, None => { continue; } };
             // Successor: pc+1 if falls through.
             if falls_through(&entry.op) {
                 let next = pc + 1;
@@ -105,13 +105,13 @@ implement OptimizationPass for DeadCodeElim {
             }
             // Jump target.
             match jump_target(&entry) {
-                base.Some(t) => {
+                Some(t) => {
                     if t >= 0 && t < n && !reachable[t] {
                         reachable[t] = true;
                         worklist.push(t);
                     }
                 }
-                base.None => {}
+                None => {}
             }
         }
         // Drop unreachable entries from the back forward (so PCs

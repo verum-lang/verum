@@ -110,7 +110,7 @@ implement LimitTracker {
         dim: LimitDimension,
         current_value: Int64,
         when_ns: Int64,
-        context: base.Text,
+        context: Text,
     ) -> EnforcementDecision {
         let idx = self.ensure_state(&dim);
         self.states[idx].current = current_value;

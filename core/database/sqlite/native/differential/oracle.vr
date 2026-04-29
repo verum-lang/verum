@@ -88,12 +88,12 @@ implement DifferentialOracle {
     }
 
     /// First report that did NOT match — useful for failing-fast in CI.
-    pub fn first_mismatch(&self) -> base.Maybe<CaseReport> {
+    pub fn first_mismatch(&self) -> Maybe<CaseReport> {
         let mut i: Int = 0;
         while i < self.reports.len() {
             if !is_match(&self.reports[i].outcome) {
                 let r = &self.reports[i];
-                return base.Some(case_report(
+                return Some(case_report(
                     r.case_name.clone(),
                     clone_outcome(&r.outcome),
                     r.loom_elapsed_ns,
@@ -102,7 +102,7 @@ implement DifferentialOracle {
             }
             i = i + 1;
         }
-        base.None
+        None
     }
 
     /// One-line summary suitable for CI output.

@@ -34,7 +34,7 @@ public type SoftHeapAllocOutcome is
     | AoRefusedSoft                            // handler refused / no handler
     | AoRefusedHard;
 
-public fn outcome_kind_name(o: &SoftHeapAllocOutcome) -> base.Text {
+public fn outcome_kind_name(o: &SoftHeapAllocOutcome) -> Text {
     match o {
         AoGranted                  => "granted".clone(),
         AoGrantedAfterReclaim(_)   => "granted_after_reclaim".clone(),

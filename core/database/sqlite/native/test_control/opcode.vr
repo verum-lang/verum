@@ -106,7 +106,7 @@ public fn op_numeric(op: &TestCtrlOp) -> Int {
     }
 }
 
-public fn is_safe_in_prod(op: &TestCtrlOp) -> base.Bool {
+public fn is_safe_in_prod(op: &TestCtrlOp) -> Bool {
     // Most TESTCTRL_* are production-safe read-only queries; the few
     // that inject faults (FaultInstall, LocaltimeFault, Imposter,
     // NeverCorrupt) must be avoided in real deployments.

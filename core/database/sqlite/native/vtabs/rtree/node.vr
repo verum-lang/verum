@@ -83,7 +83,7 @@ public fn node_entry_count(n: &RTreeNode) -> Int {
     }
 }
 
-public fn node_is_full(n: &RTreeNode) -> base.Bool {
+public fn node_is_full(n: &RTreeNode) -> Bool {
     node_entry_count(n) >= RTREE_MAX_CELLS
 }
 

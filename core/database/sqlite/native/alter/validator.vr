@@ -126,18 +126,18 @@ implement TableShape {
         self
     }
 
-    public fn column(&self, name: &Text) -> base.Maybe<ColumnShape> {
+    public fn column(&self, name: &Text) -> Maybe<ColumnShape> {
         let mut i: Int = 0;
         while i < self.columns.len() {
             if self.columns[i].name == name {
-                return base.Some(ColumnShape {
+                return Some(ColumnShape {
                     name: self.columns[i].name.clone(),
                     is_pk: self.columns[i].is_pk,
                 });
             }
             i = i + 1;
         }
-        base.None
+        None
     }
 
     public fn has_inbound_fk(&self) -> Bool { self.inbound_fk_tables.len() > 0 }

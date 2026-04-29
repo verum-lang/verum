@@ -64,12 +64,12 @@ implement VdbeExplainTable {
     }
 
     /// First occurrence of an opcode by name — useful for sniff-tests.
-    pub fn find_opcode(&self, want: &Text) -> base.Maybe<Int> {
+    pub fn find_opcode(&self, want: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.rows.len() {
-            if self.rows[i].opcode == *want { return base.Some(i); }
+            if self.rows[i].opcode == *want { return Some(i); }
             i = i + 1;
         }
-        base.None
+        None
     }
 }

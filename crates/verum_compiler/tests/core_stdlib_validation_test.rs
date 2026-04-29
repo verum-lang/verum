@@ -126,9 +126,26 @@ fn test_count_stdlib_internal_type_errors() {
             //                                          fn/impl registration
             //                                          phase, NOT in
             //                                          user code)
+            //   2026-04-29  budget: 5   (count: 5)   — `base.X` / `common.X`
+            //                                          path-prefix call sites
+            //                                          rewritten to bare names
+            //                                          via brace-mount
+            //                                          (52 .vr files touched);
+            //                                          `Event` mismatch in
+            //                                          core/term renamed to
+            //                                          match its consumers;
+            //                                          `AlterValidationError`
+            //                                          import name corrected;
+            //                                          remaining 5 are the
+            //                                          `Output` registration-
+            //                                          order bug in
+            //                                          core/io/process.vr
+            //                                          (tracked separately —
+            //                                          requires compiler
+            //                                          fix, not stdlib fix)
             //
-            // Reduce as path-prefix resolution lands.
-            const BUDGET: usize = 75;
+            // Reduce as the Output registration-order bug lands.
+            const BUDGET: usize = 5;
             assert!(
                 total <= BUDGET,
                 "Stdlib internal type errors ({total}) exceed budget ({BUDGET}). \

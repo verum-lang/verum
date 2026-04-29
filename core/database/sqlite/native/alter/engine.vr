@@ -7,7 +7,7 @@
 //
 //   Init → Validating → GeneratingSql → Executing → ApplyingDelta → Done
 //
-// On validation failure → `Failed(ValidationError)`. On execution
+// On validation failure → `Failed(AlterValidationError)`. On execution
 // failure → `Failed(ExecutionError(message))`.
 // =============================================================================
 
@@ -20,7 +20,7 @@ mount core.database.sqlite.native.alter.op.{
     AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
 };
 mount core.database.sqlite.native.alter.validator.{
-    ValidationError, SchemaSnapshot, validate, error_kind,
+    AlterValidationError, SchemaSnapshot, validate, error_kind,
 };
 mount core.database.sqlite.native.alter.delta.{
     SchemaDelta, ImpactReport, delta_from, report_for,
@@ -31,7 +31,7 @@ mount core.database.sqlite.native.alter.delta.{
 // -----------------------------------------------------------------------------
 
 public type AlterEngineFailure is
-      AefValidation(ValidationError)
+      AefValidation(AlterValidationError)
     | AefExecution(Text);
 
 public type AlterEnginePhase is
@@ -94,8 +94,8 @@ implement AlterEngine {
             EpInit => { self.phase = EpValidating; }
             EpValidating => {
                 match validate(&self.op, snap) {
-                    base.Ok(_)  => { self.phase = EpGeneratingSql; }
-                    base.Err(e) => { self.phase = EpFailed(AefValidation(e)); }
+                    Ok(_)  => { self.phase = EpGeneratingSql; }
+                    Err(e) => { self.phase = EpFailed(AefValidation(e)); }
                 }
             }
             EpGeneratingSql => {
@@ -206,7 +206,7 @@ fn clone_phase(p: &AlterEnginePhase) -> AlterEnginePhase {
 fn clone_failure(f: &AlterEngineFailure) -> AlterEngineFailure {
     match f {
         AefValidation(_e) => {
-            // ValidationError is a sum we can't deeply clone here without
+            // AlterValidationError is a sum we can't deeply clone here without
             // pattern-matching every variant — reuse a placeholder text.
             AefExecution(error_kind(_e))
         }

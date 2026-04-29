@@ -74,15 +74,15 @@ implement FaultSchedule {
     pub fn push(&mut self, e: ScheduledFault) { self.entries.push(e); }
 
     /// First fault at-or-after `op_idx`.
-    pub fn next_after(&self, op_idx: Int) -> base.Maybe<ScheduledFault> {
+    pub fn next_after(&self, op_idx: Int) -> Maybe<ScheduledFault> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].at_op >= op_idx {
-                return base.Some(scheduled(self.entries[i].at_op, clone_fault(&self.entries[i].fault)));
+                return Some(scheduled(self.entries[i].at_op, clone_fault(&self.entries[i].fault)));
             }
             i = i + 1;
         }
-        base.None
+        None
     }
 
     /// Op index at which the first terminal fault (PowerLoss) fires.

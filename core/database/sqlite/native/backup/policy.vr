@@ -26,7 +26,7 @@ mount base.{Bool};
 // -----------------------------------------------------------------------------
 
 public type ThrottlePolicy is protocol {
-    fn name(&self) -> base.Text;
+    fn name(&self) -> Text;
     /// How many pages to request on the next step.
     fn pages_for_next_step(&mut self) -> Int;
     /// Nanoseconds to wait before invoking the next step. The L7
@@ -49,7 +49,7 @@ public type Unlimited is { unit: Bool };
 public fn unlimited() -> Unlimited { Unlimited { unit: true } }
 
 implement ThrottlePolicy for Unlimited {
-    fn name(&self) -> base.Text { "unlimited".clone() }
+    fn name(&self) -> Text { "unlimited".clone() }
     fn pages_for_next_step(&mut self) -> Int { 0x7fffffff }
     fn sleep_ns(&self) -> Int64 { 0 as Int64 }
 }
@@ -71,7 +71,7 @@ public fn bounded(pages: Int, sleep_ns: Int64) -> Bounded {
 }
 
 implement ThrottlePolicy for Bounded {
-    fn name(&self) -> base.Text { "bounded".clone() }
+    fn name(&self) -> Text { "bounded".clone() }
     fn pages_for_next_step(&mut self) -> Int { self.pages_per_step }
     fn sleep_ns(&self) -> Int64 { self.sleep_per_step_ns }
 }
@@ -107,7 +107,7 @@ public fn adaptive_load(base_pages: Int, base_sleep_ns: Int64, threshold_writes:
 }
 
 implement ThrottlePolicy for AdaptiveLoad {
-    fn name(&self) -> base.Text { "adaptive_load".clone() }
+    fn name(&self) -> Text { "adaptive_load".clone() }
 
     fn pages_for_next_step(&mut self) -> Int {
         // Decay EMA back toward 0 each step.

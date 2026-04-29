@@ -128,11 +128,11 @@ public type MaxInt is { sep: Text };
 public fn max_int() -> MaxInt { MaxInt { sep: "".clone() } }
 
 implement AggregateFn for MaxInt {
-    type State = base.Maybe<Int64>;
+    type State = Maybe<Int64>;
     fn name(&self) -> Text { "max_int".clone() }
     fn arity(&self) -> Int { 1 }
-    fn init(&self) -> base.Maybe<Int64> { base.None }
-    fn step(&self, st: &mut base.Maybe<Int64>, args: &List<Register>) {
+    fn init(&self) -> Maybe<Int64> { None }
+    fn step(&self, st: &mut Maybe<Int64>, args: &List<Register>) {
         if args.len() == 0 { return; }
         let v: Int64 = match &args[0] {
             core.database.sqlite.native.l4_vdbe.register.RInt(x) => x,
@@ -140,14 +140,14 @@ implement AggregateFn for MaxInt {
             _ => { return; }
         };
         match st {
-            base.Some(cur) => { if v > *cur { *st = base.Some(v); } }
-            base.None      => { *st = base.Some(v); }
+            Some(cur) => { if v > *cur { *st = Some(v); } }
+            None      => { *st = Some(v); }
         }
     }
-    fn finalize(&self, st: base.Maybe<Int64>) -> Register {
+    fn finalize(&self, st: Maybe<Int64>) -> Register {
         match st {
-            base.Some(v) => core.database.sqlite.native.l4_vdbe.register.RInt(v),
-            base.None    => RNull,
+            Some(v) => core.database.sqlite.native.l4_vdbe.register.RInt(v),
+            None    => RNull,
         }
     }
 }

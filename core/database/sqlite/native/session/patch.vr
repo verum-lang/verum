@@ -41,7 +41,7 @@ public type PatchCell is { value: Maybe<Register> };
 
 public type SessionPatch is {
     op: SessionChangeOp,
-    table: base.Text,
+    table: Text,
     pk_columns: List<Bool>,
     /// PK column values (used to locate the target row).
     pk_values: List<Register>,

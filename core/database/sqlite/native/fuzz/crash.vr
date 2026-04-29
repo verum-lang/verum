@@ -72,15 +72,15 @@ implement CrashBucket {
         true
     }
 
-    pub fn lookup(&self, signature: &Text) -> base.Maybe<Int> {
+    pub fn lookup(&self, signature: &Text) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             if self.entries[i].signature == *signature {
-                return base.Some(self.entries[i].hit_count);
+                return Some(self.entries[i].hit_count);
             }
             i = i + 1;
         }
-        base.None
+        None
     }
 }
 

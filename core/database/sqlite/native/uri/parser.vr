@@ -86,10 +86,10 @@ public fn uri_error_name(e: &UriError) -> Text {
 // Parse
 // -----------------------------------------------------------------------------
 
-public fn parse(text: &Text) -> base.Result<ParsedUri, UriError> {
+public fn parse(text: &Text) -> Result<ParsedUri, UriError> {
     let bs = text.as_bytes();
     if bs.len() == 0 {
-        return base.Ok(ParsedUri {
+        return Ok(ParsedUri {
             path: Text.new(),
             params: uri_params_default(),
             has_scheme: false,
@@ -98,7 +98,7 @@ public fn parse(text: &Text) -> base.Result<ParsedUri, UriError> {
 
     if !looks_like_file_scheme(bs) {
         // Raw filename — return verbatim with default params.
-        return base.Ok(ParsedUri {
+        return Ok(ParsedUri {
             path: text.clone(),
             params: uri_params_default(),
             has_scheme: false,
@@ -127,12 +127,12 @@ public fn parse(text: &Text) -> base.Result<ParsedUri, UriError> {
         // Query
         i = i + 1;
         match parse_query(text, i, bs.len(), &mut params) {
-            base.Ok(_)  => {}
-            base.Err(e) => return base.Err(e),
+            Ok(_)  => {}
+            Err(e) => return Err(e),
         }
     }
 
-    base.Ok(ParsedUri {
+    Ok(ParsedUri {
         path: decoded_path,
         params: params,
         has_scheme: true,
@@ -143,7 +143,7 @@ fn parse_query(
     text: &Text,
     start: Int, end: Int,
     params: &mut UriParams,
-) -> base.Result<(), UriError> {
+) -> Result<(), UriError> {
     let bs = text.as_bytes();
     let mut i: Int = start;
     while i < end {
@@ -151,20 +151,20 @@ fn parse_query(
         while i < end && bs[i] != (38 as Byte) { i = i + 1; }
         let pair_end = i;
         match parse_pair(text, pair_start, pair_end, params) {
-            base.Ok(_)  => {}
-            base.Err(e) => return base.Err(e),
+            Ok(_)  => {}
+            Err(e) => return Err(e),
         }
         if i < end && bs[i] == (38 as Byte) { i = i + 1; }
     }
-    base.Ok(())
+    Ok(())
 }
 
 fn parse_pair(
     text: &Text,
     start: Int, end: Int,
     params: &mut UriParams,
-) -> base.Result<(), UriError> {
-    if start == end { return base.Ok(()); }
+) -> Result<(), UriError> {
+    if start == end { return Ok(()); }
     let bs = text.as_bytes();
     let mut sep: Int = -1;
     let mut i: Int = start;
@@ -182,7 +182,7 @@ fn parse_pair(
         let value = percent_decode(&slice_text(text, sep + 1, end));
         params.merge(&key, &value);
     }
-    base.Ok(())
+    Ok(())
 }
 
 fn looks_like_file_scheme(bs: List<Byte>) -> Bool {

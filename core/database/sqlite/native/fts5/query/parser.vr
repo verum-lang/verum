@@ -135,77 +135,77 @@ implement Eq for Fts5ParseError {
     }
 }
 
-public fn parse(text: &Text) -> base.Result<MatchAst, Fts5ParseError> {
+public fn parse(text: &Text) -> Result<MatchAst, Fts5ParseError> {
     let toks = lex(text);
-    if toks.len() == 1 { return base.Err(PeEmpty); }
+    if toks.len() == 1 { return Err(PeEmpty); }
     let mut state = parse_state(toks);
     parse_or(&mut state)
 }
 
-fn parse_or(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
-    let mut left = match parse_and(s) { base.Ok(v) => v, base.Err(e) => return base.Err(e) };
+fn parse_or(s: &mut ParseState) -> Result<MatchAst, Fts5ParseError> {
+    let mut left = match parse_and(s) { Ok(v) => v, Err(e) => return Err(e) };
     loop {
         match peek(s) {
             TokOr => {
                 bump(s);
                 let right = match parse_and(s) {
-                    base.Ok(v) => v,
-                    base.Err(e) => return base.Err(e),
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
                 };
                 left = or_op(left, right);
             }
             _ => break,
         }
     }
-    base.Ok(left)
+    Ok(left)
 }
 
-fn parse_and(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
-    let mut left = match parse_not(s) { base.Ok(v) => v, base.Err(e) => return base.Err(e) };
+fn parse_and(s: &mut ParseState) -> Result<MatchAst, Fts5ParseError> {
+    let mut left = match parse_not(s) { Ok(v) => v, Err(e) => return Err(e) };
     loop {
         match peek(s) {
             TokAnd => {
                 bump(s);
                 let right = match parse_not(s) {
-                    base.Ok(v) => v,
-                    base.Err(e) => return base.Err(e),
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
                 };
                 left = and_op(left, right);
             }
             // Implicit AND: two atoms in a row.
             TokWord(_) | TokQuote | TokLParen => {
                 let right = match parse_not(s) {
-                    base.Ok(v) => v,
-                    base.Err(e) => return base.Err(e),
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
                 };
                 left = and_op(left, right);
             }
             _ => break,
         }
     }
-    base.Ok(left)
+    Ok(left)
 }
 
-fn parse_not(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
+fn parse_not(s: &mut ParseState) -> Result<MatchAst, Fts5ParseError> {
     match peek(s) {
         TokNot => {
             bump(s);
             let inner = match parse_atom(s) {
-                base.Ok(v) => v,
-                base.Err(e) => return base.Err(e),
+                Ok(v) => v,
+                Err(e) => return Err(e),
             };
-            base.Ok(not_op(inner))
+            Ok(not_op(inner))
         }
         _ => parse_atom(s),
     }
 }
 
-fn parse_atom(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
+fn parse_atom(s: &mut ParseState) -> Result<MatchAst, Fts5ParseError> {
     match peek(s) {
         TokWord(w) => {
             let val = w.clone();
             bump(s);
-            base.Ok(term(val))
+            Ok(term(val))
         }
         TokQuote => {
             bump(s);
@@ -217,24 +217,24 @@ fn parse_atom(s: &mut ParseState) -> base.Result<MatchAst, Fts5ParseError> {
                         bump(s);
                     }
                     TokQuote => { bump(s); break; }
-                    TokEof   => return base.Err(PeUnclosedQuote),
-                    _        => return base.Err(PeUnexpected("expected word in phrase".clone())),
+                    TokEof   => return Err(PeUnclosedQuote),
+                    _        => return Err(PeUnexpected("expected word in phrase".clone())),
                 }
             }
-            base.Ok(phrase(words))
+            Ok(phrase(words))
         }
         TokLParen => {
             bump(s);
             let inner = match parse_or(s) {
-                base.Ok(v) => v,
-                base.Err(e) => return base.Err(e),
+                Ok(v) => v,
+                Err(e) => return Err(e),
             };
             match peek(s) {
-                TokRParen => { bump(s); base.Ok(inner) }
-                _         => base.Err(PeUnexpected("expected ')'".clone())),
+                TokRParen => { bump(s); Ok(inner) }
+                _         => Err(PeUnexpected("expected ')'".clone())),
             }
         }
-        _ => base.Err(PeUnexpected("expected term".clone())),
+        _ => Err(PeUnexpected("expected term".clone())),
     }
 }
 

@@ -99,7 +99,7 @@ fn filter_by_predicate(tree: &RTree, candidates: &List<Int64>, q: &RangeQuery) -
         // Need the candidate's MBB; walk every leaf to find it.
         let m = lookup_mbb(tree, candidates[i]);
         match m {
-            base.Some(b) => {
+            Some(b) => {
                 let pass = match q.mode {
                     QmCovers       => q.box_q.covers(&b),
                     QmContainedIn  => b.covers(&q.box_q),
@@ -107,14 +107,14 @@ fn filter_by_predicate(tree: &RTree, candidates: &List<Int64>, q: &RangeQuery) -
                 };
                 if pass { out.push(candidates[i]); }
             }
-            base.None => {}
+            None => {}
         }
         i = i + 1;
     }
     out
 }
 
-fn lookup_mbb(tree: &RTree, rowid: Int64) -> base.Maybe<BoundingBox> {
+fn lookup_mbb(tree: &RTree, rowid: Int64) -> Maybe<BoundingBox> {
     let mut i: Int = 0;
     while i < tree.nodes.len() {
         match &tree.nodes[i] {
@@ -131,7 +131,7 @@ fn lookup_mbb(tree: &RTree, rowid: Int64) -> base.Maybe<BoundingBox> {
                             max.push(b.max[z]);
                             z = z + 1;
                         }
-                        return base.Some(bbox(min, max));
+                        return Some(bbox(min, max));
                     }
                     k = k + 1;
                 }
@@ -140,5 +140,5 @@ fn lookup_mbb(tree: &RTree, rowid: Int64) -> base.Maybe<BoundingBox> {
         }
         i = i + 1;
     }
-    base.None
+    None
 }

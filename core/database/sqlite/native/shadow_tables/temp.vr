@@ -34,7 +34,7 @@ implement TempMasterTable {
 
     pub fn drop_by_name(&mut self, name: &Text) -> Bool { self.inner.drop_by_name(name) }
 
-    pub fn lookup(&self, name: &Text) -> base.Maybe<MasterRow> { self.inner.lookup(name) }
+    pub fn lookup(&self, name: &Text) -> Maybe<MasterRow> { self.inner.lookup(name) }
 
     pub fn by_kind(&self, kind: &MasterRowKind) -> List<MasterRow> { self.inner.by_kind(kind) }
 

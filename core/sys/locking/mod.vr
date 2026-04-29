@@ -23,6 +23,7 @@ module sys.locking;
 // =============================================================================
 
 mount core.sys.common;
+mount core.sys.common.{FileDesc, OSError, FcntlLockKind, Shared as SharedKind, Exclusive as ExclusiveKind, try_lock_region, unlock_region};
 mount core.base.maybe.Maybe;
 mount core.base.result.Result;
 
@@ -61,7 +62,7 @@ public type LockRegion is {
 /// non-conflict OS failure (EBADF, ENOLCK, etc.).
 public type LockError is
       Conflict(owner_pid: Maybe<Int>)
-    | IoError(err: common.OSError);
+    | IoError(err: OSError);
 
 implement Display for LockError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -103,7 +104,7 @@ implement Eq for LockError {
 /// `unlock` is a compile error under the affine-checker — the lock
 /// would otherwise leak on the underlying fd.
 public type affine LockHandle is {
-    fd: common.FileDesc,
+    fd: FileDesc,
     region: LockRegion,
     kind: FileLockKind,
     active: Bool,
@@ -148,11 +149,11 @@ implement LockRegion {
 
 implement LockHandle {
     /// Private — handles are only constructed inside `try_lock`.
-    fn new(fd: common.FileDesc, region: LockRegion, kind: FileLockKind) -> LockHandle {
+    fn new(fd: FileDesc, region: LockRegion, kind: FileLockKind) -> LockHandle {
         LockHandle { fd: fd, region: region, kind: kind, active: true }
     }
 
-    public fn fd(&self) -> common.FileDesc { self.fd }
+    public fn fd(&self) -> FileDesc { self.fd }
     public fn region(&self) -> &LockRegion { &self.region }
     public fn kind(&self) -> FileLockKind { self.kind }
     public fn is_active(&self) -> Bool { self.active }
@@ -169,23 +170,23 @@ implement LockHandle {
 /// returns `Err(Conflict(...))`. Any other OS failure returns
 /// `Err(IoError(OSError))`.
 ///
-/// Implementation: dispatches to `core.sys.common.try_lock_region`,
+/// Implementation: dispatches to `core.sys.try_lock_region`,
 /// which selects `F_OFD_SETLK` on Linux, `F_SETLK` on Darwin, and
 /// `LockFileEx` on Windows.
 public fn try_lock(
-    fd: common.FileDesc,
+    fd: FileDesc,
     region: LockRegion,
     kind: FileLockKind,
 ) -> Result<LockHandle, LockError> {
-    let backend_kind: common.FcntlLockKind = match kind {
-        Shared    => common.Shared,
-        Exclusive => common.Exclusive,
+    let backend_kind: FcntlLockKind = match kind {
+        Shared    => SharedKind,
+        Exclusive => ExclusiveKind,
     };
-    // common.try_lock_region treats `len == 0` as "to EOF". Our
+    // try_lock_region treats `len == 0` as "to EOF". Our
     // LockRegion carries that intent as `length == -1`.
     let backend_len: Int = if region.length < 0 { 0 } else { region.length };
 
-    match common.try_lock_region(fd, backend_kind, region.start, backend_len) {
+    match try_lock_region(fd, backend_kind, region.start, backend_len) {
         Ok(_)  => Ok(LockHandle.new(fd, region, kind)),
         Err(e) => {
             if e.would_block() {
@@ -207,7 +208,7 @@ public fn unlock(mut handle: LockHandle) -> Result<(), LockError> {
         return Ok(());
     }
     let backend_len: Int = if handle.region.length < 0 { 0 } else { handle.region.length };
-    let res = common.unlock_region(handle.fd, handle.region.start, backend_len);
+    let res = unlock_region(handle.fd, handle.region.start, backend_len);
     handle.active = false;
     match res {
         Ok(_)  => Ok(()),
@@ -218,7 +219,7 @@ public fn unlock(mut handle: LockHandle) -> Result<(), LockError> {
 /// Convenience: acquire an exclusive lock on a single byte. SQLite's
 /// PENDING_BYTE / RESERVED_BYTE map directly onto this pattern.
 public fn try_lock_byte_exclusive(
-    fd: common.FileDesc,
+    fd: FileDesc,
     offset: Int,
 ) -> Result<LockHandle, LockError> {
     try_lock(fd, LockRegion.byte(offset), Exclusive)
@@ -227,7 +228,7 @@ public fn try_lock_byte_exclusive(
 /// Convenience: acquire a shared lock on a single byte. SQLite's
 /// SHARED_BYTE uses this to mark a connection as a reader.
 public fn try_lock_byte_shared(
-    fd: common.FileDesc,
+    fd: FileDesc,
     offset: Int,
 ) -> Result<LockHandle, LockError> {
     try_lock(fd, LockRegion.byte(offset), Shared)

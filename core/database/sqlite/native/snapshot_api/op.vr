@@ -28,7 +28,7 @@ public fn op_name(o: &SnapshotOp) -> Text {
     }
 }
 
-public fn op_is_mutating(o: &SnapshotOp) -> base.Bool {
+public fn op_is_mutating(o: &SnapshotOp) -> Bool {
     match o {
         SoFree | SoUnlock => true,
         _ => false,
