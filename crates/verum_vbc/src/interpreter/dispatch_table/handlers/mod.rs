@@ -8,6 +8,7 @@ pub(super) mod bytecode_io;
 pub(super) mod arith_helpers;
 pub(super) mod string_helpers;
 pub(super) mod cbgr_helpers;
+pub(super) mod net_runtime;
 
 // Data movement and type conversions (0x00-0x0F)
 pub(super) mod data_movement;

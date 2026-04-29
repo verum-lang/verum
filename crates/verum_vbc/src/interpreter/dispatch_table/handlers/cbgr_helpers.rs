@@ -89,6 +89,19 @@ pub(super) fn validate_cbgr_generation(
 ) -> InterpreterResult<()> {
     use super::super::super::registers::GEN_NO_CHECK;
 
+    // Honour `InterpreterConfig.cbgr_enabled`: when the caller
+    // has explicitly disabled CBGR validation (e.g. for a
+    // max-throughput build that ran the static escape analyzer
+    // upfront and proved every reference safe), the dispatch
+    // loop must skip the per-deref generation check. This
+    // short-circuit closes the inert-defense pattern: prior to
+    // wiring, the documented opt-out had no observable effect —
+    // every dereference paid the ~15 ns validation cost
+    // regardless of caller intent.
+    if !state.config.cbgr_enabled {
+        return Ok(());
+    }
+
     if ref_generation != CBGR_NO_CHECK_GENERATION && ref_generation != GEN_NO_CHECK {
         let current_gen = state.registers.get_generation(abs_index);
         if ref_generation != current_gen {

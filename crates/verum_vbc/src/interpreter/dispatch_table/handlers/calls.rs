@@ -558,15 +558,18 @@ pub(in super::super) fn handle_new_closure(state: &mut InterpreterState) -> Inte
 /// - Platform intrinsics (num_cpus, abort, cbgr_advance_epoch)
 /// - Tier/async stubs (tier_promote, get_tier, future_poll_sync)
 fn try_dispatch_intrinsic_by_name(
-    state: &InterpreterState,
+    state: &mut InterpreterState,
     func_name_id: StringId,
     _dst: Reg,
     args_start: Reg,
     arg_count: u8,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    let func_name = match state.module.strings.get(func_name_id) {
-        Some(name) => name,
+    // Snapshot func name + args eagerly so we don't carry an immutable
+    // borrow of `state` through the body — TCP/UDP intrinsics need
+    // `&mut state` to allocate Text return values.
+    let func_name: String = match state.module.strings.get(func_name_id) {
+        Some(name) => name.to_string(),
         None => return Ok(None),
     };
 
@@ -590,7 +593,7 @@ fn try_dispatch_intrinsic_by_name(
     // Normalize function name: strip common prefixes and qualifications
     // e.g., "math.sqrt" -> "sqrt", "elementary.sqrt" -> "sqrt",
     //        "llvm.sqrt.f64" -> handled directly
-    let name = func_name;
+    let name = func_name.as_str();
 
     // Match against known intrinsic function names.
     // We check both qualified names (e.g., "llvm.sqrt.f64") and bare names
@@ -1143,14 +1146,61 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::from_i64(-1)))  // not available in interpreter
         }
 
-        // --- TCP Networking (real implementation via Rust std) ---
-        "__tcp_connect_raw" | "__tcp_listen_raw" | "__tcp_accept_raw" |
-        "__tcp_send_raw" | "__tcp_recv_raw" | "__tcp_close_raw" => {
-            // Interpreter uses existing VBC channel-based networking
-            Ok(Some(Value::from_i64(-1)))
+        // --- TCP Networking (Tier-0 std-net backed; see handlers/net_runtime.rs) ---
+        "__tcp_listen_raw" | "tcp_listen" => {
+            let port = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_listen(port))))
         }
-        "__udp_bind_raw" | "__udp_send_raw" | "__udp_recv_raw" | "__udp_close_raw" => {
-            Ok(Some(Value::from_i64(-1)))
+        "__tcp_accept_raw" | "tcp_accept" => {
+            let listen_fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_accept(listen_fd))))
+        }
+        "__tcp_connect_raw" | "tcp_connect" => {
+            let host = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            let port = get_i64_arg(state, 1);
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_connect(&host, port))))
+        }
+        "__tcp_send_raw" | "tcp_send" => {
+            let fd = get_i64_arg(state, 0);
+            let data = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::tcp_send(fd, data.as_bytes()),
+            )))
+        }
+        "__tcp_recv_raw" | "tcp_recv" => {
+            let fd = get_i64_arg(state, 0);
+            let max_len = get_i64_arg(state, 1);
+            let body = super::net_runtime::tcp_recv(fd, max_len).unwrap_or_default();
+            let v = super::string_helpers::alloc_string_value(state, &body)?;
+            Ok(Some(v))
+        }
+        "__tcp_close_raw" | "tcp_close" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_close(fd))))
+        }
+        "__udp_bind_raw" | "udp_bind" => {
+            let port = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(super::net_runtime::udp_bind(port))))
+        }
+        "__udp_send_raw" | "udp_send" => {
+            let fd = get_i64_arg(state, 0);
+            let data = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
+            let host = super::string_helpers::resolve_string_value(&get_arg(state, 2), state);
+            let port = get_i64_arg(state, 3);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::udp_send(fd, data.as_bytes(), &host, port),
+            )))
+        }
+        "__udp_recv_raw" | "udp_recv" => {
+            let fd = get_i64_arg(state, 0);
+            let max_len = get_i64_arg(state, 1);
+            let body = super::net_runtime::udp_recv(fd, max_len).unwrap_or_default();
+            let v = super::string_helpers::alloc_string_value(state, &body)?;
+            Ok(Some(v))
+        }
+        "__udp_close_raw" | "udp_close" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(super::net_runtime::udp_close(fd))))
         }
 
         // --- Context System ---
