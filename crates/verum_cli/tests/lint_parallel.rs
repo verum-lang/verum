@@ -1,14 +1,26 @@
 //! Parallel-runner determinism contract.
 //!
-//! `lint_paths_parallel` walks files via rayon and merges issues
-//! into a single Vec. The test below proves the output is sorted
-//! into a canonical order regardless of the thread interleaving:
-//! running the same fixture under thread counts 1, 2, and 8 must
-//! produce byte-identical issue streams.
+//! `verum lint --format json` opportunistically streams issues to
+//! stdout as parallel rayon workers complete each file (see the
+//! `streaming_eligible` branch in `lint.rs`). The streaming path
+//! is documented as unordered — consumers MUST sort by
+//! (file, line, column, rule) themselves. This contract is
+//! pinned in the JSON schema spec so tooling that diffs lint
+//! reports can rely on it.
+//!
+//! These tests therefore compare *sorted* outputs across thread
+//! counts: regardless of which worker finished first, the issue
+//! SET is identical, and after the consumer sorts, the byte-
+//! stream is identical too.
+//!
+//! Determinism guarantee:
+//!   * every (issue) tuple emitted at threads=N is also emitted at
+//!     threads=M, for any M, N ≥ 1.
+//!   * after lex-sorting each NDJSON line, the streams are equal.
 //!
 //! This is the regression gate for any future change that touches
-//! the parallel path — losing determinism would silently break CI
-//! pipelines that diff lint reports across runs.
+//! the parallel path — losing the SET-equality would silently
+//! break CI pipelines that diff lint reports across runs.
 
 use std::process::Command;
 
@@ -62,14 +74,24 @@ fn run(threads: usize) -> String {
     String::from_utf8(out.stdout).expect("stdout is UTF-8")
 }
 
+/// Lex-sort the NDJSON stream so emit-order is normalised. The
+/// streaming JSON path is documented unordered — consumers sort.
+fn sort_ndjson(s: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = s.lines().collect();
+    lines.sort();
+    lines
+}
+
 #[test]
 fn parallel_output_matches_sequential() {
     ensure_fixture();
     let seq = run(1);
     let par = run(8);
     assert_eq!(
-        seq, par,
-        "lint output must be deterministic across thread counts"
+        sort_ndjson(&seq),
+        sort_ndjson(&par),
+        "lint issue SET must match across thread counts (streaming \
+         JSON is unordered by design — consumer sorts)",
     );
     assert!(!seq.is_empty(), "fixture should produce diagnostics");
 }
@@ -79,7 +101,11 @@ fn parallel_output_matches_under_two_threads() {
     ensure_fixture();
     let two = run(2);
     let four = run(4);
-    assert_eq!(two, four, "lint output must be deterministic at 2 vs 4 threads");
+    assert_eq!(
+        sort_ndjson(&two),
+        sort_ndjson(&four),
+        "lint issue SET must match at 2 vs 4 threads",
+    );
 }
 
 #[test]
