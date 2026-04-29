@@ -686,27 +686,145 @@ impl LiteralRegistry {
 }
 
 /// Read characters from `bytes` until the matching closing `}` is found.
-/// Tracks brace nesting (so `${arr[i]}` and similar still work).
-/// Returns the consumed expression text and the number of bytes advanced
-/// (including the trailing `}`).
+///
+/// Tracks brace nesting AND respects string literals (single, double, triple)
+/// inside the expression, so payloads like `${"}"}`, `${' }'}` and
+/// `${"""raw"""}` round-trip correctly. Backslash inside a "..." string
+/// escapes the next character; '...' strings have no escapes.
+///
+/// Returns the consumed expression text (without the trailing `}`) and
+/// the number of bytes advanced.
 fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
+    #[derive(PartialEq, Eq)]
+    enum S { Code, Single, Double, TripleD, TripleS }
+
     let mut depth: i32 = 1;
     let mut out = String::new();
     let mut i: usize = 0;
+    let mut state = S::Code;
+
     while i < bytes.len() {
         let b = bytes[i];
-        if b == b'{' { depth += 1; out.push(b as char); i += 1; continue; }
-        if b == b'}' {
-            depth -= 1;
-            if depth == 0 { return (out, i + 1); }
-            out.push(b as char);
-            i += 1;
-            continue;
+        match state {
+            S::Code => {
+                // Detect triple-quote starts (need to look ahead 2 bytes).
+                if b == b'"' && i + 2 < bytes.len()
+                    && bytes[i + 1] == b'"' && bytes[i + 2] == b'"'
+                {
+                    out.push_str("\"\"\"");
+                    i += 3;
+                    state = S::TripleD;
+                    continue;
+                }
+                if b == b'\'' && i + 2 < bytes.len()
+                    && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\''
+                {
+                    out.push_str("'''");
+                    i += 3;
+                    state = S::TripleS;
+                    continue;
+                }
+                if b == b'"'  { state = S::Double; out.push('"');  i += 1; continue; }
+                if b == b'\'' { state = S::Single; out.push('\''); i += 1; continue; }
+                if b == b'{'  { depth += 1; out.push('{'); i += 1; continue; }
+                if b == b'}' {
+                    depth -= 1;
+                    if depth == 0 { return (out, i + 1); }
+                    out.push('}');
+                    i += 1;
+                    continue;
+                }
+                out.push(b as char);
+                i += 1;
+            }
+            S::Double => {
+                if b == b'\\' && i + 1 < bytes.len() {
+                    out.push('\\');
+                    out.push(bytes[i + 1] as char);
+                    i += 2;
+                    continue;
+                }
+                if b == b'"' {
+                    state = S::Code;
+                }
+                out.push(b as char);
+                i += 1;
+            }
+            S::Single => {
+                if b == b'\'' { state = S::Code; }
+                out.push(b as char);
+                i += 1;
+            }
+            S::TripleD => {
+                if b == b'"' && i + 2 < bytes.len()
+                    && bytes[i + 1] == b'"' && bytes[i + 2] == b'"'
+                {
+                    out.push_str("\"\"\"");
+                    i += 3;
+                    state = S::Code;
+                    continue;
+                }
+                out.push(b as char);
+                i += 1;
+            }
+            S::TripleS => {
+                if b == b'\'' && i + 2 < bytes.len()
+                    && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\''
+                {
+                    out.push_str("'''");
+                    i += 3;
+                    state = S::Code;
+                    continue;
+                }
+                out.push(b as char);
+                i += 1;
+            }
         }
-        out.push(b as char);
-        i += 1;
     }
     (out, i)
+}
+
+#[cfg(test)]
+mod brace_tests {
+    use super::read_balanced_brace;
+
+    #[test]
+    fn flat_expression() {
+        // input is the body AFTER `${`
+        let (e, n) = read_balanced_brace(b"x + 1}");
+        assert_eq!(e, "x + 1");
+        assert_eq!(n, 6);
+    }
+
+    #[test]
+    fn nested_braces_in_index() {
+        let (e, _) = read_balanced_brace(b"arr[i]}");
+        assert_eq!(e, "arr[i]");
+    }
+
+    #[test]
+    fn double_quoted_brace() {
+        let (e, _) = read_balanced_brace(b"\"}\"}");
+        assert_eq!(e, "\"}\"");
+    }
+
+    #[test]
+    fn single_quoted_brace() {
+        let (e, _) = read_balanced_brace(b"'}'}");
+        assert_eq!(e, "'}'");
+    }
+
+    #[test]
+    fn escaped_quote_inside_double() {
+        let (e, _) = read_balanced_brace(b"\"\\\"}\"}");
+        assert_eq!(e, "\"\\\"}\"");
+    }
+
+    #[test]
+    fn triple_quoted_block() {
+        let (e, _) = read_balanced_brace(b"\"\"\"}}\"\"\"}");
+        assert_eq!(e, "\"\"\"}}\"\"\"");
+    }
 }
 
 impl Default for LiteralRegistry {

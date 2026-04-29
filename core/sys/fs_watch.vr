@@ -342,10 +342,24 @@ implement InotifyBackend {
     }
 
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
-        // For simplicity we issue a blocking read here. Production code
-        // should pre-poll with poll(2) / epoll to honour `timeout_ms` —
-        // tracked as a follow-up.
-        let _ = timeout_ms;
+        // Pre-poll the inotify fd so blocking-read does not stall past the
+        // requested timeout. Poll fd entry layout is { fd: i32, events: i16,
+        // revents: i16 } — 8 bytes packed.
+        if timeout_ms >= 0 {
+            // POLLIN = 0x0001
+            let mut pfd: [Int32; 2] = [self.fd, 0x00010000 as Int32];
+            let r = unsafe {
+                core.sys.linux.syscall.syscall_raw(
+                    core.sys.linux.syscall.SYS_POLL,
+                    &pfd[0] as Int,    // pollfd*
+                    1,                  // nfds
+                    timeout_ms,
+                    0, 0, 0,
+                )
+            };
+            if r == 0 { return Ok([]); }       // timeout
+            if r < 0  { return Err("poll failed".into()); }
+        }
         let mut buf: List<Byte> = List.with_capacity(4096);
         let mut i = 0;
         while i < 4096 { buf.push(0); i = i + 1; }
