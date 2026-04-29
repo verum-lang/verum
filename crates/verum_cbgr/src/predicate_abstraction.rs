@@ -397,6 +397,43 @@ impl PredicateAbstractor {
         Self::new(AbstractionConfig::default())
     }
 
+    /// Whether `incremental_merging` is enabled. External
+    /// enumerators that produce path lists consult this to decide
+    /// whether to fold paths into the merger as they're produced
+    /// (incremental) or accumulate the full list and merge once
+    /// at the end. Mirrors `AbstractionConfig.incremental_merging`.
+    /// Before the wire-up landed external enumerators had no
+    /// public way to read the config decision — the field was
+    /// inert from their perspective.
+    #[must_use]
+    pub fn incremental_merging_enabled(&self) -> bool {
+        self.config.incremental_merging
+    }
+
+    /// Whether `use_z3_equivalence` is enabled. Public accessor
+    /// so external orchestrators can decide whether to even
+    /// construct a `Z3FeasibilityChecker` to pass to
+    /// [`check_equivalence_z3`].
+    #[must_use]
+    pub fn z3_equivalence_enabled(&self) -> bool {
+        self.config.use_z3_equivalence
+    }
+
+    /// Whether `use_subsumption` is enabled. Public accessor for
+    /// orchestrators that want to skip the cheap subsumption
+    /// check entirely under aggressive abstraction modes.
+    #[must_use]
+    pub fn subsumption_enabled(&self) -> bool {
+        self.config.use_subsumption
+    }
+
+    /// Whether `use_widening` is enabled. Public accessor that
+    /// mirrors the gate `abstract_level3` reads internally.
+    #[must_use]
+    pub fn widening_enabled(&self) -> bool {
+        self.config.use_widening
+    }
+
     /// Merge similar paths to prevent explosion
     ///
     /// This is the main entry point for path merging. It groups paths by
@@ -648,9 +685,19 @@ impl PredicateAbstractor {
 
     /// Level 3 abstraction: Widening
     ///
-    /// After N iterations, widen to more abstract form
+    /// After N iterations, widen to more abstract form. The
+    /// `use_widening` config gate enables/disables the level-3
+    /// widening behaviour entirely — when `false`, level-3 falls
+    /// back to level-2 (no widening), preserving precision at
+    /// the cost of slower convergence on deeply-nested loops.
+    /// Before this wire-up the field was inert.
     fn abstract_level3(&mut self, pred: &PathPredicate) -> PathPredicate {
         self.stats.widening_operations += 1;
+
+        // `use_widening` master gate: if disabled, never widen.
+        if !self.config.use_widening {
+            return self.abstract_level2(pred);
+        }
 
         // Get iteration count
         let hash = AbstractPredicate::compute_hash(pred);
@@ -736,6 +783,16 @@ impl PredicateAbstractor {
     ) -> bool {
         self.stats.equivalence_checks += 1;
 
+        // Honour `use_z3_equivalence` gate: when disabled, fall
+        // back to the conservative "not provably equivalent"
+        // answer. The stats counter still increments so callers
+        // see the work was attempted, but Z3 is never invoked.
+        // Before this wire-up the field was inert — disabling it
+        // had no effect on Z3 invocation count.
+        if !self.config.use_z3_equivalence {
+            return false;
+        }
+
         // Check cache
         let h1 = AbstractPredicate::compute_hash(p1);
         let h2 = AbstractPredicate::compute_hash(p2);
@@ -778,6 +835,14 @@ impl PredicateAbstractor {
         z3: &mut Z3FeasibilityChecker,
     ) -> bool {
         self.stats.subsumption_checks += 1;
+
+        // Honour `use_subsumption` gate: when disabled, fall back
+        // to the conservative "no subsumption" answer. Stats
+        // increment so callers see the attempt; Z3 is never
+        // invoked. Before this wire-up the field was inert.
+        if !self.config.use_subsumption {
+            return false;
+        }
 
         // Check cache
         let h1 = AbstractPredicate::compute_hash(p1);
