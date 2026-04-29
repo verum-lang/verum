@@ -1100,6 +1100,14 @@ enum Commands {
         #[clap(long)]
         kernel_discharged_axioms: bool,
 
+        /// Verify-ladder audit. Walks every `@verify(strategy)`
+        /// annotation, projects to its ν-ordinal, classifies dispatch
+        /// status (implemented / fallback / pending), and verifies the
+        /// strict-ν-monotonicity invariant.  Exits non-zero on any
+        /// monotonicity violation.
+        #[clap(long)]
+        verify_ladder: bool,
+
         /// Proof-honesty audit (M0.G): walk every public theorem /
         /// axiom in the project and classify each by proof-body shape
         /// — `axiom-placeholder` / `theorem-no-proof-body` /
@@ -2516,6 +2524,7 @@ fn run_command(cli: Cli) -> Result<()> {
             cross_format,
             kernel_intrinsics,
             kernel_discharged_axioms,
+            verify_ladder,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2573,6 +2582,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_intrinsics(output_format)
             } else if kernel_discharged_axioms {
                 commands::audit::audit_kernel_discharged_axioms(output_format)
+            } else if verify_ladder {
+                commands::audit::audit_verify_ladder(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

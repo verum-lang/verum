@@ -4523,6 +4523,226 @@ pub fn audit_bridge_admits_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// Verify-ladder audit (13-strategy ν-monotone dispatch surface)
+// =============================================================================
+//
+// The audit walks every `@verify(strategy)` annotation, projects to its
+// ν-ordinal, and asks the *single source of truth*
+// `verum_verification::ladder_dispatch::DefaultLadderDispatcher` for
+// each strategy's implementation status.  No duplicate status table
+// lives in this audit — drift between dispatcher and audit is
+// architecturally impossible.
+
+/// `verum audit --verify-ladder` — emits per-theorem ladder dispatch
+/// status and verifies the strict-ν-monotonicity invariant of the
+/// 13-strategy ladder.
+pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
+    use verum_verification::ladder_dispatch::{
+        DefaultLadderDispatcher, LadderDispatcher, LadderImplStatus, LadderStrategy,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Verification ladder — strategy dispatch + ν-monotonicity audit");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let dispatcher = DefaultLadderDispatcher::new();
+
+    // Per-theorem record.
+    struct LadderEntry {
+        item_kind: &'static str,
+        item_name: Text,
+        file: PathBuf,
+        strategy: Text,
+        nu_ordinal_label: &'static str,
+        impl_status: LadderImplStatus,
+    }
+
+    let mut entries: Vec<LadderEntry> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => ("theorem",   decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl)   => ("lemma",     decl.name.name.clone(), &decl.attributes),
+                ItemKind::Corollary(decl) => ("corollary", decl.name.name.clone(), &decl.attributes),
+                _ => continue,
+            };
+            if let Some(strategy) =
+                strictest_verify_strategy(&item.attributes, decl_attrs)
+            {
+                // Project to the typed LadderStrategy + ask the
+                // dispatcher (single source of truth) for impl status.
+                let typed_strategy = LadderStrategy::from_name(strategy.as_str());
+                let (nu_label, status) = match typed_strategy {
+                    Some(s) => (
+                        s.nu_ordinal_label(),
+                        dispatcher.implementation_status(s),
+                    ),
+                    None => ("?", LadderImplStatus::Pending),
+                };
+                entries.push(LadderEntry {
+                    item_kind: kind_label,
+                    item_name: item_name.clone(),
+                    file: rel_path.clone(),
+                    strategy,
+                    nu_ordinal_label: nu_label,
+                    impl_status: status,
+                });
+            }
+        }
+    }
+
+    // Per-strategy histogram.
+    let mut by_strategy: BTreeMap<Text, usize> = BTreeMap::new();
+    let mut by_status: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for e in &entries {
+        *by_strategy.entry(e.strategy.clone()).or_insert(0) += 1;
+        *by_status.entry(e.impl_status.name()).or_insert(0) += 1;
+    }
+
+    // ν-monotonicity invariant: drop into the verum_verification
+    // dispatcher's own monotonicity check (single source of truth).
+    let monotonicity_ok =
+        verum_verification::ladder_dispatch::verify_monotonicity(&dispatcher).is_ok();
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!(
+                "  {:<48}  {:<18}  {:<14}  {}",
+                "Theorem / lemma / corollary",
+                "Strategy",
+                "ν-ordinal",
+                "Dispatch status"
+            );
+            println!(
+                "  {}  {}  {}  {}",
+                "─".repeat(48),
+                "─".repeat(18),
+                "─".repeat(14),
+                "─".repeat(14)
+            );
+            for e in &entries {
+                println!(
+                    "  {:<48}  {:<18}  {:<14}  {}",
+                    e.item_name.as_str(),
+                    e.strategy.as_str(),
+                    e.nu_ordinal_label,
+                    e.impl_status.name()
+                );
+            }
+            println!();
+            println!("  Strategy histogram:");
+            for (strat, count) in &by_strategy {
+                let status = LadderStrategy::from_name(strat.as_str())
+                    .map(|s| dispatcher.implementation_status(s).name())
+                    .unwrap_or("unknown");
+                println!(
+                    "    {:<20} {:>4}   [{}]",
+                    strat.as_str(),
+                    count,
+                    status
+                );
+            }
+            println!();
+            println!("  Implementation-status totals:");
+            for (status, count) in &by_status {
+                println!("    {:<14} {:>4}", status, count);
+            }
+            println!();
+            println!(
+                "  ν-monotonicity invariant: {}",
+                if monotonicity_ok { "✓ holds" } else { "✗ VIOLATED" }
+            );
+            println!(
+                "  Files: {} scanned, {} parsed, {} skipped",
+                vr_files.len(),
+                parsed_files,
+                skipped_files
+            );
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"theorem_count\": {},\n", entries.len()));
+            out.push_str(&format!(
+                "  \"monotonicity_invariant\": {},\n",
+                monotonicity_ok
+            ));
+            out.push_str("  \"by_strategy\": {\n");
+            for (i, (strat, count)) in by_strategy.iter().enumerate() {
+                out.push_str(&format!(
+                    "    \"{}\": {}{}\n",
+                    json_escape(strat.as_str()),
+                    count,
+                    if i + 1 < by_strategy.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  },\n");
+            out.push_str("  \"by_status\": {\n");
+            for (i, (status, count)) in by_status.iter().enumerate() {
+                out.push_str(&format!(
+                    "    \"{}\": {}{}\n",
+                    status,
+                    count,
+                    if i + 1 < by_status.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  },\n");
+            out.push_str("  \"theorems\": [\n");
+            for (i, e) in entries.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {{ \"kind\": \"{}\", \"name\": \"{}\", \"file\": \"{}\", \"strategy\": \"{}\", \"nu_ordinal\": \"{}\", \"impl_status\": \"{}\" }}{}\n",
+                    e.item_kind,
+                    json_escape(e.item_name.as_str()),
+                    json_escape(&e.file.display().to_string()),
+                    e.strategy.as_str(),
+                    e.nu_ordinal_label,
+                    e.impl_status.name(),
+                    if i + 1 < entries.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            println!("{}", out);
+        }
+    }
+
+    if !monotonicity_ok {
+        return Err(crate::error::CliError::VerificationFailed(
+            "verify-ladder ν-monotonicity invariant violated".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+// =============================================================================
 // Kernel-discharged-axioms audit
 // =============================================================================
 
