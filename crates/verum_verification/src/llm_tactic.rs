@@ -423,10 +423,73 @@ impl PatternKernelChecker {
     }
 }
 
+/// Canonical tactic heads accepted by `parse_step`.  Every entry is
+/// either:
+///
+///   * A name from `verum_verification::tactic_combinator::TacticCombinator`
+///     (`skip` / `fail` / etc.); or
+///   * A canonical decision-procedure / surface tactic the catalogue
+///     documents elsewhere (`auto` / `simp` / `linarith` / etc.).
+///
+/// Adding a new head here is the right place to extend the
+/// PatternKernelChecker's accept set.  The KernelInferChecker layers
+/// kernel-attestation on top of this for `apply NAME` resolution.
 const CANONICAL_TACTICS: &[&str] = &[
-    "intro", "auto", "simp", "refl", "assumption", "trivial", "ring", "linarith",
-    "nlinarith", "norm_num", "omega", "field", "blast", "smt", "split", "left",
-    "right", "by_contradiction",
+    // ----- core combinator surface (matches TacticCombinator::all) -----
+    "skip",
+    "fail",
+    // ----- proof-state navigation -----
+    "intro",
+    "intros",
+    "revert",
+    "case",
+    "cases",
+    "destruct",
+    "induction",
+    // ----- soundness-trivial closers -----
+    "refl",
+    "reflexivity",
+    "trivial",
+    "assumption",
+    "exact",
+    // ----- contradiction family -----
+    "contradiction",
+    "by_contradiction",
+    "exfalso",
+    // ----- conjunction / disjunction / quantifier introduction -----
+    "split",
+    "left",
+    "right",
+    "constructor",
+    "exists",
+    // ----- decision procedures -----
+    "auto",
+    "eauto",
+    "blast",
+    "smt",
+    "decide",
+    "tauto",
+    // ----- arithmetic decision procedures -----
+    "ring",
+    "field",
+    "linarith",
+    "nlinarith",
+    "lia",
+    "nlia",
+    "lra",
+    "nra",
+    "omega",
+    "norm_num",
+    // ----- equality manipulation -----
+    "rewrite",
+    "rw",
+    "subst",
+    "unfold",
+    "fold",
+    "simp",
+    "simplify",
+    "compute",
+    "congruence",
 ];
 
 /// Common parse: project `step` to a typed shape that both
@@ -996,6 +1059,56 @@ mod tests {
         assert!(c.check_step(&g, "// this is a comment").is_ok());
         assert!(c.check_step(&g, "   ").is_ok());
         assert!(c.check_step(&g, "").is_ok());
+    }
+
+    #[test]
+    fn pattern_checker_accepts_extended_canonical_tactics() {
+        // #105 hardening: every entry in CANONICAL_TACTICS must be
+        // admitted as a bare invocation.  The PatternKernelChecker is
+        // a pure-pattern recogniser; the kernel-attestation gate
+        // KernelInferChecker layers on top.
+        let c = PatternKernelChecker::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        for tac in CANONICAL_TACTICS {
+            assert!(
+                c.check_step(&g, tac).is_ok(),
+                "canonical tactic `{}` should be admitted",
+                tac
+            );
+        }
+    }
+
+    #[test]
+    fn pattern_checker_accepts_extended_with_argument() {
+        // Tactics that take an argument: `cases h`, `induction n`,
+        // `unfold foo`, `subst x`.  The pattern checker only inspects
+        // the head — argument parsing is the consumer's job.
+        let c = PatternKernelChecker::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        for tac in [
+            "cases h", "induction n", "unfold foo_def", "subst x",
+            "rewrite h", "rw eq", "exists witness", "constructor",
+            "exfalso", "contradiction",
+        ] {
+            assert!(
+                c.check_step(&g, tac).is_ok(),
+                "tactic `{}` should be admitted",
+                tac
+            );
+        }
+    }
+
+    #[test]
+    fn task_105_canonical_tactics_no_duplicates() {
+        // Pin: CANONICAL_TACTICS has no duplicates so the
+        // tactic-recognition path stays linear.
+        use std::collections::HashSet;
+        let set: HashSet<&str> = CANONICAL_TACTICS.iter().copied().collect();
+        assert_eq!(
+            set.len(),
+            CANONICAL_TACTICS.len(),
+            "CANONICAL_TACTICS contains duplicates"
+        );
     }
 
     // ----- AuditTrail impls -----
