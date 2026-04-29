@@ -69,6 +69,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use verum_common::Text;
 
+/// Process-wide reference instant for `object_dump_dir` filename
+/// timestamps. We use a relative-to-process-start nanosecond
+/// counter rather than wall-clock so dumps are reproducible
+/// within a single run and don't depend on system time skew.
+static JIT_DUMP_EPOCH: std::sync::OnceLock<instant::Instant> =
+    std::sync::OnceLock::new();
+
+fn jit_dump_epoch() -> &'static instant::Instant {
+    JIT_DUMP_EPOCH.get_or_init(instant::Instant::now)
+}
+
 // ============================================================================
 // JIT Configuration
 // ============================================================================
@@ -593,6 +604,43 @@ impl JitEngine {
     /// Compile a module and create a JIT engine.
     pub fn compile(module: &Module<'_>, config: JitConfig) -> Result<Self> {
         let start = instant::Instant::now();
+
+        // Honour `JitConfig.object_dump_dir`: when configured,
+        // dump the MLIR module IR to disk before lowering.
+        // Useful for debugging the optimizer / lowering pipeline
+        // — the dumped text reflects exactly what's about to feed
+        // the LLVM ExecutionEngine. Failure to create the file or
+        // write to it is logged and ignored: we don't fail the
+        // compile because debug-output went sideways. Without
+        // this gate the field was inert.
+        if let Some(dump_dir) = config.object_dump_dir.as_deref() {
+            let dump_path = std::path::Path::new(dump_dir);
+            if let Err(e) = std::fs::create_dir_all(dump_path) {
+                tracing::warn!(
+                    "JitConfig.object_dump_dir = {:?}: failed to create directory: {}",
+                    dump_dir, e
+                );
+            } else {
+                let ts_ns = instant::Instant::now()
+                    .duration_since(*jit_dump_epoch())
+                    .as_nanos();
+                let file_name =
+                    format!("verum_jit_module_{}.mlir", ts_ns);
+                let target = dump_path.join(file_name);
+                let ir_text = format!("{}", module.as_operation());
+                if let Err(e) = std::fs::write(&target, ir_text.as_bytes()) {
+                    tracing::warn!(
+                        "JitConfig.object_dump_dir = {:?}: failed to write {}: {}",
+                        dump_dir, target.display(), e
+                    );
+                } else if config.verbose {
+                    tracing::info!(
+                        "JIT module dumped to {}",
+                        target.display()
+                    );
+                }
+            }
+        }
 
         // Prepare shared library paths
         let lib_paths: Vec<&str> = config.shared_library_paths.iter().map(|s| s.as_str()).collect();
