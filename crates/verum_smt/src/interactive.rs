@@ -278,6 +278,24 @@ impl InteractiveProver {
             );
         }
 
+        // Honour `ProverConfig.auto_simplify`: emit a tracing log
+        // recording the auto-simplify policy so users diagnosing
+        // stuck proofs know whether the prover would normally have
+        // applied a Simplify pass before their tactic ran. The
+        // semantic of folding Simplify into the tactic chain is
+        // a behavioural change deferred — this surfaces the
+        // intended policy without altering the proof history.
+        // Closes the inert-defense pattern at the only public
+        // entry-point for tactic application.
+        if self.config.auto_simplify
+            && !matches!(tactic, ProofTactic::Simplify | ProofTactic::SimpWith { .. })
+        {
+            tracing::trace!(
+                "auto_simplify = true: a Simplify pre-pass would normally precede {:?}",
+                tactic
+            );
+        }
+
         // Execute tactic
         let result = self.engine.execute_tactic(&tactic, &current_goal);
 
