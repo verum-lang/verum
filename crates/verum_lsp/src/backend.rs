@@ -209,7 +209,15 @@ impl LanguageServer for Backend {
         let cfg = self.config.snapshot();
 
         // Apply immediately-propagated knobs to stateful components.
+        // Master switch — CBGR inlay hints visible in the editor.
         self.cbgr_hints.set_enabled(cfg.cbgr_show_optimization_hints);
+        // Verbosity gate — when on, hint tooltips include the
+        // per-tier reason text (escape kind, dominator status,
+        // etc.) instead of just the timing summary. Wires the
+        // previously-inert `cbgr_enable_profiling` LspConfig flag
+        // so users that opt into profiling see why the analyzer
+        // chose each tier, not just the cost.
+        self.cbgr_hints.set_detailed_hints(cfg.cbgr_enable_profiling);
         self.refinement_validator.apply_config(&cfg);
 
         tracing::info!(

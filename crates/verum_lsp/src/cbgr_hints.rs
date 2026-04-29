@@ -58,8 +58,11 @@ pub struct CbgrHintProvider {
     escape_cache: Map<Url, EscapeAnalyzer>,
     /// Cached tier decisions per document
     tier_cache: Map<Url, Map<RefId, ReferenceTier>>,
-    /// Enable detailed hints
-    detailed_hints: bool,
+    /// Enable detailed hints (timing breakdown, per-tier overhead).
+    /// `AtomicBool` because the LSP server flips this from the
+    /// `initialize` handler on `&self` (no exclusive borrow on the
+    /// provider once it's installed in the backend struct).
+    detailed_hints: AtomicBool,
     /// Master switch for CBGR inlay hints. Off by default: otherwise every
     /// `&x` in a file gets a long block-comment hint like
     /// `/* can promote → &checked T: 0ns (saves ~15ns) */`, which VS Code
@@ -74,14 +77,22 @@ impl CbgrHintProvider {
         Self {
             escape_cache: Map::new(),
             tier_cache: Map::new(),
-            detailed_hints: true,
+            detailed_hints: AtomicBool::new(true),
             enabled: AtomicBool::new(false),
         }
     }
 
-    /// Enable or disable detailed hints
-    pub fn set_detailed_hints(&mut self, enabled: bool) {
-        self.detailed_hints = enabled;
+    /// Enable or disable detailed hints. Safe to call on shared
+    /// `&self` so the LSP `initialize` handler (which holds the
+    /// provider behind `&self`) can flip it without restructuring
+    /// the backend's lock model.
+    pub fn set_detailed_hints(&self, enabled: bool) {
+        self.detailed_hints.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Read-only view of the detailed-hints state.
+    pub fn detailed_hints(&self) -> bool {
+        self.detailed_hints.load(Ordering::Relaxed)
     }
 
     /// Master on/off for CBGR inlay hints. Safe to call on shared `&self`.
@@ -492,7 +503,7 @@ impl CbgrHintProvider {
     fn create_overhead_hint(&self, ref_info: ReferenceInfo, reason: EscapeResult) -> InlayHint {
         let label = InlayHintLabel::String("~15ns".to_string());
 
-        let tooltip = if self.detailed_hints {
+        let tooltip = if self.detailed_hints() {
             format!("CBGR overhead ~15ns per deref — {}", reason.reason())
         } else {
             "CBGR overhead ~15ns per deref".to_string()
@@ -807,20 +818,20 @@ mod tests {
     #[test]
     fn test_hint_provider_creation() {
         let provider = CbgrHintProvider::new();
-        assert!(provider.detailed_hints);
+        assert!(provider.detailed_hints());
     }
 
     #[test]
     fn test_set_detailed_hints() {
-        let mut provider = CbgrHintProvider::new();
+        let provider = CbgrHintProvider::new();
         provider.set_detailed_hints(false);
-        assert!(!provider.detailed_hints);
+        assert!(!provider.detailed_hints());
     }
 
     #[test]
     fn test_default_provider() {
         let provider = CbgrHintProvider::default();
-        assert!(provider.detailed_hints);
+        assert!(provider.detailed_hints());
     }
 
     #[test]
