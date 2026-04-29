@@ -803,6 +803,55 @@ impl MacroExpansionPhase {
                 tag,
                 content: value,
             },
+            ParsedLiteral::ShellCmd { parts, source } => {
+                // Lower `sh#"..."` into a call to `core.shell.exec.sh(<text>)`.
+                //
+                // The resulting Text is constructed by concatenating the
+                // segments at runtime:
+                //   * literal segments → string literal
+                //   * `${expr}` interpolations → `expr.shell_quote(default_flavour())`
+                //   * `$unsafe{expr}` interpolations → `ShellRaw.new(expr).shell_quote(default_flavour())`
+                //     (the wrapper's shell_quote impl returns the verbatim text).
+                //
+                // We build an interpolated string AST node — the same shape
+                // the parser produces for `f"…{expr}…"` literals. The string
+                // interpolation lowerer (run later in the same phase) takes
+                // care of method dispatch, type checking and escape splice.
+                //
+                // If there are no interpolations, the result collapses to a
+                // plain literal text.
+
+                let has_interpolations = parts.iter().any(|(kind, _)| *kind != 0u8);
+
+                if !has_interpolations {
+                    // Plain literal — emit `sh(<source>)` so the call goes
+                    // through the typed executor instead of remaining a
+                    // tagged-literal opaque blob.
+                    return Ok(self.synth_sh_call(
+                        Expr {
+                            kind: ExprKind::Literal(Literal {
+                                kind: LiteralKind::Text(StringLit::Regular(source.clone())),
+                                span,
+                            }),
+                            span,
+                            ref_kind: None,
+                            check_eliminated: false,
+                        },
+                        span,
+                    ));
+                }
+
+                // Build f-string-like content: `f"<lit><{escaped}><lit>..."`.
+                // `escaped` is the per-interpolation escape call.
+                //
+                // We synthesise a chain of `Text::push_str` over a fresh
+                // `Text` builder; this avoids depending on the format-string
+                // lowerer's internals.
+
+                let escaped_text_expr =
+                    self.synth_shell_template_text(&parts, &source, span)?;
+                return Ok(self.synth_sh_call(escaped_text_expr, span));
+            }
         };
 
         Ok(Expr {
@@ -814,6 +863,162 @@ impl MacroExpansionPhase {
             ref_kind: None,
             check_eliminated: false,
         })
+    }
+
+    /// Synthesise `core.shell.exec.sh(<text_expr>)`.
+    fn synth_sh_call(&self, text_expr: Expr, span: Span) -> Expr {
+        use verum_ast::expr::{Expr as E, ExprKind as EK};
+        use verum_ast::ty::{Ident, Path as TyPath, PathSegment};
+        // Build path expression `core.shell.exec.sh`.
+        // The Path::new constructor takes `List<PathSegment>` not
+        // `Vec<Text>` — checkpoint a4dd029e was written against an
+        // older `from_segments(Vec<Text>)` API that no longer exists;
+        // map each name to `PathSegment::Name(Ident::new(...))`.
+        let segments: List<PathSegment> = ["core", "shell", "exec", "sh"]
+            .iter()
+            .map(|s| PathSegment::Name(Ident::new(Text::from(*s), span)))
+            .collect();
+        let path = TyPath::new(segments, span);
+        let func = E {
+            kind: EK::Path(path),
+            span,
+            ref_kind: None,
+            check_eliminated: false,
+        };
+        E {
+            kind: EK::Call {
+                func: verum_common::Heap::new(func),
+                type_args: List::new(),
+                args: List::from(vec![text_expr]),
+            },
+            span,
+            ref_kind: None,
+            check_eliminated: false,
+        }
+    }
+
+    /// Build the runtime `Text` from a list of `(kind, payload)` segments.
+    /// kind=0 → literal, kind=1 → escape-and-splice expr, kind=2 → unsafe splice.
+    ///
+    /// Strategy: emit a chain
+    ///
+    ///   "<lit0>".to_text() + Escaper.posix(&{expr1}) + "<lit1>".to_text() + ...
+    ///
+    /// where `+` resolves to `Text::concat` via `Add` impl on `Text`.
+    fn synth_shell_template_text(
+        &self,
+        parts: &List<(u8, Text)>,
+        source: &Text,
+        span: Span,
+    ) -> Result<Expr, Diagnostic> {
+        use verum_ast::expr::{Expr as E, ExprKind as EK};
+        use verum_ast::literal::{Literal, LiteralKind, StringLit};
+        use verum_ast::ty::Path as TyPath;
+
+        // Helper closure: build a `Text` literal expression.
+        let mk_lit = |s: Text| -> E {
+            E {
+                kind: EK::Literal(Literal {
+                    kind: LiteralKind::Text(StringLit::Regular(s)),
+                    span,
+                }),
+                span,
+                ref_kind: None,
+                check_eliminated: false,
+            }
+        };
+
+        // Helper: parse expression source into AST.
+        let parse_expr = |src: &str| -> Result<E, Diagnostic> {
+            let parser = verum_fast_parser::VerumParser::new();
+            // We don't have a real FileId at hand; use the dummy
+            // sentinel. FileId moved from verum_diagnostics into
+            // verum_ast post-checkpoint a4dd029e and the
+            // `synthetic()` constructor was renamed to `dummy()`
+            // along the way.
+            let file_id = verum_ast::FileId::dummy();
+            parser.parse_expr_str(src, file_id).map_err(|errs| {
+                verum_diagnostics::DiagnosticBuilder::error()
+                    .message(format!(
+                        "failed to parse interpolation in sh#\"{}\": {:?}",
+                        source, errs,
+                    ))
+                    .build()
+            })
+        };
+
+        // Build escape-and-splice expression for kind=1 (`${expr}`).
+        // Lowering result: `core.shell.escape.Escaper.posix(&<expr>)`.
+        let mk_escape = |e: E| -> E {
+            use verum_ast::expr::UnOp;
+            use verum_ast::ty::{Ident, PathSegment};
+            // Same migration as `synth_sh_call` above:
+            // `Path::from_segments(Vec<Text>)` → `Path::new(List<PathSegment>, span)`.
+            let escaper_segments: List<PathSegment> = [
+                "core", "shell", "escape", "Escaper", "posix",
+            ]
+            .iter()
+            .map(|s| PathSegment::Name(Ident::new(Text::from(*s), span)))
+            .collect();
+            let escaper_path = TyPath::new(escaper_segments, span);
+            let escaper_fn = E {
+                kind: EK::Path(escaper_path),
+                span, ref_kind: None, check_eliminated: false,
+            };
+            // &<expr>
+            let borrowed = E {
+                kind: EK::Unary { op: UnOp::Ref, expr: verum_common::Heap::new(e) },
+                span, ref_kind: None, check_eliminated: false,
+            };
+            E {
+                kind: EK::Call {
+                    func: verum_common::Heap::new(escaper_fn),
+                    type_args: List::new(),
+                    args: List::from(vec![borrowed]),
+                },
+                span, ref_kind: None, check_eliminated: false,
+            }
+        };
+
+        // Combine via repeated `+` (Text concatenation).
+        let mut acc: Option<E> = None;
+        for (kind, payload) in parts.iter() {
+            let part_expr = match *kind {
+                0u8 => mk_lit(payload.clone()),
+                1u8 => {
+                    let inner = parse_expr(payload.as_str())?;
+                    mk_escape(inner)
+                }
+                2u8 => {
+                    // $unsafe{...} — verbatim splice. The expression must
+                    // evaluate to a Text-coercible value; we just call
+                    // `.to_text()` on it for safety.
+                    let inner = parse_expr(payload.as_str())?;
+                    E {
+                        kind: EK::MethodCall {
+                            receiver: verum_common::Heap::new(inner),
+                            method: verum_ast::Ident { name: Text::from("to_text"), span },
+                            type_args: List::new(),
+                            args: List::new(),
+                        },
+                        span, ref_kind: None, check_eliminated: false,
+                    }
+                }
+                _ => continue,
+            };
+            acc = Some(match acc {
+                None => part_expr,
+                Some(prev) => E {
+                    kind: EK::Binary {
+                        op: verum_ast::expr::BinOp::Add,
+                        left:  verum_common::Heap::new(prev),
+                        right: verum_common::Heap::new(part_expr),
+                    },
+                    span, ref_kind: None, check_eliminated: false,
+                },
+            });
+        }
+        Ok(acc.unwrap_or_else(|| mk_lit(Text::from(""))))
     }
 
     /// Convert a ConstValue (from meta function execution) to an AST Expr
