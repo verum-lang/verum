@@ -78,14 +78,43 @@ impl Context {
     }
 
     /// Create a new solver instance.
+    ///
+    /// Forwards every relevant `ContextConfig` field to the
+    /// fresh solver so toggling any documented knob has the
+    /// expected effect:
+    ///
+    /// - `timeout` → Z3's per-solver `timeout` Params key.
+    /// - `unsat_core` → `unsat_core` Params key (must be set
+    ///   before any assertion that should appear in a core).
+    /// - `proof_generation` → `proof` Params key (per-solver;
+    ///   the global proof flag in `Config` is more efficient
+    ///   but we mirror the per-solver fallback for callers that
+    ///   construct their own Z3 contexts).
+    /// - `model_generation` → `model` Params key.
+    ///
+    /// `memory_limit_mb` and `random_seed` are global Z3 params
+    /// (process-wide), forwarded via `set_global_param` here so
+    /// each fresh solver respects the most-recently-seen
+    /// `ContextConfig`. Without these forwards every field
+    /// except `timeout` was inert at this construction site.
     pub fn solver(&self) -> z3::Solver {
         let solver = z3::Solver::new();
+        let cfg = &self.inner.config;
+        let mut params = z3::Params::new();
 
-        // Apply timeout if configured
-        if let Some(timeout) = self.inner.config.timeout {
-            let mut params = z3::Params::new();
+        if let Some(timeout) = cfg.timeout {
             params.set_u32("timeout", timeout.as_millis() as u32);
-            solver.set_params(&params);
+        }
+        params.set_bool("unsat_core", cfg.unsat_core);
+        params.set_bool("model", cfg.model_generation);
+        params.set_bool("proof", cfg.proof_generation);
+        solver.set_params(&params);
+
+        if let Some(mb) = cfg.memory_limit_mb {
+            z3::set_global_param("memory_max_size", &mb.to_string());
+        }
+        if let Some(seed) = cfg.random_seed {
+            z3::set_global_param("smt.random_seed", &seed.to_string());
         }
 
         solver
