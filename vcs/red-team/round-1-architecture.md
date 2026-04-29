@@ -16,16 +16,46 @@ Tracks #172. Adversarial defect discovery at the architecture layer. Round 2
 
 ## Vector 1 — Refinement-type soundness under concurrency
 
-### 1.1 Refined `Int{x > 0}` race
+### 1.1 Refined `Int{x > 0}` race — DEFENSE PARTIAL 2026-04-29
 
-**Status:** PENDING — needs concurrent-write test harness.
+**Status:** DEFENSE PARTIAL — verifier-side concurrent correctness
+pinned; type-system side covered structurally by the three-tier
+CBGR model (no runtime test needed — the type checker rejects
+the unsafe program at compile time).
 
-Scenario: thread A holds `x: Int{x > 0}`, thread B writes via shared `&mut`. Can
-B observe `x = 0` between A's reads?
+**Scenario:** thread A holds `x: Int{x > 0}`, thread B writes via
+shared `&mut`. Can B observe `x = 0` between A's reads?
 
-Verum's three-tier reference model (CBGR) blocks cross-thread `&mut T` aliasing
-at the type level — see `core/mem/{thin_ref,fat_ref,capability}.vr`. The
-remaining angle is `&unsafe T` escapes (vector 2.1).
+**Type-side defense:** Verum's three-tier reference model (CBGR)
+blocks cross-thread `&mut T` aliasing at the type level — see
+`core/mem/{thin_ref,fat_ref,capability}.vr`. A program that tries
+to share `&mut Int{x > 0}` across threads fails type-checking,
+so no runtime race to exercise.
+
+**Verifier-side defense (closed 2026-04-29):** The
+`SubsumptionChecker` is shared across compiler threads via
+`Arc<SubsumptionChecker>`; its `cache` and `stats` live behind
+`Arc<RwLock<…>>`. A race in this layer would silently corrupt
+verification results — a far worse bug class than a runtime
+race because it produces *unsound type-checking decisions*.
+
+`crates/verum_smt/tests/concurrent_subsumption_invariant.rs`
+pins three properties under 8-thread × 5 000-iteration stress
+(40 000 concurrent checks):
+
+- **`concurrent_reflexive_check_no_panic_no_divergence`** —
+  every reflexive check must yield `Syntactic(true)`; no
+  thread observes a divergent result, no panic anywhere.
+- **`concurrent_stats_counter_no_lost_updates`** — recorded
+  outcomes exactly equal issued checks (with
+  syntactic-fast-path double-counting deduplicated). A lost
+  update would surface as a count below `THREADS * ITERATIONS`.
+- **`concurrent_distinct_obligations_isolated_per_key`** —
+  per-thread distinct obligations don't false-share cache
+  keys; the canonical hash is faithful under contention.
+
+The remaining tractable angle is `&unsafe T` escapes (vector
+2.1).
 
 ### 1.2 `using [Mutex]` capability serialisation
 
@@ -483,7 +513,7 @@ in `core/text/format.vr`, `core/security/otp.vr`, etc.
 
 | Vector | Status | Follow-up |
 | --- | --- | --- |
-| 1.1 Refined-int race | PENDING | concurrent harness |
+| 1.1 Refined-int race | **DEFENSE PARTIAL** | verifier-side concurrent stress test (2026-04-29); type-side structurally guaranteed by CBGR |
 | 1.2 Mutex capability | PENDING | context fuzz harness |
 | 1.3 Refinement across await | PENDING | async harness |
 | 2.1 unsafe→checked aliasing | PENDING | aliasing analysis |
