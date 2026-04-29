@@ -13181,8 +13181,20 @@ impl<'s> CompilationPipeline<'s> {
         // null Type references (use-after-free from arity collision
         // fixups). Disabled by default to prevent non-deterministic
         // SIGSEGV during normal builds.
+        //
+        // Honour `CompilerOptions.emit_mode == LlvmIr`: when the
+        // CLI passes `--emit llvm-ir`, force the IR dump so the
+        // user gets the .ll file they asked for. Pre-fix the
+        // emit_mode field landed on CompilerOptions (set by
+        // build.rs:221) but no production code path consulted it,
+        // so `verum build --emit llvm-ir` produced no .ll file and
+        // silently fell through to the executable build.
         let emit_ir = self.session.options().emit_ir
-            || std::env::var("VERUM_DUMP_IR").is_ok();
+            || std::env::var("VERUM_DUMP_IR").is_ok()
+            || matches!(
+                self.session.options().emit_mode,
+                crate::options::EmitMode::LlvmIr,
+            );
         if emit_ir && !lowering.has_arity_collisions() && lowering.skip_body_count() == 0 {
             let llvm_ir = lowering.get_ir();
             std::fs::write(&ir_path, llvm_ir.as_str().as_bytes())
@@ -13378,11 +13390,22 @@ impl<'s> CompilationPipeline<'s> {
         target_machine.write_to_file(lowering.module(), FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
 
-        // Emit LLVM bitcode when LTO is enabled for cross-module optimization
-        if self.session.options().lto {
+        // Emit LLVM bitcode when LTO is enabled for cross-module
+        // optimization, OR when the user explicitly requested
+        // `--emit bc` via the CLI's emit_mode flag. Pre-fix
+        // `emit_mode == Bitcode` was inert: build.rs:223 set the
+        // field but no production path consulted it, so
+        // `verum build --emit bc` produced no .bc file and
+        // silently fell through to the executable build.
+        let want_bitcode = self.session.options().lto
+            || matches!(
+                self.session.options().emit_mode,
+                crate::options::EmitMode::Bitcode,
+            );
+        if want_bitcode {
             let bc_path = obj_path.with_extension("bc");
             lowering.module().write_bitcode_to_path(&bc_path);
-            debug!("  Wrote LLVM bitcode for LTO: {}", bc_path.display());
+            debug!("  Wrote LLVM bitcode: {}", bc_path.display());
         }
 
         // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
