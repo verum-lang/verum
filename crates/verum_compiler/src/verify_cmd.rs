@@ -29,7 +29,10 @@ use verum_ast::decl::TheoremDecl;
 use verum_common::span::Span;
 use verum_smt::{
     Context as SmtContext, ContextConfig, Translator, VerificationError,
-    verification_cache::VerificationCache,
+    verification_cache::{
+        CacheConfig, DistributedCacheConfig as VerifyDistributedCacheConfig,
+        TrustLevel as VerifyTrustLevel, VerificationCache,
+    },
     proof_search::ProofSearchEngine,
 };
 
@@ -39,6 +42,28 @@ use crate::phases::proof_verification::ProofVerificationResult;
 use crate::pipeline::CompilationPipeline;
 use crate::session::Session;
 use crate::verification_profiler::{FileLocation, VerificationProfiler};
+
+/// Parse a `distributed_cache_trust` string into the underlying
+/// `TrustLevel`. Recognised values: `"all"`, `"signatures"` (default
+/// when `None`), `"signatures_and_expiry"` (case- and whitespace-
+/// tolerant). Unknown / mistyped values fall back to `Signatures`
+/// with a warning so a typo can't silently downgrade trust to `All`.
+fn parse_trust_level(raw: Option<&str>) -> VerifyTrustLevel {
+    match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("") | Some("signatures") => VerifyTrustLevel::Signatures,
+        Some("all") => VerifyTrustLevel::All,
+        Some("signatures_and_expiry") => VerifyTrustLevel::SignaturesAndExpiry,
+        Some(other) => {
+            warn!(
+                "unknown distributed_cache_trust value '{}' — defaulting to \
+                 'signatures' (the safe baseline). Accepted values: \
+                 'all', 'signatures', 'signatures_and_expiry'.",
+                other
+            );
+            VerifyTrustLevel::Signatures
+        }
+    }
+}
 
 /// Verification command handler
 pub struct VerifyCommand<'s> {
@@ -73,13 +98,51 @@ impl<'s> VerifyCommand<'s> {
             None
         };
 
+        // Honour `CompilerOptions.distributed_cache_url` and
+        // `distributed_cache_trust`: when a URL is configured, build a
+        // `VerificationCache` that routes lookups through the
+        // configured backend with the requested trust policy. Pre-fix
+        // both fields landed on `CompilerOptions` (set by
+        // `cli::commands::verify::verify_file_proof`) but no production
+        // path consulted them — `VerifyCommand` always called
+        // `VerificationCache::new()`, so configuring a distributed
+        // cache in `verum.toml` had zero observable effect on the
+        // verify command. The trust default mirrors the documented
+        // safe baseline (`"signatures"`); unknown / mistyped values
+        // fall back to `"signatures"` with a warning so a typo never
+        // silently downgrades to `All`.
+        let cache = Self::build_cache(session);
+
         Self {
             session,
-            cache: VerificationCache::new(),
+            cache,
             budget_tracker: BudgetTracker::new(budget, slow_threshold),
             profiler,
             obligation_scratch: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// Build the `VerificationCache` honouring the session-level
+    /// distributed-cache options. Extracted so a unit test can pin
+    /// the URL→backend + trust→`TrustLevel` translation independently
+    /// of the rest of `VerifyCommand` construction (which requires a
+    /// full `Session`).
+    fn build_cache(session: &Session) -> VerificationCache {
+        let opts = session.options();
+        let url = match opts.distributed_cache_url.as_deref() {
+            Some(u) if !u.is_empty() => u,
+            _ => return VerificationCache::new(),
+        };
+        let trust = parse_trust_level(opts.distributed_cache_trust.as_deref());
+        let dc_config = VerifyDistributedCacheConfig {
+            s3_url: Text::from(url),
+            cache_dir: Text::from(".verum/verify-cache"),
+            trust,
+            verify_signatures: trust != VerifyTrustLevel::All,
+        };
+        VerificationCache::with_config(
+            CacheConfig::default().with_distributed_cache(dc_config),
+        )
     }
 
     /// Record a discharged obligation's elapsed time. Called by the
@@ -2093,5 +2156,69 @@ impl BudgetTracker {
                 Duration::ZERO
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod trust_level_tests {
+    use super::*;
+
+    #[test]
+    fn parse_trust_level_default_is_signatures() {
+        // Pin: missing / empty trust strings default to the documented
+        // safe baseline. Anything else would mean a `verum.toml` that
+        // declares only `distributed_cache = "..."` (no trust line)
+        // silently downgrades to a different trust stance.
+        assert_eq!(parse_trust_level(None), VerifyTrustLevel::Signatures);
+        assert_eq!(parse_trust_level(Some("")), VerifyTrustLevel::Signatures);
+        assert_eq!(
+            parse_trust_level(Some("   ")),
+            VerifyTrustLevel::Signatures
+        );
+    }
+
+    #[test]
+    fn parse_trust_level_recognises_documented_values() {
+        // Pin: the three documented trust stances ("all",
+        // "signatures", "signatures_and_expiry") parse to the
+        // matching `TrustLevel` variant. Case-insensitive; surrounding
+        // whitespace tolerated. Locks the contract surface so a typo
+        // in the verum.toml schema docs can't drift the parser.
+        assert_eq!(parse_trust_level(Some("all")), VerifyTrustLevel::All);
+        assert_eq!(parse_trust_level(Some("ALL")), VerifyTrustLevel::All);
+        assert_eq!(
+            parse_trust_level(Some("signatures")),
+            VerifyTrustLevel::Signatures
+        );
+        assert_eq!(
+            parse_trust_level(Some(" Signatures ")),
+            VerifyTrustLevel::Signatures
+        );
+        assert_eq!(
+            parse_trust_level(Some("signatures_and_expiry")),
+            VerifyTrustLevel::SignaturesAndExpiry
+        );
+        assert_eq!(
+            parse_trust_level(Some("Signatures_And_Expiry")),
+            VerifyTrustLevel::SignaturesAndExpiry
+        );
+    }
+
+    #[test]
+    fn parse_trust_level_unknown_falls_back_to_signatures() {
+        // Pin: load-bearing safety contract — an unknown value MUST
+        // never silently downgrade trust to `All`. Defaults to the
+        // safe baseline and emits a warning (not asserted here; the
+        // warning travels via `tracing` and is part of the user-
+        // visible story, not the wire contract).
+        assert_eq!(
+            parse_trust_level(Some("trust_everything")),
+            VerifyTrustLevel::Signatures
+        );
+        assert_eq!(
+            parse_trust_level(Some("none")),
+            VerifyTrustLevel::Signatures
+        );
+        assert_eq!(parse_trust_level(Some("0")), VerifyTrustLevel::Signatures);
     }
 }

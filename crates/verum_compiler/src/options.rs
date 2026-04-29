@@ -150,6 +150,20 @@ pub struct CompilerOptions {
     /// verification cache layer; the option here is the CLI handle.
     pub distributed_cache_url: Option<String>,
 
+    /// Trust policy applied to entries fetched from the distributed
+    /// verification cache. Accepted values: `"all"` (no validation —
+    /// trust everything; equivalent to `TrustLevel::None` on the
+    /// underlying cache), `"signatures"` (require Ed25519 signature
+    /// — the safe default), `"signatures_and_expiry"` (signature plus
+    /// TTL freshness; the local `cache_ttl` enforces the expiry side
+    /// since the underlying transport does not yet expose a separate
+    /// expiry-aware variant). `None` falls back to `"signatures"`.
+    /// Only consulted when `distributed_cache_url` is also set.
+    /// Unknown / mistyped values fall back to `"signatures"` with a
+    /// warning at consumption time so a typo never silently downgrades
+    /// the trust stance to `All`.
+    pub distributed_cache_trust: Option<String>,
+
     /// Enable per-theorem closure-hash incremental verification cache
     /// (`verum_verification::closure_cache`).  When true, theorem
     /// proofs whose closure-hash is in the cache and whose cached
@@ -352,6 +366,7 @@ impl Default for CompilerOptions {
             profile_verification: false,
             profile_obligation: false,
             distributed_cache_url: None,
+            distributed_cache_trust: None,
             closure_cache_enabled: false,
             closure_cache_root: None,
             profile_memory: false,
