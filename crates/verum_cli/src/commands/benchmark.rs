@@ -4,8 +4,6 @@
 //! systems and emits a comparison matrix.
 
 use crate::error::{CliError, Result};
-use std::path::PathBuf;
-use verum_common::Text;
 use verum_verification::benchmark::{
     mock_runner_for, BenchmarkMetric, BenchmarkResult, BenchmarkRunner, BenchmarkSuite,
     BenchmarkSystem, ComparisonMatrix,

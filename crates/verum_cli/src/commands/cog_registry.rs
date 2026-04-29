@@ -662,7 +662,7 @@ fn json_escape(s: &str) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
-    use verum_verification::cog_registry::{CogReproEnvelope, RegistryClient};
+    use verum_verification::cog_registry::CogReproEnvelope;
 
     fn fixture_manifest(name: &str) -> CogManifest {
         CogManifest::new(

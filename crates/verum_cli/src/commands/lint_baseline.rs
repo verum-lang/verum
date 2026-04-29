@@ -155,7 +155,6 @@ fn now_rfc3339() -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use verum_common::Text;
 
     fn make_issue(rule: &'static str, file: &str, line: usize, msg: &str) -> LintIssue {
         LintIssue {
