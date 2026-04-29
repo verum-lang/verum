@@ -999,6 +999,38 @@ enum Commands {
         format: String,
     },
 
+    /// Foreign-system theorem import (#85) — inverse of cross-format
+    /// export.  Reads a Coq / Lean4 / Mizar / Isabelle source file
+    /// and emits a Verum `.vr` skeleton with one `@axiom`-bodied
+    /// declaration per imported theorem, attributed back to the
+    /// source via `@framework(<system>, "<source>:<line>")`.  The
+    /// user fills in the proof body with Verum tactics, or keeps the
+    /// `@axiom` and treats the foreign system as the trust boundary.
+    ///
+    /// Usage:
+    ///   verum foreign-import --from <coq|lean4|mizar|isabelle> <FILE>
+    ///                        [--out <PATH>] [--format skeleton|json|summary]
+    ForeignImport {
+        /// Foreign system: coq / rocq / lean4 / lean / mathlib /
+        /// mizar / isabelle / hol.
+        #[clap(long)]
+        from: String,
+
+        /// Source file to parse.
+        #[clap(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Write rendered output to this path instead of stdout.
+        #[clap(long)]
+        out: Option<PathBuf>,
+
+        /// Output format: `skeleton` (default — emit `.vr` source),
+        /// `json` (structured payload for tooling), `summary`
+        /// (human-readable list).
+        #[clap(long, default_value = "skeleton")]
+        format: String,
+    },
+
     /// Auto-paper documentation generator (#84).  Walks every
     /// `.vr` file in the project, projects every public @theorem /
     /// @lemma / @corollary / @axiom into a typed `DocItem`, and
@@ -2797,6 +2829,12 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             commands::proof_repair::run_proof_repair(&kind, &field, max, &format)
         }
+        Commands::ForeignImport {
+            from,
+            file,
+            out,
+            format,
+        } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
         Commands::DocRender { sub } => match sub {
             DocRenderSub::Render {
                 format,
