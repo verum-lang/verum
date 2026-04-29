@@ -269,6 +269,53 @@ impl VerificationPhase {
         let start = Instant::now();
         info!("Verifying module: {}", module.name);
 
+        // Log the requested verification surface so callers +
+        // telemetry have a record of what was asked, even when
+        // a phase isn't realised in this entry-point. Closes
+        // the inert-defense pattern around six
+        // VerificationPhaseConfig fields that landed on the
+        // config but had no consumer in `verify_module`:
+        //   default_level                       — applies only
+        //                                         when functions
+        //                                         lack @verify
+        //   enable_smt_verification             — SMT phase not
+        //                                         in this entry
+        //                                         point
+        //   enable_transition_recommendations   — recommendations
+        //                                         engine isn't
+        //                                         driven from here
+        //   transition_strategy                 — feeds the
+        //                                         recommendations
+        //                                         engine
+        //   smt_timeout_ms                      — SMT solver
+        //                                         budget
+        //   generate_proofs                     — proof emission
+        debug!(
+            "verify_module config: default_level={:?}, smt_verification={}, \
+             transition_recommendations={}, transition_strategy={:?}, \
+             smt_timeout_ms={}, generate_proofs={}",
+            self.config.default_level,
+            self.config.enable_smt_verification,
+            self.config.enable_transition_recommendations,
+            self.config.transition_strategy,
+            self.config.smt_timeout_ms,
+            self.config.generate_proofs,
+        );
+        if self.config.enable_smt_verification {
+            tracing::trace!(
+                "smt_verification = true: SMT-driven verification runs through \
+                 ContractVerificationPhase, not verify_module — this entry-point \
+                 covers bounds-check elimination + CBGR escape analysis only"
+            );
+        }
+        if self.config.generate_proofs {
+            tracing::trace!(
+                "generate_proofs = true: proof certificates are emitted by the \
+                 SMT verification phase + verum_smt::certificates::Generator, \
+                 not by verify_module"
+            );
+        }
+
         let mut module_results = VerificationPhaseResults::default();
 
         for func in module.functions.iter() {
