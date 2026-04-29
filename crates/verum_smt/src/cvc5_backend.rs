@@ -517,6 +517,54 @@ impl Cvc5Backend {
                 );
             }
 
+            // Set preprocessing — CVC5's `preprocess-only false`
+            // disables the simplification + rewriting passes that
+            // run before solving. Default `true` preserves the
+            // existing CVC5 behaviour. Inert before this wire-up:
+            // toggling the flag had no observable effect.
+            let preprocess_str = if self.config.preprocessing {
+                "false" // preprocess-only=false → run preprocessing AND solving
+            } else {
+                "true" // preprocess-only=true → stop after preprocessing (no solving)
+            };
+            cvc5_sys::cvc5_solver_set_option(
+                self.solver,
+                CString::new("preprocess-only").unwrap().as_ptr(),
+                CString::new(preprocess_str).unwrap().as_ptr(),
+            );
+
+            // Set quantifier instantiation strategy via CVC5's
+            // `--full-saturate-quant` / `--cegqi` / `--mbqi` flags.
+            // Auto leaves CVC5's default heuristic in place; the
+            // other modes pin a single strategy.
+            let q_mode_opt: Option<&str> = match self.config.quantifier_mode {
+                QuantifierMode::Auto => None,
+                QuantifierMode::None => Some("none"),
+                QuantifierMode::EMatching => Some("ematching"),
+                QuantifierMode::CEGQI => Some("cegqi"),
+                QuantifierMode::MBQI => Some("mbqi"),
+            };
+            if let Some(mode_str) = q_mode_opt {
+                cvc5_sys::cvc5_solver_set_option(
+                    self.solver,
+                    CString::new("quant-mode").unwrap().as_ptr(),
+                    CString::new(mode_str).unwrap().as_ptr(),
+                );
+            }
+
+            // Set verbosity level (0-5). CVC5's `verbosity` option
+            // controls how much trace / status output the solver
+            // emits to stderr. 0 (default) is silent; 5 is the most
+            // verbose. Saturate at 5 for higher inputs.
+            let verbosity_clamped = self.config.verbosity.min(5);
+            let verbosity_str = CString::new(verbosity_clamped.to_string())
+                .map_err(|e| Cvc5Error::ConfigurationError(e.to_string()))?;
+            cvc5_sys::cvc5_solver_set_option(
+                self.solver,
+                CString::new("verbosity").unwrap().as_ptr(),
+                verbosity_str.as_ptr(),
+            );
+
             Ok(())
         }
     }
