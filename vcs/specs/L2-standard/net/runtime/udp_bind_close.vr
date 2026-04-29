@@ -1,0 +1,26 @@
+// @test: run
+// @expected-stdout: udp bind ok\nudp close ok
+// @tier: 0
+// @level: L2
+// @tags: net, udp, runtime, intrinsic
+// @description: Tier-0 runtime smoke — bind a UDP socket on an
+// ephemeral port, close it.
+
+mount core.sys.raw.{__udp_bind_raw, __udp_close_raw};
+
+fn main() {
+    let fd = __udp_bind_raw(0);
+    if fd > 0 {
+        print("udp bind ok");
+    } else {
+        print("udp bind failed");
+        return;
+    }
+
+    let rc = __udp_close_raw(fd);
+    if rc == 0 {
+        print("udp close ok");
+    } else {
+        print("udp close failed");
+    }
+}
