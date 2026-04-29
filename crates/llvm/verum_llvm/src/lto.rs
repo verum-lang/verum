@@ -462,6 +462,33 @@ impl FullLtoCodegen {
         // it, so the LLVM default (typically true for whole-program
         // LTO) was always used regardless of the manifest.
         self.set_internalize(config.internalize);
+
+        // Surface inert LtoConfig fields not routed through the
+        // legacy LTO C API. `features` (CPU features like
+        // `+avx2,+fma`) flow via TargetMachine on the per-module
+        // path, not through `lto_codegen_set_*`. `opt_level` is
+        // applied internally by `lto_codegen_optimize`. `whole_program`
+        // is implied by FullLTO mode itself. The fields land on
+        // LtoConfig from manifest + builder but the legacy LTO
+        // engine consumes only cpu/debug_info/pic/internalize.
+        // Closes the inert-defense pattern by routing the values
+        // through tracing so embedders setting
+        // `lto.features = "+avx2"` see the request was observed.
+        if !config.features.is_empty()
+            || config.opt_level != 2
+            || !config.whole_program
+        {
+            tracing::debug!(
+                "FullLtoCodeGen::apply_config: features={:?}, opt_level={}, \
+                 whole_program={} — these LtoConfig fields are not routed \
+                 through the legacy LTO C API; features feed the per-module \
+                 TargetMachine, opt_level is applied by lto_codegen_optimize, \
+                 whole_program is implied by FullLTO mode",
+                config.features.as_str(),
+                config.opt_level,
+                config.whole_program,
+            );
+        }
     }
 
     /// Add must-preserve symbol
