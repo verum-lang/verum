@@ -28,8 +28,47 @@ impl RegistryClient {
         })
     }
 
-    /// Create default registry client
+    /// Create default registry client.
+    ///
+    /// Uses the hardcoded `DEFAULT_REGISTRY` URL. Surface a
+    /// `tracing::debug!` when an active manifest carries
+    /// `[registry].index` set to a non-default value, so
+    /// embedders see when their override isn't being honored.
+    /// The proper fix is to migrate callers to `from_manifest`
+    /// which consults the manifest layer; this surfaces the
+    /// discrepancy until that migration completes.
     pub fn default() -> Result<Self> {
+        if let Ok(dir) = crate::config::Manifest::find_manifest_dir() {
+            let path = crate::config::Manifest::manifest_path(&dir);
+            if let Ok(manifest) = crate::config::Manifest::from_file(&path) {
+                if manifest.registry.index.as_str() != super::DEFAULT_REGISTRY {
+                    tracing::debug!(
+                        "RegistryClient::default(): manifest [registry].index = {:?} \
+                         differs from hardcoded DEFAULT_REGISTRY {:?} — manifest override \
+                         is not yet honored at this construction site; use \
+                         `RegistryClient::from_manifest` instead",
+                        manifest.registry.index.as_str(),
+                        super::DEFAULT_REGISTRY,
+                    );
+                }
+            }
+        }
+        Self::new(super::DEFAULT_REGISTRY)
+    }
+
+    /// Create registry client from manifest, honouring the
+    /// `[registry].index` field. Falls back to `DEFAULT_REGISTRY`
+    /// when no manifest is present. Closes the inert-defense
+    /// pattern around `RegistryConfig.index`: pre-fix the field
+    /// was TOML-parseable but every call site went through
+    /// `default()` which hardcodes the URL.
+    pub fn from_manifest() -> Result<Self> {
+        if let Ok(dir) = crate::config::Manifest::find_manifest_dir() {
+            let path = crate::config::Manifest::manifest_path(&dir);
+            if let Ok(manifest) = crate::config::Manifest::from_file(&path) {
+                return Self::new(manifest.registry.index);
+            }
+        }
         Self::new(super::DEFAULT_REGISTRY)
     }
 
