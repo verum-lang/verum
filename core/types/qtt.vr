@@ -340,3 +340,119 @@ implement Debug for Quantity {
         }
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq + Clone for UsageCount / TrackedBinding / QttViolation
+// =============================================================================
+
+implement Eq for UsageCount {
+    fn eq(&self, other: &UsageCount) -> Bool {
+        self.runtime == other.runtime
+    }
+}
+
+implement Clone for UsageCount {
+    fn clone(&self) -> UsageCount { UsageCount { runtime: self.runtime } }
+}
+
+implement Copy for UsageCount {}
+
+implement Display for UsageCount {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.runtime.to_text().as_str())
+    }
+}
+
+implement Debug for UsageCount {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"UsageCount({self.runtime})".as_str())
+    }
+}
+
+implement Eq for TrackedBinding {
+    fn eq(&self, other: &TrackedBinding) -> Bool {
+        self.name == other.name && self.declared == other.declared
+    }
+}
+
+implement Clone for TrackedBinding {
+    fn clone(&self) -> TrackedBinding {
+        TrackedBinding { name: self.name.clone(), declared: self.declared.clone() }
+    }
+}
+
+implement Display for TrackedBinding {
+    /// Renders as `<name>:<quantity>` — matches QTT-literature
+    /// notation `x : ω. Int` minus the type ascription (which lives
+    /// elsewhere in the binder).
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name.as_str())?;
+        f.write_str(":")?;
+        self.declared.fmt(f)
+    }
+}
+
+implement Debug for TrackedBinding {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"TrackedBinding {{ name: {self.name}, declared: ".as_str())?;
+        self.declared.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}
+
+implement Eq for QttViolation {
+    fn eq(&self, other: &QttViolation) -> Bool {
+        match (self, other) {
+            (QttViolation.OverUse { binding: ba, observed: oa, declared: da },
+             QttViolation.OverUse { binding: bb, observed: ob, declared: db }) =>
+                ba == bb && oa == ob && da == db,
+            (QttViolation.UnderUse { binding: ba, declared: da },
+             QttViolation.UnderUse { binding: bb, declared: db }) =>
+                ba == bb && da == db,
+            (QttViolation.ErasedUsedAtRuntime { binding: ba },
+             QttViolation.ErasedUsedAtRuntime { binding: bb }) =>
+                ba == bb,
+            _ => false,
+        }
+    }
+}
+
+implement Display for QttViolation {
+    /// Renders a QTT violation in human-readable form for verifier
+    /// diagnostics.  Each variant surfaces the binding name and
+    /// the relevant declared quantity so callers can locate the
+    /// offending binding directly from the message.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QttViolation.OverUse { binding, observed, declared } => {
+                f.write_str(f"binding `{binding}` used {observed} times, declared ".as_str())?;
+                declared.fmt(f)
+            },
+            QttViolation.UnderUse { binding, declared } => {
+                f.write_str(f"binding `{binding}` not consumed, declared ".as_str())?;
+                declared.fmt(f)
+            },
+            QttViolation.ErasedUsedAtRuntime { binding } =>
+                f.write_str(f"erased binding `{binding}` referenced at runtime".as_str()),
+        }
+    }
+}
+
+implement Debug for QttViolation {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            QttViolation.OverUse { binding, observed, declared } => {
+                f.write_str(f"OverUse({binding}, observed={observed}, declared=".as_str())?;
+                declared.fmt_debug(f)?;
+                f.write_str(")")
+            },
+            QttViolation.UnderUse { binding, declared } => {
+                f.write_str(f"UnderUse({binding}, declared=".as_str())?;
+                declared.fmt_debug(f)?;
+                f.write_str(")")
+            },
+            QttViolation.ErasedUsedAtRuntime { binding } =>
+                f.write_str(f"ErasedUsedAtRuntime({binding})".as_str()),
+        }
+    }
+}
