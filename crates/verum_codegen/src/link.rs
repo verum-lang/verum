@@ -1016,6 +1016,25 @@ impl PreparedLink {
 
         if self.config.strip {
             linker = linker.strip();
+        } else if self.config.strip_debug {
+            // Wire `strip_debug` symmetrically with the standard
+            // (non-LTO) link path at line ~855. Pre-fix the LTO
+            // link branch only checked `strip` — setting
+            // `strip_debug = true` had no effect on LTO builds,
+            // surfacing as smaller-than-expected .text but
+            // unchanged debug-section size in the output.
+            linker = linker.strip_debug();
+        }
+
+        // Wire `entry_point` into the LTO link path symmetrically
+        // with the standard link path at line ~860. Pre-fix the
+        // LTO branch silently used the linker's default entry
+        // (`_start` on Linux, `_main` on macOS) regardless of the
+        // user's configured entry — `verum build --release` (which
+        // typically enables LTO) ignored the manifest's
+        // `entry_point` setting.
+        if let Some(ref entry) = self.config.entry_point {
+            linker = linker.entry(entry);
         }
 
         for path in &self.config.library_paths {
@@ -1030,6 +1049,38 @@ impl PreparedLink {
             if let InputFile::Library(name) = input {
                 linker = linker.add_library(name);
             }
+        }
+
+        // Wire `static_link` and `exports` into the LTO link path
+        // symmetrically with the standard path. Pre-fix the LTO
+        // branch dropped both, so static-link manifests built
+        // under release / LTO produced dynamically-linked outputs.
+        if self.config.static_link {
+            linker = linker.static_link();
+        }
+        for symbol in &self.config.exports {
+            linker = linker.export_symbol(symbol);
+        }
+
+        // Wire `rpaths`, `linker_script`, and `extra_args` into
+        // the LTO link path symmetrically with the standard path.
+        // Pre-fix all three were silently dropped under LTO —
+        // surfacing as missing rpaths / ignored linker scripts /
+        // dropped extra flags in `verum build --release` builds.
+        for path in &self.config.rpaths {
+            linker = linker.rpath(path);
+        }
+        if let Some(ref script) = self.config.linker_script {
+            linker = linker.linker_script(script);
+        }
+        for arg in &self.config.extra_args {
+            linker = linker.arg(arg);
+        }
+
+        // Wire `verbose` symmetrically — same drop pattern as the
+        // other LTO-path-omitted fields above.
+        if self.config.verbose {
+            linker = linker.verbose();
         }
 
         let result = linker.link()?;
