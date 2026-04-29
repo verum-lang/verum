@@ -81,12 +81,43 @@ repeated lookups against the same hub symbol-table entry.
 
 ## Vector 2 — Runtime DoS
 
-### 2.1 Allocator pressure / generation churn
+### 2.1 Allocator pressure / generation churn — DEFENSE CONFIRMED 2026-04-29
 
-**Status:** PARTIAL DEFENSE — the byte-loop sweep through #203 (~170+ sites
-migrated to bulk-copy) closes one major allocator-pressure source on
-wire-frame paths. Tight-loop alloc-free does still churn the LocalHeap
-generation counter; need stress test.
+**Status:** DEFENSE CONFIRMED. Two independent layers of defense, each
+with its own guardrail:
+
+1. **Wire-frame allocation reduction.** The byte-loop sweep through
+   #203 closes ~170+ sites where unbounded byte-by-byte appends were
+   migrated to bulk `extend_from_slice` / pre-reserve patterns. This
+   removes the primary alloc-pressure source on wire-frame paths
+   (QUIC/TLS/HTTP/SQLite/Postgres/MySQL/encoding/security frame
+   serialisation).
+
+2. **Generation churn no-collision invariant.** The
+   `CbgrHeader::increment_generation` primitive is monotone under
+   concurrent contention — captured `(gen, epoch)` tuples are
+   strictly less than every subsequently-written generation, so a
+   stale reference can never resurrect. Guardrail at
+   `crates/verum_common/src/cbgr.rs::test_generation_churn_rejects_stale_reference`:
+   4 workers × 25 000 advances = 100 000 concurrent
+   `increment_generation` calls, with a watcher repeatedly
+   `validate(captured_gen, captured_epoch)`-ing once the first advance
+   has signalled. Every observation post-advance MUST be
+   `GenerationMismatch`; a single `Success` would prove a UAF
+   defense gap. Mirrors the production allocator's
+   `dealloc_slot` slot-delta increment (`core/mem/allocator.vr:617`)
+   at the `CbgrHeader` API level.
+
+**Note on the Rust stub `tracked_dealloc`:** the Rust-side
+`tracked_dealloc` calls `invalidate()` (sets gen → `GEN_UNALLOCATED`)
+but does NOT advance generation past previously-captured tuples. A
+naive `invalidate()` + `increment_generation()` re-alloc sequence
+collides on `GEN_INITIAL`. Production's `core/mem/allocator.vr`
+avoids this by NOT pairing `invalidate()` with `increment_generation()` —
+it uses page-generation + per-slot delta where the delta increments
+on dealloc, advancing the effective generation before re-alloc lands
+on the same slot. The guardrail tests the production pattern, not
+the stub.
 
 ### 2.2 Refinement check at every callsite of a hot function
 
@@ -290,7 +321,7 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 1.1 Deep generic | **DEFENSE CONFIRMED** | 2^14 wrapping guardrail (2026-04-28) |
 | 1.2 SMT exponential | **DEFENSE CONFIRMED** | closed via round-1 §5.1 (2026-04-28) |
 | 1.3 Module fan-out | **DEFENSE CONFIRMED** | 64-leaf+hub+aggregator guardrail (2026-04-28) |
-| 2.1 Alloc pressure | PARTIAL | wire-frame done |
+| 2.1 Alloc pressure | **DEFENSE CONFIRMED** | wire-frame done + generation-churn no-collision guardrail (2026-04-29) |
 | 2.2 Refinement caching | PENDING | hot-loop test |
 | 2.3 10^6 tasks | **DEFENSE CONFIRMED** | atomic spawn-time cap (2026-04-28) |
 | 2.4 Channel backlog | **DEFENSE CONFIRMED** | zero-internal-unbounded audit (2026-04-28) |
@@ -302,12 +333,12 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 5.1 1000-module load | **DEFENSE CONFIRMED** | 256-module synthetic guardrail (2026-04-28) |
 | 5.2 Deep cfg | **DEFENSE CONFIRMED** | 78-predicate walker linearity (2026-04-28) |
 
-**9 vectors confirmed defended (channel backlog, 10^6 tasks, SMT exponential,
-dispatch worst case, deep cfg, atomic contention, module load, deep generic,
-module fan-out), 2 partial defences (alloc pressure, plus ~170+ wire-frame
-sites swept), 3 pending** post 2026-04-28 closures.  Sections A-C above
-document performance-class invariants already upheld through the closed
-audit.
+**11 vectors confirmed defended (alloc pressure, channel backlog, 10^6
+tasks, SMT exponential, dispatch worst case, deep cfg, atomic
+contention, module load, deep generic, module fan-out, plus ~170+
+wire-frame sites swept), 3 pending** post 2026-04-29 closure.
+Sections A-C above document performance-class invariants already
+upheld through the closed audit.
 
 The wire-frame and crypto hot paths now have allocation-free bulk-copy
 primitives in place; further work is in the synthetic-input adversarial

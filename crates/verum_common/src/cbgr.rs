@@ -1120,4 +1120,175 @@ mod tests {
             TOTAL.saturating_sub(final_value),
         );
     }
+
+    // =========================================================================
+    // Round 3 §2.1 — Allocator pressure / generation churn (DEFENSE CONFIRMED)
+    // =========================================================================
+    //
+    // Red-team scenario: tight-loop alloc → dealloc → re-alloc churn against
+    // the per-allocation `CbgrHeader` to expose use-after-free races.  An
+    // attacker captures `(gen, epoch)` from a live reference, the original
+    // owner deallocates and the slot is re-allocated.  The attacker tries
+    // to dereference using the now-stale captured tuple.
+    //
+    // The production allocator (`core/mem/allocator.vr::dealloc_slot`)
+    // models this by incrementing a per-slot generation delta on dealloc:
+    // the next allocation of the same slot lands on `page_gen + new_delta`,
+    // strictly greater than the captured generation.  At the
+    // `CbgrHeader` level the equivalent monotone primitive is
+    // `increment_generation()` — every dealloc-then-reuse cycle advances
+    // the generation by ≥1, never returning to a previously-captured value
+    // (until the per-slot delta wraps the modulo-256 boundary, at which
+    // point the page-generation epoch advances and the captured tuple
+    // mismatches via the epoch slot of validate()).
+    //
+    // Defense: `CbgrHeader::validate(expected_gen, expected_epoch)` returns
+    //   - `GenerationMismatch` when current_gen != expected_gen (the
+    //     captured tuple is stale because the slot's generation has
+    //     monotonically advanced)
+    //   - `Success` ONLY when expected matches current exactly.
+    //
+    // The test pins this contract under contention: many threads drive
+    // generation advances (the canonical dealloc-then-realloc primitive)
+    // while a watcher repeatedly validates the captured-pre-churn tuple.
+    // The watcher MUST NOT observe `Success` after at least one
+    // increment_generation() has landed.  A single Success post-advance
+    // would prove a defense gap in the use-after-free contract.
+
+    #[test]
+    fn test_generation_churn_rejects_stale_reference() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::thread;
+
+        // The watcher captures (gen, epoch) BEFORE any churn happens.
+        // CbgrHeader::new(0) → gen=GEN_INITIAL, epoch=0, so the
+        // captured tuple is (GEN_INITIAL, 0).
+        //
+        // Workers drive monotone generation advances.  Each
+        // increment_generation() lands a new value strictly greater
+        // than GEN_INITIAL (until GEN_MAX wraparound, which we size
+        // out of by sizing TOTAL well below GEN_MAX).
+        const WORKERS: u32 = 4;
+        const ITERS_PER_WORKER: u32 = 25_000;
+        const TOTAL: u32 = WORKERS * ITERS_PER_WORKER;
+
+        let header = Arc::new(CbgrHeader::new(0));
+        let captured_gen = GEN_INITIAL;
+        let captured_epoch = 0u32;
+
+        // Sanity baseline: fresh header validates the captured tuple.
+        assert_eq!(
+            header.validate(captured_gen, captured_epoch),
+            CbgrErrorCode::Success,
+            "baseline: fresh header must validate the captured tuple"
+        );
+
+        let advance_started = Arc::new(AtomicBool::new(false));
+        let mut handles = Vec::with_capacity(WORKERS as usize + 1);
+
+        // Workers drive churn via increment_generation — production's
+        // canonical "dealloc advances slot generation delta" primitive
+        // expressed at the CbgrHeader API.
+        let started = Arc::clone(&advance_started);
+        for _ in 0..WORKERS {
+            let h = Arc::clone(&header);
+            let s = Arc::clone(&started);
+            handles.push(thread::spawn(move || {
+                for _ in 0..ITERS_PER_WORKER {
+                    let _ = h.increment_generation();
+                    // Mark "advance started" exactly once.  Watcher
+                    // uses this to distinguish the legitimate baseline
+                    // window (zero advances landed) from the post-
+                    // advance window (≥1 advance landed → captured
+                    // tuple MUST be stale).
+                    s.store(true, Ordering::Release);
+                }
+            }));
+        }
+
+        // Watcher: repeatedly validate the captured-pre-churn tuple.
+        // Once any worker has signalled `advance_started`, every
+        // subsequent Success is a defense gap.
+        let h_watch = Arc::clone(&header);
+        let started_watch = Arc::clone(&advance_started);
+        handles.push(thread::spawn(move || {
+            // Spin until first advance has landed before strict-mode
+            // assertions kick in.  Cap the spin at TOTAL × 4 yields
+            // so the test fails fast if workers never reach the
+            // shared header (test-machinery error, not a defense bug).
+            let mut spin_budget = (TOTAL as u64) * 4;
+            while !started_watch.load(Ordering::Acquire) {
+                if spin_budget == 0 {
+                    panic!(
+                        "watcher: advance_started never flipped \
+                         within budget — test machinery error"
+                    );
+                }
+                spin_budget -= 1;
+                thread::yield_now();
+            }
+
+            // Strict mode: from here on, EVERY validate of the
+            // captured tuple MUST reject.  Iteration count sized to
+                // ensure many concurrent advances overlap the watcher
+            // window.
+            for _ in 0..(TOTAL * 2) {
+                let result = h_watch.validate(captured_gen, captured_epoch);
+                match result {
+                    CbgrErrorCode::GenerationMismatch => {
+                        // Defense holds — current gen has advanced
+                        // past captured_gen, validate correctly fails.
+                    }
+                    CbgrErrorCode::ExpiredReference => {
+                        // Allowed: GEN_UNALLOCATED race window if
+                        // anything ever invalidates the slot.  Our
+                        // workers do not call invalidate() so this
+                        // outcome should not arise in this test, but
+                        // accepting it keeps the assertion honest if
+                        // the implementation evolves to interleave
+                        // an invalidate during increment_generation.
+                    }
+                    CbgrErrorCode::Success => {
+                        panic!(
+                            "use-after-free: stale tuple ({}, {}) \
+                             validated as Success after advances landed",
+                            captured_gen, captured_epoch
+                        );
+                    }
+                    other => panic!(
+                        "unexpected validation outcome: {:?}",
+                        other
+                    ),
+                }
+            }
+        }));
+
+        for h in handles {
+            h.join().expect("worker or watcher panicked");
+        }
+
+        // Final state: the header has advanced TOTAL times.  Sized
+        // to stay well below GEN_MAX so no wraparound triggers.
+        // Final gen = GEN_INITIAL + TOTAL.
+        let final_gen = header.generation();
+        assert_eq!(
+            final_gen,
+            GEN_INITIAL + TOTAL,
+            "post-churn: lost updates — expected gen {} got {}",
+            GEN_INITIAL + TOTAL,
+            final_gen
+        );
+
+        // Final-state captured tuple must reject — every advance is
+        // monotone so captured_gen < final_gen → GenerationMismatch.
+        assert_eq!(
+            header.validate(captured_gen, captured_epoch),
+            CbgrErrorCode::GenerationMismatch,
+            "post-churn: stale tuple must reject as GenerationMismatch \
+             (final_gen={}, captured_gen={})",
+            final_gen,
+            captured_gen,
+        );
+    }
 }
