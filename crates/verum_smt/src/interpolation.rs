@@ -233,6 +233,47 @@ impl InterpolationEngine {
         Self { config }
     }
 
+    /// Construct a Z3 solver with this engine's `config.timeout_ms`
+    /// applied. All `Solver::new()` sites that participate in
+    /// interpolation work route through this helper so the timeout
+    /// field — documented as "Timeout" on `InterpolationConfig` —
+    /// actually constrains every solver instance the engine spawns.
+    /// Without this wiring the field would be inert: Z3 would run
+    /// to its native limit (effectively unlimited) regardless of
+    /// what callers configured.
+    fn fresh_solver(&self) -> Solver {
+        let solver = Solver::new();
+        self.apply_timeout_only(&solver);
+        solver
+    }
+
+    /// Apply only the configured timeout to `solver` via a fresh
+    /// `Params`. Helpers that need to set algorithm-specific
+    /// params (e.g. `proof = true` in McMillan) merge them into
+    /// their own [`z3::Params`] and route through
+    /// [`apply_timeout_into`] so the timeout and the
+    /// algorithm-specific options arrive in the same call —
+    /// `Solver::set_params` replaces the entire param set, so two
+    /// separate calls would lose whichever came first.
+    fn apply_timeout_only(&self, solver: &Solver) {
+        if let Maybe::Some(_) = self.config.timeout_ms {
+            let mut params = z3::Params::new();
+            self.apply_timeout_into(&mut params);
+            solver.set_params(&params);
+        }
+    }
+
+    /// Mix the configured timeout into an already-constructed
+    /// `Params`. Callers that need other params (proof, model,
+    /// etc.) build their `Params`, call this, then send the
+    /// merged value via `Solver::set_params`. Keeps the timeout
+    /// honoured even on call sites that customise the solver.
+    fn apply_timeout_into(&self, params: &mut z3::Params) {
+        if let Maybe::Some(timeout) = self.config.timeout_ms {
+            params.set_u32("timeout", timeout as u32);
+        }
+    }
+
     /// Compute interpolant between two formulas
     ///
     /// Given A and B where A ∧ B is UNSAT, compute I such that:
@@ -243,7 +284,7 @@ impl InterpolationEngine {
         let start = Instant::now();
 
         // Check if A ∧ B is unsatisfiable
-        let solver = Solver::new();
+        let solver = self.fresh_solver();
         solver.assert(a);
         solver.assert(b);
 
@@ -326,9 +367,13 @@ impl InterpolationEngine {
 
         let solver = Solver::new();
 
-        // Enable proof generation
+        // Enable proof generation. Fold the configured timeout into
+        // the same `Params` value — `Solver::set_params` replaces
+        // the entire param set, so a separate `fresh_solver()` +
+        // `set_params({proof})` would erase the timeout.
         let mut params = z3::Params::new();
         params.set_bool("proof", true);
+        self.apply_timeout_into(&mut params);
         solver.set_params(&params);
 
         solver.assert(a);
@@ -380,7 +425,7 @@ impl InterpolationEngine {
         // Model-based interpolation using quantifier elimination
 
         // Step 1: Get model for A (since A ∧ B is UNSAT, ¬B satisfies A)
-        let solver_a = Solver::new();
+        let solver_a = self.fresh_solver();
         solver_a.assert(a);
         solver_a.assert(b.not());
 
@@ -545,8 +590,8 @@ impl InterpolationEngine {
 
         // MEMORY FIX: Reuse solvers instead of creating new ones in loop
         // Each Solver::new() allocates ~500KB that accumulates without cleanup
-        let solver_a = Solver::new();
-        let solver_b = Solver::new();
+        let solver_a = self.fresh_solver();
+        let solver_b = self.fresh_solver();
 
         for _ in 0..MAX_ITERATIONS {
             // Refine from A side - use push/pop for incremental solving
@@ -590,7 +635,7 @@ impl InterpolationEngine {
         const MAX_ITERATIONS: usize = 20;
 
         // MEMORY FIX: Create solver once, reuse with reset()
-        let solver = Solver::new();
+        let solver = self.fresh_solver();
 
         for _ in 0..MAX_ITERATIONS {
             solver.reset(); // Clear previous state
