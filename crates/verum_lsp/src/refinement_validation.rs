@@ -348,6 +348,17 @@ struct ValidatorConfig {
     show_counterexamples: bool,
     max_counterexample_traces: u32,
     cache_enabled: bool,
+    /// Mirror of `LspConfig::verification_show_cost_warnings` —
+    /// gates the per-validation cost diagnostic that fires when
+    /// elapsed time exceeds `slow_threshold`. False means "stay
+    /// quiet about slow validations even when they happen".
+    cost_warnings_enabled: bool,
+    /// Mirror of `LspConfig::verification_slow_threshold` — once
+    /// validation wall-clock crosses this, a single info-level
+    /// cost warning is surfaced (when `cost_warnings_enabled` is
+    /// true) so users know which functions are dragging their
+    /// editor latency.
+    slow_threshold: Duration,
 }
 
 impl Default for ValidatorConfig {
@@ -359,6 +370,8 @@ impl Default for ValidatorConfig {
             show_counterexamples: true,
             max_counterexample_traces: 5,
             cache_enabled: true,
+            cost_warnings_enabled: true,
+            slow_threshold: Duration::from_millis(5_000),
         }
     }
 }
@@ -390,11 +403,38 @@ impl RefinementValidator {
         guard.show_counterexamples = cfg.show_counterexamples;
         guard.max_counterexample_traces = cfg.max_counterexample_traces;
         guard.cache_enabled = cfg.cache_validation_results;
+        // Cost-warning gates were inert before this wire-up — the
+        // LspConfig fields existed and were JSON-parseable from
+        // initializationOptions, but no consumer ever read them.
+        // Now they reach the validator's per-call slow-warning path
+        // via `should_emit_cost_warning`.
+        guard.cost_warnings_enabled = cfg.verification_show_cost_warnings;
+        guard.slow_threshold = cfg.verification_slow_threshold;
 
         // Resize the cache to match the new capacity/TTL. We do this by
         // rebuilding; the few cached entries that get dropped here are not
         // load-bearing (they're revalidated on the next request anyway).
         self.cache.resize(cfg.cache_max_entries, cfg.cache_ttl);
+    }
+
+    /// Decide whether a validation that took `elapsed` should
+    /// surface a cost warning. Returns `true` only when both
+    /// gates concur: cost warnings are enabled AND the elapsed
+    /// time crossed the configured slow threshold. Returning
+    /// `bool` (rather than constructing the diagnostic here) keeps
+    /// the validator decoupled from the LSP diagnostic shape —
+    /// callers in `backend.rs` build the diagnostic in their own
+    /// format and just consult this gate.
+    pub fn should_emit_cost_warning(&self, elapsed: Duration) -> bool {
+        let cfg = self.config.read();
+        cfg.cost_warnings_enabled && elapsed >= cfg.slow_threshold
+    }
+
+    /// Read-only view of the configured slow threshold so callers
+    /// can name it in their cost-warning diagnostic message
+    /// without having to thread the LspConfig in alongside.
+    pub fn slow_threshold(&self) -> Duration {
+        self.config.read().slow_threshold
     }
 
     /// Whether this validator is currently enabled. Hot-path callers should
@@ -3021,6 +3061,50 @@ mod tests {
         let stats = cache.stats();
         assert_eq!(stats.total_entries, 1);
         assert_eq!(stats.capacity, 10);
+    }
+
+    #[test]
+    fn cost_warning_gate_requires_both_enabled_and_threshold() {
+        // Pin: `should_emit_cost_warning` correctly conjuncts the
+        // `cost_warnings_enabled` flag with the elapsed-vs-threshold
+        // comparison. Before the wire-up the LspConfig fields
+        // (`verification_show_cost_warnings`, `verification_slow_threshold`)
+        // never reached the validator — the JSON parser stored them on
+        // LspConfig but no consumer ever read them.
+        let validator = RefinementValidator::new();
+
+        // Default config: enabled = true, threshold = 5_000ms.
+        // 100ms elapsed is well under threshold → no warning.
+        assert!(
+            !validator.should_emit_cost_warning(Duration::from_millis(100)),
+            "below-threshold elapsed must not emit"
+        );
+        // 6_000ms elapsed crosses the default threshold → warning.
+        assert!(
+            validator.should_emit_cost_warning(Duration::from_millis(6_000)),
+            "above-threshold elapsed must emit when enabled"
+        );
+
+        // Apply a config that disables cost warnings entirely. Even
+        // a 60-second validation must stay quiet now.
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.verification_show_cost_warnings = false;
+        validator.apply_config(&cfg);
+        assert!(
+            !validator.should_emit_cost_warning(Duration::from_millis(60_000)),
+            "verification_show_cost_warnings=false must suppress every warning"
+        );
+
+        // Re-enable, lower the threshold to 10ms. A 50ms validation
+        // now crosses it.
+        cfg.verification_show_cost_warnings = true;
+        cfg.verification_slow_threshold = Duration::from_millis(10);
+        validator.apply_config(&cfg);
+        assert!(
+            validator.should_emit_cost_warning(Duration::from_millis(50)),
+            "lowering the threshold via apply_config must take effect"
+        );
+        assert_eq!(validator.slow_threshold(), Duration::from_millis(10));
     }
 
     #[test]
