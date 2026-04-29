@@ -159,6 +159,17 @@ pub struct ForeignTheorem {
     /// emitted Verum skeleton.  Composed from `system.framework_tag`
     /// + `source_file:source_line`.
     pub framework_citation: Text,
+    /// Qualified path produced by walking the enclosing scopes
+    /// (Coq `Section`/`Module`, Lean `namespace`, Isabelle
+    /// `theory`).  Empty when the declaration is at top level.
+    /// Foreign-system convention: dot-separated.
+    /// (#93 hardening — replaces the V0 flat-name view.)
+    #[serde(default)]
+    pub qualified_name: Text,
+    /// Names of the enclosing scopes in source order, outermost
+    /// first.  Empty for top-level declarations.
+    #[serde(default)]
+    pub scope_path: Vec<Text>,
 }
 
 impl ForeignTheorem {
@@ -438,39 +449,243 @@ const ISABELLE_KEYWORDS: &[(&str, ForeignTheoremKind)] = &[
 // Shared statement-level extractor
 // =============================================================================
 
-/// Generic line-based extractor used by every V0 importer.  Scans
-/// the source for lines beginning with one of the configured
-/// keywords; the next identifier becomes the theorem name; the
-/// statement runs to the line's terminator (`.` for Coq/Mizar/
-/// Isabelle, `:=` for Lean) or end-of-line.
+/// Block-structured extractor (#93 hardening).  Handles:
 ///
-/// Comments (Coq-style `(* ... *)`, Lean-style `-- ...`, Mizar-
-/// style `::`, Isabelle-style `(*...*)`) are stripped from the
-/// keyword-detection pass — declarations inside comments don't
-/// trigger imports.
+///   * Coq: `Section S. ... End S.` and `Module M. ... End M.` —
+///     names are pushed/popped from the scope stack so qualified
+///     declarations get the right `S.M.thm` rendering.
+///   * Lean4: `namespace foo ... end foo` — same model.
+///   * Isabelle: `theory T begin ... end` — wraps every declaration
+///     in the theory name.
+///   * Mizar: no block-nesting (top-level only); the importer still
+///     respects `definition ... end;` as a no-scope frame so
+///     internal declarations aren't double-counted.
+///
+/// Multi-line statements are aggregated up to the per-system
+/// terminator (`.` for Coq/Isabelle/Mizar, `:=` or end-of-block
+/// for Lean) so a `Theorem foo : ...` whose statement spans 5
+/// lines is captured intact.
 fn extract_decls(
     content: &str,
     source_file: &str,
     system: ForeignSystem,
     keywords: &[(&str, ForeignTheoremKind)],
 ) -> Vec<ForeignTheorem> {
-    let mut out: Vec<ForeignTheorem> = Vec::new();
     let stripped = strip_comments(content, system);
-    for (line_idx, line) in stripped.lines().enumerate() {
+    let mut out: Vec<ForeignTheorem> = Vec::new();
+    let mut scope: Vec<Text> = Vec::new();
+    let lines: Vec<&str> = stripped.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let line = lines[i];
         let trimmed = line.trim_start();
+
+        // ----- scope-open keywords --------------------------------------
+        if let Some(name) = match_scope_open(trimmed, system) {
+            scope.push(Text::from(name));
+            i += 1;
+            continue;
+        }
+
+        // ----- scope-close keywords -------------------------------------
+        if let Some(closing) = match_scope_close(trimmed, system) {
+            // Pop until we find a matching name (or just one frame
+            // when the close has no name attached, e.g. Isabelle's
+            // bare `end`).
+            match closing {
+                ScopeCloseShape::Named(name) => {
+                    while let Some(top) = scope.last() {
+                        if top.as_str() == name {
+                            scope.pop();
+                            break;
+                        }
+                        scope.pop();
+                    }
+                }
+                ScopeCloseShape::Anonymous => {
+                    scope.pop();
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        // ----- declaration keywords -------------------------------------
+        let mut matched = false;
         for (kw, kind) in keywords {
             if !starts_with_keyword(trimmed, kw) {
                 continue;
             }
-            if let Some(theorem) =
-                parse_decl_line(trimmed, kw, *kind, system, source_file, line_idx + 1)
-            {
+            // Aggregate the statement across however many lines it spans.
+            let (joined, consumed) = aggregate_decl(&lines[i..], system);
+            let line_number = i + 1;
+            if let Some(theorem) = parse_decl_line(
+                joined.trim_start(),
+                kw,
+                *kind,
+                system,
+                source_file,
+                line_number,
+                &scope,
+            ) {
                 out.push(theorem);
             }
+            i += consumed;
+            matched = true;
             break;
+        }
+        if !matched {
+            i += 1;
         }
     }
     out
+}
+
+#[derive(Debug, Clone)]
+enum ScopeCloseShape<'a> {
+    Named(&'a str),
+    Anonymous,
+}
+
+/// Recognise `Section X.` / `Module X.` (Coq) / `namespace X` (Lean)
+/// / `theory X` (Isabelle).  Returns the new scope name on match.
+fn match_scope_open<'a>(line: &'a str, system: ForeignSystem) -> Option<&'a str> {
+    let line = line.trim();
+    match system {
+        ForeignSystem::Coq => {
+            for kw in ["Section", "Module"] {
+                if let Some(rest) = strip_kw(line, kw) {
+                    let name = rest
+                        .trim_start()
+                        .split(|c: char| !is_ident_char(c))
+                        .next()
+                        .unwrap_or("");
+                    if !name.is_empty() {
+                        return Some(name);
+                    }
+                }
+            }
+            None
+        }
+        ForeignSystem::Lean4 => {
+            if let Some(rest) = strip_kw(line, "namespace") {
+                let name = rest.trim().split_whitespace().next().unwrap_or("");
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+            None
+        }
+        ForeignSystem::Isabelle => {
+            if let Some(rest) = strip_kw(line, "theory") {
+                let name = rest.trim().split_whitespace().next().unwrap_or("");
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+            None
+        }
+        ForeignSystem::Mizar => None,
+    }
+}
+
+/// Recognise scope-closing forms:
+///
+///   * Coq:      `End X.`        → Named(X)
+///   * Lean4:    `end foo`       → Named(foo); `end` alone → Anonymous
+///   * Isabelle: `end`           → Anonymous
+fn match_scope_close<'a>(line: &'a str, system: ForeignSystem) -> Option<ScopeCloseShape<'a>> {
+    let line = line.trim().trim_end_matches('.').trim();
+    match system {
+        ForeignSystem::Coq => {
+            if let Some(rest) = strip_kw(line, "End") {
+                let name = rest.trim().split_whitespace().next().unwrap_or("");
+                if !name.is_empty() {
+                    return Some(ScopeCloseShape::Named(name));
+                }
+            }
+            None
+        }
+        ForeignSystem::Lean4 => {
+            if line == "end" {
+                return Some(ScopeCloseShape::Anonymous);
+            }
+            if let Some(rest) = strip_kw(line, "end") {
+                let name = rest.trim().split_whitespace().next().unwrap_or("");
+                if !name.is_empty() {
+                    return Some(ScopeCloseShape::Named(name));
+                }
+                return Some(ScopeCloseShape::Anonymous);
+            }
+            None
+        }
+        ForeignSystem::Isabelle => {
+            if line == "end" {
+                return Some(ScopeCloseShape::Anonymous);
+            }
+            None
+        }
+        ForeignSystem::Mizar => None,
+    }
+}
+
+fn strip_kw<'a>(line: &'a str, kw: &str) -> Option<&'a str> {
+    if !line.starts_with(kw) {
+        return None;
+    }
+    let rest = &line[kw.len()..];
+    if rest.is_empty() {
+        return Some(rest);
+    }
+    let next = rest.chars().next().unwrap();
+    if is_ident_char(next) {
+        return None;
+    }
+    Some(rest)
+}
+
+fn is_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Aggregate a multi-line declaration into one logical line.
+/// Returns `(joined_text, lines_consumed)`.  The aggregator stops
+/// at the per-system terminator:
+///
+///   * Coq / Mizar / Isabelle: `.` at end of a line (or top-level
+///     `proof` / `by` / `apply` for Isabelle).
+///   * Lean4: `:=` or a blank line.
+fn aggregate_decl(remaining: &[&str], system: ForeignSystem) -> (String, usize) {
+    let mut joined = String::new();
+    let mut consumed = 0usize;
+    for raw in remaining {
+        consumed += 1;
+        joined.push_str(raw);
+        joined.push(' ');
+        let snapshot = joined.trim().to_string();
+        match system {
+            ForeignSystem::Coq | ForeignSystem::Mizar => {
+                if snapshot.ends_with('.') {
+                    return (joined, consumed);
+                }
+            }
+            ForeignSystem::Isabelle => {
+                if snapshot.contains(" by ")
+                    || snapshot.contains(" proof ")
+                    || snapshot.contains(" apply ")
+                    || snapshot.ends_with('.')
+                {
+                    return (joined, consumed);
+                }
+            }
+            ForeignSystem::Lean4 => {
+                if snapshot.contains(":=") || raw.trim().is_empty() {
+                    return (joined, consumed);
+                }
+            }
+        }
+    }
+    (joined, consumed)
 }
 
 fn starts_with_keyword(s: &str, kw: &str) -> bool {
@@ -492,6 +707,7 @@ fn parse_decl_line(
     system: ForeignSystem,
     source_file: &str,
     line_number: usize,
+    scope: &[Text],
 ) -> Option<ForeignTheorem> {
     let after_kw = line[kw.len()..].trim_start();
     // Pull the next identifier as the theorem name.
@@ -505,8 +721,6 @@ fn parse_decl_line(
     let after_name = after_kw[name_end..].trim_start();
     // The statement begins after the next `:`.
     let colon = after_name.find(':')?;
-    // Skip `::` (Mizar comment marker handled in strip_comments;
-    // here we still avoid `:=` for Lean).
     let mut statement = after_name[colon + 1..].trim_start().to_string();
     // For Lean, statement ends at `:=`.
     if system == ForeignSystem::Lean4 {
@@ -524,8 +738,6 @@ fn parse_decl_line(
             }
         }
         if let Some(dot) = statement.rfind('.') {
-            // Only truncate if `.` is at end of statement, not part of
-            // a name like `Mathlib.Algebra`.
             let trailing = &statement[dot + 1..];
             if trailing.trim().is_empty() {
                 statement.truncate(dot);
@@ -536,6 +748,18 @@ fn parse_decl_line(
     if name.is_empty() || statement.is_empty() {
         return None;
     }
+    let qualified = if scope.is_empty() {
+        name.to_string()
+    } else {
+        let mut q = scope
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect::<Vec<_>>()
+            .join(".");
+        q.push('.');
+        q.push_str(name);
+        q
+    };
     let citation = format!("{}:{}", source_file, line_number);
     Some(ForeignTheorem {
         system,
@@ -545,6 +769,8 @@ fn parse_decl_line(
         source_file: Text::from(source_file),
         source_line: line_number as u32,
         framework_citation: Text::from(citation),
+        qualified_name: Text::from(qualified),
+        scope_path: scope.to_vec(),
     })
 }
 
@@ -761,6 +987,8 @@ mod tests {
             source_file: Text::from("Mathlib/Algebra/Group/Basic.lean"),
             source_line: 42,
             framework_citation: Text::from("Mathlib/Algebra/Group/Basic.lean:42"),
+            qualified_name: Text::from("add_comm"),
+            scope_path: Vec::new(),
         };
         let s = t.to_verum_skeleton();
         let s = s.as_str();
@@ -782,6 +1010,8 @@ mod tests {
             source_file: Text::from("c.v"),
             source_line: 1,
             framework_citation: Text::from("c.v:1"),
+            qualified_name: Text::from("choice"),
+            scope_path: Vec::new(),
         };
         let s = t.to_verum_skeleton();
         assert!(s.as_str().contains("public axiom choice"));
@@ -818,5 +1048,144 @@ mod tests {
         assert!(s.contains("@framework(coq"));
         assert!(s.contains("test.v:1"));
         assert!(s.contains("proof by axiom"));
+    }
+
+    // =========================================================================
+    // Scope tracking + multi-line statements (#93 hardening)
+    // =========================================================================
+
+    #[test]
+    fn coq_section_scopes_qualified_name() {
+        let src = "\
+Section Algebra.
+  Theorem comm : forall a b, a + b = b + a.
+  Proof. admit. Qed.
+End Algebra.
+";
+        let out = CoqImporter.parse_text(src, "f.v").unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name.as_str(), "comm");
+        assert_eq!(out[0].scope_path.len(), 1);
+        assert_eq!(out[0].scope_path[0].as_str(), "Algebra");
+        assert_eq!(out[0].qualified_name.as_str(), "Algebra.comm");
+    }
+
+    #[test]
+    fn coq_nested_section_module_qualifies_path() {
+        let src = "\
+Section Outer.
+  Module M.
+    Theorem inner : True.
+    Proof. trivial. Qed.
+  End M.
+End Outer.
+";
+        let out = CoqImporter.parse_text(src, "f.v").unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].qualified_name.as_str(), "Outer.M.inner");
+    }
+
+    #[test]
+    fn coq_section_close_pops_scope() {
+        let src = "\
+Section S.
+  Theorem inside : True.
+  Proof. trivial. Qed.
+End S.
+Theorem outside : True.
+Proof. trivial. Qed.
+";
+        let out = CoqImporter.parse_text(src, "f.v").unwrap();
+        let mut by_name: std::collections::BTreeMap<&str, &ForeignTheorem> =
+            std::collections::BTreeMap::new();
+        for t in &out {
+            by_name.insert(t.name.as_str(), t);
+        }
+        assert_eq!(
+            by_name.get("inside").unwrap().qualified_name.as_str(),
+            "S.inside"
+        );
+        assert_eq!(
+            by_name.get("outside").unwrap().qualified_name.as_str(),
+            "outside"
+        );
+    }
+
+    #[test]
+    fn lean_namespace_scopes_qualified_name() {
+        let src = "\
+namespace Foo
+theorem bar : Nat := 1
+end Foo
+theorem baz : Nat := 2
+";
+        let out = Lean4Importer.parse_text(src, "f.lean").unwrap();
+        let bar = out.iter().find(|t| t.name.as_str() == "bar").unwrap();
+        assert_eq!(bar.qualified_name.as_str(), "Foo.bar");
+        let baz = out.iter().find(|t| t.name.as_str() == "baz").unwrap();
+        assert_eq!(baz.qualified_name.as_str(), "baz");
+    }
+
+    #[test]
+    fn isabelle_theory_wraps_declarations() {
+        let src = "\
+theory MyThy
+begin
+theorem foo: True
+  by simp
+end
+";
+        let out = IsabelleImporter.parse_text(src, "f.thy").unwrap();
+        let foo = out.iter().find(|t| t.name.as_str() == "foo").unwrap();
+        assert_eq!(foo.qualified_name.as_str(), "MyThy.foo");
+    }
+
+    #[test]
+    fn coq_multiline_statement_aggregates_until_dot() {
+        let src = "\
+Theorem long_thm :
+  forall a b c,
+  a + (b + c) = (a + b) + c.
+Proof. admit. Qed.
+";
+        let out = CoqImporter.parse_text(src, "f.v").unwrap();
+        assert_eq!(out.len(), 1);
+        let stmt = out[0].statement.as_str();
+        // Statement must include all three lines of the body.
+        assert!(stmt.contains("forall a b c"));
+        assert!(stmt.contains("a + (b + c)"));
+        assert!(stmt.contains("(a + b) + c"));
+    }
+
+    #[test]
+    fn lean_multiline_statement_until_assign() {
+        let src = "\
+theorem step :
+    Nat
+    := 42
+";
+        let out = Lean4Importer.parse_text(src, "f.lean").unwrap();
+        assert_eq!(out.len(), 1);
+        // Statement before `:=` should include `Nat`.
+        assert!(out[0].statement.as_str().contains("Nat"));
+    }
+
+    #[test]
+    fn task_93_qualified_name_round_trips_into_skeleton_via_serde() {
+        let t = ForeignTheorem {
+            system: ForeignSystem::Coq,
+            name: Text::from("foo"),
+            kind: ForeignTheoremKind::Theorem,
+            statement: Text::from("True"),
+            source_file: Text::from("f.v"),
+            source_line: 1,
+            framework_citation: Text::from("f.v:1"),
+            qualified_name: Text::from("S.M.foo"),
+            scope_path: vec![Text::from("S"), Text::from("M")],
+        };
+        let json = serde_json::to_string(&t).unwrap();
+        let back: ForeignTheorem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.qualified_name.as_str(), "S.M.foo");
+        assert_eq!(back.scope_path.len(), 2);
     }
 }
