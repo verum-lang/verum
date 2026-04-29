@@ -36,6 +36,22 @@ pub struct SmtGuardConfig {
     pub extract_witnesses: bool,
     /// Enable guard redundancy detection
     pub detect_redundancy: bool,
+    /// Maximum number of distinct uncovered-case witnesses to
+    /// extract from the model (default: 1).
+    ///
+    /// When the SMT solver reports the guard set as non-exhaustive,
+    /// the verifier asks Z3 for a satisfying model of the
+    /// negation, then iteratively asserts a "block-this-model"
+    /// constraint and re-solves to surface additional distinct
+    /// witnesses. The cap bounds the loop so a guard with an
+    /// unbounded uncovered region (e.g. `n > 0` over Int — every
+    /// `n ≤ 0` is uncovered) doesn't run forever.
+    ///
+    /// `0` is treated the same as `1` (always extract at least one
+    /// witness when extract_witnesses is on); set higher (3-5 is
+    /// a typical UX choice) to surface a richer view of the
+    /// uncovered region in user-facing exhaustiveness diagnostics.
+    pub max_witnesses: usize,
 }
 
 impl Default for SmtGuardConfig {
@@ -45,6 +61,7 @@ impl Default for SmtGuardConfig {
             max_guards: 10,
             extract_witnesses: true,
             detect_redundancy: true,
+            max_witnesses: 1,
         }
     }
 }

@@ -185,7 +185,16 @@ impl SmtGuardVerifier {
         redundant
     }
 
-    /// Extract witness values for uncovered cases
+    /// Extract witness values for uncovered cases.
+    ///
+    /// Honours `SmtGuardConfig.max_witnesses`: iteratively asks Z3
+    /// for a satisfying model, extracts the bindings, then asserts
+    /// a "block-this-model" constraint and re-solves to surface
+    /// additional distinct witnesses — up to `max_witnesses`. Pre-
+    /// fix this method always returned a single witness regardless
+    /// of the cap, surfacing only one uncovered case in user-facing
+    /// diagnostics even when many distinct holes existed in the
+    /// guard set's coverage.
     fn extract_uncovered_witnesses(
         &self,
         formulas: &[SmtFormula],
@@ -203,11 +212,12 @@ impl SmtGuardVerifier {
 
         let negation = SmtFormula::Not(Box::new(disjunction));
 
-        if let Some(model) = self.get_model(&negation, scrutinee_ty) {
-            List::from_iter([model])
-        } else {
-            List::new()
-        }
+        // Treat 0 the same as 1 — the consumer asked for "at least
+        // one witness" by enabling extract_witnesses upstream;
+        // returning zero would defeat that contract.
+        let cap = self.config.max_witnesses.max(1);
+        let witnesses = self.get_models(&negation, scrutinee_ty, cap);
+        List::from_iter(witnesses)
     }
 
     /// Check if a formula is unsatisfiable using Z3
@@ -363,6 +373,12 @@ impl SmtGuardVerifier {
     /// decision — surfaced as garbage witness data in user-facing
     /// diagnostics. The dispatch on `scrutinee_ty` declares vars in
     /// the matching Z3 sort.
+    ///
+    /// Now retained behind `#[cfg(test)]` since the production
+    /// path goes through `get_models(...)` (which honours
+    /// `SmtGuardConfig.max_witnesses`); this single-shot variant
+    /// is preserved as a focused fixture for the per-sort tests.
+    #[cfg(test)]
     fn get_model(
         &self,
         formula: &SmtFormula,
@@ -446,6 +462,126 @@ impl SmtGuardVerifier {
                 }
             }
             None
+        })
+    }
+
+    /// Get up to `max_witnesses` distinct satisfying models for a
+    /// formula. Loops `solver.check()` + `get_model` and asserts a
+    /// "block-this-model" constraint between iterations so each
+    /// returned witness disagrees with the previous on at least one
+    /// variable. Bounded by `max_witnesses` so an unbounded
+    /// uncovered region (e.g. `n ≤ 0` over Int has infinitely many
+    /// witnesses) doesn't run forever.
+    ///
+    /// Returns an empty Vec when the formula is UNSAT (no uncovered
+    /// witnesses to surface).
+    fn get_models(
+        &self,
+        formula: &SmtFormula,
+        scrutinee_ty: &Type,
+        max_witnesses: usize,
+    ) -> Vec<SmtWitness> {
+        use crate::z3_backend::{Z3Config, Z3ContextManager};
+
+        let mut config = Z3Config::default();
+        config.global_timeout_ms = verum_common::Maybe::Some(self.config.timeout_ms);
+        config.enable_proofs = false;
+
+        let ctx_manager = Z3ContextManager::new(config);
+
+        ctx_manager.with_config(|| {
+            use z3::Solver;
+            use z3::SatResult;
+            use z3::ast::{Ast, Bool, Int};
+
+            let solver = Solver::new();
+
+            // Translate the base formula once. If it doesn't
+            // translate, no models are extractable.
+            let z3_formula = match self.formula_to_z3(formula, scrutinee_ty) {
+                Some(f) => f,
+                None => return Vec::new(),
+            };
+            solver.assert(&z3_formula);
+
+            // Collect names once — they don't change between
+            // iterations because we're solving the same base
+            // formula with added blocking constraints.
+            let mut names = collect_var_names(formula);
+            names.sort();
+            names.dedup();
+
+            let mut witnesses = Vec::with_capacity(max_witnesses);
+
+            for _ in 0..max_witnesses {
+                if !matches!(solver.check(), SatResult::Sat) {
+                    break;
+                }
+                let model = match solver.get_model() {
+                    Some(m) => m,
+                    None => break,
+                };
+
+                // Extract bindings + record the (name, z3_var,
+                // value) triples we'll use to build the blocking
+                // constraint after this iteration.
+                let mut bindings = HashMap::new();
+                let mut block_clauses: Vec<Bool> = Vec::with_capacity(names.len());
+
+                for name in &names {
+                    match scrutinee_ty {
+                        Type::Bool => {
+                            let z3_var = Bool::new_const(name.as_str());
+                            if let Some(value) = model.eval(&z3_var, true) {
+                                if let Some(b) = value.as_bool() {
+                                    bindings
+                                        .insert(name.clone(), SmtValue::Bool(b));
+                                    let val_const = Bool::from_bool(b);
+                                    block_clauses.push(z3_var._eq(&val_const));
+                                }
+                            }
+                        }
+                        _ => {
+                            let z3_var = Int::new_const(name.as_str());
+                            if let Some(value) = model.eval(&z3_var, true) {
+                                if let Some(int_val) = value.as_i64() {
+                                    bindings.insert(
+                                        name.clone(),
+                                        SmtValue::Int(int_val as i128),
+                                    );
+                                    let val_const = Int::from_i64(int_val);
+                                    block_clauses
+                                        .push(z3_var._eq(&val_const));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                witnesses.push(SmtWitness {
+                    bindings,
+                    description: Text::from("Uncovered case found by SMT"),
+                });
+
+                // Block this exact model — assert at least one
+                // variable differs in the next solution. If the
+                // formula has zero variables (pure-literal SAT),
+                // there's nothing to block; skip the next
+                // iteration to avoid an infinite SAT loop on the
+                // same trivial model.
+                if block_clauses.is_empty() {
+                    break;
+                }
+                let conjunction = if block_clauses.len() == 1 {
+                    block_clauses.into_iter().next().unwrap()
+                } else {
+                    let refs: Vec<&Bool> = block_clauses.iter().collect();
+                    Bool::and(&refs)
+                };
+                solver.assert(&conjunction.not());
+            }
+
+            witnesses
         })
     }
 
@@ -853,6 +989,95 @@ mod tests {
                 v
             ),
             other => panic!("Int scrutinee must yield SmtValue::Int, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn get_models_default_cap_returns_one_witness() {
+        // Pin: SmtGuardConfig::default().max_witnesses == 1, so the
+        // default user-facing behaviour preserves the pre-multi-
+        // witness contract (a single witness for an uncovered case).
+        // Regression that defaults to 0 would make
+        // extract_witnesses=true silently extract zero witnesses;
+        // regression that defaults to a higher number would change
+        // every consumer's diagnostic output.
+        let cfg = SmtGuardConfig::default();
+        assert_eq!(cfg.max_witnesses, 1);
+
+        let verifier = SmtGuardVerifier::with_defaults();
+        // `n > 5` is non-exhaustive; negation `n ≤ 5` is satisfiable
+        // by infinitely many integers. The cap = 1 must trim to ONE.
+        let positive = SmtFormula::Binary {
+            op: SmtOp::Gt,
+            left: Box::new(SmtFormula::Var(Text::from("n"))),
+            right: Box::new(SmtFormula::Int(5)),
+        };
+        let negation = SmtFormula::Not(Box::new(positive));
+        let witnesses = verifier.get_models(&negation, &Type::Int, 1);
+        assert_eq!(witnesses.len(), 1);
+    }
+
+    #[test]
+    fn get_models_higher_cap_returns_multiple_distinct_witnesses() {
+        // Pin: with cap=3 over an unbounded uncovered region
+        // (`n ≤ 5` has infinitely many witnesses), the helper
+        // surfaces THREE distinct values. The blocking-constraint
+        // loop is the load-bearing mechanism here — without it the
+        // solver would re-return the same model on each iteration
+        // and we'd never get past the first.
+        let verifier = SmtGuardVerifier::with_defaults();
+        let positive = SmtFormula::Binary {
+            op: SmtOp::Gt,
+            left: Box::new(SmtFormula::Var(Text::from("n"))),
+            right: Box::new(SmtFormula::Int(5)),
+        };
+        let negation = SmtFormula::Not(Box::new(positive));
+        let witnesses = verifier.get_models(&negation, &Type::Int, 3);
+        assert_eq!(witnesses.len(), 3);
+        // All three witnesses must be DISTINCT — the blocking
+        // constraint guarantees this. A regression that drops the
+        // block (or asserts the wrong polarity) surfaces here as
+        // duplicate values in the witness set.
+        let n_values: Vec<i128> = witnesses
+            .iter()
+            .map(|w| match w.bindings.get(&Text::from("n")) {
+                Some(SmtValue::Int(v)) => *v,
+                _ => panic!("missing or wrong-typed binding for n"),
+            })
+            .collect();
+        let mut sorted = n_values.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            n_values.len(),
+            "witnesses must be distinct (block-this-model loop): {:?}",
+            n_values
+        );
+        // Every value must satisfy the negation (n ≤ 5) — otherwise
+        // the SMT round-trip is broken.
+        for v in &n_values {
+            assert!(*v <= 5, "witness {} violates n ≤ 5", v);
+        }
+    }
+
+    #[test]
+    fn get_models_bounded_space_caps_at_actual_count() {
+        // Pin: when the uncovered region has FEWER distinct
+        // satisfying models than the cap, the helper returns the
+        // actual count (not the cap). For a Bool variable `flag`,
+        // the negation `!flag` has exactly ONE model (`flag=false`).
+        // Asking for max_witnesses=10 must return a single witness
+        // — the loop terminates on UNSAT after the first model is
+        // blocked.
+        let verifier = SmtGuardVerifier::with_defaults();
+        let formula = SmtFormula::Var(Text::from("flag"));
+        let negation = SmtFormula::Not(Box::new(formula));
+        let witnesses = verifier.get_models(&negation, &Type::Bool, 10);
+        assert_eq!(witnesses.len(), 1);
+        match witnesses[0].bindings.get(&Text::from("flag")) {
+            Some(SmtValue::Bool(b)) => assert_eq!(*b, false),
+            other => panic!("expected SmtValue::Bool(false), got {:?}", other),
         }
     }
 }
