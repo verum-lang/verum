@@ -13408,6 +13408,69 @@ impl<'s> CompilationPipeline<'s> {
             debug!("  Wrote LLVM bitcode: {}", bc_path.display());
         }
 
+        // Honour `EmitMode::Assembly` / `EmitMode::Object`: short-circuit
+        // before runtime-stub compilation and linking. Pre-fix
+        // `verum build --emit asm` and `--emit obj` set `emit_mode` on
+        // CompilerOptions (build.rs:218-224) but the pipeline always
+        // proceeded to link an executable, silently ignoring the request.
+        // Companion to the `EmitMode::LlvmIr` / `Bitcode` wiring above —
+        // the LlvmIr/Bitcode variants merely add an artifact alongside
+        // the executable, while Assembly/Object are terminal modes that
+        // replace the executable as the final artifact.
+        match self.session.options().emit_mode {
+            crate::options::EmitMode::Assembly => {
+                let asm_path = if self
+                    .session
+                    .options()
+                    .output
+                    .to_str()
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    profile_dir.join(format!("{}.s", module_name))
+                } else {
+                    self.session.options().output.clone()
+                };
+                target_machine
+                    .write_to_file(lowering.module(), FileType::Assembly, &asm_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to write assembly file: {}", e))?;
+                let elapsed = start.elapsed();
+                info!(
+                    "Emitted assembly: {} ({:.2}s)",
+                    asm_path.display(),
+                    elapsed.as_secs_f64()
+                );
+                return Ok(asm_path);
+            }
+            crate::options::EmitMode::Object => {
+                let final_obj = if self
+                    .session
+                    .options()
+                    .output
+                    .to_str()
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    profile_dir.join(format!("{}.o", module_name))
+                } else {
+                    self.session.options().output.clone()
+                };
+                if final_obj != obj_path {
+                    std::fs::copy(&obj_path, &final_obj).with_context(|| {
+                        format!("Failed to copy object to {}", final_obj.display())
+                    })?;
+                }
+                let elapsed = start.elapsed();
+                info!(
+                    "Emitted object: {} ({:.2}s)",
+                    final_obj.display(),
+                    elapsed.as_secs_f64()
+                );
+                return Ok(final_obj);
+            }
+            _ => {}
+        }
+
         // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
         // ALL runtime functions are now pure LLVM IR (platform_ir.rs + tensor_ir.rs + metal_ir.rs).
         // No C compilation needed. We still generate an empty .o for the linker.
