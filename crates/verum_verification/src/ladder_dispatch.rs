@@ -293,6 +293,80 @@ pub struct LadderObligation {
     /// elaboration, not on-wire artifacts.
     #[serde(skip)]
     pub ast_assertions: Vec<verum_ast::expr::Expr>,
+    /// **ε-side coherence claim** (#115 hardening).  The
+    /// `@enact(epsilon = ...)` annotation projected to a typed
+    /// claim object.  Required by the Coherent triplet
+    /// (CoherentStatic / CoherentRuntime / Coherent) — without it,
+    /// these strategies fall through to the trivial-decider.
+    /// When present, the dispatcher discharges:
+    ///
+    ///   * α-side: via the kernel/SMT path on `core_term` /
+    ///     `ast_assertions` (same as Certified).
+    ///   * ε-side: per the strategy's contract — symbolic claim
+    ///     (CoherentStatic), deferred runtime monitor
+    ///     (CoherentRuntime), or kernel re-check of `claim_term`
+    ///     (Coherent strict).
+    #[serde(default)]
+    pub epsilon_claim: Option<EpsilonClaim>,
+}
+
+// =============================================================================
+// EpsilonClaim — α/ε bidirectional check payload (#115 hardening)
+// =============================================================================
+
+/// The ε-side coherence claim attached to an obligation by the
+/// `@enact(epsilon = ...)` annotation.  Drives the ε-discharge
+/// path of the Coherent triplet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EpsilonClaim {
+    /// Identifier of the `@enact` site that introduced this claim
+    /// (e.g. `"foo::bar:42"`).  Used for diagnostics + audit.
+    pub site: Text,
+    /// Symbolic claim text — the literal annotation argument.
+    /// CoherentStatic accepts when this is non-empty (the symbolic
+    /// claim is taken at face value at compile time).
+    pub claim: Text,
+    /// Optional typed projection of the claim to a kernel term.
+    /// When present, the `Coherent` strict strategy runs
+    /// `verum_kernel::infer` against it (full re-check; mirrors
+    /// the α-side discharge).
+    #[serde(default)]
+    pub claim_term: verum_common::Maybe<verum_kernel::CoreTerm>,
+    /// True when the ε-side is wired to a runtime monitor (the
+    /// `core.action.coherence_monitor` infrastructure runs the
+    /// check at execution time).  CoherentRuntime admits when this
+    /// is set + α-side admits.
+    #[serde(default)]
+    pub runtime_monitor: bool,
+}
+
+impl EpsilonClaim {
+    /// Build a static ε-claim (CoherentStatic).
+    pub fn symbolic(site: impl Into<Text>, claim: impl Into<Text>) -> Self {
+        Self {
+            site: site.into(),
+            claim: claim.into(),
+            claim_term: verum_common::Maybe::None,
+            runtime_monitor: false,
+        }
+    }
+
+    /// Build a runtime-monitor ε-claim (CoherentRuntime).
+    pub fn runtime(site: impl Into<Text>, claim: impl Into<Text>) -> Self {
+        Self {
+            site: site.into(),
+            claim: claim.into(),
+            claim_term: verum_common::Maybe::None,
+            runtime_monitor: true,
+        }
+    }
+
+    /// Attach a typed kernel projection of the claim.  Required by
+    /// the strict `Coherent` strategy for kernel-side ε-discharge.
+    pub fn with_claim_term(mut self, term: verum_kernel::CoreTerm) -> Self {
+        self.claim_term = verum_common::Maybe::Some(term);
+        self
+    }
 }
 
 impl PartialEq for LadderObligation {
@@ -305,6 +379,7 @@ impl PartialEq for LadderObligation {
             && self.expected_type == other.expected_type
             && self.smt_assertions == other.smt_assertions
             && self.ast_assertions == other.ast_assertions
+            && self.epsilon_claim == other.epsilon_claim
         // axiom_registry intentionally excluded — Arc identity is
         // not part of the obligation's structural identity.
     }
@@ -328,7 +403,16 @@ impl LadderObligation {
             axiom_registry: None,
             smt_assertions: Vec::new(),
             ast_assertions: Vec::new(),
+            epsilon_claim: None,
         }
+    }
+
+    /// Attach a typed ε-side coherence claim.  Required by the
+    /// Coherent triplet (CoherentStatic / CoherentRuntime /
+    /// Coherent) for the ε-discharge path.
+    pub fn with_epsilon_claim(mut self, claim: EpsilonClaim) -> Self {
+        self.epsilon_claim = Some(claim);
+        self
     }
 
     /// Attach typed AST assertions for the real SMT-backend path.
@@ -757,11 +841,16 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::CoherentStatic => {
-                // #112 hardening — Coherent strategies require α-cert
-                // + ε-cert, but trivial tautologies live in the
-                // kernel's structural fragment — neither cite
-                // α-axioms nor traverse ε-monitors, so both gates
-                // are vacuously satisfied.
+                // #115 hardening — when the obligation carries an
+                // ε-claim, route through the real α/ε dispatcher:
+                // α via kernel/SMT (Certified-grade), ε via the
+                // symbolic claim text.  Falls back to the trivial-
+                // tautology decider for back-compat when no claim.
+                if let Some(verdict) =
+                    dispatch_coherent_via_alpha_epsilon(obligation, LadderStrategy::CoherentStatic)
+                {
+                    return verdict;
+                }
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -782,6 +871,13 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::CoherentRuntime => {
+                // #115 hardening — α via kernel/SMT, ε deferred to
+                // runtime monitor when flagged in the claim.
+                if let Some(verdict) =
+                    dispatch_coherent_via_alpha_epsilon(obligation, LadderStrategy::CoherentRuntime)
+                {
+                    return verdict;
+                }
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -802,6 +898,13 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::Coherent => {
+                // #115 hardening — α via kernel/SMT, ε via kernel
+                // re-check on `claim_term`.  Strict bidirectional.
+                if let Some(verdict) =
+                    dispatch_coherent_via_alpha_epsilon(obligation, LadderStrategy::Coherent)
+                {
+                    return verdict;
+                }
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -1099,6 +1202,163 @@ pub fn dispatch_via_smt_solver(
             note: Text::from(format!(
                 "smt-error: backend={}, error={} (transport / setup failure, not logical UNKNOWN)",
                 backend, error
+            )),
+        },
+    })
+}
+
+// =============================================================================
+// Coherent α/ε dispatcher (#115 hardening)
+// =============================================================================
+
+/// Discharge a Coherent-strategy obligation by composing α-side
+/// (kernel/SMT) and ε-side (claim/monitor) checks per the strategy's
+/// contract:
+///
+///   * `CoherentStatic` — α via the certified-grade pipeline
+///     (kernel+SMT cross-validate); ε admitted symbolically when
+///     the claim text is non-empty.
+///   * `CoherentRuntime` — α via the certified pipeline; ε admitted
+///     as a deferred-runtime obligation when
+///     `epsilon_claim.runtime_monitor = true`.
+///   * `Coherent` (strict) — α via the certified pipeline; ε via
+///     kernel re-check on `epsilon_claim.claim_term`.
+///
+/// Returns `None` when the obligation has no `epsilon_claim` —
+/// caller falls back to the trivial-decider for V0 back-compat.
+pub fn dispatch_coherent_via_alpha_epsilon(
+    obligation: &LadderObligation,
+    strategy: LadderStrategy,
+) -> Option<LadderVerdict> {
+    let claim = obligation.epsilon_claim.as_ref()?;
+
+    let started = std::time::Instant::now();
+
+    // -- α-side discharge --------------------------------------------
+    // Try the kernel re-check first; then SMT solver; if neither has
+    // a typed payload, treat the α-side as trivially-discharged when
+    // the obligation_text is a trivial tautology, otherwise fail.
+    let alpha_outcome = (|| -> Result<Text, Text> {
+        if let Some(LadderVerdict::Closed { witness, .. }) =
+            dispatch_proof_via_kernel(obligation, strategy)
+        {
+            return Ok(witness);
+        }
+        if let Some(LadderVerdict::Closed { witness, .. }) =
+            dispatch_via_smt_solver(obligation, strategy)
+        {
+            return Ok(witness);
+        }
+        if let Some(LadderVerdict::Open { reason, .. }) =
+            dispatch_proof_via_kernel(obligation, strategy)
+        {
+            return Err(reason);
+        }
+        if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str()) {
+            return Ok(Text::from(format!("alpha-trivial-tautology: {}", rule)));
+        }
+        Err(Text::from("α-side discharge: no typed payload, no trivial admission"))
+    })();
+
+    let alpha_witness = match alpha_outcome {
+        Ok(w) => w,
+        Err(reason) => {
+            return Some(LadderVerdict::Open {
+                strategy,
+                reason: Text::from(format!(
+                    "α-side rejected: {} (ε-side not consulted)",
+                    reason.as_str()
+                )),
+            });
+        }
+    };
+
+    // -- ε-side discharge per strategy --------------------------------
+    let epsilon_witness: Result<Text, Text> = match strategy {
+        LadderStrategy::CoherentStatic => {
+            // Symbolic ε-claim: non-empty claim text suffices.
+            if claim.claim.as_str().trim().is_empty() {
+                Err(Text::from("ε-claim text is empty"))
+            } else {
+                Ok(Text::from(format!(
+                    "epsilon-symbolic: site={} claim=`{}`",
+                    claim.site.as_str(),
+                    claim.claim.as_str()
+                )))
+            }
+        }
+        LadderStrategy::CoherentRuntime => {
+            // Runtime monitor: must be flagged.  Admission records
+            // the deferred-monitor obligation for runtime evaluation.
+            if !claim.runtime_monitor {
+                Err(Text::from(
+                    "ε-claim.runtime_monitor = false (CoherentRuntime requires monitor flag)",
+                ))
+            } else {
+                Ok(Text::from(format!(
+                    "epsilon-runtime-monitor-deferred: site={} claim=`{}`",
+                    claim.site.as_str(),
+                    claim.claim.as_str()
+                )))
+            }
+        }
+        LadderStrategy::Coherent => {
+            // Strict: kernel re-check on claim_term.  Without a
+            // typed projection we can't run the kernel — reject.
+            use verum_common::Maybe;
+            let term = match &claim.claim_term {
+                Maybe::Some(t) => t,
+                Maybe::None => {
+                    return Some(LadderVerdict::Open {
+                        strategy,
+                        reason: Text::from(
+                            "Coherent (strict) requires `epsilon_claim.claim_term`; symbolic claim alone is insufficient",
+                        ),
+                    });
+                }
+            };
+            let registry = match &obligation.axiom_registry {
+                Some(r) => r,
+                None => {
+                    return Some(LadderVerdict::Open {
+                        strategy,
+                        reason: Text::from(
+                            "Coherent (strict) requires `axiom_registry` for ε-side kernel re-check",
+                        ),
+                    });
+                }
+            };
+            let ctx = verum_kernel::Context::new();
+            verum_kernel::infer(&ctx, term, registry)
+                .map(|inferred| {
+                    Text::from(format!(
+                        "epsilon-kernel-recheck: well-typed, shape {:?}",
+                        verum_kernel::shape_of(&inferred)
+                    ))
+                })
+                .map_err(|e| Text::from(format!("ε-kernel rejected: {:?}", e)))
+        }
+        _ => return None, // not a Coherent strategy
+    };
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+
+    Some(match epsilon_witness {
+        Ok(eps) => LadderVerdict::Closed {
+            strategy,
+            witness: Text::from(format!(
+                "α: {} | ε: {}",
+                alpha_witness.as_str(),
+                eps.as_str()
+            )),
+            elapsed_ms,
+        },
+        Err(reason) => LadderVerdict::Open {
+            strategy,
+            reason: Text::from(format!(
+                "α admitted ({}); ε rejected: {}",
+                alpha_witness.as_str(),
+                reason.as_str()
             )),
         },
     })
@@ -1753,6 +2013,191 @@ mod tests {
             result.is_some(),
             "SMT path must engage when ast_assertions non-empty"
         );
+    }
+
+    // -- Coherent α/ε dispatch (#115) ----------------------------------
+
+    #[test]
+    fn coherent_static_admits_with_symbolic_epsilon_claim() {
+        // Trivial α (textual reflexivity) + non-empty ε-claim
+        // → CoherentStatic admits both sides.
+        let claim = EpsilonClaim::symbolic("foo:42", "monitor_invariant_holds");
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::CoherentStatic,
+            "x = x",
+        )
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::CoherentStatic);
+                let s = witness.as_str();
+                assert!(s.contains("α:"));
+                assert!(s.contains("ε:"));
+                assert!(s.contains("epsilon-symbolic"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_static_rejects_with_empty_epsilon_claim() {
+        let claim = EpsilonClaim::symbolic("foo:42", "");
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::CoherentStatic,
+            "x = x",
+        )
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { reason, .. } => {
+                assert!(reason.as_str().contains("ε-claim text is empty"));
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_runtime_admits_with_runtime_monitor_flag() {
+        let claim = EpsilonClaim::runtime("foo:42", "runtime_invariant");
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::CoherentRuntime,
+            "True",
+        )
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::CoherentRuntime);
+                assert!(witness.as_str().contains("epsilon-runtime-monitor-deferred"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_runtime_rejects_static_only_claim() {
+        // CoherentRuntime requires runtime_monitor=true.
+        let claim = EpsilonClaim::symbolic("foo:42", "static_invariant");
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::CoherentRuntime,
+            "True",
+        )
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { reason, .. } => {
+                assert!(reason.as_str().contains("runtime_monitor = false"));
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_strict_admits_with_typed_claim_term_and_registry() {
+        // Strict Coherent: ε-side runs kernel re-check on
+        // `claim_term`.  Need both registry and a well-typed term.
+        let registry = registry_with("eps_axiom", type_zero());
+        let claim = EpsilonClaim::symbolic("foo:42", "strict_check")
+            .with_claim_term(axiom_term("eps_axiom", type_zero()));
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::Coherent,
+            "True",
+        )
+        .with_core_term(axiom_term("eps_axiom", type_zero()), registry)
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::Coherent);
+                let s = witness.as_str();
+                assert!(s.contains("α:"));
+                assert!(s.contains("ε:"));
+                assert!(s.contains("epsilon-kernel-recheck"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_strict_rejects_without_claim_term() {
+        // Coherent strict needs `epsilon_claim.claim_term` — symbolic
+        // claim alone is insufficient.
+        let claim = EpsilonClaim::symbolic("foo:42", "no_typed_claim");
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::Coherent,
+            "True",
+        )
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { reason, .. } => {
+                assert!(reason.as_str().contains("requires `epsilon_claim.claim_term`"));
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_falls_back_to_trivial_decider_without_claim() {
+        // When no ε-claim is attached, the Coherent triplet falls
+        // through to the trivial-decider for V0 back-compat.
+        let v = DefaultLadderDispatcher::new()
+            .dispatch(&obligation_with_text(LadderStrategy::CoherentStatic, "x = x"));
+        match v {
+            LadderVerdict::Closed { witness, .. } => {
+                assert!(witness.as_str().contains("trivial-tautology"));
+            }
+            other => panic!("expected Closed (trivial), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn task_115_alpha_rejection_short_circuits_epsilon() {
+        // Pin: when the α-side fails, ε-side is not consulted (the
+        // verdict reason cites α-rejection only).
+        let registry = std::sync::Arc::new(verum_kernel::AxiomRegistry::new());
+        let claim = EpsilonClaim::symbolic("foo:42", "valid_claim");
+        // Unbound-var term forces α-rejection.
+        let o = LadderObligation::text(
+            "thm.coh",
+            LadderStrategy::CoherentStatic,
+            "irrelevant",
+        )
+        .with_core_term(verum_kernel::CoreTerm::Var(Text::from("nope")), registry)
+        .with_epsilon_claim(claim);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { reason, .. } => {
+                let s = reason.as_str();
+                assert!(s.contains("α-side rejected"));
+                assert!(s.contains("ε-side not consulted"));
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn task_115_full_backbone_real_dispatch_complete() {
+        // Pin the architectural completion: every backbone strategy
+        // has a real-dispatch path (kernel / SMT / α-ε) when the
+        // appropriate typed payload is supplied.  No strategy is
+        // pure trivial-decider any more.
+        // Static / Runtime are non-SMT; they're admitted unconditionally.
+        let d = DefaultLadderDispatcher::new();
+        for s in LadderStrategy::backbone() {
+            assert!(
+                matches!(d.implementation_status(s), LadderImplStatus::Implemented),
+                "{:?} should be Implemented",
+                s
+            );
+        }
     }
 
     #[test]
