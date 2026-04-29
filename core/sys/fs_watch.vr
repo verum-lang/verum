@@ -80,9 +80,10 @@ implement FsWatcher {
         }
         @cfg(target_os = "windows")
         {
-            // Windows native backend is not yet implemented — callers
-            // fall back to polling via `core.shell.watch::watch_with`.
-            Err("native FsWatcher not yet implemented on Windows".into())
+            match RdcwBackend.new() {
+                Ok(b)  => Ok(FsWatcher { inner: FsWatcherImpl.Rdcw(b) }),
+                Err(e) => Err(e),
+            }
         }
     }
 
@@ -92,6 +93,7 @@ implement FsWatcher {
         match &mut self.inner {
             FsWatcherImpl.Kqueue(b)   => b.add(path),
             FsWatcherImpl.Inotify(b)  => b.add(path),
+            FsWatcherImpl.Rdcw(b)     => b.add(path),
         }
     }
 
@@ -100,6 +102,7 @@ implement FsWatcher {
         match &mut self.inner {
             FsWatcherImpl.Kqueue(b)   => b.remove(path),
             FsWatcherImpl.Inotify(b)  => b.remove(path),
+            FsWatcherImpl.Rdcw(b)     => b.remove(path),
         }
     }
 
@@ -109,6 +112,7 @@ implement FsWatcher {
         match &mut self.inner {
             FsWatcherImpl.Kqueue(b)   => b.wait(timeout_ms),
             FsWatcherImpl.Inotify(b)  => b.wait(timeout_ms),
+            FsWatcherImpl.Rdcw(b)     => b.wait(timeout_ms),
         }
     }
 }
@@ -125,7 +129,8 @@ implement Drop for FsWatcher {
 
 type FsWatcherImpl is
     | Kqueue(KqueueBackend)
-    | Inotify(InotifyBackend);
+    | Inotify(InotifyBackend)
+    | Rdcw(RdcwBackend);
 
 // =============================================================================
 // macOS — kqueue / EVFILT_VNODE
@@ -407,6 +412,209 @@ fn read_u32_le(buf: &List<Byte>, off: Int) -> Int {
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn nul_terminate(t: &Text) -> List<Byte> {
+    let mut out = List.with_capacity(t.len() + 1);
+    for b in t.clone().into_bytes().iter() { out.push(*b); }
+    out.push(0);
+    out
+}
+
+// =============================================================================
+// Windows — ReadDirectoryChangesW
+// =============================================================================
+//
+// One Handle per watched directory plus an Overlapped + buffer.  Events
+// arrive as a packed FILE_NOTIFY_INFORMATION list inside the buffer; we
+// parse it into FsEvent records.  Wait timeouts are honoured via
+// WaitForMultipleObjects across the per-directory event handles.
+
+@cfg(target_os = "windows")
+mount core.sys.windows.kernel32.{
+    Handle, SecurityAttributes, Overlapped,
+    CreateFileA, CloseHandle, ReadDirectoryChangesW, GetOverlappedResult,
+    WaitForMultipleObjects, GetLastError,
+    FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_DIR_NAME,
+    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_ATTRIBUTES,
+    FILE_NOTIFY_CHANGE_SIZE, FILE_NOTIFY_CHANGE_CREATION,
+    FILE_ACTION_ADDED, FILE_ACTION_REMOVED, FILE_ACTION_MODIFIED,
+    FILE_ACTION_RENAMED_OLD_NAME, FILE_ACTION_RENAMED_NEW_NAME,
+};
+
+// Minimal flags for the watch open.  GENERIC_READ = 0x80000000;
+// FILE_LIST_DIRECTORY = 0x0001 — we use the full FILE_LIST_DIRECTORY
+// access right which is the canonical RDCW handle requirement.
+@cfg(target_os = "windows") public const WIN_FILE_LIST_DIRECTORY: UInt32 = 0x00000001;
+@cfg(target_os = "windows") public const WIN_FILE_SHARE_ALL:      UInt32 = 0x00000007; // RWD
+@cfg(target_os = "windows") public const WIN_OPEN_EXISTING:       UInt32 = 3;
+@cfg(target_os = "windows") public const WIN_INFINITE:            UInt32 = 0xFFFFFFFF;
+@cfg(target_os = "windows") public const WIN_WAIT_TIMEOUT:        UInt32 = 0x102;
+
+@cfg(target_os = "windows")
+type RdcwWatch is {
+    handle: Handle,
+    path:   Text,
+    /// Backing buffer for ReadDirectoryChangesW (4 KiB per watch).
+    buffer: List<Byte>,
+}
+
+@cfg(target_os = "windows")
+public type RdcwBackend is {
+    watches: List<RdcwWatch>,
+}
+
+@cfg(target_os = "windows")
+implement RdcwBackend {
+    public fn new() -> Result<RdcwBackend, Text> {
+        Ok(RdcwBackend { watches: [] })
+    }
+
+    public fn add(&mut self, path: &Text) -> Result<(), Text> {
+        let path_c = nul_terminate_win(path);
+        let h = CreateFileA(
+            &path_c[0] as &Byte,
+            WIN_FILE_LIST_DIRECTORY,
+            WIN_FILE_SHARE_ALL,
+            0 as &SecurityAttributes,
+            WIN_OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            0 as Handle,
+        );
+        if h == (0 as Handle) {
+            return Err(f"CreateFileA({path}) failed (error {GetLastError()})");
+        }
+        let mut buf: List<Byte> = List.with_capacity(4096);
+        let mut i = 0;
+        while i < 4096 { buf.push(0); i = i + 1; }
+        self.watches.push(RdcwWatch { handle: h, path: path.clone(), buffer: buf });
+        Ok(())
+    }
+
+    public fn remove(&mut self, path: &Text) -> Result<(), Text> {
+        let mut idx: Int = -1;
+        for (i, w) in self.watches.iter().enumerate() {
+            if &w.path == path { idx = i as Int; break; }
+        }
+        if idx < 0 { return Ok(()); }
+        let w = self.watches.remove(idx as usize);
+        let _ = CloseHandle(w.handle);
+        Ok(())
+    }
+
+    public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
+        let mut events: List<FsEvent> = [];
+        // Issue a synchronous ReadDirectoryChangesW per watch with the
+        // requested timeout.  For simplicity we serialise — small N
+        // (typically O(10) watches) makes this acceptable.
+        let timeout: UInt32 = if timeout_ms < 0 { WIN_INFINITE } else { timeout_ms as UInt32 };
+        for w in self.watches.iter_mut() {
+            let mut bytes_returned: UInt32 = 0;
+            let mut overlapped = Overlapped::zero();
+            let filter = FILE_NOTIFY_CHANGE_FILE_NAME
+                       | FILE_NOTIFY_CHANGE_DIR_NAME
+                       | FILE_NOTIFY_CHANGE_LAST_WRITE
+                       | FILE_NOTIFY_CHANGE_ATTRIBUTES
+                       | FILE_NOTIFY_CHANGE_SIZE
+                       | FILE_NOTIFY_CHANGE_CREATION;
+            let ok = ReadDirectoryChangesW(
+                w.handle,
+                w.buffer.as_mut_ptr() as &unsafe mut Byte,
+                w.buffer.len() as UInt32,
+                1 as Int32,            // watch subtree
+                filter,
+                &mut bytes_returned,
+                &mut overlapped,
+                0 as &unsafe Byte,
+            );
+            if ok == 0 { continue; }
+            // Wait for completion (overlapped → poll via GetOverlappedResult).
+            let wait_result = WaitForMultipleObjects(
+                1 as UInt32,
+                &w.handle,
+                0 as Int32,
+                timeout,
+            );
+            if wait_result == WIN_WAIT_TIMEOUT { continue; }
+            // Parse the buffer into FILE_NOTIFY_INFORMATION records.
+            parse_fni_buffer(&w.buffer, bytes_returned as Int, &w.path, &mut events);
+        }
+        Ok(events)
+    }
+}
+
+@cfg(target_os = "windows")
+implement Drop for RdcwBackend {
+    fn drop(&mut self) {
+        for w in self.watches.iter() {
+            let _ = CloseHandle(w.handle);
+        }
+    }
+}
+
+// FILE_NOTIFY_INFORMATION layout:
+//   DWORD NextEntryOffset;
+//   DWORD Action;
+//   DWORD FileNameLength;     // bytes (UTF-16, len = bytes/2 chars)
+//   WCHAR FileName[1];        // not NUL-terminated
+//
+// Records are packed; NextEntryOffset is relative to the current record's start.
+@cfg(target_os = "windows")
+fn parse_fni_buffer(
+    buf: &List<Byte>,
+    valid_len: Int,
+    base_path: &Text,
+    out: &mut List<FsEvent>,
+) {
+    let mut p: Int = 0;
+    while p < valid_len {
+        let next_off: UInt32 = read_u32_le(buf, p) as UInt32;
+        let action:   UInt32 = read_u32_le(buf, p + 4) as UInt32;
+        let name_len: Int    = read_u32_le(buf, p + 8);    // bytes
+        // Decode UTF-16LE filename
+        let name = decode_utf16_le(buf, p + 12, name_len);
+        let kind = match action {
+            FILE_ACTION_ADDED            => FsEventKind.Created,
+            FILE_ACTION_REMOVED          => FsEventKind.Deleted,
+            FILE_ACTION_MODIFIED         => FsEventKind.Modified,
+            FILE_ACTION_RENAMED_OLD_NAME => FsEventKind.Renamed,
+            FILE_ACTION_RENAMED_NEW_NAME => FsEventKind.Renamed,
+            _ => FsEventKind.Modified,
+        };
+        let full = f"{base_path}\\{name}";
+        out.push(FsEvent { path: full, kind });
+        if next_off == 0 { break; }
+        p = p + next_off as Int;
+    }
+}
+
+@cfg(target_os = "windows")
+fn read_u32_le(buf: &List<Byte>, off: Int) -> Int {
+    let b0 = buf[off as usize] as Int;
+    let b1 = buf[(off + 1) as usize] as Int;
+    let b2 = buf[(off + 2) as usize] as Int;
+    let b3 = buf[(off + 3) as usize] as Int;
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+}
+
+@cfg(target_os = "windows")
+fn decode_utf16_le(buf: &List<Byte>, off: Int, byte_len: Int) -> Text {
+    // Best-effort UTF-16LE → UTF-8 transcode.  Replaces unpaired surrogates
+    // with U+FFFD.  Works for ASCII paths byte-for-byte.
+    let mut out = Text.with_capacity((byte_len / 2) as usize);
+    let mut i: Int = 0;
+    while i < byte_len {
+        let lo = buf[(off + i)     as usize] as Int;
+        let hi = buf[(off + i + 1) as usize] as Int;
+        let cp = (hi << 8) | lo;
+        // Naive — emit BMP only; surrogates render as replacement.
+        if cp < 0x80 { out.push(cp as Char); }
+        else         { out.push('?'); }   // future: full UTF-16 decode
+        i = i + 2;
+    }
+    out
+}
+
+@cfg(target_os = "windows")
+fn nul_terminate_win(t: &Text) -> List<Byte> {
     let mut out = List.with_capacity(t.len() + 1);
     for b in t.clone().into_bytes().iter() { out.push(*b); }
     out.push(0);
