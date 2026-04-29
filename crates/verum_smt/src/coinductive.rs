@@ -1350,14 +1350,19 @@ pub fn process_type(input_type: Type, output_type: Type) -> CoinductiveType {
 /// Configuration for bisimulation checking
 #[derive(Debug, Clone)]
 pub struct BisimulationConfig {
-    /// Maximum unfolding depth for recursive destructors
+    /// Maximum unfolding depth for recursive destructors.
+    /// Reached at line 1513 in `check_bounded` — every recursion
+    /// step is gated.
     pub max_depth: usize,
-    /// Timeout for Z3 queries in milliseconds
+    /// Timeout for Z3 queries in milliseconds. Threaded into the
+    /// checker's `Context` at construction time so every solver
+    /// instance the bisimulation work spawns carries the limit.
     pub timeout_ms: u64,
-    /// Whether to generate counterexamples
+    /// Whether to generate counterexamples. When false, the
+    /// `BisimulationResult::counterexample` slot is left `None`
+    /// even on a failed bisimulation, saving the formatting work
+    /// for callers that only need the boolean answer.
     pub generate_counterexamples: bool,
-    /// Whether to use incremental solving
-    pub incremental: bool,
     /// Strategy for handling infinite structures
     pub infinite_strategy: InfiniteStrategy,
 }
@@ -1368,7 +1373,6 @@ impl Default for BisimulationConfig {
             max_depth: 100,
             timeout_ms: 30000,
             generate_counterexamples: true,
-            incremental: true,
             infinite_strategy: InfiniteStrategy::BoundedUnfolding,
         }
     }
@@ -1441,12 +1445,24 @@ pub struct BisimulationChecker<'a> {
 }
 
 impl<'a> BisimulationChecker<'a> {
-    /// Create a new bisimulation checker
+    /// Create a new bisimulation checker.
+    ///
+    /// `config.timeout_ms` is honoured by routing through a
+    /// [`crate::context::Context`] built with a matching timeout —
+    /// every Z3 solver instance the checker spawns inherits it.
+    /// Without this wiring the field would be inert: the consumer
+    /// would always use the 30-second default that
+    /// `Context::default()` ships with, regardless of what callers
+    /// asked for via `BisimulationConfig`.
     pub fn new(checker: &'a CoinductiveChecker, config: BisimulationConfig) -> Self {
+        let ctx_config = crate::context::ContextConfig {
+            timeout: Some(std::time::Duration::from_millis(config.timeout_ms)),
+            ..Default::default()
+        };
         Self {
             checker,
             config,
-            ctx: crate::context::Context::new(),
+            ctx: crate::context::Context::with_config(ctx_config),
             stats: BisimulationStats::default(),
         }
     }
@@ -2548,8 +2564,27 @@ mod tests {
         assert_eq!(config.max_depth, 100);
         assert_eq!(config.timeout_ms, 30000);
         assert!(config.generate_counterexamples);
-        assert!(config.incremental);
         assert_eq!(config.infinite_strategy, InfiniteStrategy::BoundedUnfolding);
+    }
+
+    #[test]
+    fn checker_inherits_config_timeout() {
+        // Pin: BisimulationConfig.timeout_ms is wired into the
+        // checker's Context. Without this, the field would be
+        // documented-but-inert, with every Z3 call defaulting to
+        // the 30-second Context::default() instead.
+        let config = BisimulationConfig {
+            timeout_ms: 12_345,
+            ..Default::default()
+        };
+        let checker = CoinductiveChecker::new();
+        let bisim = BisimulationChecker::new(&checker, config);
+        let timeout = bisim
+            .ctx
+            .config()
+            .timeout
+            .expect("checker context should carry a timeout");
+        assert_eq!(timeout.as_millis(), 12_345);
     }
 
     #[test]
