@@ -137,6 +137,10 @@ pub mod unicode_data;
 // Metal GPU runtime as LLVM IR (replaces verum_metal.m)
 pub mod metal_ir;
 
+// AOT permission policy — closes the script-mode security gap on
+// the Tier-1 path by baking the resolved policy into the binary.
+pub mod permissions;
+
 // Re-export main types
 pub use error::{LlvmLoweringError, Result, BuildExt, OptionExt};
 pub use types::{RefTier, TypeLowering, THIN_REF_SIZE, FAT_REF_SIZE};
@@ -161,6 +165,7 @@ pub use bitfield::{
     BitfieldLowering, BitfieldStats, min_container_bytes, optimal_container_bits,
 };
 pub use ffi::{FfiLowering, FfiLoweringStats, ffi_subop_to_calling_convention};
+pub use permissions::AotPermissionPolicy;
 
 // Re-export verum_llvm for convenience
 pub use verum_llvm;

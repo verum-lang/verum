@@ -347,16 +347,17 @@ pub fn run_with_tier_and_flags(
             // (compiler-version pin, declared-deps audit) before LLVM
             // compilation so an unbuildable script fails fast with a
             // clear diagnostic instead of a confusing native-link
-            // error half a megabyte deeper. Permission enforcement
-            // doesn't yet apply to the AOT path — the runtime
-            // `PermissionRouter` lives in the interpreter only;
-            // wiring it into the LLVM lowering of `PermissionAssert`
-            // is a follow-on step.
+            // error half a megabyte deeper. The resolved permission
+            // policy is also handed to the LLVM lowerer here so every
+            // `PermissionAssert` site in the binary enforces the
+            // same `(scope, target)` grants the interpreter would.
             // Script-shaped AOT path: validate frontmatter, then
             // try the persistent native-binary cache. On hit, exec
             // the cached binary directly — sub-millisecond cold
             // start. On miss, run the LLVM pipeline below and
             // store the result.
+            let mut aot_permission_policy:
+                Option<verum_codegen::llvm::AotPermissionPolicy> = None;
             let aot_cache_key: Option<crate::script::cache::CacheKey> =
                 if is_script_shaped(&input) {
                     use crate::script::context::{ScriptContext, ScriptContextOptions};
@@ -378,14 +379,16 @@ pub fn run_with_tier_and_flags(
                                  now they are ignored",
                             );
                         }
-                        if !fm.permissions.is_empty() {
-                            ui::warn(
-                                "script frontmatter declares permissions — \
-                                 AOT permission enforcement lands separately; \
-                                 use `verum run` (interpreter) for sandboxed \
-                                 execution today",
-                            );
-                        }
+                    }
+                    aot_permission_policy = build_aot_permission_policy(&ctx);
+                    if aot_permission_policy.is_some() {
+                        ui::detail(
+                            "Permissions",
+                            &format!(
+                                "{} grants baked into AOT binary",
+                                ctx.permissions.len()
+                            ),
+                        );
                     }
                     if let Some(cached) = lookup_aot_binary(ctx.cache_key) {
                         ui::status(
@@ -407,6 +410,9 @@ pub fn run_with_tier_and_flags(
                 ..Default::default()
             };
             let mut session = Session::new(options);
+            if let Some(policy) = aot_permission_policy {
+                session.set_aot_permission_policy(policy);
+            }
             let mut pipeline = CompilationPipeline::new(&mut session);
 
             match pipeline.run_native_compilation() {
@@ -1093,6 +1099,66 @@ fn cli_kind_to_router_scope(
 /// separately. The current policy gives meaningful protection at
 /// the kind level and is the natural insertion point for the
 /// future per-target check.
+/// Build the AOT-side counterpart of [`build_script_permission_policy`]:
+/// the same `PermissionSet`, packaged as compile-time data the LLVM
+/// lowerer can bake into the generated binary at every
+/// `PermissionAssert` site.
+///
+/// `None` is returned for scripts whose `ctx.permissions` is empty —
+/// the trusted-application path. The lowerer treats `None` as
+/// allow-all (no-op every gate), matching the interpreter's default
+/// when no script policy is wired.
+///
+/// The mapping mirrors `build_script_permission_policy` exactly so
+/// the two execution tiers agree on which scope/target combinations
+/// are allowed:
+///
+/// * `Memory` and `Cryptography` go into `always_allow` (no script
+///   permission kind maps to them today).
+/// * Wildcard CLI-scope grants populate the `wildcards` set.
+/// * Specific-target grants populate `specific` with the same
+///   `(scope_tag, target_id)` pairs — `target_id` hashed via
+///   `hash_grant_target` to match the runtime gate's input shape.
+fn build_aot_permission_policy(
+    ctx: &crate::script::context::ScriptContext,
+) -> Option<verum_codegen::llvm::AotPermissionPolicy> {
+    use crate::script::permissions::PermissionScope as CliScope;
+    use verum_codegen::llvm::AotPermissionPolicy;
+    use verum_vbc::interpreter::permission::PermissionScope;
+
+    if ctx.permissions.is_empty() {
+        return None;
+    }
+
+    let mut policy = AotPermissionPolicy::default();
+
+    // Memory and Cryptography have no script-level kinds; the
+    // interpreter policy treats them as always allowed regardless of
+    // declared grants. Mirror that here so AOT and interpreter agree
+    // on every scope, not just the kinds the script wrote.
+    policy.always_allow.insert(PermissionScope::Memory.to_wire_tag());
+    policy.always_allow.insert(PermissionScope::Cryptography.to_wire_tag());
+
+    for grant in iterate_grants(&ctx.permissions) {
+        let Some(scope) = cli_kind_to_router_scope(grant.kind) else {
+            continue;
+        };
+        let scope_tag = scope.to_wire_tag();
+        match &grant.scope {
+            CliScope::Any => {
+                policy.wildcards.insert(scope_tag);
+            }
+            CliScope::Targets(targets) => {
+                for t in targets {
+                    policy.specific.insert((scope_tag, hash_grant_target(t)));
+                }
+            }
+        }
+    }
+
+    Some(policy)
+}
+
 fn build_script_permission_policy(
     ctx: &crate::script::context::ScriptContext,
 ) -> Option<verum_compiler::session::ScriptPermissionPolicy> {

@@ -425,6 +425,17 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Populated from `EscapeAnalysisResult` before instruction lowering.
     /// When present, overrides the LLVM-side local/unknown heuristic.
     vbc_escape_tiers: HashMap<usize, RefTier>,
+
+    /// AOT permission policy installed by the lowering driver.
+    /// `Some` when the source is a script with `permissions = [...]`
+    /// (or `--allow*` CLI flags); `None` for trusted-application
+    /// AOT runs that bypass script-mode enforcement.
+    ///
+    /// `PermissionAssert` lowering reads this to decide whether to
+    /// elide, panic unconditionally, or emit a per-target switch.
+    /// Shared via `Arc` so every lowered function in the module sees
+    /// the same policy without any cloning of the underlying tables.
+    permission_policy: Option<Arc<super::permissions::AotPermissionPolicy>>,
 }
 
 /// Information about a reference stored in a register.
@@ -635,6 +646,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_loop_hints: None,
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
+            permission_policy: None,
         }
     }
 
@@ -739,6 +751,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_loop_hints: None,
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
+            permission_policy: None,
         }
     }
 
@@ -798,6 +811,25 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// This is the authoritative lookup that handles name collisions correctly.
     pub fn resolve_func_id(&self, func_id: u32) -> Option<FunctionValue<'ctx>> {
         self.func_id_map.as_ref().and_then(|m| m.get(&func_id).copied())
+    }
+
+    /// Install the AOT permission policy for this function. Called by
+    /// the lowering driver before instruction emission so the
+    /// `PermissionAssert` arm can resolve the policy without
+    /// threading it through every helper.
+    pub fn set_permission_policy(
+        &mut self,
+        policy: Option<Arc<super::permissions::AotPermissionPolicy>>,
+    ) {
+        self.permission_policy = policy;
+    }
+
+    /// Borrow the AOT permission policy if one is installed. `None`
+    /// is the trusted-application path — `PermissionAssert` is
+    /// elided. `Some` returns the resolved policy from script
+    /// frontmatter ∪ CLI flags.
+    pub fn permission_policy(&self) -> Option<&super::permissions::AotPermissionPolicy> {
+        self.permission_policy.as_deref()
     }
 
     /// Get the LLVM function.

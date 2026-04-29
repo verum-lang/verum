@@ -12936,7 +12936,8 @@ impl<'s> CompilationPipeline<'s> {
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
-            .with_coverage(self.session.options().coverage);
+            .with_coverage(self.session.options().coverage)
+            .with_permission_policy(self.session.aot_permission_policy());
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,
@@ -14740,6 +14741,14 @@ impl<'s> CompilationPipeline<'s> {
 
         // Set target triple for the host
         let config = config.with_target(verum_codegen::llvm::verum_llvm::targets::TargetMachine::get_default_triple().as_str().to_string_lossy());
+
+        // Wire the AOT permission policy into lowering. `None` is the
+        // trusted-application default — `PermissionAssert` is elided.
+        // `Some` makes the lowerer bake the policy into every
+        // permission gate at compile time, sealing the resolved
+        // grants in the binary so `--aot` runs of script-shaped
+        // sources enforce identically to the interpreter.
+        let config = config.with_permission_policy(self.session.aot_permission_policy());
 
         info!("  Lowering VBC to LLVM IR (opt level: {})", opt_level);
 

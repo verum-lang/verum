@@ -5729,11 +5729,211 @@ pub fn lower_instruction<'ctx>(
         }
 
         // ====================================================================
+        // Permission gates (SCRIPT-5 — AOT enforcement)
+        //
+        // The Tier-0 interpreter routes `PermissionAssert` through a
+        // runtime `PermissionRouter`. The Tier-1 path bakes the same
+        // policy directly into the IR via `lower_permission_assert`.
+        // Stats opcodes have no AOT analogue (the AOT binary doesn't
+        // carry a router) — they lower to a sentinel value that
+        // matches the interpreter's "stats unavailable" path.
+        // ====================================================================
+        Instruction::PermissionAssert { scope_tag, target_id } => {
+            lower_permission_assert(ctx, *scope_tag, *target_id)
+        }
+        Instruction::PermissionStatsRead { dst, selector: _ } => {
+            // No router → stats are zero. Mirrors the interpreter's
+            // "selector out of range" return path so callers see
+            // sane data.
+            let i64_ty = ctx.types().i64_type();
+            ctx.set_register(dst.0, i64_ty.const_zero().into());
+            Ok(())
+        }
+        Instruction::PermissionStatsClear { dst } => {
+            // No router to clear. Return Unit (0) — same as the
+            // interpreter when it has no stats to reset.
+            let i64_ty = ctx.types().i64_type();
+            ctx.set_register(dst.0, i64_ty.const_zero().into());
+            Ok(())
+        }
+
+        // ====================================================================
         // Catch-all: fail on unimplemented instructions
         // ====================================================================
         _ => {
             Err(LlvmLoweringError::internal(format!("Unimplemented VBC instruction in AOT lowering: {:?}", instr)))
         }
+    }
+}
+
+/// Lower a `PermissionAssert { scope_tag, target_id }` to LLVM IR.
+///
+/// Three paths, all driven by the compile-time-known policy on the
+/// `FunctionContext`:
+///
+/// * **No policy installed** → trusted-application AOT run. Emit
+///   nothing; the assert is a no-op at runtime, matching the
+///   interpreter's allow-all default behaviour when no script
+///   policy is wired.
+/// * **Policy unconditionally allows this scope** (always-allow set
+///   or wildcard grant) → emit nothing. The script declared this
+///   scope open; LLVM sees zero overhead at the call site.
+/// * **Policy fully denies this scope** (no grants of any shape) →
+///   emit unconditional panic with code 143. LLVM treats every
+///   following instruction as unreachable, so the gated intrinsic
+///   body is removed entirely by DCE.
+/// * **Policy lists specific targets** → emit a `switch` on the
+///   target_id register. Listed values fall through to the success
+///   path; the default case panics. LLVM lowers a small switch to
+///   compact branch-on-equal sequences and folds the constants
+///   aggressively.
+///
+/// The panic path is inlined per call site rather than routed
+/// through a runtime helper. Inlining keeps the policy sealed in
+/// the binary (no function symbol an attacker could intercept) and
+/// lets LLVM merge identical denial sites across the module.
+fn lower_permission_assert<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    scope_tag: u8,
+    target_id: Reg,
+) -> Result<()> {
+    let policy = match ctx.permission_policy() {
+        Some(p) => p.clone(),
+        None => return Ok(()),
+    };
+
+    if policy.is_scope_unconditionally_allowed(scope_tag) {
+        return Ok(());
+    }
+
+    if policy.is_scope_fully_denied(scope_tag) {
+        let target_val = ctx.get_register(target_id.0)?;
+        let target_i64 = as_i64(ctx, target_val, "perm_target_denied")?;
+        emit_permission_panic(ctx, scope_tag, target_i64)?;
+        // Continuation block — anything after a fully-denied assert
+        // is unreachable, but downstream lowering still emits into
+        // the current block. Keep a fresh successor so the function
+        // remains structurally well-formed for verifier passes.
+        let parent = ctx
+            .builder()
+            .get_insert_block()
+            .or_internal("perm assert: no insert block")?;
+        let parent_fn = parent
+            .get_parent()
+            .or_internal("perm assert: insert block has no parent")?;
+        let cont_bb = ctx
+            .llvm_context()
+            .append_basic_block(parent_fn, "perm_denied_cont");
+        ctx.builder().position_at_end(cont_bb);
+        return Ok(());
+    }
+
+    let allowed_targets = policy.specific_targets_for_scope(scope_tag);
+
+    let target_val = ctx.get_register(target_id.0)?;
+    let target_i64 = as_i64(ctx, target_val, "perm_target")?;
+
+    let parent = ctx
+        .builder()
+        .get_insert_block()
+        .or_internal("perm assert: no insert block")?;
+    let parent_fn = parent
+        .get_parent()
+        .or_internal("perm assert: insert block has no parent")?;
+
+    let ok_bb = ctx
+        .llvm_context()
+        .append_basic_block(parent_fn, "perm_ok");
+    let deny_bb = ctx
+        .llvm_context()
+        .append_basic_block(parent_fn, "perm_deny");
+
+    let i64_ty = ctx.types().i64_type();
+    let cases: Vec<(verum_llvm::values::IntValue<'ctx>, _)> = allowed_targets
+        .iter()
+        .map(|t| (i64_ty.const_int(*t, false), ok_bb))
+        .collect();
+    ctx.builder()
+        .build_switch(target_i64, deny_bb, &cases)
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    ctx.builder().position_at_end(deny_bb);
+    emit_permission_panic(ctx, scope_tag, target_i64)?;
+
+    ctx.builder().position_at_end(ok_bb);
+    Ok(())
+}
+
+/// Emit the panic prologue for a denied permission check: print a
+/// human-readable message naming the scope and target, then call
+/// `_exit(143)`. Code 143 mirrors `SIGTERM` — tooling can use the
+/// exact code to distinguish capability violations from logic
+/// panics (which exit 1 via `Assert` / `Panic`).
+///
+/// Builder cursor is left after a terminating `unreachable` — the
+/// caller positions to a fresh block before continuing.
+fn emit_permission_panic<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    scope_tag: u8,
+    _target_i64: verum_llvm::values::IntValue<'ctx>,
+) -> Result<()> {
+    let module = ctx.get_module();
+    let llvm_ctx = ctx.llvm_context();
+    let i32_ty = llvm_ctx.i32_type();
+    let i64_ty = llvm_ctx.i64_type();
+    let ptr_ty = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let scope_name = scope_tag_name(scope_tag);
+    let msg = format!(
+        "permission denied: script lacks `{}` grant for this operation",
+        scope_name
+    );
+    let msg_ptr = ctx
+        .builder()
+        .build_global_string_ptr(&msg, "perm_denied_msg")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+    let puts_fn = module.get_function("puts").unwrap_or_else(|| {
+        let fn_type = i32_ty.fn_type(&[ptr_ty.into()], false);
+        module.add_function("puts", fn_type, None)
+    });
+    let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
+        let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
+        let f = module.add_function("_exit", fn_type, None);
+        f.add_attribute(
+            verum_llvm::attributes::AttributeLoc::Function,
+            llvm_ctx.create_string_attribute("noreturn", ""),
+        );
+        f
+    });
+
+    ctx.builder()
+        .build_call(puts_fn, &[msg_ptr.as_pointer_value().into()], "")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.builder()
+        .build_call(exit_fn, &[i64_ty.const_int(143, false).into()], "")
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    ctx.builder()
+        .build_unreachable()
+        .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+    Ok(())
+}
+
+/// Map a wire-encoded permission scope tag back to the
+/// human-readable scope name. Mirrors
+/// `PermissionScope::from_wire_tag` in the interpreter — kept in
+/// lockstep so denial messages name the same scope the script
+/// would have written in its `permissions = [...]` declaration.
+fn scope_tag_name(tag: u8) -> &'static str {
+    match tag {
+        0 => "syscall",
+        1 => "filesystem",
+        2 => "network",
+        3 => "process",
+        4 => "memory",
+        5 => "cryptography",
+        6 => "time",
+        _ => "unknown",
     }
 }
 

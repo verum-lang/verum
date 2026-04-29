@@ -769,3 +769,66 @@ fn test_cyclomatic_complexity_calculation() {
     let complexity = linter.calculate_complexity(&simple_func);
     assert_eq!(complexity, 1, "Simple function should have complexity 1");
 }
+
+#[test]
+fn test_lint_emits_complexity_warning_when_threshold_exceeded() {
+    let mut config = LinterConfig::default();
+    config.check_performance = true;
+    config.max_cyclomatic_complexity = 0;
+
+    let linter = MetaLinter::with_config(config);
+    let func = make_function("simple", vec![], Some(make_string_literal("hi")), vec![]);
+
+    let result = linter.lint_function(&func);
+    let complexity_warnings = result
+        .warnings
+        .iter()
+        .filter(|w| w.message.as_str().contains("cyclomatic complexity"))
+        .count();
+    assert_eq!(
+        complexity_warnings, 1,
+        "expected one complexity warning when complexity (1) > threshold (0)"
+    );
+}
+
+#[test]
+fn test_lint_skips_complexity_when_within_threshold() {
+    let mut config = LinterConfig::default();
+    config.check_performance = true;
+    config.max_cyclomatic_complexity = 10;
+
+    let linter = MetaLinter::with_config(config);
+    let func = make_function("simple", vec![], Some(make_string_literal("hi")), vec![]);
+
+    let result = linter.lint_function(&func);
+    let complexity_warnings = result
+        .warnings
+        .iter()
+        .filter(|w| w.message.as_str().contains("cyclomatic complexity"))
+        .count();
+    assert_eq!(
+        complexity_warnings, 0,
+        "no complexity warning when complexity (1) <= threshold (10)"
+    );
+}
+
+#[test]
+fn test_lint_skips_complexity_when_check_performance_disabled() {
+    let mut config = LinterConfig::default();
+    config.check_performance = false;
+    config.max_cyclomatic_complexity = 0;
+
+    let linter = MetaLinter::with_config(config);
+    let func = make_function("simple", vec![], Some(make_string_literal("hi")), vec![]);
+
+    let result = linter.lint_function(&func);
+    let complexity_warnings = result
+        .warnings
+        .iter()
+        .filter(|w| w.message.as_str().contains("cyclomatic complexity"))
+        .count();
+    assert_eq!(
+        complexity_warnings, 0,
+        "no complexity warning when check_performance is disabled, even if threshold is 0"
+    );
+}
