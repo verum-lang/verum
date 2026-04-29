@@ -262,6 +262,22 @@ impl InteractiveProver {
             .ok_or_else(|| ProofError::TacticFailed("No goals remaining".into()))?
             .clone();
 
+        // Honour `ProverConfig.verbose` — emit a structured trace
+        // for every tactic application so users debugging a stuck
+        // proof can follow what the prover is doing. Without this
+        // gate the field was inert: setting verbose = true had no
+        // observable effect on the prover's output.
+        if self.config.verbose {
+            tracing::info!(
+                "interactive prover: applying {:?} to goal #{} of {}",
+                tactic,
+                self.goals.len() - self.goals.iter().position(|g| {
+                    std::ptr::eq(g, &current_goal)
+                }).unwrap_or(0),
+                self.goals.len()
+            );
+        }
+
         // Execute tactic
         let result = self.engine.execute_tactic(&tactic, &current_goal);
 
