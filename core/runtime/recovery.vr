@@ -994,6 +994,16 @@ implement Debug for RecoveryCircuitState {
     }
 }
 
+implement Display for RecoveryCircuitState {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Closed   => f.write_str("closed"),
+            Open     => f.write_str("open"),
+            HalfOpen => f.write_str("half-open"),
+        }
+    }
+}
+
 implement Debug for RecoveryBackoffStrategy {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {

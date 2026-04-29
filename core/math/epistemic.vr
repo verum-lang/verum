@@ -143,6 +143,18 @@ implement Eq for EpistemicStatus {
     }
 }
 
+implement Display for EpistemicStatus {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.label())
+    }
+}
+
+implement Debug for EpistemicStatus {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"EpistemicStatus.{self.label()}".as_str())
+    }
+}
+
 implement Ord for EpistemicStatus {
     fn cmp(&self, other: &EpistemicStatus) -> Ordering {
         let l = self.rank();

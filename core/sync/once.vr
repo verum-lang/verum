@@ -310,6 +310,32 @@ implement Debug for OnceState {
     }
 }
 
+implement Display for OnceState {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            New        => f.write_str("new"),
+            InProgress => f.write_str("in-progress"),
+            Done       => f.write_str("done"),
+            Poisoned   => f.write_str("poisoned"),
+        }
+    }
+}
+
+fn once_state_tag(s: &OnceState) -> Int {
+    match s {
+        New        => 0,
+        InProgress => 1,
+        Done       => 2,
+        Poisoned   => 3,
+    }
+}
+
+implement Eq for OnceState {
+    fn eq(&self, other: &OnceState) -> Bool {
+        once_state_tag(self) == once_state_tag(other)
+    }
+}
+
 // =============================================================================
 // OnceLock<T> - Lazy initialization with stored value
 // =============================================================================
