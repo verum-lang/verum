@@ -172,6 +172,19 @@ pub struct Session {
     /// step, and the next invocation would re-pay the full
     /// compile cost.
     pending_exit_code: Shared<RwLock<Option<i32>>>,
+
+    /// AOT permission policy serialised as data (rather than a
+    /// closure) so the LLVM lowerer can bake it into the generated
+    /// binary at compile time. Built by the CLI from the same
+    /// `PermissionSet` that produces `script_permission_policy`,
+    /// then read by the pipeline when it constructs
+    /// `LoweringConfig` for the AOT path.
+    ///
+    /// `None` is the trusted-application path — the AOT lowerer
+    /// elides every `PermissionAssert` site (matching the
+    /// interpreter's allow-all default when no policy is wired).
+    aot_permission_policy:
+        Shared<RwLock<Option<verum_codegen::llvm::AotPermissionPolicy>>>,
 }
 
 impl Session {
@@ -206,6 +219,7 @@ impl Session {
             last_compiled_vbc: Shared::new(RwLock::new(None)),
             pending_exit_code: Shared::new(RwLock::new(None)),
             script_permission_policy: Shared::new(RwLock::new(None)),
+            aot_permission_policy: Shared::new(RwLock::new(None)),
         }
     }
 
@@ -267,6 +281,31 @@ impl Session {
     /// installed — there is no replay.
     pub fn take_script_permission_policy(&self) -> Option<ScriptPermissionPolicy> {
         self.script_permission_policy.write().take()
+    }
+
+    /// Install an AOT-side permission policy. Counterpart to
+    /// `set_script_permission_policy` — same `PermissionSet` source,
+    /// different consumer: the AOT lowering pipeline reads this
+    /// when it builds `LoweringConfig`, baking the resolved grants
+    /// into the generated binary at compile time.
+    ///
+    /// `None` (the default) is the trusted-application path —
+    /// `PermissionAssert` opcodes lower to no-ops, matching the
+    /// allow-all interpreter default for plain applications.
+    pub fn set_aot_permission_policy(
+        &self,
+        policy: verum_codegen::llvm::AotPermissionPolicy,
+    ) {
+        *self.aot_permission_policy.write() = Some(policy);
+    }
+
+    /// Borrow the AOT permission policy for the current run, if one
+    /// is installed. Cloned out so the caller doesn't hold the lock
+    /// while constructing the lowering config.
+    pub fn aot_permission_policy(
+        &self,
+    ) -> Option<verum_codegen::llvm::AotPermissionPolicy> {
+        self.aot_permission_policy.read().clone()
     }
 
     /// Set the cross-cog resolver for external package imports.
@@ -401,6 +440,7 @@ impl Session {
             last_compiled_vbc: Shared::new(RwLock::new(None)),
             pending_exit_code: Shared::new(RwLock::new(None)),
             script_permission_policy: Shared::new(RwLock::new(None)),
+            aot_permission_policy: Shared::new(RwLock::new(None)),
         }
     }
 

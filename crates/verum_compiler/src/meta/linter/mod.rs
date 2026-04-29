@@ -120,6 +120,31 @@ impl MetaLinter {
         if self.config.check_performance {
             self.safety
                 .check_unbounded_recursion(&ctx, func.span, &mut result);
+
+            // Cyclomatic complexity check.  `max_cyclomatic_complexity`
+            // was a config field with no readers — `lint_function`
+            // never invoked `calculate_complexity` against it, so the
+            // documented contract was a no-op regardless of value.
+            // Now gated under the same `check_performance` umbrella as
+            // recursion (cyclomatic complexity is a maintainability /
+            // performance metric, not a safety one) and emits a
+            // warning rather than an error so opt-in tooling can
+            // surface it without blocking compilation.
+            let complexity = self.safety.calculate_complexity(func);
+            if complexity > self.config.max_cyclomatic_complexity {
+                result.add_warning(LintWarning {
+                    message: Text::from(format!(
+                        "Meta function '{}' has cyclomatic complexity {} (threshold {})",
+                        func.name.as_str(),
+                        complexity,
+                        self.config.max_cyclomatic_complexity
+                    )),
+                    span: func.span,
+                    suggestion: Maybe::Some(Text::from(
+                        "Consider splitting this function into smaller pieces, or raise max_cyclomatic_complexity if the threshold is too tight",
+                    )),
+                });
+            }
         }
 
         // Validate annotations

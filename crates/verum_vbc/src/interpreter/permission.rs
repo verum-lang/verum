@@ -81,6 +81,45 @@ pub enum PermissionScope {
     Time,
 }
 
+impl PermissionScope {
+    /// Stable byte encoding for wire-format use.
+    ///
+    /// The bytecode encoder writes `PermissionAssert::scope_tag`
+    /// using these values (see `bytecode.rs::encode_instruction`).
+    /// The dispatch handler decodes them via the inverse
+    /// `from_wire_tag`. Both sides — and any AOT permission gate
+    /// emitted by the LLVM lowerer — must agree on this mapping,
+    /// so it lives on the type itself rather than as a hand-rolled
+    /// match scattered across the codebase.
+    pub fn to_wire_tag(self) -> u8 {
+        match self {
+            PermissionScope::Syscall => 0,
+            PermissionScope::FileSystem => 1,
+            PermissionScope::Network => 2,
+            PermissionScope::Process => 3,
+            PermissionScope::Memory => 4,
+            PermissionScope::Cryptography => 5,
+            PermissionScope::Time => 6,
+        }
+    }
+
+    /// Inverse of [`to_wire_tag`]. Unknown bytes collapse to
+    /// `Syscall` — the most-restricted scope — so a malformed
+    /// call site errs on stronger gating, not weaker.
+    pub fn from_wire_tag(tag: u8) -> Self {
+        match tag {
+            0 => PermissionScope::Syscall,
+            1 => PermissionScope::FileSystem,
+            2 => PermissionScope::Network,
+            3 => PermissionScope::Process,
+            4 => PermissionScope::Memory,
+            5 => PermissionScope::Cryptography,
+            6 => PermissionScope::Time,
+            _ => PermissionScope::Syscall,
+        }
+    }
+}
+
 /// Opaque target identifier within a [`PermissionScope`].
 ///
 /// The router treats it as an arbitrary `u64` — interpretation is
@@ -292,6 +331,37 @@ impl PermissionRouter {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn wire_tag_round_trip_is_lossless_for_all_scopes() {
+        for scope in [
+            PermissionScope::Syscall,
+            PermissionScope::FileSystem,
+            PermissionScope::Network,
+            PermissionScope::Process,
+            PermissionScope::Memory,
+            PermissionScope::Cryptography,
+            PermissionScope::Time,
+        ] {
+            let tag = scope.to_wire_tag();
+            assert_eq!(
+                PermissionScope::from_wire_tag(tag),
+                scope,
+                "round-trip failed for {scope:?} via tag {tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_wire_tag_collapses_to_syscall() {
+        for bad in [7, 8, 100, 255] {
+            assert_eq!(
+                PermissionScope::from_wire_tag(bad),
+                PermissionScope::Syscall,
+                "unknown tag {bad} must collapse to Syscall"
+            );
+        }
+    }
 
     #[test]
     fn allow_all_router_passes_every_request() {

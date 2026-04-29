@@ -79,6 +79,13 @@ pub struct LoweringConfig {
     pub debug_info: bool,
     /// Enable code coverage instrumentation.
     pub coverage: bool,
+    /// AOT permission policy — when present, every `PermissionAssert`
+    /// is lowered to a compile-time-resolved gate against the policy
+    /// instead of an unconditional pass. `None` is the trusted-
+    /// application path: `PermissionAssert` becomes a no-op, matching
+    /// the interpreter's allow-all default when no script policy is
+    /// installed on the Session.
+    pub permission_policy: Option<super::permissions::AotPermissionPolicy>,
 }
 
 impl Default for LoweringConfig {
@@ -92,6 +99,7 @@ impl Default for LoweringConfig {
             inline_threshold: 100,
             debug_info: false,
             coverage: false,
+            permission_policy: None,
         }
     }
 }
@@ -138,6 +146,18 @@ impl LoweringConfig {
     /// Enable code coverage instrumentation (--coverage flag).
     pub fn with_coverage(mut self, enable: bool) -> Self {
         self.coverage = enable;
+        self
+    }
+
+    /// Install an AOT permission policy. The lowerer bakes the
+    /// resolved grants into every `PermissionAssert` site at compile
+    /// time — see [`super::permissions`] for the policy model.
+    /// Pass `None` to opt out (trusted-application default).
+    pub fn with_permission_policy(
+        mut self,
+        policy: Option<super::permissions::AotPermissionPolicy>,
+    ) -> Self {
+        self.permission_policy = policy;
         self
     }
 
@@ -303,6 +323,13 @@ pub struct VbcToLlvmLowering<'ctx> {
     /// When set, provides per-instruction tier decisions that override
     /// the LLVM-side local/unknown heuristic for Ref/RefMut instructions.
     escape_analysis: Option<verum_vbc::cbgr_analysis::EscapeAnalysisResult>,
+
+    /// AOT permission policy promoted to `Arc` so each function
+    /// context in the module shares one allocation. Mirrors
+    /// `config.permission_policy`; populated lazily on the first
+    /// `lower_module` call so callers that toggle the config between
+    /// modules see fresh state.
+    permission_policy_arc: Option<std::sync::Arc<super::permissions::AotPermissionPolicy>>,
 }
 
 /// Coerce any `BasicValueEnum` to an LLVM `i1` boolean suitable for
@@ -490,6 +517,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             (None, None, None)
         };
 
+        let permission_policy_arc = config
+            .permission_policy
+            .as_ref()
+            .map(|p| std::sync::Arc::new(p.clone()));
+
         Self {
             context,
             module,
@@ -504,6 +536,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             di_compile_unit,
             di_file,
             escape_analysis: None,
+            permission_policy_arc,
         }
     }
 
@@ -1519,6 +1552,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             llvm_fn,
             func_name,
         );
+
+        // Hand the AOT permission policy to the function context so
+        // `PermissionAssert` lowering can resolve it. Cloned `Arc` —
+        // every function in the module sees the same policy without
+        // duplicating the underlying tables.
+        if let Some(ref policy) = self.permission_policy_arc {
+            ctx.set_permission_policy(Some(policy.clone()));
+        }
 
         // Attach DWARF debug info (DISubprogram) to the function if debug mode is on.
         // This enables breakpoints, step-through, and variable inspection in LLDB/GDB.
