@@ -458,8 +458,19 @@ impl RefinementValidator {
         // Build cache key
         let cache_key = format!("{}:{}:{}", doc_uri, position.line, position.character);
 
+        // Honour `LspConfig.cache_validation_results`: when the
+        // caller has disabled the validator cache (e.g. the user
+        // is debugging a flaky proof and wants every keystroke
+        // re-checked from scratch), skip both the lookup and the
+        // insert below. Closes the inert-defense pattern: the
+        // flag was forwarded into the `ValidatorConfig.cache_enabled`
+        // field but no path consulted it.
+        let cache_enabled = self.config.read().cache_enabled;
+
         // Check cache first
-        if let Maybe::Some(cached_result) = self.cache.get(&cache_key) {
+        if cache_enabled
+            && let Maybe::Some(cached_result) = self.cache.get(&cache_key)
+        {
             return Ok(self.result_to_response(cached_result, start.elapsed()));
         }
 
@@ -480,8 +491,10 @@ impl RefinementValidator {
             Err(_) => ValidationResult::Unknown, // Timeout
         };
 
-        // Cache result
-        self.cache.insert(cache_key, validation_result.clone());
+        // Cache result when caching is active
+        if cache_enabled {
+            self.cache.insert(cache_key, validation_result.clone());
+        }
 
         Ok(self.result_to_response(validation_result, start.elapsed()))
     }
