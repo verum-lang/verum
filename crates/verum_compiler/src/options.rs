@@ -681,3 +681,50 @@ fn num_cpus() -> usize {
         .map(|n| n.get())
         .unwrap_or(4)
 }
+
+#[cfg(test)]
+mod emit_mode_tests {
+    use super::*;
+
+    #[test]
+    fn emit_mode_default_is_binary() {
+        // Pin: the default emission mode produces an executable / linked
+        // binary. Anything else is opt-in via the CLI's `--emit` flag.
+        assert_eq!(EmitMode::default(), EmitMode::Binary);
+    }
+
+    #[test]
+    fn emit_mode_variants_are_exhaustive() {
+        // Pin: the EmitMode variant set is the contract surface that
+        // build.rs:218-224 dispatches over and pipeline.rs gates on.
+        // A refactor that drops one of these silently re-enables the
+        // pre-fix "set the field but ignore it" inert-defense behaviour.
+        // Each variant must round-trip through `with_emit_mode` so the
+        // builder API stays in lockstep with the enum.
+        for mode in [
+            EmitMode::Binary,
+            EmitMode::Assembly,
+            EmitMode::LlvmIr,
+            EmitMode::Bitcode,
+            EmitMode::Object,
+        ] {
+            let opts = CompilerOptions::default().with_emit_mode(mode);
+            assert_eq!(opts.emit_mode, mode);
+        }
+    }
+
+    #[test]
+    fn emit_mode_terminal_modes_distinct_from_binary() {
+        // Pin: Assembly and Object are terminal modes that REPLACE the
+        // executable as the final artifact (pipeline short-circuits before
+        // linking). LlvmIr and Bitcode are additive — they emit alongside
+        // the executable. This contract test pins the variant identity so
+        // a later "merge LlvmIr/Bitcode into Assembly" simplification
+        // doesn't accidentally collapse the additive vs terminal split.
+        assert_ne!(EmitMode::Assembly, EmitMode::Binary);
+        assert_ne!(EmitMode::Object, EmitMode::Binary);
+        assert_ne!(EmitMode::Assembly, EmitMode::Object);
+        assert_ne!(EmitMode::LlvmIr, EmitMode::Assembly);
+        assert_ne!(EmitMode::Bitcode, EmitMode::Object);
+    }
+}
