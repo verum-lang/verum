@@ -645,6 +645,31 @@ impl JitEngine {
         // Prepare shared library paths
         let lib_paths: Vec<&str> = config.shared_library_paths.iter().map(|s| s.as_str()).collect();
 
+        // Surface inert JitConfig fields. `enable_debug_info`
+        // (DWARF in JITted modules) and `enable_multithreading`
+        // (LLVM-internal parallel compilation) flow from the
+        // manifest + builder but the underlying
+        // `ExecutionEngine::new` accepts only
+        // (module, opt_level, lib_paths, enable_object_cache),
+        // so the two flags reach the JitEngine constructor but
+        // not the LLVM engine itself. Closes the inert-defense
+        // pattern by routing the values through tracing so
+        // embedders writing
+        // `JitConfig::new().enable_debug_info(true)` see the
+        // setting was observed at construction, even when the
+        // underlying ExecutionEngine API doesn't yet thread
+        // through to LLVM's DWARF / parallel-compilation knobs.
+        if config.enable_debug_info || !config.enable_multithreading {
+            tracing::debug!(
+                "JitEngine: enable_debug_info={}, enable_multithreading={} \
+                 — these fields land on JitConfig but ExecutionEngine::new \
+                 takes only (module, opt_level, lib_paths, object_cache); \
+                 LLVM-side wiring is forward-looking",
+                config.enable_debug_info,
+                config.enable_multithreading,
+            );
+        }
+
         // Create execution engine
         let engine = ExecutionEngine::new(
             module,
