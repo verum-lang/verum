@@ -46,6 +46,11 @@ pub mod tactic;
 /// users / IDE / CI can inspect / list / clear / probe the
 /// per-theorem closure-hash incremental verification cache.
 pub mod cache_closure;
+/// `verum doc-render` subcommand — auto-paper generator.  Walks
+/// every `.vr` file, projects @theorem / @lemma / @corollary /
+/// @axiom to typed `DocItem`s, and renders Markdown / LaTeX / HTML
+/// via `verum_verification::doc_render::DefaultDocRenderer`.
+pub mod doc_render;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

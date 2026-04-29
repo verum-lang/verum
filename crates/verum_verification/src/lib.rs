@@ -94,6 +94,13 @@ pub mod tactic_combinator;
 /// boundary [`closure_cache::IncrementalCacheStore`] +
 /// memory-backed + filesystem-backed reference impls.
 pub mod closure_cache;
+/// Auto-paper documentation generator (#84).  Projects every
+/// public @theorem / @lemma / @corollary / @axiom plus its
+/// docstring + proof body into a typed [`doc_render::DocItem`]
+/// and renders to Markdown / LaTeX / HTML via the
+/// [`doc_render::DocRenderer`] trait.  Single source of truth for
+/// the corpus → paper-draft pipeline.
+pub mod doc_render;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
