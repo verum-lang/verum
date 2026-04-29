@@ -17,7 +17,7 @@ mount core.database.sqlite.native.index_variants.kind.{
 };
 
 // -----------------------------------------------------------------------------
-// IndexedColumn
+// IndexColumnDescriptor
 // -----------------------------------------------------------------------------
 
 public type SortDirection is SdAsc | SdDesc;
@@ -26,7 +26,7 @@ public fn sort_dir_name(d: &SortDirection) -> Text {
     match d { SdAsc => "ASC".clone(), SdDesc => "DESC".clone() }
 }
 
-public type IndexedColumn is {
+public type IndexColumnDescriptor is {
     /// Column name OR expression text (for IkExpression indexes).
     expr: Text,
     direction: SortDirection,
@@ -34,17 +34,17 @@ public type IndexedColumn is {
     collation: Text,
 }
 
-public fn indexed_column(name: Text) -> IndexedColumn {
-    IndexedColumn {
+public fn indexed_column(name: Text) -> IndexColumnDescriptor {
+    IndexColumnDescriptor {
         expr: name,
         direction: SdAsc,
         collation: "BINARY".clone(),
     }
 }
 
-implement IndexedColumn {
-    public fn descending(mut self) -> IndexedColumn { self.direction = SdDesc; self }
-    public fn with_collation(mut self, name: Text) -> IndexedColumn { self.collation = name; self }
+implement IndexColumnDescriptor {
+    public fn descending(mut self) -> IndexColumnDescriptor { self.direction = SdDesc; self }
+    public fn with_collation(mut self, name: Text) -> IndexColumnDescriptor { self.collation = name; self }
 }
 
 // -----------------------------------------------------------------------------
@@ -55,7 +55,7 @@ public type IndexDescriptor is {
     name: Text,
     table: Text,
     kind: IndexKind,
-    columns: List<IndexedColumn>,
+    columns: List<IndexColumnDescriptor>,
     /// Auto-bumped by ANALYZE; planner uses to compute selectivity.
     estimated_rows: Int64,
 }
@@ -71,7 +71,7 @@ public fn descriptor_new(name: Text, table: Text, kind: IndexKind) -> IndexDescr
 }
 
 implement IndexDescriptor {
-    public fn add_column(&mut self, c: IndexedColumn) {
+    public fn add_column(&mut self, c: IndexColumnDescriptor) {
         self.columns.push(c);
     }
 

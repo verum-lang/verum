@@ -27,15 +27,15 @@ mount core.database.common.protocol.Connection;
 
 /// Connection held for the whole client session — default for direct
 /// connections. All Postgres / MySQL / SQLite features work.
-public type Session is ();
+public type SessionMode is ();
 
 /// Connection held for one transaction — pgbouncer / Supavisor proxy
 /// pattern. LISTEN / SET / cursors that span transactions are forbidden.
-public type Transaction is ();
+public type TransactionMode is ();
 
 /// Connection held for one statement — autocommit-only, very rare in
 /// practice. Used for serverless front-ends with bursty traffic.
-public type Statement is ();
+public type StatementMode is ();
 
 // -----------------------------------------------------------------------------
 // Pool — supervisor + checkout API.

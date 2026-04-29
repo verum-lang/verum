@@ -7,10 +7,10 @@ module core.database.sqlite.native.l4_vdbe.affinity_coerce;
 // Spec: sqlite-native.md §9.3, §11.6 (MakeRecord opcode + affinity p4)
 //
 // L2 (`l2_record.type_coercion`) owns the canonical affinity coercion
-// table over `CoercionSqliteValue`. The VDBE keeps SQLite's storage
+// table over `CoercionSqliteApiValue`. The VDBE keeps SQLite's storage
 // classes in `Register`. This module is the bridge:
 //
-//   * `register_to_value(reg) -> CoercionSqliteValue`
+//   * `register_to_value(reg) -> CoercionSqliteApiValue`
 //   * `value_to_register(val) -> Register`
 //   * `coerce_register(reg, affinity) -> Register`
 //
@@ -30,18 +30,18 @@ mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RNull, RInt, RReal, RText, RBlob, RRowId,
 };
 mount core.database.sqlite.native.l2_record.type_coercion.{
-    CoercionSqliteValue, VNull, VInt, VReal, VText, VBlob,
+    CoercionSqliteApiValue, VNull, VInt, VReal, VText, VBlob,
     coerce,
 };
 mount core.database.sqlite.native.l2_record.affinity.Affinity;
 
 // -----------------------------------------------------------------------------
-// Register ↔ CoercionSqliteValue
+// Register ↔ CoercionSqliteApiValue
 // -----------------------------------------------------------------------------
 
 /// Promote a VDBE register into the L2 value shape.  RRowId folds to
 /// VInt — the storage class distinction is VDBE-internal.
-public fn register_to_value(reg: Register) -> CoercionSqliteValue {
+public fn register_to_value(reg: Register) -> CoercionSqliteApiValue {
     match reg {
         RNull       => VNull,
         RInt(i)     => VInt(i),
@@ -53,7 +53,7 @@ public fn register_to_value(reg: Register) -> CoercionSqliteValue {
 }
 
 /// Demote an L2 coerced value back into a VDBE register.
-public fn value_to_register(v: CoercionSqliteValue) -> Register {
+public fn value_to_register(v: CoercionSqliteApiValue) -> Register {
     match v {
         VNull       => RNull,
         VInt(i)     => RInt(i),

@@ -24,12 +24,12 @@ mount core.database.common.types.{WireBuf, WireReader};
 // Errors
 // -----------------------------------------------------------------------------
 
-public type FrameError is
+public type PgFrameError is
       FeShort { wanted: Int, available: Int }
     | FeBadLength { len: Int }
     | FeInvalidUtf8;
 
-implement Display for FrameError {
+implement Display for PgFrameError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             FeShort { wanted, available } =>
@@ -42,7 +42,7 @@ implement Display for FrameError {
     }
 }
 
-implement Debug for FrameError {
+implement Debug for PgFrameError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             FeShort { wanted, available } =>
@@ -55,7 +55,7 @@ implement Debug for FrameError {
     }
 }
 
-implement Eq for FrameError {
+implement Eq for PgFrameError {
     fn eq(&self, other: &PgFrameError) -> Bool {
         match (self, other) {
             (FeShort { wanted: wa, available: aa },
@@ -129,7 +129,7 @@ implement PgFrame {
 /// Returns `Ok(Some((frame, bytes_consumed)))` on success,
 /// `Ok(None)` if the buffer holds an incomplete frame, or `Err(...)`
 /// for protocol violations.
-public fn try_parse_tagged(buf: &[Byte]) -> Result<Maybe<TaggedReadOutcome>, FrameError> {
+public fn try_parse_tagged(buf: &[Byte]) -> Result<Maybe<TaggedReadOutcome>, PgFrameError> {
     let n = buf.len() as Int;
     if n < 5 {
         return Ok(None);

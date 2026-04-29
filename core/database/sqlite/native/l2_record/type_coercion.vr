@@ -42,7 +42,7 @@ mount core.database.sqlite.native.l2_record.affinity.Affinity;
 /// A SQLite dynamic value. The five storage classes map 1-to-1 onto
 /// the VDBE register kinds; once the VDBE lands, this type and
 /// `Register` converge.
-public type CoercionSqliteValue is
+public type CoercionSqliteApiValue is
       VNull
     | VInt(Int64)
     | VReal(Float64)
@@ -52,7 +52,7 @@ public type CoercionSqliteValue is
 /// Storage-class tag, mostly for tests.
 public type ValueClass is Null | Int64Class | RealClass | TextClass | BlobClass;
 
-public fn classify(v: &CoercionSqliteValue) -> ValueClass {
+public fn classify(v: &CoercionSqliteApiValue) -> ValueClass {
     match v {
         VNull    => Null,
         VInt(_)  => Int64Class,
@@ -158,7 +158,7 @@ public fn looks_real(s: &Text) -> Bool {
 // -----------------------------------------------------------------------------
 
 /// Apply SQLite's affinity-driven coercion to `v` for a column of
-/// `col_affinity`. Pure — returns a new CoercionSqliteValue.
+/// `col_affinity`. Pure — returns a new CoercionSqliteApiValue.
 ///
 /// NULL is always passed through unchanged (SQLite's "NULL is
 /// everywhere valid" invariant — STRICT mode rejects this separately).
@@ -167,7 +167,7 @@ public fn looks_real(s: &Text) -> Bool {
 /// when the source is TEXT. When the source is already numeric, the
 /// cross-class promotion rules apply (Real→Int iff the float is
 /// exactly representable as i64; else kept as Real).
-public fn coerce(v: CoercionSqliteValue, col_affinity: Affinity) -> CoercionSqliteValue {
+public fn coerce(v: CoercionSqliteApiValue, col_affinity: Affinity) -> CoercionSqliteApiValue {
     match v {
         VNull => VNull,
         _ => match col_affinity {
@@ -180,7 +180,7 @@ public fn coerce(v: CoercionSqliteValue, col_affinity: Affinity) -> CoercionSqli
     }
 }
 
-fn coerce_to_integer(v: CoercionSqliteValue) -> CoercionSqliteValue {
+fn coerce_to_integer(v: CoercionSqliteApiValue) -> CoercionSqliteApiValue {
     match v {
         VInt(_)  => v,
         VReal(x) => {
@@ -213,7 +213,7 @@ fn coerce_to_integer(v: CoercionSqliteValue) -> CoercionSqliteValue {
     }
 }
 
-fn coerce_to_real(v: CoercionSqliteValue) -> CoercionSqliteValue {
+fn coerce_to_real(v: CoercionSqliteApiValue) -> CoercionSqliteApiValue {
     match v {
         VReal(_) => v,
         VInt(i)  => VReal(i as Float64),
@@ -229,7 +229,7 @@ fn coerce_to_real(v: CoercionSqliteValue) -> CoercionSqliteValue {
     }
 }
 
-fn coerce_to_text(v: CoercionSqliteValue) -> CoercionSqliteValue {
+fn coerce_to_text(v: CoercionSqliteApiValue) -> CoercionSqliteApiValue {
     match v {
         VText(_) => v,
         VInt(i)  => VText(int64_to_text(i)),
@@ -239,7 +239,7 @@ fn coerce_to_text(v: CoercionSqliteValue) -> CoercionSqliteValue {
     }
 }
 
-fn coerce_to_numeric(v: CoercionSqliteValue) -> CoercionSqliteValue {
+fn coerce_to_numeric(v: CoercionSqliteApiValue) -> CoercionSqliteApiValue {
     match v {
         VInt(_) | VReal(_) => v,
         VText(s) => {

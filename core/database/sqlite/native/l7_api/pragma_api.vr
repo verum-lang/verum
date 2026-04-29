@@ -22,14 +22,14 @@ module core.database.sqlite.native.l7_api.pragma_api;
 // existing `pragmas/dispatch.execute` runner without round-tripping
 // SQL:
 //
-//     pragma_get_int(&db, PCacheSize)         -> Result<Int64, DbError>
-//     pragma_set_int(&mut db, PCacheSize, 1000) -> Result<(), DbError>
+//     pragma_get_int(&db, PCacheSize)         -> Result<Int64, SqliteApiDbError>
+//     pragma_set_int(&mut db, PCacheSize, 1000) -> Result<(), SqliteApiDbError>
 //
-//     pragma_get_text(&db, PJournalMode)      -> Result<Text,  DbError>
-//     pragma_set_text(&mut db, PJournalMode, "WAL") -> Result<(), DbError>
+//     pragma_get_text(&db, PJournalMode)      -> Result<Text,  SqliteApiDbError>
+//     pragma_set_text(&mut db, PJournalMode, "WAL") -> Result<(), SqliteApiDbError>
 //
-//     pragma_get_bool(&db, PForeignKeys)      -> Result<Bool,  DbError>
-//     pragma_set_bool(&mut db, PForeignKeys, true) -> Result<(), DbError>
+//     pragma_get_bool(&db, PForeignKeys)      -> Result<Bool,  SqliteApiDbError>
+//     pragma_set_bool(&mut db, PForeignKeys, true) -> Result<(), SqliteApiDbError>
 //
 // Plus a uniform `pragma_get` / `pragma_set` over a tagged
 // `PragmaValue` for callers that need to hold the value abstractly
@@ -55,7 +55,7 @@ mount core.database.sqlite.native.pragmas.dispatch.{
     execute as pragma_dispatch,
 };
 mount core.database.sqlite.native.l7_api.database.{
-    Database, DbError,
+    Database, SqliteApiDbError,
     DbMisuse, DbGeneric, DbReadonly,
 };
 
@@ -134,7 +134,7 @@ fn value_to_register(v: &PragmaValue) -> Register {
     }
 }
 
-fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, DbError> {
+fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, SqliteApiDbError> {
     match result {
         PrEmpty   => Ok(PvNull),
         PrRow(row) => {
@@ -159,7 +159,7 @@ fn unwrap_single_row(result: PragmaResult) -> Result<PragmaValue, DbError> {
 /// `pragmas.dispatch.execute` — same code path the SQL parser hits.
 /// Result is the first column of the first row, or `PvNull` for
 /// side-effect-only pragmas.
-public fn pragma_get(db: &mut Database, kind: PragmaKind) -> Result<PragmaValue, DbError> {
+public fn pragma_get(db: &mut Database, kind: PragmaKind) -> Result<PragmaValue, SqliteApiDbError> {
     let name = pragma_kind_to_name(&kind);
     let cfg = db.pragma_cfg_mut();
     let result = pragma_dispatch(cfg, &name, None, None);
@@ -174,7 +174,7 @@ public fn pragma_set(
     db: &mut Database,
     kind: PragmaKind,
     value: PragmaValue,
-) -> Result<(), DbError> {
+) -> Result<(), SqliteApiDbError> {
     let spec_v = pragma_spec(&kind);
     if !spec_v.is_settable {
         return Err(DbReadonly);
@@ -194,7 +194,7 @@ public fn pragma_set(
 // -----------------------------------------------------------------------------
 
 /// Read an Int-shaped PRAGMA.  Errors if the pragma returns Text.
-public fn pragma_get_int(db: &mut Database, kind: PragmaKind) -> Result<Int64, DbError> {
+public fn pragma_get_int(db: &mut Database, kind: PragmaKind) -> Result<Int64, SqliteApiDbError> {
     let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
     match v.as_int() {
         Some(n) => Ok(n),
@@ -208,12 +208,12 @@ public fn pragma_set_int(
     db: &mut Database,
     kind: PragmaKind,
     value: Int64,
-) -> Result<(), DbError> {
+) -> Result<(), SqliteApiDbError> {
     pragma_set(db, kind, PvInt(value))
 }
 
 /// Read a Text-shaped PRAGMA (journal_mode, encoding, locking_mode).
-public fn pragma_get_text(db: &mut Database, kind: PragmaKind) -> Result<Text, DbError> {
+public fn pragma_get_text(db: &mut Database, kind: PragmaKind) -> Result<Text, SqliteApiDbError> {
     let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
     match v.as_text() {
         Some(s) => Ok(s),
@@ -227,14 +227,14 @@ public fn pragma_set_text(
     db: &mut Database,
     kind: PragmaKind,
     value: Text,
-) -> Result<(), DbError> {
+) -> Result<(), SqliteApiDbError> {
     pragma_set(db, kind, PvText(value))
 }
 
 /// Read a boolean-shaped PRAGMA (foreign_keys, query_only,
 /// recursive_triggers, …).  Returns the integer interpretation
 /// (0 → false, non-zero → true).
-public fn pragma_get_bool(db: &mut Database, kind: PragmaKind) -> Result<Bool, DbError> {
+public fn pragma_get_bool(db: &mut Database, kind: PragmaKind) -> Result<Bool, SqliteApiDbError> {
     let v = match pragma_get(db, kind) { Ok(v) => v, Err(e) => { return Err(e); } };
     match v.as_bool() {
         Some(b) => Ok(b),
@@ -248,7 +248,7 @@ public fn pragma_set_bool(
     db: &mut Database,
     kind: PragmaKind,
     value: Bool,
-) -> Result<(), DbError> {
+) -> Result<(), SqliteApiDbError> {
     pragma_set(db, kind, PvBool(value))
 }
 

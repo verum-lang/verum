@@ -114,10 +114,10 @@ public fn db_name(k: &DbKind) -> Text {
 }
 
 // -----------------------------------------------------------------------------
-// StmtKind — sqlite3_stmt_status
+// SqliteStatStmtKind — sqlite3_stmt_status
 // -----------------------------------------------------------------------------
 
-public type StmtKind is
+public type SqliteStatStmtKind is
       SsFullscanStep               // SQLITE_STMTSTATUS_FULLSCAN_STEP   = 1
     | SsSort                       // SQLITE_STMTSTATUS_SORT            = 2
     | SsAutoindex                  // SQLITE_STMTSTATUS_AUTOINDEX       = 3
@@ -127,7 +127,7 @@ public type StmtKind is
     | SsFilterMiss                 // SQLITE_STMTSTATUS_FILTER_MISS     = 7
     | SsFilterHit;                 // SQLITE_STMTSTATUS_FILTER_HIT      = 8
 
-public fn stmt_code(k: &StmtKind) -> Int {
+public fn stmt_code(k: &SqliteStatStmtKind) -> Int {
     match k {
         SsFullscanStep => 1,
         SsSort         => 2,
@@ -140,7 +140,7 @@ public fn stmt_code(k: &StmtKind) -> Int {
     }
 }
 
-public fn stmt_name(k: &StmtKind) -> Text {
+public fn stmt_name(k: &SqliteStatStmtKind) -> Text {
     match k {
         SsFullscanStep => "fullscan_step".clone(),
         SsSort         => "sort".clone(),

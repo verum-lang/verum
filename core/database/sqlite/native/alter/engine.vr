@@ -20,7 +20,7 @@ mount core.database.sqlite.native.alter.op.{
     AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
 };
 mount core.database.sqlite.native.alter.validator.{
-    AlterValidationError, SchemaSnapshot, validate, error_kind,
+    AlterValidationError, AlterSchemaSnapshot, validate, error_kind,
 };
 mount core.database.sqlite.native.alter.delta.{
     SchemaDelta, ImpactReport, delta_from, report_for,
@@ -87,7 +87,7 @@ implement AlterEngine {
     ///   while !engine.is_terminal() { engine.step(snap, runner); }
     pub fn step(
         &mut self,
-        snap: &SchemaSnapshot,
+        snap: &AlterSchemaSnapshot,
         sql_runner: fn(&Text) -> Maybe<Text>,
     ) {
         match &self.phase {
