@@ -284,19 +284,16 @@ impl IncrementalDiagnosticsProvider {
         } else if !text.ends_with(';') && self.looks_like_statement(node) {
             ("Missing semicolon".to_string(), "E0020".to_string())
         } else {
-            // Generic syntax error.  Truncate the preview by *characters*,
-            // not by raw bytes — naive `&text[..20]` panics with
-            // "byte index 20 is not a char boundary" when the source
-            // contains multi-byte UTF-8 (combining marks, emoji, CJK
-            // identifiers, non-ASCII string literals).  Take the first
-            // 20 chars and append an ellipsis only if more content
-            // followed.
+            // Generic syntax error.  Truncate by characters, not raw
+            // bytes — uses the UTF-8-safe truncate from verum_common
+            // so combining marks / emoji / CJK in user source can't
+            // crash the diagnostic generator.
             let text_string = text.to_string();
-            let preview: String = text_string.chars().take(20).collect();
-            let preview = if preview.chars().count() < text_string.chars().count() {
+            let preview = verum_common::text_utf8::truncate_chars(&text_string, 20);
+            let preview = if preview.len() < text_string.len() {
                 format!("{}...", preview)
             } else {
-                preview
+                preview.to_string()
             };
             (format!("Syntax error near '{}'", preview), "E0099".to_string())
         };

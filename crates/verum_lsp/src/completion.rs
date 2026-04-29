@@ -210,7 +210,7 @@ pub enum TriggerContext {
 /// 7. Member access (after '.')
 /// 8. Default: expression context
 pub fn get_trigger_context(line: &str, character: u32) -> Option<TriggerContext> {
-    let prefix = safe_prefix_at(line, character);
+    let prefix = verum_common::text_utf8::safe_prefix(line, character as usize);
 
     // Check for attribute context FIRST (after '@')
     if let Some(attr_context) = check_attribute_context(prefix) {
@@ -493,36 +493,9 @@ fn add_module_completions(completions: &mut List<CompletionItem>, module: &verum
     }
 }
 
-/// Compute a UTF-8-safe prefix slice for `line[..character]`.
-///
-/// `character` is the LSP-protocol cursor position.  Per LSP spec
-/// it is a UTF-16 code-unit count, but in practice we treat it as
-/// a byte offset for ASCII-dominant code paths and clamp safely
-/// when it lands inside a multi-byte UTF-8 sequence (combining
-/// marks, emoji, CJK, etc.).  Naive `&line[..n]` panics with
-/// "byte index N is not a char boundary" when `character` falls
-/// inside a multi-byte char.
-///
-/// Round DOWN to the nearest char boundary.  This is the
-/// conservative choice: showing completions for the already-typed
-/// prefix is always safe; lying about a half-typed multi-byte
-/// char is not.  Walks at most 3 bytes back since UTF-8 sequences
-/// are ≤ 4 bytes.
-fn safe_prefix_at(line: &str, character: u32) -> &str {
-    let target = (character as usize).min(line.len());
-    if line.is_char_boundary(target) {
-        return &line[..target];
-    }
-    let mut clamped = target;
-    while clamped > 0 && !line.is_char_boundary(clamped) {
-        clamped -= 1;
-    }
-    &line[..clamped]
-}
-
 /// Get the receiver name before a dot for member access
 fn get_receiver_name(line: &str, character: u32) -> Option<String> {
-    let prefix = safe_prefix_at(line, character);
+    let prefix = verum_common::text_utf8::safe_prefix(line, character as usize);
 
     // Find the dot and get the identifier before it.  `rfind` returns
     // a byte offset at a char boundary, so the slice is always safe.

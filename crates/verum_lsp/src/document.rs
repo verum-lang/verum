@@ -507,53 +507,20 @@ impl DocumentState {
             .collect()
     }
 
-    /// Get the word at a given position
+    /// Get the word at a given position.
+    ///
+    /// Uses `verum_common::text_utf8::find_word_bounds` for the
+    /// UTF-8-safe walk.  `position_to_offset` returns a byte offset;
+    /// the helper handles multi-byte clamping and identifier
+    /// boundary detection.
     pub fn word_at_position(&self, position: Position) -> Option<String> {
-        // `position_to_offset` returns a BYTE offset.  The previous
-        // implementation built a `Vec<char>` and then indexed it
-        // using the byte offset, which silently mis-located the
-        // cursor when the document contained multi-byte UTF-8.  Walk
-        // by byte offsets consistently — `char_indices` gives real
-        // byte offsets at char boundaries, so all slices are safe.
         let offset = self.position_to_offset(position) as usize;
-        let text = self.text.as_str();
-
-        if offset > text.len() {
-            return None;
-        }
-
-        // Clamp the cursor to the nearest preceding char boundary.
-        let mut cursor = offset.min(text.len());
-        while cursor > 0 && !text.is_char_boundary(cursor) {
-            cursor -= 1;
-        }
-
-        // Find start of word: walk char_indices() in reverse from the
-        // cursor, advancing `start` past identifier characters.
-        let mut start = cursor;
-        for (byte_idx, ch) in text[..cursor].char_indices().rev() {
-            if is_identifier_char(ch) {
-                start = byte_idx;
-            } else {
-                break;
-            }
-        }
-
-        // Find end of word: walk forward from the cursor.
-        let mut end = cursor;
-        for (byte_idx, ch) in text[cursor..].char_indices() {
-            if is_identifier_char(ch) {
-                end = cursor + byte_idx + ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-
-        if start == end {
-            return None;
-        }
-
-        Some(text[start..end].to_string())
+        let (start, end) = verum_common::text_utf8::find_word_bounds(
+            self.text.as_str(),
+            offset,
+            is_identifier_char,
+        )?;
+        Some(self.text[start..end].to_string())
     }
 
     /// Get the line at a given line number
