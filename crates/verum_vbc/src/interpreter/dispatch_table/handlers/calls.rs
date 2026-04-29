@@ -1278,13 +1278,25 @@ fn try_dispatch_intrinsic_by_name(
         }
 
         // --- Process Management ---
-        "__process_spawn_raw" | "__process_exec_raw" => {
-            Ok(Some(Value::from_i64(-1)))  // not available
+        // Process bridge via core.sys.process_native — these legacy stubs
+        // are kept for backwards-compat with bytecode that still references
+        // the old C-runtime entrypoint names. Once all callers have been
+        // moved to the native path they can be removed entirely.
+        "__process_spawn_raw" | "__process_exec_raw"
+            | "__process_spawn_full_raw"
+            | "__process_wait_raw" | "__process_kill_raw" => {
+            Ok(Some(Value::from_i64(-1)))
         }
-        "__process_wait_raw" => Ok(Some(Value::from_i64(-1))),
-        "__fd_read_all_raw" => Ok(Some(Value::from_i64(0))),
-        "__fd_close_raw" => Ok(Some(Value::from_i64(0))),
+        "__fd_read_all_raw" | "__fd_read_chunk_raw" => Ok(Some(Value::from_i64(0))),
+        "__fd_write_all_raw" => Ok(Some(Value::from_i64(-1))),
+        "__fd_close_raw" | "__fd_close_raw_buf" => Ok(Some(Value::from_i64(0))),
         "__ptr_read_i64" | "__ptr_free" => Ok(Some(Value::from_i64(0))),
+
+        // --- Echo control (interactive password prompt) ---
+        "__termios_save_and_disable_echo" | "__windows_save_and_disable_echo" => {
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__termios_restore_echo" | "__windows_restore_echo" => Ok(Some(Value::from_i64(0))),
 
         // --- Metal GPU (interpreter: not available) ---
         "__metal_get_device" => Ok(Some(Value::from_i64(0))),  // no GPU

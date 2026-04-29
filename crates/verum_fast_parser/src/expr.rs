@@ -8265,8 +8265,62 @@ pub fn block_parser_recursive(parser: &mut RecursiveParser) -> ParseResult<Block
 fn validate_format_tag(tag: &str, content: &Text) -> Option<String> {
     match tag {
         "json" => validate_json_content(content.as_str()),
+        "sh"   => validate_sh_content(content.as_str()),
         _ => None, // Other tags are not validated at parse time
     }
+}
+
+/// Basic shell-command validation at parse time.
+///
+/// Catches structural errors that would surely crash a shell:
+///   * unbalanced single quotes  (within the literal text — interpolations
+///     are stripped first because they are replaced by escaped tokens at
+///     lowering time)
+///   * unbalanced double quotes
+///   * trailing backslash with no following character
+///
+/// Does NOT attempt to parse shell syntax — that is intentional. The
+/// shell-layer auto-escape contract guarantees safety regardless of the
+/// command body, so this validator is only a usability check ("did you
+/// forget a closing quote?"). See `core/shell/escape.vr::validate_sh`.
+fn validate_sh_content(content: &str) -> Option<String> {
+    // Strip out `${...}` interpolation segments — they're replaced at
+    // lowering with a typed call, so any quote inside them is irrelevant
+    // to the literal-shape check.
+    let mut stripped = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+            // Skip until matching '}'
+            let mut depth = 1;
+            i += 2;
+            while i < bytes.len() && depth > 0 {
+                if bytes[i] == b'{' { depth += 1; }
+                else if bytes[i] == b'}' { depth -= 1; }
+                i += 1;
+            }
+            continue;
+        }
+        stripped.push(bytes[i] as char);
+        i += 1;
+    }
+
+    let mut single = false;
+    let mut double = false;
+    let mut prev_backslash = false;
+    for ch in stripped.chars() {
+        if prev_backslash { prev_backslash = false; continue; }
+        if ch == '\\' && !single { prev_backslash = true; continue; }
+        if ch == '\'' && !double { single = !single; continue; }
+        if ch == '"'  && !single { double = !double; continue; }
+    }
+    if single { return Some("unbalanced single quote in sh# literal".to_string()); }
+    if double { return Some("unbalanced double quote in sh# literal".to_string()); }
+    if prev_backslash {
+        return Some("trailing backslash in sh# literal".to_string());
+    }
+    None
 }
 
 /// Basic JSON validation at parse time.
