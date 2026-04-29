@@ -449,7 +449,7 @@ impl InterpolationEngine {
         &self,
         formula: &Bool,
         shared: &List<Text>,
-        model: &z3::Model,
+        _model: &z3::Model,
     ) -> Result<Bool, Text> {
         // Collect all variables in formula
         let all_vars = self.collect_variables(formula);
@@ -465,6 +465,35 @@ impl InterpolationEngine {
         }
 
         if to_eliminate.is_empty() {
+            return Ok(formula.clone());
+        }
+
+        // Honour the configured `max_projection_vars` budget:
+        // model-based projection performs QE over the elimination
+        // set, which is exponential in the number of variables for
+        // some theories. Reject before invoking the QE tactic when
+        // the set is too large; the caller can either widen the
+        // budget on `InterpolationConfig` or pick a different
+        // algorithm (e.g. `Pudlak`) that doesn't go through this
+        // path. Closes the inert-defense pattern: the field had no
+        // readers prior to this gate.
+        if to_eliminate.len() > self.config.max_projection_vars {
+            return Err(Text::from(format!(
+                "MBI projection would eliminate {} variables, exceeding \
+                 configured max_projection_vars = {}",
+                to_eliminate.len(),
+                self.config.max_projection_vars
+            )));
+        }
+
+        // Skip quantifier elimination entirely when the caller has
+        // turned it off via `quantifier_elimination = false`. The
+        // safe over-approximation is the original formula —
+        // interpolation will lose precision but still preserve the
+        // McMillan correctness invariant (`A ⇒ I`); it just may
+        // not reach the `I ∧ B ⇒ ⊥` half cleanly. Document this in
+        // the changelog so callers know the trade-off.
+        if !self.config.quantifier_elimination {
             return Ok(formula.clone());
         }
 
