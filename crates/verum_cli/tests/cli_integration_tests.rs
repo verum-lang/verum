@@ -530,7 +530,12 @@ mod help_tests {
     fn test_help() {
         let output = run_verum(&["--help"], None);
         assert_success(&output, "verum --help");
-        assert_output_contains(&output, "Verum language toolchain");
+        // The CLI's About string is the language tagline:
+        // "The Verum language compiler — semantic honesty, cost
+        // transparency, zero-cost safety". Match the stable
+        // "Verum language compiler" prefix so future tagline tweaks
+        // don't break the contract.
+        assert_output_contains(&output, "Verum language compiler");
     }
 
     /// Test build --help shows build options
@@ -616,7 +621,7 @@ mod project_tests {
             &[
                 "new",
                 "test_new_project",
-                "--type",
+                "--profile",
                 "application",
                 "--path",
                 project_dir.to_str().unwrap(),
@@ -640,7 +645,7 @@ mod project_tests {
             &[
                 "new",
                 "test_app",
-                "--type",
+                "--profile",
                 "application",
                 "--path",
                 project_dir.to_str().unwrap(),
@@ -663,7 +668,7 @@ mod project_tests {
             &[
                 "new",
                 "test_sys",
-                "--type",
+                "--profile",
                 "systems",
                 "--path",
                 project_dir.to_str().unwrap(),
@@ -686,7 +691,7 @@ mod project_tests {
             &[
                 "new",
                 "test_lib",
-                "--type",
+                "--profile",
                 "application",
                 "--lib",
                 "--path",
@@ -711,7 +716,7 @@ mod project_tests {
             &[
                 "new",
                 "test_no_vcs",
-                "--type",
+                "--profile",
                 "application",
                 "--vcs",
                 "none",
