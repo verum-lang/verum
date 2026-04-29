@@ -18,9 +18,9 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
 use z3::ast::{Ast, Dynamic};
-use z3::DeclKind;
+use z3::{DeclKind, Sort};
 
-use verum_common::{Set, Text};
+use verum_common::{Map, Set, Text};
 
 /// Collect all free variable names from a Z3 Boolean formula
 ///
@@ -113,6 +113,72 @@ pub fn collect_variables_from_dynamic(
     for i in 0..num_children {
         if let Some(child) = node.nth_child(i) {
             collect_variables_from_dynamic(&child, variables, visited);
+        }
+    }
+}
+
+/// Collect all free variables paired with their Z3 sorts from a
+/// Boolean formula.
+///
+/// Same traversal as [`collect_variables_from_bool`], but for each
+/// uninterpreted constant we read its declaration's range (the result
+/// sort of an arity-0 FuncDecl is the variable's own sort) and store
+/// the `(name, sort)` pair.
+///
+/// Critical for callers that need to construct quantifier bindings
+/// for the same variables — Z3 distinguishes constants by both name
+/// and sort, so a bound `Bool x` does not bind a free `Int x`. Without
+/// the sort context, quantifier elimination operates on a vacuous
+/// quantifier and produces an unsound or trivially-true result.
+///
+/// If the same name appears with multiple sorts (which would be a
+/// well-formedness error in the source formula), the first sort
+/// encountered during traversal wins.
+pub fn collect_typed_variables_from_bool(formula: &z3::ast::Bool) -> Map<Text, Sort> {
+    let mut typed: Map<Text, Sort> = Map::new();
+    let mut visited = HashSet::new();
+
+    let dynamic = Dynamic::from_ast(formula);
+    collect_typed_variables_from_dynamic(&dynamic, &mut typed, &mut visited);
+
+    typed
+}
+
+/// Recursive walker that extracts `(name, sort)` pairs.
+fn collect_typed_variables_from_dynamic(
+    node: &Dynamic,
+    typed: &mut Map<Text, Sort>,
+    visited: &mut HashSet<u64>,
+) {
+    let id = compute_ast_hash(node);
+    if visited.contains(&id) {
+        return;
+    }
+    visited.insert(id);
+
+    if node.is_app() {
+        if let Ok(decl) = node.safe_decl() {
+            if decl.arity() == 0 && is_variable_decl_kind(decl.kind()) {
+                let name = decl.name();
+                if is_user_variable_name(&name) {
+                    let key = Text::from(name);
+                    if !typed.contains_key(&key) {
+                        // `node` IS the constant (arity 0), so its
+                        // `get_sort()` is exactly the variable's sort.
+                        // The FuncDecl-side `range()` returns a
+                        // SortKind only, not a full Sort, so use the
+                        // AST node's sort accessor.
+                        typed.insert(key, node.get_sort());
+                    }
+                }
+            }
+        }
+    }
+
+    let num_children = node.num_children();
+    for i in 0..num_children {
+        if let Some(child) = node.nth_child(i) {
+            collect_typed_variables_from_dynamic(&child, typed, visited);
         }
     }
 }
