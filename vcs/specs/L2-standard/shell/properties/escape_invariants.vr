@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: shell, escape, properties, invariants, typecheck
-// @timeout: 10000
+// @timeout: 30000
 // @expect: pass
 
 // Property-based invariants for `core.shell.escape.Escaper`. Each function

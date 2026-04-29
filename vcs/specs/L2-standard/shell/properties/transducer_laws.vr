@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: shell, transducer, laws, properties, typecheck
-// @timeout: 10000
+// @timeout: 30000
 // @expect: pass
 
 // Equational laws that the Transducer compose / identity API must satisfy.

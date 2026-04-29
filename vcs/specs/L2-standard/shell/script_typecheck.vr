@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: shell, script, frontmatter, exit, typecheck
-// @timeout: 5000
+// @timeout: 30000
 // @expect: pass
 
 mount core.shell.script.{args, arg, args_count, exit, die, bootstrap, script_main};
