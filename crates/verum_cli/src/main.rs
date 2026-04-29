@@ -1091,6 +1091,15 @@ enum Commands {
         #[clap(long)]
         kernel_intrinsics: bool,
 
+        /// Kernel-discharged-axioms audit. Walks every
+        /// `@kernel_discharge("<intrinsic>")` attribute in the
+        /// project, verifies the cited dispatcher name appears in
+        /// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
+        /// Exits non-zero on any unmatched citation. Surfaces the
+        /// trusted-base-shrinkage cross-link in machine-checkable form.
+        #[clap(long)]
+        kernel_discharged_axioms: bool,
+
         /// Proof-honesty audit (M0.G): walk every public theorem /
         /// axiom in the project and classify each by proof-body shape
         /// — `axiom-placeholder` / `theorem-no-proof-body` /
@@ -2506,6 +2515,7 @@ fn run_command(cli: Cli) -> Result<()> {
             self_recognition,
             cross_format,
             kernel_intrinsics,
+            kernel_discharged_axioms,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2561,6 +2571,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_cross_format(output_format)
             } else if kernel_intrinsics {
                 commands::audit::audit_kernel_intrinsics(output_format)
+            } else if kernel_discharged_axioms {
+                commands::audit::audit_kernel_discharged_axioms(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

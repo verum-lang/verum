@@ -249,7 +249,13 @@ public type GrothendieckOverMod is protocol {
 /// for HTT 5.1.4 + the next for Definition 3.3 O2) makes the structural
 /// content visible to the kernel-recheck and to `verum audit
 /// --framework-axioms` — both citations now appear separately.
+/// **Kernel-discharged** via `verum_kernel::grothendieck::build_grothendieck`
+/// (V0 algorithmic surface).  The `@kernel_discharge` attribute below
+/// is machine-checked by `verum audit --kernel-discharged-axioms`:
+/// every cited dispatcher name MUST exist in
+/// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
 @framework(lurie_htt, "HTT 5.1.4 — Syn(F) is Grothendieck construction ∫_{M ⊨ F} M over Mod(F)")
+@kernel_discharge("kernel_grothendieck_construction_strict")
 public axiom lurie_htt_5_1_4_syn_is_grothendieck(
     inclusion: &SubTheoryInclusion,
 ) -> &GrothendieckOverMod
