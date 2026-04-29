@@ -189,7 +189,7 @@ impl SmtGuardVerifier {
     fn extract_uncovered_witnesses(
         &self,
         formulas: &[SmtFormula],
-        _scrutinee_ty: &Type,
+        scrutinee_ty: &Type,
     ) -> List<SmtWitness> {
         if formulas.is_empty() {
             return List::new();
@@ -203,7 +203,7 @@ impl SmtGuardVerifier {
 
         let negation = SmtFormula::Not(Box::new(disjunction));
 
-        if let Some(model) = self.get_model(&negation) {
+        if let Some(model) = self.get_model(&negation, scrutinee_ty) {
             List::from_iter([model])
         } else {
             List::new()
@@ -350,16 +350,24 @@ impl SmtGuardVerifier {
     ///
     /// Walks the formula collecting every `Var(name)` reference, then
     /// asks the solver to evaluate each name in the satisfying model
-    /// and returns the resulting bindings as the witness. Pre-fix
-    /// this method only ever extracted a binding named `"n"` (a
-    /// hardcoded literal) — any guard mentioning a different
-    /// identifier (`x`, `value`, `count`, …) produced a witness with
-    /// an empty bindings map, which user-facing diagnostics then
-    /// rendered as a useless `_` placeholder. The hardcoded name
-    /// also masked a separate weakness: even a guard containing both
-    /// `n` AND another variable would only get a partial witness,
-    /// since the second variable was never asked.
-    fn get_model(&self, formula: &SmtFormula) -> Option<SmtWitness> {
+    /// (under the right Z3 sort for `scrutinee_ty`) and returns the
+    /// resulting bindings as the witness.
+    ///
+    /// Pre-fix this method only ever extracted a binding named `"n"`
+    /// (a hardcoded literal) AND hardcoded `Type::Int` for both the
+    /// formula translation and the var-extraction sort. Bool guards
+    /// (e.g. `if x` where x is Bool) had their vars declared in a
+    /// SEPARATE Int sort from the model's actual Bool sort, so
+    /// `model.eval(Int::new_const(...))` returned an arbitrary
+    /// fresh-Int evaluation rather than the solver's actual Bool
+    /// decision — surfaced as garbage witness data in user-facing
+    /// diagnostics. The dispatch on `scrutinee_ty` declares vars in
+    /// the matching Z3 sort.
+    fn get_model(
+        &self,
+        formula: &SmtFormula,
+        scrutinee_ty: &Type,
+    ) -> Option<SmtWitness> {
         use crate::z3_backend::{Z3Config, Z3ContextManager};
 
         let mut config = Z3Config::default();
@@ -371,11 +379,11 @@ impl SmtGuardVerifier {
         ctx_manager.with_config(|| {
             use z3::Solver;
             use z3::SatResult;
-            use z3::ast::Int;
+            use z3::ast::{Bool, Int};
 
             let solver = Solver::new();
 
-            if let Some(z3_formula) = self.formula_to_z3(formula, &Type::Int) {
+            if let Some(z3_formula) = self.formula_to_z3(formula, scrutinee_ty) {
                 solver.assert(&z3_formula);
 
                 if let SatResult::Sat = solver.check() {
@@ -394,21 +402,38 @@ impl SmtGuardVerifier {
                         names.dedup();
 
                         for name in names {
-                            // The SMT translator currently models
-                            // every binding as Int (the only type
-                            // it can lower to Z3 today — see
-                            // `formula_to_z3::SmtFormula::Var` Int
-                            // branch returns None, so only the
-                            // arithmetic-`to_int` path actually
-                            // declares vars, all as Int). When the
-                            // verifier learns to lower Bool / Real
-                            // bindings, this loop must dispatch on
-                            // the binding's recorded type instead
-                            // of always asking for an Int model.
-                            let z3_var = Int::new_const(name.as_str());
-                            if let Some(value) = model.eval(&z3_var, true) {
-                                if let Some(int_val) = value.as_i64() {
-                                    bindings.insert(name.clone(), SmtValue::Int(int_val as i128));
+                            // Dispatch on scrutinee_ty so the const
+                            // declaration matches the sort the model
+                            // actually carries. Mismatched sort →
+                            // separate Z3 var → garbage witness.
+                            // Float/Char/Text are not yet wired —
+                            // formula_to_z3 itself can't lower them
+                            // (see SmtFormula::Var dispatch + the
+                            // to_int helper); when those types gain
+                            // SMT support, this dispatch needs the
+                            // matching arm.
+                            match scrutinee_ty {
+                                Type::Bool => {
+                                    let z3_var = Bool::new_const(name.as_str());
+                                    if let Some(value) = model.eval(&z3_var, true) {
+                                        if let Some(b) = value.as_bool() {
+                                            bindings.insert(
+                                                name.clone(),
+                                                SmtValue::Bool(b),
+                                            );
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    let z3_var = Int::new_const(name.as_str());
+                                    if let Some(value) = model.eval(&z3_var, true) {
+                                        if let Some(int_val) = value.as_i64() {
+                                            bindings.insert(
+                                                name.clone(),
+                                                SmtValue::Int(int_val as i128),
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -679,5 +704,55 @@ mod tests {
         assert_eq!(names.len(), 2);
         assert_eq!(names[0].as_str(), "x");
         assert_eq!(names[1].as_str(), "x");
+    }
+
+    #[test]
+    fn get_model_returns_int_witness_for_int_scrutinee() {
+        // End-to-end: a guard `x > 5` over Int — the negation
+        // `!(x > 5)` is satisfiable (x = 0 works), so get_model
+        // must return Some(witness) carrying an SmtValue::Int
+        // for "x". Pin: regression that dispatches to Bool sort
+        // for non-Bool scrutinees would surface here as None
+        // (sort mismatch makes the value extraction fail) or as
+        // an SmtValue::Bool that the renderer rejects.
+        let verifier = SmtGuardVerifier::with_defaults();
+        let positive = SmtFormula::Binary {
+            op: SmtOp::Gt,
+            left: Box::new(SmtFormula::Var(Text::from("x"))),
+            right: Box::new(SmtFormula::Int(5)),
+        };
+        let negation = SmtFormula::Not(Box::new(positive));
+        let witness = verifier.get_model(&negation, &Type::Int);
+        let witness = witness.expect("Int negation is SAT — get_model must surface it");
+        let value = witness.bindings.get(&Text::from("x"))
+            .expect("witness must contain a binding for the formula's only Var");
+        assert!(
+            matches!(value, SmtValue::Int(_)),
+            "Int scrutinee must yield SmtValue::Int, got {:?}",
+            value
+        );
+    }
+
+    #[test]
+    fn get_model_returns_bool_witness_for_bool_scrutinee() {
+        // Symmetric pin for the Bool dispatch arm. A Bool guard
+        // `flag` translates to SmtFormula::Var("flag"); the
+        // negation is satisfiable (flag = false works). Pre-fix
+        // the witness extraction declared `Int::new_const("flag")`
+        // — a SEPARATE Z3 var in the wrong sort — so the model
+        // evaluation returned an arbitrary fresh-Int value (or
+        // None), surfacing as garbage in user-facing diagnostics.
+        let verifier = SmtGuardVerifier::with_defaults();
+        let formula = SmtFormula::Var(Text::from("flag"));
+        let negation = SmtFormula::Not(Box::new(formula));
+        let witness = verifier.get_model(&negation, &Type::Bool);
+        let witness = witness.expect("Bool negation is SAT — get_model must surface it");
+        let value = witness.bindings.get(&Text::from("flag"))
+            .expect("witness must contain a binding for the formula's only Var");
+        assert!(
+            matches!(value, SmtValue::Bool(_)),
+            "Bool scrutinee must yield SmtValue::Bool, got {:?}",
+            value
+        );
     }
 }
