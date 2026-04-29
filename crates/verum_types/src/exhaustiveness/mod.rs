@@ -278,6 +278,7 @@ pub fn check_exhaustiveness_with_options<'a>(
                 max_guards: guarded_patterns.len(),
                 extract_witnesses: true,
                 detect_redundancy: config.check_redundancy,
+                max_witnesses: 1,
             };
 
             let verifier = config.guard_verifier.unwrap();
