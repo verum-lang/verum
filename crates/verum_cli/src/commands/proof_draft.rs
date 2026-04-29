@@ -14,7 +14,7 @@ use crate::error::{CliError, Result};
 use verum_common::Text;
 use verum_verification::proof_drafting::{
     DefaultSuggestionEngine, LemmaSummary, ProofGoalSummary, ProofStateView,
-    SuggestionCategory, SuggestionEngine,
+    SuggestionEngine,
 };
 
 /// Run the proof-draft command.  Returns `Ok(())` on success;
@@ -161,6 +161,7 @@ fn json_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use verum_verification::proof_drafting::SuggestionCategory;
 
     #[test]
     fn parse_lemma_minimal_two_components() {
