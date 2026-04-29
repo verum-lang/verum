@@ -1284,6 +1284,25 @@ impl TacticEvaluator {
         evaluator
     }
 
+    /// Replace the evaluator's configuration with `config`.
+    ///
+    /// Used by callers (and tests) that need to toggle policy
+    /// flags such as `allow_admits` post-construction. The
+    /// configuration is consulted on every tactic application,
+    /// so changes take effect immediately for subsequent
+    /// `apply_tactic` calls without rebuilding the evaluator
+    /// state.
+    pub fn set_config(&mut self, config: TacticConfig) {
+        self.config = config;
+    }
+
+    /// Borrow the active configuration. Useful for callers that
+    /// need to inspect the current policy without holding a
+    /// separate copy.
+    pub fn config(&self) -> &TacticConfig {
+        &self.config
+    }
+
     /// Register a named tactic in the registry
     ///
     /// This allows user-defined tactics to be invoked by name via
@@ -5332,14 +5351,34 @@ impl TacticEvaluator {
     }
 
     /// Apply admit tactic - admit goal without proof (for development)
+    ///
+    /// Honours `TacticConfig.allow_admits`: when `false`, the tactic
+    /// fails before mutating state, so a production verification run
+    /// cannot accidentally accept an admitted goal as proven. The
+    /// flag's documented contract — "Allow admit/sorry tactics" —
+    /// is now load-bearing instead of inert.
     fn apply_admit(&mut self) -> TacticResult<()> {
+        if !self.config.allow_admits {
+            return Err(TacticError::Failed(Text::from(
+                "admit tactic is disabled by TacticConfig.allow_admits = false",
+            )));
+        }
         self.stats.admitted_goals += 1;
         self.state.prove_current_goal()?;
         Ok(())
     }
 
     /// Apply sorry tactic - like admit but marks as incomplete
+    ///
+    /// See [`apply_admit`]: also gated by `TacticConfig.allow_admits`.
+    /// Both tactics short-circuit goals without producing real
+    /// evidence, so they share the same opt-in flag.
     fn apply_sorry(&mut self) -> TacticResult<()> {
+        if !self.config.allow_admits {
+            return Err(TacticError::Failed(Text::from(
+                "sorry tactic is disabled by TacticConfig.allow_admits = false",
+            )));
+        }
         self.stats.sorry_goals += 1;
         self.state.prove_current_goal()?;
         Ok(())
