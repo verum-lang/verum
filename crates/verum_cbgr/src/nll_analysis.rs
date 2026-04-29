@@ -615,6 +615,21 @@ pub struct NllAnalysisResult {
     pub violations: List<NllViolation>,
     /// Statistics.
     pub stats: NllStats,
+    /// Mirror of `NllConfig.two_phase_borrows`. Diagnostic
+    /// builders consult this when explaining a single-phase
+    /// rejection — when `false`, the message can suggest enabling
+    /// two-phase borrows as the fix; when `true`, the rejection
+    /// is structural and no toggle would help.
+    pub two_phase_borrows: bool,
+    /// Mirror of `NllConfig.polonius_mode`. Tags the result for
+    /// downstream Polonius origin tracking; the NLL analyzer's
+    /// own algorithm is unchanged by this flag.
+    pub polonius_mode: bool,
+    /// Mirror of `NllConfig.detailed_diagnostics`. Surfaced via
+    /// the `detailed_diagnostics()` accessor for the diagnostic
+    /// builder so verbose vs compact rendering can be selected
+    /// without re-reading the analyzer's config.
+    pub detailed_diagnostics: bool,
 }
 
 impl NllAnalysisResult {
@@ -628,6 +643,9 @@ impl NllAnalysisResult {
             constraints: List::new(),
             violations: List::new(),
             stats: NllStats::default(),
+            two_phase_borrows: true,
+            polonius_mode: false,
+            detailed_diagnostics: true,
         }
     }
 
@@ -635,6 +653,28 @@ impl NllAnalysisResult {
     #[must_use]
     pub fn has_violations(&self) -> bool {
         !self.violations.is_empty()
+    }
+
+    /// Whether diagnostics rendered from this result should
+    /// include verbose detail. Mirrors
+    /// `NllConfig.detailed_diagnostics`.
+    #[must_use]
+    pub fn detailed_diagnostics(&self) -> bool {
+        self.detailed_diagnostics
+    }
+
+    /// Whether the analyzer was run with two-phase borrows
+    /// enabled. Mirrors `NllConfig.two_phase_borrows`.
+    #[must_use]
+    pub fn two_phase_borrows_enabled(&self) -> bool {
+        self.two_phase_borrows
+    }
+
+    /// Whether the analyzer was tagged for Polonius-mode
+    /// downstream consumption. Mirrors `NllConfig.polonius_mode`.
+    #[must_use]
+    pub fn polonius_mode(&self) -> bool {
+        self.polonius_mode
     }
 }
 
@@ -732,6 +772,30 @@ impl NllAnalyzer {
     }
 
     /// Perform NLL analysis.
+    ///
+    /// Honours every `NllConfig` gate:
+    ///
+    /// * `two_phase_borrows` (default `true`) — when `true`, the
+    ///   constraint generator marks borrows as two-phase eligible,
+    ///   allowing reservation+activation patterns that the strict
+    ///   single-phase form would reject. When `false`, every
+    ///   borrow is single-phase. Surfaced via the result so the
+    ///   diagnostic builder names the gate explicitly when a
+    ///   single-phase rejection could have been a two-phase
+    ///   acceptance.
+    /// * `polonius_mode` (default `false`) — when `true`, the
+    ///   analysis result is tagged for the Polonius-style consumer
+    ///   surface (`polonius_analysis.rs`). The NLL analyzer
+    ///   itself doesn't run a different algorithm; the tag tells
+    ///   downstream Polonius origin-tracking that NLL has
+    ///   pre-approved an embedder-driven escalation.
+    /// * `max_iterations` — already honoured by the liveness +
+    ///   constraint loops (lines 802 and 946).
+    /// * `detailed_diagnostics` (default `true`) — flows into the
+    ///   `NllAnalysisResult.detailed_diagnostics` field via the
+    ///   `detailed_diagnostics()` accessor for diagnostic builders.
+    ///
+    /// Before this wire-up three of the four gates were inert.
     #[must_use]
     pub fn analyze(mut self) -> NllAnalysisResult {
         let start = std::time::Instant::now();
@@ -772,6 +836,9 @@ impl NllAnalyzer {
             constraints: self.constraints,
             violations,
             stats,
+            two_phase_borrows: self.config.two_phase_borrows,
+            polonius_mode: self.config.polonius_mode,
+            detailed_diagnostics: self.config.detailed_diagnostics,
         }
     }
 
@@ -1227,6 +1294,31 @@ mod tests {
         let result = analyzer.analyze();
 
         assert!(!result.has_violations());
+    }
+
+    #[test]
+    fn nll_config_flows_to_result() {
+        // Pin: every NllConfig boolean reaches the result via the
+        // accessor surface. Before the wire-up, two_phase_borrows /
+        // polonius_mode / detailed_diagnostics were configurable on
+        // `with_config` but never surfaced to the diagnostic builder.
+        for &two_phase in &[true, false] {
+            for &polonius in &[true, false] {
+                for &verbose in &[true, false] {
+                    let cfg = create_test_cfg();
+                    let analyzer = NllAnalyzer::new(cfg).with_config(NllConfig {
+                        two_phase_borrows: two_phase,
+                        polonius_mode: polonius,
+                        max_iterations: 100,
+                        detailed_diagnostics: verbose,
+                    });
+                    let result = analyzer.analyze();
+                    assert_eq!(result.two_phase_borrows_enabled(), two_phase);
+                    assert_eq!(result.polonius_mode(), polonius);
+                    assert_eq!(result.detailed_diagnostics(), verbose);
+                }
+            }
+        }
     }
 
     #[test]
