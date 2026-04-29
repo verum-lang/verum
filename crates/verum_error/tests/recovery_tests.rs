@@ -136,3 +136,91 @@ fn test_circuit_breaker_reset() {
     let stats = breaker.stats();
     assert_eq!(stats.failure_count, 0);
 }
+
+// =============================================================================
+// SupervisionConfig wiring tests
+// =============================================================================
+//
+// Pin: SupervisionConfig.{strategy, max_restarts, within} reach
+// the public `should_permit_restart` + `strategy()` accessors.
+// Pre-fix all three fields were stored on the struct + asserted
+// in tests but no production code path consulted them — every
+// caller of supervision logic routed through `RestartStrategy`
+// (a separate enum) without consulting SupervisionConfig.
+
+mod supervision_config_wiring {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn should_permit_restart_under_limit() {
+        // Pin: a child can restart up to max_restarts times within
+        // the configured window. Under the limit → permitted.
+        let cfg = SupervisionConfig::default(); // 10 restarts / 60s
+        let now = Instant::now();
+        assert!(cfg.should_permit_restart(0, now));
+        assert!(cfg.should_permit_restart(5, now));
+        assert!(cfg.should_permit_restart(9, now));
+    }
+
+    #[test]
+    fn should_permit_restart_at_limit_blocks() {
+        // Pin: restart_count == max_restarts → not permitted.
+        let cfg = SupervisionConfig::default();
+        let now = Instant::now();
+        assert!(!cfg.should_permit_restart(10, now));
+        assert!(!cfg.should_permit_restart(100, now));
+    }
+
+    #[test]
+    fn should_permit_restart_after_window_resets() {
+        // Pin: when window has elapsed, restart is permitted
+        // regardless of count — caller is expected to reset its
+        // counter on the next attempt. Use a tiny window to
+        // exercise the elapsed branch deterministically.
+        let cfg = SupervisionConfig {
+            strategy: SupervisionStrategy::OneForOne,
+            max_restarts: 1,
+            within: Duration::from_nanos(1),
+        };
+        let past = Instant::now();
+        std::thread::sleep(Duration::from_millis(2));
+        // Even with restart_count > max_restarts, the elapsed
+        // window resets and permits restart.
+        assert!(cfg.should_permit_restart(100, past));
+    }
+
+    #[test]
+    fn strategy_accessor_returns_configured_value() {
+        // Pin: strategy() exposes the raw enum without the field
+        // becoming inert. Round-trip every variant.
+        for strat in [
+            SupervisionStrategy::OneForOne,
+            SupervisionStrategy::OneForAll,
+            SupervisionStrategy::RestForOne,
+        ] {
+            let cfg = SupervisionConfig {
+                strategy: strat,
+                max_restarts: 5,
+                within: Duration::from_secs(30),
+            };
+            assert_eq!(cfg.strategy(), strat);
+        }
+    }
+
+    #[test]
+    fn preset_constructors_carry_distinct_limits() {
+        // Pin: the preset constructors set distinct
+        // (max_restarts, within) pairs that should_permit_restart
+        // honours.
+        let critical = SupervisionConfig::critical(); // 5/30s
+        let resilient = SupervisionConfig::resilient(); // 15/120s
+        let now = Instant::now();
+        // critical permits 4 restarts but blocks at 5.
+        assert!(critical.should_permit_restart(4, now));
+        assert!(!critical.should_permit_restart(5, now));
+        // resilient permits up to 14, blocks at 15.
+        assert!(resilient.should_permit_restart(14, now));
+        assert!(!resilient.should_permit_restart(15, now));
+    }
+}
