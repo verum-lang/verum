@@ -229,9 +229,30 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     // Emit VBC bytecode dump (.vbc.txt)
     options.emit_vbc = emit_vbc;
 
-    // Set target triple for cross-compilation / @cfg evaluation
+    // Set target triple for cross-compilation / @cfg evaluation.
+    // Precedence: --target CLI flag > [llvm].target_triple in
+    // verum.toml > host default. Pre-fix the manifest's
+    // `[llvm]` block was parsed but never plumbed downstream —
+    // declaring `target_triple = "x86_64-unknown-linux-gnu"`
+    // in `verum.toml` had zero effect; users had to pass
+    // `--target` on every invocation.
     if let Some(ref target) = target {
         options.target_triple = Some(verum_common::Text::from(target.as_str()));
+    } else if let Some(ref triple) = manifest.llvm.target_triple {
+        options.target_triple = Some(triple.clone());
+    }
+
+    // Wire `[llvm].target_cpu` / `[llvm].target_features` from
+    // `verum.toml` into the AOT pipeline. CLI doesn't expose these
+    // directly today (only `--target` is available); the manifest is
+    // the user-facing knob. Fields default to `None`, in which case
+    // the AOT pipeline falls back to host-CPU detection (or
+    // `"generic"` / empty for WASM cross-builds).
+    if options.target_cpu.is_none() && manifest.llvm.target_cpu.is_some() {
+        options.target_cpu = manifest.llvm.target_cpu.clone();
+    }
+    if options.target_features.is_none() && manifest.llvm.target_features.is_some() {
+        options.target_features = manifest.llvm.target_features.clone();
     }
 
     // Pass features to compiler for @cfg(feature = "...") evaluation

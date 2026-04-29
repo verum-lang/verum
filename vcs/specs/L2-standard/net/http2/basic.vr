@@ -10,7 +10,7 @@
 mount core.net.http2.{
     PREFACE,
     Http2Error, ErrorCode, connection_error, stream_error,
-    FrameHeader, FrameType, FrameFlags, Frame,
+    FrameHeader, FrameType, FrameFlags, Http2Frame,
     FRAME_HEADER_SIZE, MAX_FRAME_SIZE_INITIAL,
     Settings, SettingId,
     HpackEncoder, HpackDecoder, HeaderField, HpackError,
@@ -55,8 +55,8 @@ fn typecheck_frame_header() -> Result<FrameHeader, Http2Error> {
 }
 
 // Decode payload — try all frame types.
-fn typecheck_frame_decode(header: &FrameHeader, payload: &[Byte]) -> Result<Frame, Http2Error> {
-    Frame.decode_payload(header, payload)
+fn typecheck_frame_decode(header: &FrameHeader, payload: &[Byte]) -> Result<Http2Frame, Http2Error> {
+    Http2Frame.decode_payload(header, payload)
 }
 
 // Error helpers.

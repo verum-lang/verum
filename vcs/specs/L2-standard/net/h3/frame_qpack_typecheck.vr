@@ -14,7 +14,7 @@ mount core.net.h3.frame.{
     UniStreamType, encode_stream_type, decode_stream_type,
 };
 mount core.net.h3.qpack.decoder.{
-    HeaderField, QpackDecodeError, decode_field_section,
+    QpackHeaderField, QpackDecodeError, decode_field_section,
 };
 mount core.net.h3.qpack.encoder.{encode_field_section};
 mount core.net.h3.qpack.static_table.{get as st_get, find as st_find, find_name as st_find_name};
@@ -44,12 +44,12 @@ fn check_qpack_static_table() {
 }
 
 fn check_qpack_roundtrip() -> Result<(), QpackDecodeError> {
-    let headers: List<HeaderField> = [
-        HeaderField { name: Text.from(":method"), value: Text.from("GET") },
-        HeaderField { name: Text.from(":scheme"), value: Text.from("https") },
-        HeaderField { name: Text.from(":path"),   value: Text.from("/api/users/42") },
-        HeaderField { name: Text.from(":authority"), value: Text.from("example.com") },
-        HeaderField { name: Text.from("user-agent"), value: Text.from("verum-h3/0.1") },
+    let headers: List<QpackHeaderField> = [
+        QpackHeaderField { name: Text.from(":method"), value: Text.from("GET") },
+        QpackHeaderField { name: Text.from(":scheme"), value: Text.from("https") },
+        QpackHeaderField { name: Text.from(":path"),   value: Text.from("/api/users/42") },
+        QpackHeaderField { name: Text.from(":authority"), value: Text.from("example.com") },
+        QpackHeaderField { name: Text.from("user-agent"), value: Text.from("verum-h3/0.1") },
     ];
     let encoded = encode_field_section(&headers);
     let _ = decode_field_section(encoded.as_slice())?;

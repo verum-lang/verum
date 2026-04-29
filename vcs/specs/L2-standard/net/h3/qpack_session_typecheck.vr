@@ -9,7 +9,7 @@ mount core.net.h3.qpack.{
     QpackSession, QpackSessionError,
     DynamicTable, DynamicTableError,
     EncoderInstruction, DecoderInstruction, InstrError,
-    HeaderField,
+    QpackHeaderField,
     encode_encoder, decode_encoder,
     encode_decoder, decode_decoder,
 };
@@ -65,12 +65,12 @@ fn check_session() -> Result<(), QpackSessionError> {
     let mut sess = QpackSession.new(4096_u64, 4096_u64);
     sess.set_encoder_capacity(4096_u64)?;
 
-    let headers: List<HeaderField> = [
-        HeaderField { name: Text.from(":method"), value: Text.from("GET") },
-        HeaderField { name: Text.from(":scheme"), value: Text.from("https") },
-        HeaderField { name: Text.from(":authority"), value: Text.from("api.example.com") },
-        HeaderField { name: Text.from(":path"),   value: Text.from("/v1/users/42") },
-        HeaderField { name: Text.from("user-agent"), value: Text.from("verum-h3") },
+    let headers: List<QpackHeaderField> = [
+        QpackHeaderField { name: Text.from(":method"), value: Text.from("GET") },
+        QpackHeaderField { name: Text.from(":scheme"), value: Text.from("https") },
+        QpackHeaderField { name: Text.from(":authority"), value: Text.from("api.example.com") },
+        QpackHeaderField { name: Text.from(":path"),   value: Text.from("/v1/users/42") },
+        QpackHeaderField { name: Text.from("user-agent"), value: Text.from("verum-h3") },
     ];
     let encoded = sess.encode_field_section(&headers)?;
     // Drain both instruction streams (encoder-stream inserts queued,

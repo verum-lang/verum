@@ -11,9 +11,10 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.h3.qpack.static_table.{
-    StaticEntry, STATIC_TABLE_SIZE,
+    QpackStaticEntry, STATIC_TABLE_SIZE,
     get, find, find_name,
 };
+type StaticEntry is QpackStaticEntry;
 
 fn static_table_size_is_99() {
     // RFC 9204 §3.2.1 — static table has exactly 99 entries (indices 0..98).

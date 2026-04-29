@@ -11,7 +11,7 @@
 
 mount core.collections.list.{List};
 mount core.async.cancellation.{CancellationToken};
-mount core.net.h3.qpack.decoder.{HeaderField};
+mount core.net.h3.qpack.decoder.{QpackHeaderField};
 mount core.net.h3.webtransport.{
     SessionId, WtConnectRequest, WtSession,
     WtBidirectional, WtUnidirectional, WebTransportHandler,
@@ -23,14 +23,14 @@ fn session_id_roundtrip() {
 }
 
 fn connect_request_extracts_minimum_pseudo_headers() {
-    let mut fields: List<HeaderField> = [];
-    fields.push(HeaderField { name: f":method",     value: f"CONNECT" });
-    fields.push(HeaderField { name: f":protocol",   value: f"webtransport" });
-    fields.push(HeaderField { name: f":authority",  value: f"example.com" });
-    fields.push(HeaderField { name: f":path",       value: f"/echo" });
-    fields.push(HeaderField { name: f":scheme",     value: f"https" });
-    fields.push(HeaderField { name: f"sec-webtransport-http3-draft", value: f"draft02" });
-    fields.push(HeaderField { name: f"x-trace-id",  value: f"abc-123" });
+    let mut fields: List<QpackHeaderField> = [];
+    fields.push(QpackHeaderField { name: f":method",     value: f"CONNECT" });
+    fields.push(QpackHeaderField { name: f":protocol",   value: f"webtransport" });
+    fields.push(QpackHeaderField { name: f":authority",  value: f"example.com" });
+    fields.push(QpackHeaderField { name: f":path",       value: f"/echo" });
+    fields.push(QpackHeaderField { name: f":scheme",     value: f"https" });
+    fields.push(QpackHeaderField { name: f"sec-webtransport-http3-draft", value: f"draft02" });
+    fields.push(QpackHeaderField { name: f"x-trace-id",  value: f"abc-123" });
 
     match WtConnectRequest.from_h3_headers(&fields) {
         Some(req) => {
@@ -47,11 +47,11 @@ fn connect_request_extracts_minimum_pseudo_headers() {
 }
 
 fn connect_request_rejects_non_connect_method() {
-    let mut fields: List<HeaderField> = [];
-    fields.push(HeaderField { name: f":method",     value: f"GET" });
-    fields.push(HeaderField { name: f":protocol",   value: f"webtransport" });
-    fields.push(HeaderField { name: f":authority",  value: f"example.com" });
-    fields.push(HeaderField { name: f":path",       value: f"/echo" });
+    let mut fields: List<QpackHeaderField> = [];
+    fields.push(QpackHeaderField { name: f":method",     value: f"GET" });
+    fields.push(QpackHeaderField { name: f":protocol",   value: f"webtransport" });
+    fields.push(QpackHeaderField { name: f":authority",  value: f"example.com" });
+    fields.push(QpackHeaderField { name: f":path",       value: f"/echo" });
     match WtConnectRequest.from_h3_headers(&fields) {
         None => {},
         Some(_) => panic("expected None — non-CONNECT must reject"),
@@ -59,11 +59,11 @@ fn connect_request_rejects_non_connect_method() {
 }
 
 fn connect_request_rejects_wrong_protocol() {
-    let mut fields: List<HeaderField> = [];
-    fields.push(HeaderField { name: f":method",    value: f"CONNECT" });
-    fields.push(HeaderField { name: f":protocol",  value: f"websocket" });
-    fields.push(HeaderField { name: f":authority", value: f"example.com" });
-    fields.push(HeaderField { name: f":path",      value: f"/echo" });
+    let mut fields: List<QpackHeaderField> = [];
+    fields.push(QpackHeaderField { name: f":method",    value: f"CONNECT" });
+    fields.push(QpackHeaderField { name: f":protocol",  value: f"websocket" });
+    fields.push(QpackHeaderField { name: f":authority", value: f"example.com" });
+    fields.push(QpackHeaderField { name: f":path",      value: f"/echo" });
     match WtConnectRequest.from_h3_headers(&fields) {
         None => {},
         Some(_) => panic("expected None — non-webtransport :protocol must reject"),
@@ -71,10 +71,10 @@ fn connect_request_rejects_wrong_protocol() {
 }
 
 fn connect_request_rejects_missing_authority() {
-    let mut fields: List<HeaderField> = [];
-    fields.push(HeaderField { name: f":method",   value: f"CONNECT" });
-    fields.push(HeaderField { name: f":protocol", value: f"webtransport" });
-    fields.push(HeaderField { name: f":path",     value: f"/echo" });
+    let mut fields: List<QpackHeaderField> = [];
+    fields.push(QpackHeaderField { name: f":method",   value: f"CONNECT" });
+    fields.push(QpackHeaderField { name: f":protocol", value: f"webtransport" });
+    fields.push(QpackHeaderField { name: f":path",     value: f"/echo" });
     match WtConnectRequest.from_h3_headers(&fields) {
         None => {},
         Some(_) => panic("expected None — missing :authority must reject"),

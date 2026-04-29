@@ -85,7 +85,7 @@ fn h3_error_structural_variants_constructible() {
 }
 
 fn h3_error_tagged_distinctly() {
-    let errs: [H3Error; 8] = [
+    let errs: [H3Error; 11] = [
         H3Error.ConnectionError {
             code:   H3ErrorCode.new(H3ErrorCode.H3_INTERNAL_ERROR),
             reason: f"x",
@@ -100,10 +100,13 @@ fn h3_error_tagged_distinctly() {
         H3Error.MissingSettings,
         H3Error.SettingsRepeat,
         H3Error.ConnectionClosed,
+        H3Error.StreamCancelled,
+        H3Error.WriteAfterFinish,
+        H3Error.SendBufferFull,
     ];
-    let mut tags: [Int; 8] = [0; 8];
+    let mut tags: [Int; 11] = [0; 11];
     let mut i: Int = 0;
-    while i < 8 {
+    while i < 11 {
         tags[i] = match errs[i] {
             H3Error.ConnectionError { .. }  => 1,
             H3Error.StreamError { .. }      => 2,
@@ -113,13 +116,16 @@ fn h3_error_tagged_distinctly() {
             H3Error.MissingSettings         => 6,
             H3Error.SettingsRepeat          => 7,
             H3Error.ConnectionClosed        => 8,
+            H3Error.StreamCancelled         => 9,
+            H3Error.WriteAfterFinish        => 10,
+            H3Error.SendBufferFull          => 11,
         };
         i = i + 1;
     }
     let mut j: Int = 0;
-    while j < 8 {
+    while j < 11 {
         let mut k: Int = j + 1;
-        while k < 8 {
+        while k < 11 {
             assert(tags[j] != tags[k]);
             k = k + 1;
         }

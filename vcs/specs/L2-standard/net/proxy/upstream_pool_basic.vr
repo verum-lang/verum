@@ -8,7 +8,7 @@
 // §9.3 / §8.9 — Upstream + UpstreamPool shape. No actual TCP connect
 // at typecheck time.
 
-mount core.net.http.{PoolConfig};
+mount core.net.http.{HttpPoolConfig};
 mount core.net.proxy.upstream_pool.{
     Upstream, UpstreamPool, ConnectionLease,
 };
@@ -21,7 +21,7 @@ fn typecheck_upstream_build() -> Upstream {
 
 fn typecheck_pool_new() -> UpstreamPool {
     UpstreamPool.new(
-        PoolConfig.new()
+        HttpPoolConfig.new()
             .with_max_idle(200)
             .with_max_per_host(20)
             .with_idle_timeout_ms(60_000),
