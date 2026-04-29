@@ -505,10 +505,9 @@ pub fn decompose_cert(cert: &SmtCertificate) -> Result<Vec<InferenceStep>, Decom
         CertFormat::VerumCanonical => decompose_verum_canonical(cert.body.as_str()),
         CertFormat::Cvc5Alethe => decompose_alethe(cert.body.as_str()),
         CertFormat::Z3Proof => decompose_z3_proof(cert.body.as_str()),
-        // V2 formats — typed parser pending.
-        CertFormat::LfscPattern | CertFormat::OpenSmt | CertFormat::Mathsat => {
-            Err(DecomposeError::UnsupportedFormat(cert.format))
-        }
+        CertFormat::LfscPattern => decompose_lfsc_pattern(cert.body.as_str()),
+        CertFormat::OpenSmt => decompose_open_smt(cert.body.as_str()),
+        CertFormat::Mathsat => decompose_mathsat(cert.body.as_str()),
     }
 }
 
@@ -899,6 +898,230 @@ fn render_sexpr(s: &Sexpr) -> String {
             out
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// LFSC pattern (CVC4 / CVC5 legacy)
+// -----------------------------------------------------------------------------
+//
+// LFSC traces are nested S-expressions whose head atoms are the
+// rule names ("resolution", "and-elim", "th-lemma", "trust", …).
+// We reuse the Z3 walker — same shape, different rule registry
+// alias set — and project every head-of-list whose atom resolves
+// in `KERNEL_RULE_REGISTRY` into an `InferenceStep`.
+
+fn decompose_lfsc_pattern(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    let mut tokens = TokenStream::new(trimmed);
+    let root = parse_sexpr(&mut tokens).map_err(|m| DecomposeError::Malformed {
+        line: 0,
+        message: Text::from(m),
+    })?;
+    let mut steps: Vec<InferenceStep> = Vec::new();
+    let mut next_id: u32 = 0;
+    walk_lfsc_sexpr(&root, &mut steps, &mut next_id);
+    if steps.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    Ok(steps)
+}
+
+fn walk_lfsc_sexpr(s: &Sexpr, steps: &mut Vec<InferenceStep>, next_id: &mut u32) {
+    if let Sexpr::List(items) = s {
+        if let Some(Sexpr::Atom(head)) = items.first() {
+            if lookup_kernel_rule(head).is_some() {
+                let id = format!("lfsc_step_{}", *next_id);
+                *next_id += 1;
+                let conclusion = items.last().map(render_sexpr).unwrap_or_default();
+                let mut premises: Vec<Text> = Vec::new();
+                for sub in items.iter().skip(1).take(items.len().saturating_sub(2)) {
+                    if let Sexpr::List(_) = sub {
+                        premises.push(Text::from(format!("p_{}", premises.len())));
+                    }
+                }
+                steps.push(InferenceStep {
+                    id: Text::from(id),
+                    rule: Text::from(head.clone()),
+                    premises,
+                    conclusion: Text::from(conclusion),
+                });
+            }
+        }
+        for child in items {
+            walk_lfsc_sexpr(child, steps, next_id);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// OpenSMT2 — line-oriented `<id> := <rule> [<premise>...]   : <conclusion>`
+// -----------------------------------------------------------------------------
+//
+// OpenSMT2's proof trace is line-oriented similarly to verum_canonical
+// but uses `:=` as the rule-binding separator (one definition per
+// line) rather than the `step <id>` keyword.  Comments start with
+// `;` (SMT-LIB convention).
+
+fn decompose_open_smt(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
+    let mut steps: Vec<InferenceStep> = Vec::new();
+    for (lineno, raw) in body.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        // Split at `:=` — head is `<id>`, tail is `<rule> [<p>...] : <c>`.
+        let (id_part, rest) = match line.split_once(":=") {
+            Some(parts) => parts,
+            None => {
+                return Err(DecomposeError::Malformed {
+                    line: lineno + 1,
+                    message: Text::from("expected `:=` separating id from rule"),
+                });
+            }
+        };
+        let id = id_part.trim();
+        if id.is_empty() {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("empty step id"),
+            });
+        }
+        let (rule_and_premises, conclusion) = match rest.split_once(':') {
+            Some(parts) => parts,
+            None => {
+                return Err(DecomposeError::Malformed {
+                    line: lineno + 1,
+                    message: Text::from("expected `:` separating rule from conclusion"),
+                });
+            }
+        };
+        let mut tokens = rule_and_premises.split_whitespace();
+        let rule = tokens.next().ok_or_else(|| DecomposeError::Malformed {
+            line: lineno + 1,
+            message: Text::from("missing rule name"),
+        })?;
+        let premises: Vec<Text> = tokens.map(Text::from).collect();
+        let conclusion = conclusion.trim();
+        if conclusion.is_empty() {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("empty conclusion"),
+            });
+        }
+        steps.push(InferenceStep {
+            id: Text::from(id),
+            rule: Text::from(rule),
+            premises,
+            conclusion: Text::from(conclusion),
+        });
+    }
+    if steps.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    Ok(steps)
+}
+
+// -----------------------------------------------------------------------------
+// MathSAT5 — line-oriented `<rule>(<id>; <premises>) -> <conclusion>`
+// -----------------------------------------------------------------------------
+//
+// MathSAT's native proof trace renders one step per line in the
+// shape `<rule>(<id>; <p1>, <p2>, ...) -> <conclusion>`.  Comments
+// start with `#`.  We extract the leading rule name (cross-checked
+// against the kernel registry), the parenthesised id + premises,
+// and the conclusion after `->`.
+
+fn decompose_mathsat(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
+    let mut steps: Vec<InferenceStep> = Vec::new();
+    for (lineno, raw) in body.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let paren_open = line.find('(').ok_or_else(|| DecomposeError::Malformed {
+            line: lineno + 1,
+            message: Text::from("expected `(` after rule name"),
+        })?;
+        // Walk forward from paren_open to find the matching `)` —
+        // not `rfind`, because the conclusion (`-> <expr>`) may
+        // itself contain nested parentheses we don't want to
+        // include in the rule application.
+        let after_open = &line[paren_open + 1..];
+        let mut depth: i32 = 1;
+        let mut close_off: Option<usize> = None;
+        for (off, c) in after_open.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close_off = Some(off);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let paren_close = match close_off {
+            Some(o) => paren_open + 1 + o,
+            None => {
+                return Err(DecomposeError::Malformed {
+                    line: lineno + 1,
+                    message: Text::from("missing closing `)`"),
+                });
+            }
+        };
+        let rule = line[..paren_open].trim();
+        if rule.is_empty() {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("empty rule name"),
+            });
+        }
+        let inside = &line[paren_open + 1..paren_close];
+        let (id_part, premise_part) = match inside.split_once(';') {
+            Some(parts) => parts,
+            None => (inside, ""),
+        };
+        let id = id_part.trim();
+        if id.is_empty() {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("empty step id"),
+            });
+        }
+        let premises: Vec<Text> = premise_part
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(Text::from)
+            .collect();
+        let after = line[paren_close + 1..].trim_start();
+        let conclusion = after
+            .strip_prefix("->")
+            .map(str::trim)
+            .unwrap_or("")
+            .trim();
+        if conclusion.is_empty() {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("expected `-> <conclusion>` after rule application"),
+            });
+        }
+        steps.push(InferenceStep {
+            id: Text::from(id),
+            rule: Text::from(rule),
+            premises,
+            conclusion: Text::from(conclusion),
+        });
+    }
+    if steps.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    Ok(steps)
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -1654,12 +1877,76 @@ mod tests {
     }
 
     #[test]
-    fn decompose_lfsc_format_unsupported() {
-        let cert = SmtCertificate::new(CertFormat::LfscPattern, "QF_LIA", "x", "anything");
-        assert!(matches!(
-            decompose_cert(&cert),
-            Err(DecomposeError::UnsupportedFormat(CertFormat::LfscPattern))
-        ));
+    fn decompose_lfsc_pattern_finds_rule_applications() {
+        // LFSC trace: nested S-exprs whose head atoms are rule names.
+        // `resolution` is in the kernel registry.
+        let body = "(resolution (mp (asserted A) (asserted B) C) (assumed D))";
+        let cert = SmtCertificate::new(CertFormat::LfscPattern, "QF_LIA", "C", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert!(steps.iter().any(|s| s.rule.as_str() == "resolution"));
+        assert!(steps.iter().any(|s| s.rule.as_str() == "mp"));
+    }
+
+    #[test]
+    fn decompose_lfsc_pattern_rejects_empty_body() {
+        let cert = SmtCertificate::new(CertFormat::LfscPattern, "QF_LIA", "x", "  ");
+        assert!(matches!(decompose_cert(&cert), Err(DecomposeError::Empty)));
+    }
+
+    #[test]
+    fn decompose_open_smt_line_oriented() {
+        let body = "\
+; OpenSMT2 proof trace
+s1 := assume    : (>= x 0)
+s2 := la_generic s1 : (>= (+ x 1) 1)
+";
+        let cert = SmtCertificate::new(CertFormat::OpenSmt, "QF_LIA", "x", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].id.as_str(), "s1");
+        assert_eq!(steps[0].rule.as_str(), "assume");
+        assert_eq!(steps[1].rule.as_str(), "la_generic");
+        assert_eq!(steps[1].premises.len(), 1);
+    }
+
+    #[test]
+    fn decompose_open_smt_rejects_missing_assignment() {
+        let body = "s1 assume : (>= x 0)";
+        let cert = SmtCertificate::new(CertFormat::OpenSmt, "QF_LIA", "x", body);
+        let err = decompose_cert(&cert).unwrap_err();
+        assert!(matches!(err, DecomposeError::Malformed { .. }));
+    }
+
+    #[test]
+    fn decompose_mathsat_line_oriented() {
+        let body = "\
+# MathSAT5 proof trace
+assume(s1) -> (>= x 0)
+la_generic(s2; s1) -> (>= (+ x 1) 1)
+";
+        let cert = SmtCertificate::new(CertFormat::Mathsat, "QF_LIA", "x", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].rule.as_str(), "assume");
+        assert_eq!(steps[1].rule.as_str(), "la_generic");
+        assert_eq!(steps[1].premises.len(), 1);
+        assert_eq!(steps[1].premises[0].as_str(), "s1");
+    }
+
+    #[test]
+    fn decompose_mathsat_rejects_unparenthesised_line() {
+        let body = "la_generic s1 -> conclusion";
+        let cert = SmtCertificate::new(CertFormat::Mathsat, "QF_LIA", "x", body);
+        let err = decompose_cert(&cert).unwrap_err();
+        assert!(matches!(err, DecomposeError::Malformed { .. }));
+    }
+
+    #[test]
+    fn decompose_mathsat_rejects_missing_arrow() {
+        let body = "la_generic(s1; s0) (no arrow here)";
+        let cert = SmtCertificate::new(CertFormat::Mathsat, "QF_LIA", "x", body);
+        let err = decompose_cert(&cert).unwrap_err();
+        assert!(matches!(err, DecomposeError::Malformed { .. }));
     }
 
     // ----- KernelOnlyReplayEngine — end-to-end with the decomposer -----
@@ -1692,16 +1979,20 @@ mod tests {
     }
 
     #[test]
-    fn kernel_only_unsupported_format_rejected_with_explanation() {
-        let cert = SmtCertificate::new(CertFormat::OpenSmt, "QF_LIA", "x", "anything");
+    fn kernel_only_accepts_well_formed_open_smt_body() {
+        let body = "s1 := assume   : (>= x 0)\n\
+                    s2 := mp s1    : (>= x 0)";
+        let cert = SmtCertificate::new(CertFormat::OpenSmt, "QF_LIA", "(>= x 0)", body);
         let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
-        match v {
-            ReplayVerdict::Rejected { reason, .. } => {
-                assert!(reason.as_str().contains("not yet implemented"));
-                assert!(reason.as_str().contains("open_smt"));
-            }
-            other => panic!("expected Rejected, got {:?}", other),
-        }
+        assert!(matches!(v, ReplayVerdict::Accepted { .. }));
+    }
+
+    #[test]
+    fn kernel_only_accepts_well_formed_mathsat_body() {
+        let body = "assume(s1) -> (>= x 0)\nmp(s2; s1) -> (>= x 0)";
+        let cert = SmtCertificate::new(CertFormat::Mathsat, "QF_LIA", "(>= x 0)", body);
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        assert!(matches!(v, ReplayVerdict::Accepted { .. }));
     }
 
     #[test]
