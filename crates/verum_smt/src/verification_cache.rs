@@ -410,8 +410,70 @@ impl VerificationCache {
         // Cache miss - run actual verification
         let result = verify_fn();
 
-        // Cache the result (even if it's an error)
+        // Cache the result (even if it's an error). When the
+        // config carries `statistics_driven = true`, this
+        // unconditional path bypasses the gating — callers that
+        // need expense-driven caching should use
+        // `get_or_verify_with_stats` instead and pass the Z3
+        // solver statistics.
         self.insert(predicate, base_type, result.clone());
+
+        result
+    }
+
+    /// Get-or-verify with solver statistics for stats-driven
+    /// caching. Closes the inert-defense pattern around four
+    /// `CacheConfig` fields (`statistics_driven`,
+    /// `min_decisions_to_cache`, `min_conflicts_to_cache`,
+    /// `min_solve_time_ms`) at the call-site layer: pre-fix the
+    /// fields routed through `should_cache_with_stats` only via
+    /// `insert_with_stats`, but no production caller used the
+    /// stats-aware insertion path — `get_or_verify` always
+    /// cached unconditionally regardless of the config.
+    ///
+    /// The closure returns both the verification result and the
+    /// solver statistics that produced it. When the cache
+    /// config has `statistics_driven = true`, only "expensive"
+    /// queries (exceeding any of the three thresholds) are
+    /// cached. When `statistics_driven = false`, every result
+    /// is cached just like `get_or_verify`.
+    ///
+    /// # Arguments
+    ///
+    /// * `predicate` / `base_type` — cache key components
+    /// * `verify_fn` — closure returning `(result, decisions,
+    ///   conflicts, solve_time_ms)`. Backends that don't expose
+    ///   per-query statistics can pass zeros — the statistics-
+    ///   driven gate then short-circuits to "skip cache" when
+    ///   any threshold is non-zero, which is the desired
+    ///   conservative behaviour.
+    pub fn get_or_verify_with_stats<F>(
+        &self,
+        predicate: &Expr,
+        base_type: &Type,
+        verify_fn: F,
+    ) -> VerificationResult
+    where
+        F: FnOnce() -> (VerificationResult, u64, u64, u64),
+    {
+        // Try cache first
+        if let Maybe::Some(cached_result) = self.get(predicate, base_type) {
+            return cached_result;
+        }
+
+        // Cache miss - run actual verification with stats
+        let (result, decisions, conflicts, solve_time_ms) = verify_fn();
+
+        // Stats-driven cache decision (only caches expensive queries
+        // when `config.statistics_driven = true`)
+        self.insert_with_stats(
+            predicate,
+            base_type,
+            result.clone(),
+            decisions,
+            conflicts,
+            solve_time_ms,
+        );
 
         result
     }
