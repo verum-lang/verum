@@ -204,3 +204,51 @@ public fn identity_coherence_cert(
         field_enactment: enactment,
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for CoherenceVerdict
+// =============================================================================
+
+implement Eq for CoherenceVerdict {
+    fn eq(&self, other: &CoherenceVerdict) -> Bool {
+        match (self, other) {
+            (CoherenceVerdict.Decidable,
+             CoherenceVerdict.Decidable) => true,
+            (CoherenceVerdict.SemiDecidable { bound: a },
+             CoherenceVerdict.SemiDecidable { bound: b }) => a == b,
+            (CoherenceVerdict.Undecidable { reason: a },
+             CoherenceVerdict.Undecidable { reason: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CoherenceVerdict {
+    /// Renders the verdict for diagnostic surfaces:
+    ///   `Decidable`                       → `decidable`
+    ///   `SemiDecidable { bound }`         → `semi-decidable (<bound>)`
+    ///   `Undecidable { reason }`          → `undecidable: <reason>`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CoherenceVerdict.Decidable =>
+                f.write_str("decidable"),
+            CoherenceVerdict.SemiDecidable { bound } =>
+                f.write_str(f"semi-decidable ({bound})".as_str()),
+            CoherenceVerdict.Undecidable { reason } =>
+                f.write_str(f"undecidable: {reason}".as_str()),
+        }
+    }
+}
+
+implement Debug for CoherenceVerdict {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CoherenceVerdict.Decidable =>
+                f.write_str("Decidable"),
+            CoherenceVerdict.SemiDecidable { bound } =>
+                f.write_str(f"SemiDecidable({bound})".as_str()),
+            CoherenceVerdict.Undecidable { reason } =>
+                f.write_str(f"Undecidable({reason})".as_str()),
+        }
+    }
+}
