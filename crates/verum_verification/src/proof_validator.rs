@@ -4210,6 +4210,33 @@ impl ProofValidator {
             });
         }
 
+        // Well-foundedness gate: if the property template does not
+        // reference the induction variable, induction is vacuous —
+        // the IH P(n) and the obligation P(n+1) are syntactically
+        // identical, so the IH trivially discharges the step case
+        // regardless of whether P actually holds for any value.
+        // Reject up front when the documented `check_well_founded`
+        // flag is on. The cheap test: substitute the var with a
+        // distinct probe value; if the result is structurally
+        // identical to the original, the var is unused.
+        if self.config.check_well_founded {
+            let probe = self.make_zero();
+            let probed =
+                self.substitute_induction_var(&property_template, var, &probe);
+            if self.expr_eq(&property_template, &probed) {
+                return Err(ValidationError::InductionError {
+                    message: format!(
+                        "induction is not well-founded: property does not \
+                         reference induction variable `{}` — IH and step \
+                         obligation are identical, so any P would `discharge` \
+                         vacuously",
+                        var
+                    )
+                    .into(),
+                });
+            }
+        }
+
         // 1. Validate base case: should prove P(0) or P(base)
         let base_conclusion = base_case.conclusion();
         self.validate_impl(base_case, &base_conclusion)?;
