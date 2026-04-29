@@ -254,6 +254,28 @@ impl ThinLtoCodegen {
         }
     }
 
+    /// Set PIC model.
+    ///
+    /// ThinLTO has its own PIC-model setter
+    /// (`thinlto_codegen_set_pic_model`) — wires the manifest's
+    /// `pic` setting into the codegen so position-independent /
+    /// position-dependent emission matches the configured stance.
+    /// Pre-fix the field was acknowledged-but-discarded with a
+    /// `let _ = config.pic` line; the comment claimed PIC was
+    /// "determined by the input bitcode modules", but the C API
+    /// has long supported per-codegen overrides via
+    /// `thinlto_codegen_set_pic_model`.
+    pub fn set_pic_model(&self, pic: bool) {
+        let model = if pic {
+            lto_codegen_model::LTO_CODEGEN_PIC_MODEL_DYNAMIC
+        } else {
+            lto_codegen_model::LTO_CODEGEN_PIC_MODEL_STATIC
+        };
+        unsafe {
+            thinlto_codegen_set_pic_model(self.codegen, model);
+        }
+    }
+
     /// Apply configuration
     pub fn apply_config(&self, config: &LtoConfig) {
         self.set_cpu(&config.cpu);
@@ -265,9 +287,10 @@ impl ThinLtoCodegen {
             self.set_cache_size_percentage(cache.max_size_percentage);
         }
 
-        // Note: PIC model setting for ThinLTO is not directly supported
-        // The PIC model is determined by the input bitcode modules
-        let _ = config.pic; // Acknowledge the config field
+        // Wire `pic` via ThinLTO's dedicated setter. Closes the
+        // inert-defense pattern flagged inline with the prior
+        // `let _ = config.pic` acknowledgment line.
+        self.set_pic_model(config.pic);
     }
 
     /// Process all modules
@@ -601,5 +624,29 @@ mod tests {
         assert!(cfg.internalize);
         cfg.internalize = false;
         assert!(!cfg.internalize);
+    }
+
+    #[test]
+    fn thinlto_pic_default_is_true() {
+        // Pin: the documented default keeps PIC on so dynamic-
+        // linking targets work correctly. ThinLTO's own
+        // `thinlto_codegen_set_pic_model` is the canonical knob
+        // for overriding bitcode's stance.
+        let cfg = LtoConfig::new(LtoMode::Thin);
+        assert!(cfg.pic, "default pic must stay true");
+    }
+
+    #[test]
+    fn thinlto_pic_round_trips_via_builder() {
+        // Pin: the `pic` field is mutable on the public surface
+        // and round-trips through the builder. The actual ThinLTO
+        // codegen integration (set_pic_model) requires LLVM at
+        // link time and isn't exercised in the lib-test harness;
+        // we pin the config-shape contract here, and the
+        // integration path is covered by the e2e link tests.
+        let cfg = LtoConfig::new(LtoMode::Thin).with_pic(false);
+        assert!(!cfg.pic, "with_pic(false) must flip the field");
+        let cfg2 = cfg.with_pic(true);
+        assert!(cfg2.pic, "with_pic(true) must restore the field");
     }
 }
