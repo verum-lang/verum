@@ -205,3 +205,114 @@ public fn substitute(p: Process, from: Text, to: Text) -> Process {
         Process.Replicate { inner } => proc_replicate(substitute(*inner, from, to)),
     }
 }
+
+// =============================================================================
+// 5. Foundation Protocol Impls — Display + Debug + Eq for Process
+// =============================================================================
+
+implement Eq for Process {
+    /// Structural (syntactic) equality on π-calculus processes.
+    /// Note: this is *not* α-equivalence — `(νx) P` and `(νy) P[x:=y]`
+    /// compare unequal under this Eq even though they denote the
+    /// same process.  Use `alpha_eq` (when added) for α-equivalence;
+    /// callers that need α-canonical form should normalise via
+    /// `substitute` first.
+    fn eq(&self, other: &Process) -> Bool {
+        match (self, other) {
+            (Process.Zero, Process.Zero) => true,
+            (Process.Par { left: la, right: ra },
+             Process.Par { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (Process.Restrict { name: na, body: ba },
+             Process.Restrict { name: nb, body: bb }) =>
+                na == nb && **ba == **bb,
+            (Process.Send { channel: ca, message: ma, cont: ka },
+             Process.Send { channel: cb, message: mb, cont: kb }) =>
+                ca == cb && ma == mb && **ka == **kb,
+            (Process.Recv { channel: ca, binder: ba, cont: ka },
+             Process.Recv { channel: cb, binder: bb, cont: kb }) =>
+                ca == cb && ba == bb && **ka == **kb,
+            (Process.Replicate { inner: ia },
+             Process.Replicate { inner: ib }) =>
+                **ia == **ib,
+            _ => false,
+        }
+    }
+}
+
+implement Display for Process {
+    /// Renders a process in standard π-calculus notation:
+    ///   `0`           — terminated
+    ///   `P | Q`       — parallel
+    ///   `(νx)P`       — restriction
+    ///   `x<y>.P`      — send
+    ///   `x(z).P`      — receive
+    ///   `!P`          — replication
+    ///
+    /// Parentheses are inserted around `Par` arguments to disambiguate
+    /// from outer combinators; the default left-association of `|`
+    /// is preserved.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Process.Zero => f.write_str("0"),
+            Process.Par { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" | ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            Process.Restrict { name, body } => {
+                f.write_str(f"(ν{name})".as_str())?;
+                (**body).fmt(f)
+            },
+            Process.Send { channel, message, cont } => {
+                f.write_str(f"{channel}<{message}>.".as_str())?;
+                (**cont).fmt(f)
+            },
+            Process.Recv { channel, binder, cont } => {
+                f.write_str(f"{channel}({binder}).".as_str())?;
+                (**cont).fmt(f)
+            },
+            Process.Replicate { inner } => {
+                f.write_str("!")?;
+                (**inner).fmt(f)
+            },
+        }
+    }
+}
+
+implement Debug for Process {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Process.Zero => f.write_str("Zero"),
+            Process.Par { left, right } => {
+                f.write_str("Par(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Process.Restrict { name, body } => {
+                f.write_str(f"Restrict({name}, ".as_str())?;
+                (**body).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Process.Send { channel, message, cont } => {
+                f.write_str(f"Send({channel}, {message}, ".as_str())?;
+                (**cont).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Process.Recv { channel, binder, cont } => {
+                f.write_str(f"Recv({channel}, {binder}, ".as_str())?;
+                (**cont).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Process.Replicate { inner } => {
+                f.write_str("Replicate(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
