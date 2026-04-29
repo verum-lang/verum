@@ -933,8 +933,42 @@ implement<T> Drop for Weak<T> {
 }
 
 implement<T> Debug for Weak<T> {
+    /// Debug renders the identity tuple (generation, epoch) plus a
+    /// liveness bit so post-mortem dumps can correlate Weak handles
+    /// with their `Shared` parent without exposing the raw pointer.
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str("Weak")
+        let alive = self.strong_count() > 0;
+        let live_marker = if alive { "alive" } else { "dropped" };
+        f.write_str(f"Weak {{ gen: {self.generation}, epoch: {self.epoch}, {live_marker} }}".as_str())
+    }
+}
+
+implement<T> Eq for Weak<T> {
+    /// Identity equality — two `Weak<T>` are equal iff they were
+    /// produced from the same `Shared<T>` allocation.  Comparing
+    /// generation + epoch + pointer is sufficient under CBGR
+    /// (generation+epoch suffices to distinguish reused allocations
+    /// from genuinely identical ones; the pointer is the address
+    /// witness).
+    fn eq(&self, other: &Weak<T>) -> Bool {
+        self.ptr == other.ptr
+            && self.generation == other.generation
+            && self.epoch == other.epoch
+    }
+}
+
+implement<T> Hash for Weak<T> {
+    /// Identity hash matching Eq's identity semantics.  Allows
+    /// `Map<Weak<T>, V>` keyed by allocation identity.
+    fn hash(&self, hasher: &mut Hasher) {
+        // Pointer-as-int address; combined with gen+epoch to
+        // disambiguate generation-bumped reuses.
+        unsafe {
+            let addr = self.ptr as UInt64;
+            hasher.write_int(addr as Int);
+        }
+        hasher.write_int(self.generation as Int);
+        hasher.write_int(self.epoch as Int);
     }
 }
 
