@@ -568,9 +568,31 @@ impl RefinementValidator {
         match verify_result {
             crate::smt_worker::SmtCheckResult::Valid => Ok(ValidationResult::Valid),
             crate::smt_worker::SmtCheckResult::Invalid { model } => {
-                // Extract detailed counterexample with execution trace
-                let counterexample =
-                    self.extract_counterexample(&refinement_ctx, &model, &source, position);
+                // Honour `LspConfig.show_counterexamples`: when
+                // disabled, return a stub counterexample without
+                // running the (potentially expensive) extraction
+                // + trace-recovery pipeline. Closes the inert-
+                // defense pattern: the flag was forwarded into
+                // the validator's `show_counterexamples` field
+                // but no path consulted it. Callers that don't
+                // surface counterexample data (e.g. minimal
+                // status-line UIs) avoid paying the rendering
+                // cost; full IDEs leave the default `true` and
+                // get the rich extraction.
+                let counterexample = if self.config.read().show_counterexamples {
+                    self.extract_counterexample(&refinement_ctx, &model, &source, position)
+                } else {
+                    CounterexampleData {
+                        variable: Text::from("<hidden>"),
+                        value: Text::from(""),
+                        r#type: Text::from(""),
+                        constraint: Text::from(""),
+                        violation_reason: Text::from(
+                            "counterexample suppressed by LspConfig.show_counterexamples = false",
+                        ),
+                        trace: List::new(),
+                    }
+                };
                 Ok(ValidationResult::Invalid { counterexample })
             }
             crate::smt_worker::SmtCheckResult::Unknown => Ok(ValidationResult::Unknown),
