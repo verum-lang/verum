@@ -382,3 +382,154 @@ fn cc_alpha_eq_ctx(
         _ => false,
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for CcTerm / CcStep
+// =============================================================================
+
+implement Eq for CcTerm {
+    /// Syntactic equality on continuation-calculus terms.  Not
+    /// α-equivalence — for that use `cc_alpha_eq` /
+    /// `cc_alpha_eq_ctx`.  `λx.x` and `λy.y` compare unequal under
+    /// `==`; the doc-comment matches the same convention applied to
+    /// `Process` (commit c1089b69) and `CbpvTerm` (commit 1a6243aa).
+    fn eq(&self, other: &CcTerm) -> Bool {
+        match (self, other) {
+            (CcTerm.Const { payload: a },
+             CcTerm.Const { payload: b }) => a == b,
+            (CcTerm.Var { name: a },
+             CcTerm.Var { name: b }) => a == b,
+            (CcTerm.Lam { param: pa, body: ba },
+             CcTerm.Lam { param: pb, body: bb }) =>
+                pa == pb && **ba == **bb,
+            (CcTerm.App { func: fa, arg: aa },
+             CcTerm.App { func: fb, arg: ab }) =>
+                **fa == **fb && **aa == **ab,
+            (CcTerm.Reset { inner: ia },
+             CcTerm.Reset { inner: ib }) =>
+                **ia == **ib,
+            (CcTerm.Shift { binder: ba, body: ya },
+             CcTerm.Shift { binder: bb, body: yb }) =>
+                ba == bb && **ya == **yb,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CcTerm {
+    /// Renders in standard delimited-control notation:
+    ///   `Const { payload }`              → `'<payload>`   (single-quote prefix
+    ///                                                       distinguishes a
+    ///                                                       value-level constant
+    ///                                                       from a Var of the
+    ///                                                       same name)
+    ///   `Var { name }`                   → `<name>`
+    ///   `Lam { param, body }`            → `λ<param>. <body>`
+    ///   `App { func, arg }`              → `(<func> <arg>)`
+    ///   `Reset { inner }`                → `reset <inner>`
+    ///   `Shift { binder, body }`         → `shift <binder>. <body>`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CcTerm.Const { payload } =>
+                f.write_str(f"'{payload}".as_str()),
+            CcTerm.Var { name } =>
+                f.write_str(name.as_str()),
+            CcTerm.Lam { param, body } => {
+                f.write_str(f"λ{param}. ".as_str())?;
+                (**body).fmt(f)
+            },
+            CcTerm.App { func, arg } => {
+                f.write_str("(")?;
+                (**func).fmt(f)?;
+                f.write_str(" ")?;
+                (**arg).fmt(f)?;
+                f.write_str(")")
+            },
+            CcTerm.Reset { inner } => {
+                f.write_str("reset ")?;
+                (**inner).fmt(f)
+            },
+            CcTerm.Shift { binder, body } => {
+                f.write_str(f"shift {binder}. ".as_str())?;
+                (**body).fmt(f)
+            },
+        }
+    }
+}
+
+implement Debug for CcTerm {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CcTerm.Const { payload } =>
+                f.write_str(f"Const({payload})".as_str()),
+            CcTerm.Var { name } =>
+                f.write_str(f"Var({name})".as_str()),
+            CcTerm.Lam { param, body } => {
+                f.write_str(f"Lam({param}, ".as_str())?;
+                (**body).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CcTerm.App { func, arg } => {
+                f.write_str("App(")?;
+                (**func).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**arg).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CcTerm.Reset { inner } => {
+                f.write_str("Reset(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CcTerm.Shift { binder, body } => {
+                f.write_str(f"Shift({binder}, ".as_str())?;
+                (**body).fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
+
+implement Eq for CcStep {
+    fn eq(&self, other: &CcStep) -> Bool {
+        match (self, other) {
+            (CcStep.Stepped { next: a },
+             CcStep.Stepped { next: b }) => a == b,
+            (CcStep.Normal { term: a },
+             CcStep.Normal { term: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CcStep {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CcStep.Stepped { next } => {
+                f.write_str("→ ")?;
+                next.fmt(f)
+            },
+            CcStep.Normal { term } => {
+                f.write_str("⊥ ")?;
+                term.fmt(f)
+            },
+        }
+    }
+}
+
+implement Debug for CcStep {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CcStep.Stepped { next } => {
+                f.write_str("Stepped(")?;
+                next.fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CcStep.Normal { term } => {
+                f.write_str("Normal(")?;
+                term.fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
