@@ -396,8 +396,11 @@ public fn main() -> Int { 0 }
     assert!(out.status.success());
     let body = fs::read_to_string(dir.join("extracted").join("mask.v"))
         .expect("read");
+    // Extractor recognises that bitwise `&` has no Coq-side lowering
+    // and emits a fallback `Definition ... := tt. (* body pending *)`
+    // stub plus a `lowering pending` marker in the captured-body block.
     assert!(
-        body.contains("V12.2.1 will lower") || body.contains("V12.2.1 body"),
+        body.contains("lowering pending") || body.contains("body pending"),
         "must fall back for bitwise; got:\n{}",
         body
     );
