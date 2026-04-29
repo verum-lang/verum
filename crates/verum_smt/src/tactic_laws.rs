@@ -317,6 +317,7 @@ pub const SIMPLIFIER_APPLIES: &[LawId] = &[
     LawId::SeqAssociative,
     LawId::OrelseLeftIdentity,
     LawId::OrelseRightIdentity,
+    LawId::OrelseAssociative,
     LawId::RepeatZeroIsSkip,
     LawId::RepeatOneIsBody,
 ];
@@ -381,6 +382,16 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
             // LawId::OrelseRightIdentity — `t | fail ≡ t`
             if is_fail(&r) {
                 return l;
+            }
+            // LawId::OrelseAssociative — right-associate.
+            // `(a || b) || c` becomes `a || (b || c)`.  Mirrors the
+            // AndThen canonicalisation: two OrElse chains differing
+            // only in bracketing compare equal after normalize.
+            if let TacticCombinator::OrElse(ll, lr) = l {
+                return normalize_once(TacticCombinator::OrElse(
+                    ll,
+                    Box::new(TacticCombinator::OrElse(lr, Box::new(r))),
+                ));
             }
             // L9: Single(k) | Single(k) ≡ Single(k) (only for
             // identical single-leaf tactics — see module docs for
@@ -511,6 +522,29 @@ pub fn check_orelse_right_identity(t: &TacticCombinator) -> bool {
     format!("{:?}", lhs) == format!("{:?}", rhs)
 }
 
+/// Check L6 (OrElse associativity): `(a || b) || c ≡ a || (b || c)`.
+pub fn check_orelse_associativity(
+    a: &TacticCombinator,
+    b: &TacticCombinator,
+    c: &TacticCombinator,
+) -> bool {
+    let lhs = normalize(TacticCombinator::OrElse(
+        Box::new(TacticCombinator::OrElse(
+            Box::new(a.clone()),
+            Box::new(b.clone()),
+        )),
+        Box::new(c.clone()),
+    ));
+    let rhs = normalize(TacticCombinator::OrElse(
+        Box::new(a.clone()),
+        Box::new(TacticCombinator::OrElse(
+            Box::new(b.clone()),
+            Box::new(c.clone()),
+        )),
+    ));
+    format!("{:?}", lhs) == format!("{:?}", rhs)
+}
+
 /// Check L7 (Repeat(t, 0) ≡ skip).
 pub fn check_repeat_zero_is_skip(t: &TacticCombinator) -> bool {
     let lhs = normalize(TacticCombinator::Repeat(Box::new(t.clone()), 0));
@@ -563,6 +597,48 @@ mod tests {
     #[test]
     fn l5_orelse_right_identity() {
         assert!(check_orelse_right_identity(&smt()));
+    }
+
+    #[test]
+    fn l6_orelse_associativity_all_primitives() {
+        // The catalogue's `LawId::OrelseAssociative` — wired into
+        // the simplifier in this commit (#103).  `(a || b) || c ≡
+        // a || (b || c)` must hold by structural equality after
+        // normalization.
+        assert!(check_orelse_associativity(&simp(), &smt(), &lia()));
+    }
+
+    #[test]
+    fn normalize_right_associates_orelse_chains() {
+        // The simplifier should produce a canonical right-associated
+        // shape so two chains differing only in bracketing compare
+        // equal as Rust Debug strings (the same canonicalisation
+        // AndThen has shipped since V0).
+        let left_assoc = TacticCombinator::OrElse(
+            Box::new(TacticCombinator::OrElse(
+                Box::new(simp()),
+                Box::new(smt()),
+            )),
+            Box::new(lia()),
+        );
+        let right_assoc = TacticCombinator::OrElse(
+            Box::new(simp()),
+            Box::new(TacticCombinator::OrElse(
+                Box::new(smt()),
+                Box::new(lia()),
+            )),
+        );
+        let n_left = format!("{:?}", normalize(left_assoc));
+        let n_right = format!("{:?}", normalize(right_assoc));
+        assert_eq!(n_left, n_right);
+    }
+
+    #[test]
+    fn simplifier_applies_includes_orelse_associative() {
+        // Pin: the SIMPLIFIER_APPLIES list now includes
+        // OrelseAssociative — the catalogue ↔ simplifier
+        // single-source-of-truth invariant must continue to hold.
+        assert!(SIMPLIFIER_APPLIES.contains(&LawId::OrelseAssociative));
     }
 
     #[test]
