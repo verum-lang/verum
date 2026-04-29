@@ -147,6 +147,23 @@ impl Renderer {
         Self::new(RenderConfig::default())
     }
 
+    /// Read mirror of `RenderConfig.terminal_width`. The renderer
+    /// itself doesn't soft-wrap output (terminals already do that
+    /// for free); the value is surfaced so callers that pipe
+    /// rendered output through their own wrapper (LSP servers
+    /// composing into JSON-RPC frames, CI pretty-printers) can
+    /// consult the configured stance without re-reading
+    /// `RenderConfig`.
+    pub fn terminal_width(&self) -> usize {
+        self.config.terminal_width
+    }
+
+    /// Read mirror of `RenderConfig.relative_paths`. Surfaced for
+    /// the same composition reason as `terminal_width()`.
+    pub fn relative_paths_enabled(&self) -> bool {
+        self.config.relative_paths
+    }
+
     /// Render a diagnostic to a string
     pub fn render(&mut self, diagnostic: &Diagnostic) -> Text {
         let mut output = Text::new();
@@ -308,11 +325,25 @@ impl Renderer {
         // Get the first label for location info (always available since labels is non-empty)
         let first_label = labels.first().unwrap();
 
+        // Honour `config.relative_paths`: when `true`, the file
+        // header shows the path relative to the current working
+        // directory instead of the full absolute path. Falls back
+        // to the original path when relativisation fails (e.g.
+        // CWD lookup error or path on a different filesystem
+        // mount). Before this wire-up the field was inert — the
+        // header always showed the absolute path the diagnostic
+        // arrived with.
+        let header_path = if self.config.relative_paths {
+            self.relativise_path(file)
+        } else {
+            file.to_string()
+        };
+
         // Always render location header first
         output.push_str(&format!(
             "  {} {}:{}:{}\n",
             self.colorize("-->", Color::Blue),
-            file,
+            header_path,
             first_label.span.line,
             first_label.span.column
         ));
@@ -346,7 +377,27 @@ impl Renderer {
                 break;
             }
 
-            let line_content = &lines[line_idx];
+            let raw_line = &lines[line_idx];
+            // Honour `config.max_line_width`: truncate source
+            // lines longer than the limit with an ellipsis. `0`
+            // disables truncation. Char-count slicing (not byte
+            // slicing) so the truncation never lands inside a
+            // UTF-8 codepoint. Before this wire-up the field was
+            // inert — long lines rendered to the full width
+            // regardless of caller config.
+            let line_content_owned: Text;
+            let line_content: &str = if self.config.max_line_width > 0
+                && raw_line.chars().count() > self.config.max_line_width
+            {
+                let truncated: String = raw_line
+                    .chars()
+                    .take(self.config.max_line_width.saturating_sub(1))
+                    .collect();
+                line_content_owned = Text::from(format!("{truncated}…"));
+                &line_content_owned
+            } else {
+                raw_line.as_str()
+            };
 
             // Find labels for this line
             let line_labels: List<_> = labels
@@ -420,7 +471,14 @@ impl Renderer {
         }
     }
 
-    /// Render the gutter (line numbers and decorations)
+    /// Render the gutter (line numbers and decorations).
+    ///
+    /// Honours `config.show_line_numbers`: when `false`, the
+    /// line-number column is replaced with a single space so the
+    /// pipe alignment stays consistent. Useful for terminals
+    /// that prefer minimal chrome (e.g. piped output captured by
+    /// `pbcopy` for paste into chat). Before this wire-up the
+    /// field was inert — line numbers always rendered.
     fn render_gutter(
         &self,
         output: &mut Text,
@@ -431,8 +489,12 @@ impl Renderer {
         match style {
             GutterStyle::Line => {
                 if let Some(num) = line_num {
-                    let num_str = format!("{:>width$}", num, width = width);
-                    output.push_str(&self.colorize(&num_str, Color::Blue));
+                    if self.config.show_line_numbers {
+                        let num_str = format!("{:>width$}", num, width = width);
+                        output.push_str(&self.colorize(&num_str, Color::Blue));
+                    } else {
+                        output.push_str(&" ".repeat(width));
+                    }
                     output.push_str(&self.colorize(" │ ", Color::Blue));
                 }
             }
@@ -484,6 +546,25 @@ impl Renderer {
     pub fn add_test_content(&mut self, file: &str, content: &str) {
         let lines: List<Text> = content.lines().map(Text::from).collect();
         self.file_cache.insert(file.into(), lines);
+    }
+
+    /// Convert an absolute path to one relative to the current
+    /// working directory when possible. Returns the original path
+    /// unchanged on any failure (CWD lookup error, path lives on
+    /// a different mount, path is not a child of CWD). Used to
+    /// honour `config.relative_paths` on the file-snippet header.
+    fn relativise_path(&self, file: &str) -> String {
+        let path = std::path::Path::new(file);
+        if !path.is_absolute() {
+            return file.to_string();
+        }
+        match std::env::current_dir() {
+            Ok(cwd) => match path.strip_prefix(&cwd) {
+                Ok(rel) => rel.display().to_string(),
+                Err(_) => file.to_string(),
+            },
+            Err(_) => file.to_string(),
+        }
     }
 
     /// Format severity with color
@@ -760,5 +841,65 @@ impl BatchRenderer {
         }
 
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_config_accessors_mirror_constructed_values() {
+        // Pin: `terminal_width()` and `relative_paths_enabled()`
+        // accessors expose the configured values to external
+        // composition layers (LSP servers, CI pretty-printers).
+        // Before the wire-up landed these fields had no public
+        // read surface — composers had to re-construct
+        // `RenderConfig` to inspect the renderer's stance.
+        for &width in &[0usize, 80, 120, 240] {
+            for &rel in &[true, false] {
+                let renderer = Renderer::new(RenderConfig {
+                    terminal_width: width,
+                    relative_paths: rel,
+                    ..RenderConfig::default()
+                });
+                assert_eq!(renderer.terminal_width(), width);
+                assert_eq!(renderer.relative_paths_enabled(), rel);
+            }
+        }
+    }
+
+    #[test]
+    fn show_line_numbers_false_keeps_pipe_alignment() {
+        // Pin: `show_line_numbers = false` replaces the line
+        // number with whitespace of the same width, preserving
+        // the pipe alignment so downstream parsers that key on
+        // the " │ " separator still work.
+        let cfg = RenderConfig {
+            show_line_numbers: false,
+            colors: false,
+            ..RenderConfig::default()
+        };
+        let renderer = Renderer::new(cfg);
+        let mut output = Text::new();
+        renderer.render_gutter(&mut output, 4, Some(42), GutterStyle::Line);
+        // Width-4 padding instead of "  42" → four spaces
+        // followed by " │ ".
+        assert_eq!(output.as_str(), "     │ ");
+
+        // With show_line_numbers = true the same call renders
+        // the actual number.
+        let cfg_on = RenderConfig {
+            show_line_numbers: true,
+            colors: false,
+            ..RenderConfig::default()
+        };
+        let renderer_on = Renderer::new(cfg_on);
+        let mut output_on = Text::new();
+        renderer_on.render_gutter(&mut output_on, 4, Some(42), GutterStyle::Line);
+        assert!(
+            output_on.as_str().starts_with("  42 │ "),
+            "show_line_numbers=true must render the number: {output_on:?}"
+        );
     }
 }
