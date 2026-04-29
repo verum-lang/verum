@@ -4542,18 +4542,18 @@ pub fn audit_htt_roadmap(format: AuditFormat) -> Result<()> {
             ui::step("HTT (Lurie 2009) mechanisation roadmap");
             println!();
             println!(
-                "  {:<35}  {:<13}  {}",
+                "  {:<43}  {:<13}  {}",
                 "Section", "Status", "Kernel module(s)"
             );
             println!(
                 "  {}  {}  {}",
-                "-".repeat(35),
-                "-".repeat(13),
-                "-".repeat(40)
+                "─".repeat(43),
+                "─".repeat(13),
+                "─".repeat(40)
             );
             for e in &entries {
                 println!(
-                    "  {:<35}  {:<13}  {}",
+                    "  {:<43}  {:<13}  {}",
                     e.section.as_str(),
                     e.status.name(),
                     e.kernel_modules.as_str()
@@ -4612,18 +4612,18 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
             ui::step("Adamek-Rosicky 1994 mechanisation roadmap");
             println!();
             println!(
-                "  {:<35}  {:<13}  {}",
+                "  {:<43}  {:<13}  {}",
                 "Section", "Status", "Kernel module(s)"
             );
             println!(
                 "  {}  {}  {}",
-                "-".repeat(35),
-                "-".repeat(13),
-                "-".repeat(40)
+                "─".repeat(43),
+                "─".repeat(13),
+                "─".repeat(40)
             );
             for e in &entries {
                 println!(
-                    "  {:<35}  {:<13}  {}",
+                    "  {:<43}  {:<13}  {}",
                     e.section.as_str(),
                     e.status.name(),
                     e.kernel_modules.as_str()
@@ -4693,10 +4693,10 @@ pub fn audit_self_recognition(format: AuditFormat) -> Result<()> {
             );
             println!(
                 "  {}  {}  {}  {}",
-                "-".repeat(13),
-                "-".repeat(8),
-                "-".repeat(6),
-                "-".repeat(40)
+                "─".repeat(13),
+                "─".repeat(8),
+                "─".repeat(6),
+                "─".repeat(40)
             );
             for rule in KernelRuleId::full_list() {
                 let req = required_meta_theory(rule);
@@ -4815,7 +4815,7 @@ pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
                 "  {:<45}  {}",
                 "Intrinsic name", "Default-decision (no args)"
             );
-            println!("  {}  {}", "-".repeat(45), "-".repeat(40));
+            println!("  {}  {}", "─".repeat(45), "─".repeat(40));
             for name in names {
                 let decision = dispatch_intrinsic(name, &[])
                     .and_then(|v| v.as_bool())
@@ -4882,9 +4882,9 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
             );
             println!(
                 "  {}  {}  {}",
-                "-".repeat(10),
-                "-".repeat(5),
-                "-".repeat(40)
+                "─".repeat(10),
+                "─".repeat(5),
+                "─".repeat(40)
             );
             for f in &formats {
                 let cmd = format_replay_command(*f, "<artefact>");
