@@ -167,6 +167,13 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
                 declared_strategy: typed_strategy,
                 obligation_text: Text::from("(elaborated obligation pending V1)"),
                 timeout_ms: None,
+                // V0 surface: kernel re-check + SMT plumbing land
+                // empty. The trivial-tautology decider handles the
+                // dispatch when these are absent.
+                core_term: verum_common::Maybe::None,
+                expected_type: verum_common::Maybe::None,
+                axiom_registry: None,
+                smt_assertions: Vec::new(),
             };
             let verdict = dispatcher.dispatch(&obligation);
             totals.record(&verdict);
@@ -333,12 +340,7 @@ mod tests {
     use super::*;
 
     fn obligation(strategy: LadderStrategy, name: &str) -> LadderObligation {
-        LadderObligation {
-            item_name: Text::from(name),
-            declared_strategy: strategy,
-            obligation_text: Text::from("trivial"),
-            timeout_ms: None,
-        }
+        LadderObligation::text(name, strategy, "trivial")
     }
 
     // ----- VerdictTotals -----
