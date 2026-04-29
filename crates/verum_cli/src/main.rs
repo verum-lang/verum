@@ -1207,6 +1207,15 @@ enum Commands {
         #[clap(long)]
         kernel_rules: bool,
 
+        /// Run the kernel re-check (K-Refine-omega / K-Universe-Ascent /
+        /// K-Eps-Mu / K-Round-Trip) against every theorem-shaped +
+        /// axiom + function declaration in the project, surfacing
+        /// per-name admitted / rejected outcomes.  Useful as a fast
+        /// first gate in CI pipelines before the verifier dispatcher
+        /// runs.  Exits non-zero on any rejection.  (#122)
+        #[clap(long)]
+        kernel_recheck: bool,
+
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
@@ -3495,6 +3504,7 @@ fn run_command(cli: Cli) -> Result<()> {
             direct_only,
             framework_axioms,
             kernel_rules,
+            kernel_recheck,
             epsilon,
             coord,
             no_coord,
@@ -3533,6 +3543,8 @@ fn run_command(cli: Cli) -> Result<()> {
             };
             if kernel_rules {
                 commands::audit::audit_kernel_rules(output_format)
+            } else if kernel_recheck {
+                commands::audit::audit_kernel_recheck_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {
