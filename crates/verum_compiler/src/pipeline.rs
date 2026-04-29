@@ -1368,7 +1368,10 @@ impl<'s> CompilationPipeline<'s> {
                 methods: List::new(),
                 implements: List::new(),
             };
-            metadata.types.insert(Text::from(cached_type.path.as_str()), type_desc);
+            let path_text = Text::from(cached_type.path.as_str());
+            if metadata.types.insert(path_text.clone(), type_desc).is_none() {
+                metadata.type_declaration_order.push(path_text);
+            }
         }
 
         // Convert functions

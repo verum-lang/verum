@@ -157,9 +157,11 @@ fn extract_module_metadata(
         }
         if use_qualified {
             let qualified_name: Text = format!("{}.{}", module_path, type_name).into();
-            metadata.types.insert(qualified_name, descriptor);
-        } else {
-            metadata.types.insert(type_name, descriptor);
+            if metadata.types.insert(qualified_name.clone(), descriptor).is_none() {
+                metadata.type_declaration_order.push(qualified_name);
+            }
+        } else if metadata.types.insert(type_name.clone(), descriptor).is_none() {
+            metadata.type_declaration_order.push(type_name);
         }
     }
 
