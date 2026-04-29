@@ -3085,6 +3085,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     budget: budget_duration,
                     export_path: export,
                     distributed_cache: distributed_cache.map(|t| t.to_string()),
+                    distributed_cache_trust: None,
                     profile_name: verify_profile.map(|t| t.to_string()),
                     profile_obligation,
                     closure_cache_enabled: closure_cache,
