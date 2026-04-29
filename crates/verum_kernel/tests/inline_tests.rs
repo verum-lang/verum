@@ -1525,3 +1525,236 @@ fn b222_strict_loader_aggregates_multiple_modules() {
     assert_eq!(r2.registered.len(), 1);
     assert_eq!(reg.all().len(), 2);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Cubical reductions (#98 hardening) — kernel-side rule application
+// ─────────────────────────────────────────────────────────────────────
+
+fn var(name: &str) -> CoreTerm {
+    CoreTerm::Var(Text::from(name))
+}
+
+fn refl(x: CoreTerm) -> CoreTerm {
+    CoreTerm::Refl(Heap::new(x))
+}
+
+#[test]
+fn face_marker_helpers_recognise_canonical_constants() {
+    // `is_face_top` / `is_face_bot` / `is_interval_one` are the
+    // V0 marker conventions the cubical reducer dispatches on.
+    assert!(is_face_top(&var("⊤")));
+    assert!(is_face_top(&var("1")));
+    assert!(is_face_top(&var("top")));
+    assert!(is_face_top(&var("true")));
+    assert!(is_face_top(&var("i1")));
+
+    assert!(is_face_bot(&var("⊥")));
+    assert!(is_face_bot(&var("0")));
+    assert!(is_face_bot(&var("bot")));
+    assert!(is_face_bot(&var("false")));
+    assert!(is_face_bot(&var("i0")));
+
+    assert!(is_interval_one(&var("i1")));
+    assert!(is_interval_one(&var("1")));
+
+    // Anything not on the canonical list is neither.
+    assert!(!is_face_top(&var("phi")));
+    assert!(!is_face_bot(&var("phi")));
+    assert!(!is_interval_one(&var("phi")));
+}
+
+#[test]
+fn cubical_hcomp_id_when_empty_system_reduces_to_base() {
+    // catalogue rule `hcomp-id-when-empty-system`:
+    // `hcomp {φ = ⊥} u a ↪ a`.
+    let hc = CoreTerm::HComp {
+        phi: Heap::new(var("⊥")),
+        walls: Heap::new(var("walls")),
+        base: Heap::new(var("a")),
+    };
+    let n = normalize(&hc);
+    assert_eq!(n, var("a"));
+}
+
+#[test]
+fn cubical_hcomp_id_when_phi_top_with_lambda_walls_applies_to_i1() {
+    // catalogue rule `hcomp-id-when-φ-equals-1`:
+    // `hcomp {φ = ⊤} u a ↪ u i1 1=1`.  When walls is a lambda we
+    // β-reduce on the spot.
+    let walls = CoreTerm::Lam {
+        binder: Text::from("i"),
+        domain: Heap::new(unit_ty()),
+        body: Heap::new(var("i")),
+    };
+    let hc = CoreTerm::HComp {
+        phi: Heap::new(var("⊤")),
+        walls: Heap::new(walls),
+        base: Heap::new(var("a")),
+    };
+    let n = normalize(&hc);
+    // After β: substituted body is `i1`.
+    assert_eq!(n, var("i1"));
+}
+
+#[test]
+fn cubical_hcomp_with_neutral_phi_left_residual() {
+    // When the face is neither ⊤ nor ⊥, normalize is structure-
+    // preserving (no rewrite fires).
+    let hc = CoreTerm::HComp {
+        phi: Heap::new(var("phi")),
+        walls: Heap::new(var("walls")),
+        base: Heap::new(var("a")),
+    };
+    let n = normalize(&hc);
+    assert!(matches!(n, CoreTerm::HComp { .. }));
+}
+
+#[test]
+fn cubical_transp_fill_when_regular_is_i1() {
+    // catalogue rule `transp-fill`:
+    // `transp A 1 a ↪ a` — regularity endpoint i1 ⇒ identity.
+    let tr = CoreTerm::Transp {
+        path: Heap::new(var("path")),
+        regular: Heap::new(var("i1")),
+        value: Heap::new(var("a")),
+    };
+    let n = normalize(&tr);
+    assert_eq!(n, var("a"));
+}
+
+#[test]
+fn cubical_transp_on_refl_when_path_is_reflexive() {
+    // catalogue rule `transp-on-refl`:
+    // `transp (refl _) _ a ↪ a`.
+    let tr = CoreTerm::Transp {
+        path: Heap::new(refl(var("A"))),
+        regular: Heap::new(var("phi")),
+        value: Heap::new(var("a")),
+    };
+    let n = normalize(&tr);
+    assert_eq!(n, var("a"));
+}
+
+#[test]
+fn cubical_transp_const_when_path_is_constant_lambda() {
+    // catalogue rule `transp-const`:
+    // `transp (λ _ → A) φ a ↪ a` — constant line of types.
+    let constant_path = CoreTerm::Lam {
+        binder: Text::from("i"),
+        domain: Heap::new(unit_ty()),
+        body: Heap::new(var("A")),
+    };
+    let tr = CoreTerm::Transp {
+        path: Heap::new(constant_path),
+        regular: Heap::new(var("phi")),
+        value: Heap::new(var("a")),
+    };
+    let n = normalize(&tr);
+    assert_eq!(n, var("a"));
+}
+
+#[test]
+fn cubical_transp_does_not_reduce_when_path_uses_binder() {
+    // `λ i → P i` IS variable; transp must NOT collapse to value.
+    let dependent_path = CoreTerm::Lam {
+        binder: Text::from("i"),
+        domain: Heap::new(unit_ty()),
+        body: Heap::new(CoreTerm::App(
+            Heap::new(var("P")),
+            Heap::new(var("i")),
+        )),
+    };
+    let tr = CoreTerm::Transp {
+        path: Heap::new(dependent_path),
+        regular: Heap::new(var("phi")),
+        value: Heap::new(var("a")),
+    };
+    let n = normalize(&tr);
+    assert!(
+        matches!(n, CoreTerm::Transp { .. }),
+        "transp on dependent path must not reduce: got {:?}",
+        n
+    );
+}
+
+#[test]
+fn cubical_glue_on_false_face_reduces_to_carrier() {
+    // catalogue rule `glue-on-false-face`:
+    // `Glue A {⊥} T e ↪ A`.
+    let g = CoreTerm::Glue {
+        carrier: Heap::new(var("A")),
+        phi: Heap::new(var("⊥")),
+        fiber: Heap::new(var("T")),
+        equiv: Heap::new(var("e")),
+    };
+    let n = normalize(&g);
+    assert_eq!(n, var("A"));
+}
+
+#[test]
+fn cubical_glue_on_true_face_reduces_to_fiber() {
+    // catalogue rule `glue-on-true-face`:
+    // `Glue A {⊤} T e ↪ T 1=1`.  T is neutral (Var), so we
+    // expect the fibre returned as-is.
+    let g = CoreTerm::Glue {
+        carrier: Heap::new(var("A")),
+        phi: Heap::new(var("⊤")),
+        fiber: Heap::new(var("T")),
+        equiv: Heap::new(var("e")),
+    };
+    let n = normalize(&g);
+    assert_eq!(n, var("T"));
+}
+
+#[test]
+fn cubical_glue_with_neutral_phi_left_residual() {
+    let g = CoreTerm::Glue {
+        carrier: Heap::new(var("A")),
+        phi: Heap::new(var("phi")),
+        fiber: Heap::new(var("T")),
+        equiv: Heap::new(var("e")),
+    };
+    let n = normalize(&g);
+    assert!(matches!(n, CoreTerm::Glue { .. }));
+}
+
+#[test]
+fn task_98_normalize_hits_every_canonical_face_form() {
+    // Pin: every documented kernel-side cubical reduction
+    // (#98 hardening) actually fires under `normalize`.
+    let cases: &[(CoreTerm, &str)] = &[
+        (
+            CoreTerm::HComp {
+                phi: Heap::new(var("⊥")),
+                walls: Heap::new(var("u")),
+                base: Heap::new(var("a")),
+            },
+            "hcomp-id-when-empty-system",
+        ),
+        (
+            CoreTerm::Transp {
+                path: Heap::new(var("p")),
+                regular: Heap::new(var("i1")),
+                value: Heap::new(var("a")),
+            },
+            "transp-fill",
+        ),
+        (
+            CoreTerm::Glue {
+                carrier: Heap::new(var("A")),
+                phi: Heap::new(var("⊥")),
+                fiber: Heap::new(var("T")),
+                equiv: Heap::new(var("e")),
+            },
+            "glue-on-false-face",
+        ),
+    ];
+    for (term, rule) in cases {
+        let n = normalize(term);
+        assert_ne!(
+            &n, term,
+            "rule `{}` did not fire — normalize was a no-op on {:?}",
+            rule, term
+        );
+    }
+}
