@@ -1526,6 +1526,16 @@ implement<T: Default> Default for Pin<T> {
     }
 }
 
+// Display delegates transparently — pinning is an unobservable
+// invariant from the user's perspective; rendered output should
+// match the underlying value.  Mirrors the wrapper-Display
+// convention applied to Heap/Shared/Cow/ManuallyDrop.
+implement<T: Display> Display for Pin<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.pointer.fmt(f)
+    }
+}
+
 // =============================================================================
 // Simple Allocation Functions for Collections
 // =============================================================================
