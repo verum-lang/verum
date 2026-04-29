@@ -206,6 +206,42 @@ impl AttributeValidator {
         self.config.enabled
     }
 
+    /// Read mirror of `ValidationConfig.allow_unknown`. Surfaced
+    /// for orchestrators that compose the validator with their
+    /// own attribute-extension registry — they consult this to
+    /// decide whether to register additional names before
+    /// validation runs.
+    #[must_use]
+    pub fn allow_unknown(&self) -> bool {
+        self.config.allow_unknown
+    }
+
+    /// Read mirror of `ValidationConfig.warn_unknown`. Mirrors
+    /// the verbosity stance for diagnostics that re-summarise
+    /// validator output.
+    #[must_use]
+    pub fn warn_unknown(&self) -> bool {
+        self.config.warn_unknown
+    }
+
+    /// Read mirror of `ValidationConfig.warn_deprecated`.
+    /// Surfaced for the deprecated-attribute extension hook
+    /// that lives in downstream orchestrators (the validator
+    /// itself doesn't currently maintain a deprecated-attribute
+    /// list — the hook is the read surface that lets a future
+    /// extension consult the configured stance).
+    #[must_use]
+    pub fn warn_deprecated(&self) -> bool {
+        self.config.warn_deprecated
+    }
+
+    /// Read mirror of `ValidationConfig.warn_unstable`. Same
+    /// extension-hook contract as `warn_deprecated`.
+    #[must_use]
+    pub fn warn_unstable(&self) -> bool {
+        self.config.warn_unstable
+    }
+
     /// Validate attributes for a function declaration.
     #[must_use]
     pub fn validate_function_attrs(&self, attrs: &[Attribute]) -> List<AttributeValidationWarning> {
@@ -470,8 +506,34 @@ impl AttributeValidator {
             "black_box" => target.contains(AttributeTarget::Expr),
             "optimize_barrier" => target.contains(AttributeTarget::Stmt),
 
-            // Unknown attributes - allow by default, but warn if configured
+            // Unknown attributes — behaviour gated on
+            // `allow_unknown` and `warn_unknown`:
+            //
+            //   * `allow_unknown == true`  + `warn_unknown` → W0400 (warn, accept).
+            //   * `allow_unknown == true`  + !warn_unknown  → silently accept.
+            //   * `allow_unknown == false`                  → W0402 (reject as
+            //     "unknown attribute, no extension installed"); the
+            //     attribute fails validation regardless of the warn
+            //     gate so strict mode (`disabled()` /
+            //     `strict()` constructors) actually rejects.
+            //
+            // Before this wire-up `allow_unknown` was inert — every
+            // unknown attribute fell through to the warn-or-pass
+            // path regardless of the configured stance.
             _ => {
+                if !self.config.allow_unknown {
+                    return Some(
+                        AttributeValidationWarning::new(
+                            format!(
+                                "unknown attribute `@{}` rejected by strict mode \
+                                 (`allow_unknown = false`)",
+                                name
+                            ),
+                            attr.span,
+                        )
+                        .with_code("W0402"),
+                    );
+                }
                 if self.config.warn_unknown {
                     return Some(
                         AttributeValidationWarning::new(
@@ -771,6 +833,76 @@ mod tests {
             warnings.is_empty(),
             "lenient config should not warn about unknown attributes"
         );
+    }
+
+    #[test]
+    fn allow_unknown_false_rejects_unknown_attribute_with_w0402() {
+        // Pin: `allow_unknown = false` rejects unknown attributes
+        // outright (W0402), not just warns. Before the wire-up
+        // the field was inert — every unknown attribute fell
+        // through to the warn-or-pass path regardless of the
+        // configured stance.
+        let mut config = ValidationConfig::default();
+        config.allow_unknown = false;
+        // Set warn_unknown false too so we can be sure the
+        // returned warning came from the strict-mode rejection,
+        // not the warn path.
+        config.warn_unknown = false;
+        let validator = AttributeValidator::new(config);
+
+        let attrs = vec![make_attr("totally_unknown_attribute_xyz", Span::default())];
+        let warnings = validator.validate_function_attrs(&attrs);
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "strict mode must produce exactly one rejection"
+        );
+        assert_eq!(
+            warnings[0].code.as_str(),
+            "W0402",
+            "rejection must use the W0402 code: {:?}",
+            warnings[0]
+        );
+        assert!(
+            warnings[0]
+                .message
+                .as_str()
+                .contains("strict mode"),
+            "rejection message must name the strict-mode gate: {}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn config_accessors_mirror_constructed_values() {
+        // Pin: every accessor on AttributeValidator returns the
+        // configured value. Before the wire-up, four config
+        // fields (allow_unknown, warn_unknown, warn_deprecated,
+        // warn_unstable) had no public read surface — external
+        // orchestrators that wanted to drive the validator with
+        // a custom extension registry couldn't observe its
+        // configured stance.
+        for &allow in &[true, false] {
+            for &warn_u in &[true, false] {
+                for &warn_d in &[true, false] {
+                    for &warn_uns in &[true, false] {
+                        let config = ValidationConfig {
+                            enabled: true,
+                            allow_unknown: allow,
+                            warn_unknown: warn_u,
+                            warn_deprecated: warn_d,
+                            warn_unstable: warn_uns,
+                        };
+                        let v = AttributeValidator::new(config);
+                        assert_eq!(v.allow_unknown(), allow);
+                        assert_eq!(v.warn_unknown(), warn_u);
+                        assert_eq!(v.warn_deprecated(), warn_d);
+                        assert_eq!(v.warn_unstable(), warn_uns);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
