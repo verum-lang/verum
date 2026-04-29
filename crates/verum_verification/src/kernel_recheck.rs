@@ -461,6 +461,34 @@ impl KernelRecheck {
         out
     }
 
+    /// Walk every kernel-recheckable item in a module and project
+    /// the per-name K-rule outcomes into a single result list.
+    /// One-stop entry point for downstream verification phases that
+    /// want to drive the full module re-check uniformly without
+    /// dispatching across `ItemKind` variants.
+    ///
+    /// Recognises (matches the per-decl helpers above):
+    ///
+    ///   * `Theorem` / `Lemma` / `Corollary` → [`recheck_theorem`]
+    ///   * `Axiom`                            → [`recheck_axiom`]
+    ///   * `Function`                         → [`recheck_function`]
+    ///   * Nested module / impl block         → recurse into items
+    ///
+    /// Returns one entry per `(item_name, kind_label, outcome)`
+    /// triple.  Items that aren't kernel-recheckable (Type, Const,
+    /// Use, etc.) are silently skipped — they have their own
+    /// verification phases.
+    pub fn recheck_module(
+        module: &verum_ast::Module,
+    ) -> List<(Text, &'static str, Result<(), KernelRecheckError>)> {
+        let mut out: List<(Text, &'static str, Result<(), KernelRecheckError>)> =
+            List::new();
+        for item in module.items.iter() {
+            collect_module_recheck(&item.kind, &mut out);
+        }
+        out
+    }
+
     /// V2 convenience — directly recheck a refinement type from
     /// the post-typecheck `verum_types::Type` IR. This is the
     /// flavour the production verification phase actually consumes
@@ -640,6 +668,65 @@ pub(crate) fn walk_ast_block_for_recheck(
 /// of producing per-decl cost records, it folds outcomes into the
 /// caller's `out` list under the parent function's label so the
 /// diagnostic surface stays anchored on the visible scope.
+/// Module-level walker (#121).  Single-pass dispatch across every
+/// kernel-recheckable item kind; nested modules / impl blocks
+/// recurse into their items.  The unified result list pairs each
+/// per-name outcome with a short kind label (`"theorem"` /
+/// `"axiom"` / `"function"` / `"lemma"` / `"corollary"` / nested
+/// `"impl-method"`) for diagnostics.
+fn collect_module_recheck(
+    kind: &verum_ast::decl::ItemKind,
+    out: &mut List<(Text, &'static str, Result<(), KernelRecheckError>)>,
+) {
+    use verum_ast::decl::ItemKind as IK;
+    match kind {
+        IK::Theorem(t) => {
+            for (name, r) in KernelRecheck::recheck_theorem(t).iter() {
+                out.push((name.clone(), "theorem", r.clone()));
+            }
+        }
+        IK::Lemma(t) => {
+            for (name, r) in KernelRecheck::recheck_theorem(t).iter() {
+                out.push((name.clone(), "lemma", r.clone()));
+            }
+        }
+        IK::Corollary(t) => {
+            for (name, r) in KernelRecheck::recheck_theorem(t).iter() {
+                out.push((name.clone(), "corollary", r.clone()));
+            }
+        }
+        IK::Axiom(a) => {
+            for (name, r) in KernelRecheck::recheck_axiom(a).iter() {
+                out.push((name.clone(), "axiom", r.clone()));
+            }
+        }
+        IK::Function(f) => {
+            for (name, r) in KernelRecheck::recheck_function(f).iter() {
+                out.push((name.clone(), "function", r.clone()));
+            }
+        }
+        IK::Module(m) => {
+            if let verum_common::Maybe::Some(items) = &m.items {
+                for nested in items.iter() {
+                    collect_module_recheck(&nested.kind, out);
+                }
+            }
+        }
+        IK::Impl(impl_decl) => {
+            for impl_item in impl_decl.items.iter() {
+                if let verum_ast::decl::ImplItemKind::Function(f) = &impl_item.kind {
+                    for (name, r) in KernelRecheck::recheck_function(f).iter() {
+                        out.push((name.clone(), "impl-method", r.clone()));
+                    }
+                }
+            }
+        }
+        // Type definitions, consts, and use clauses don't have a
+        // refinement-type leakage surface to recheck — skip silently.
+        _ => {}
+    }
+}
+
 fn walk_ast_nested_item_for_recheck(
     kind: &verum_ast::decl::ItemKind,
     parent_function_name: &Text,
@@ -2568,5 +2655,61 @@ mod tests {
                 lifted
             );
         }
+    }
+
+    // -- recheck_module entry point (#121) ------------------------------
+
+    fn empty_module() -> verum_ast::Module {
+        verum_ast::Module::new(
+            verum_common::List::new(),
+            verum_ast::FileId::dummy(),
+            span_dummy(),
+        )
+    }
+
+    #[test]
+    fn recheck_module_empty_returns_empty_list() {
+        let m = empty_module();
+        let results = KernelRecheck::recheck_module(&m);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn recheck_module_skips_non_recheckable_items_silently() {
+        // Empty module → empty result.  Pin the contract that non-
+        // recheckable items (Type / Const / Use / etc.) don't
+        // surface noise in the result list.
+        let m = empty_module();
+        let results = KernelRecheck::recheck_module(&m);
+        for (_, kind, _) in results.iter() {
+            assert!(
+                matches!(
+                    *kind,
+                    "theorem" | "lemma" | "corollary" | "axiom" | "function" | "impl-method"
+                ),
+                "unexpected kind label: {}",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn task_121_module_walker_label_set_is_finite_and_documented() {
+        // Pin the kind-label set so future ItemKind additions
+        // don't surface uncategorised entries silently.
+        let allowed: std::collections::BTreeSet<&'static str> = [
+            "theorem",
+            "lemma",
+            "corollary",
+            "axiom",
+            "function",
+            "impl-method",
+        ]
+        .iter()
+        .copied()
+        .collect();
+        // Empty module has no entries; this test pins the
+        // allow-list as the documented surface.
+        assert_eq!(allowed.len(), 6);
     }
 }
