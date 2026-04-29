@@ -78,7 +78,7 @@ implement Eq for PathParseError {
     }
 }
 
-public fn parse_path(s: &Text) -> base.Result<List<PathSeg>, PathParseError> {
+public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
     let bs = s.as_bytes();
     if bs.len() == 0 { return Err(PpEmpty); }
     if bs[0] != (36 as Byte) { return Err(PpMissingDollar); }
@@ -136,7 +136,7 @@ fn is_name_byte(b: Byte) -> Bool {
     b == (95 as Byte)
 }
 
-fn parse_index(bs: &List<Byte>, start: Int) -> base.Result<(Int, Int), PathParseError> {
+fn parse_index(bs: &List<Byte>, start: Int) -> Result<(Int, Int), PathParseError> {
     if start >= bs.len() || bs[start] != (91 as Byte) { return Err(PpUnclosedBracket); }
     let mut i: Int = start + 1;
     let mut idx: Int = 0;

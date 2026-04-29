@@ -91,12 +91,12 @@ public fn sqlite_version_compat() -> Text {
 // Comparison
 // -----------------------------------------------------------------------------
 
-public fn precedes(a: &DistributionVersion, b: &DistributionVersion) -> base.Bool {
+public fn precedes(a: &DistributionVersion, b: &DistributionVersion) -> Bool {
     if a.major != b.major { return a.major < b.major; }
     if a.minor != b.minor { return a.minor < b.minor; }
     a.patch < b.patch
 }
 
-public fn at_least(have: &DistributionVersion, want: &DistributionVersion) -> base.Bool {
+public fn at_least(have: &DistributionVersion, want: &DistributionVersion) -> Bool {
     !precedes(have, want)
 }

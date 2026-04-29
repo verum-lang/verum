@@ -29,14 +29,14 @@ public fn on_conflict_name(o: &OnConflict) -> Text {
     }
 }
 
-public fn on_conflict_from_name(s: &Text) -> base.Maybe<OnConflict> {
+public fn on_conflict_from_name(s: &Text) -> Maybe<OnConflict> {
     let lo = ascii_lower(s);
-    if lo == "abort".clone()    { return base.Some(OcAbort); }
-    if lo == "fail".clone()     { return base.Some(OcFail); }
-    if lo == "ignore".clone()   { return base.Some(OcIgnore); }
-    if lo == "replace".clone()  { return base.Some(OcReplace); }
-    if lo == "rollback".clone() { return base.Some(OcRollback); }
-    base.None
+    if lo == "abort".clone()    { return Some(OcAbort); }
+    if lo == "fail".clone()     { return Some(OcFail); }
+    if lo == "ignore".clone()   { return Some(OcIgnore); }
+    if lo == "replace".clone()  { return Some(OcReplace); }
+    if lo == "rollback".clone() { return Some(OcRollback); }
+    None
 }
 
 // -----------------------------------------------------------------------------
@@ -61,7 +61,7 @@ public fn decision_for(policy: &OnConflict, msg: Text) -> ViolationDecision {
 
 fn ascii_lower(s: &Text) -> Text {
     let bs = s.as_bytes();
-    let mut out = base.Text.new();
+    let mut out = Text.new();
     let mut i: base.Int = 0;
     while i < bs.len() {
         let b: base.Byte = bs[i];

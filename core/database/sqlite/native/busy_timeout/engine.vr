@@ -30,7 +30,7 @@ public fn new_engine() -> BusyEngine {
 }
 
 implement BusyEngine {
-    pub fn install_custom(&mut self, name: base.Text) {
+    pub fn install_custom(&mut self, name: Text) {
         self.kind = BhCustom(name);
         self.attempts = 0;
     }

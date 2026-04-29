@@ -19,7 +19,7 @@ mount collections.List;
 // -----------------------------------------------------------------------------
 
 public type SeedSource is protocol {
-    fn name(&self) -> base.Text;
+    fn name(&self) -> Text;
     fn fetch(&self, n_bytes: Int) -> List<Byte>;
 };
 
@@ -34,7 +34,7 @@ public fn fixed_seed(material: List<Byte>) -> FixedSeedSource {
 }
 
 implement SeedSource for FixedSeedSource {
-    fn name(&self) -> base.Text { "fixed".clone() }
+    fn name(&self) -> Text { "fixed".clone() }
 
     fn fetch(&self, n_bytes: Int) -> List<Byte> {
         let mut out: List<Byte> = List.new();
@@ -56,7 +56,7 @@ public type CounterSeedSource is { unit: Bool }
 public fn counter_seed() -> CounterSeedSource { CounterSeedSource { unit: true } }
 
 implement SeedSource for CounterSeedSource {
-    fn name(&self) -> base.Text { "counter".clone() }
+    fn name(&self) -> Text { "counter".clone() }
 
     fn fetch(&self, n_bytes: Int) -> List<Byte> {
         let mut out: List<Byte> = List.new();

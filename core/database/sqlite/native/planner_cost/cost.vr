@@ -180,6 +180,6 @@ public fn estimate_aggregate_cost(input_rows: Float64, group_by_cols: Int) -> Co
 // Comparison
 // -----------------------------------------------------------------------------
 
-public fn cost_less(a: &Cost, b: &Cost) -> base.Bool {
+public fn cost_less(a: &Cost, b: &Cost) -> Bool {
     cost_total(a) < cost_total(b)
 }

@@ -82,12 +82,12 @@ implement TableInfoSet {
         out
     }
 
-    pub fn lookup(&self, name: &Text) -> base.Maybe<TableInfoRow> {
+    pub fn lookup(&self, name: &Text) -> Maybe<TableInfoRow> {
         let mut i: Int = 0;
         while i < self.rows.len() {
             if self.rows[i].name == *name {
                 let r = &self.rows[i];
-                return base.Some(TableInfoRow {
+                return Some(TableInfoRow {
                     cid: r.cid,
                     name: r.name.clone(),
                     declared_type: r.declared_type.clone(),
@@ -98,13 +98,13 @@ implement TableInfoSet {
             }
             i = i + 1;
         }
-        base.None
+        None
     }
 }
 
-fn clone_default(d: &base.Maybe<Text>) -> base.Maybe<Text> {
+fn clone_default(d: &Maybe<Text>) -> Maybe<Text> {
     match d {
-        base.Some(t) => base.Some(t.clone()),
-        base.None    => base.None,
+        Some(t) => Some(t.clone()),
+        None    => None,
     }
 }

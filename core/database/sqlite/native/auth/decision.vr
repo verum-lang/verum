@@ -37,7 +37,7 @@ public fn combine(a: AuthDecision, b: AuthDecision) -> AuthDecision {
 }
 
 /// Decision name for tracing / EXPLAIN.
-public fn name(d: &AuthDecision) -> base.Text {
+public fn name(d: &AuthDecision) -> Text {
     match d {
         AdAllow  => "ALLOW".clone(),
         AdDeny   => "DENY".clone(),

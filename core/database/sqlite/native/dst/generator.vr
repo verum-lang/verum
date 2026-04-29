@@ -116,30 +116,30 @@ implement DstGenerator {
         let mut acc = self.mix.insert_weight;
         if pick < acc + self.mix.update_weight {
             return match self.pick_live_key() {
-                base.Some(k) => OpUpdate(k, gen_name(&mut self.seed)),
-                base.None    => OpInsert(self.next_id_taken(), gen_name(&mut self.seed)),
+                Some(k) => OpUpdate(k, gen_name(&mut self.seed)),
+                None    => OpInsert(self.next_id_taken(), gen_name(&mut self.seed)),
             };
         }
         acc = acc + self.mix.update_weight;
         if pick < acc + self.mix.delete_weight {
             return match self.pick_live_key() {
-                base.Some(k) => {
+                Some(k) => {
                     self.evict_key(k);
                     OpDelete(k)
                 }
-                base.None    => OpSelectById(0),
+                None    => OpSelectById(0),
             };
         }
         match self.pick_live_key() {
-            base.Some(k) => OpSelectById(k),
-            base.None    => OpSelectById(0),
+            Some(k) => OpSelectById(k),
+            None    => OpSelectById(0),
         }
     }
 
-    fn pick_live_key(&mut self) -> base.Maybe<Int> {
-        if self.live_keys.len() == 0 { return base.None; }
+    fn pick_live_key(&mut self) -> Maybe<Int> {
+        if self.live_keys.len() == 0 { return None; }
         let idx = self.seed.next_below(self.live_keys.len());
-        base.Some(self.live_keys[idx])
+        Some(self.live_keys[idx])
     }
 
     fn evict_key(&mut self, k: Int) {
@@ -160,9 +160,9 @@ implement DstGenerator {
     }
 }
 
-fn gen_name(s: &mut DstSeed) -> base.Text {
+fn gen_name(s: &mut DstSeed) -> Text {
     // 8-byte ASCII letter blob — deterministic per draw.
-    let mut t = base.Text.new();
+    let mut t = Text.new();
     let mut i: Int = 0;
     while i < 8 {
         let c: Byte = ((s.next_below(26) as Byte) + (97 as Byte));

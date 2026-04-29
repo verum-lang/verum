@@ -81,9 +81,9 @@ public fn parse_error_name(e: &IsoParseError) -> Text {
 // Parse
 // -----------------------------------------------------------------------------
 
-public fn parse(text: &Text) -> base.Result<Instant, IsoParseError> {
+public fn parse(text: &Text) -> Result<Instant, IsoParseError> {
     let bs = text.as_bytes();
-    if bs.len() < 5 { return base.Err(IpeBadFormat); }
+    if bs.len() < 5 { return Err(IpeBadFormat); }
 
     // Date-only: 10 bytes "YYYY-MM-DD".
     if bs.len() == 10 {
@@ -97,85 +97,85 @@ public fn parse(text: &Text) -> base.Result<Instant, IsoParseError> {
     if bs.len() >= 5 && is_digit(bs[0]) && bs[2] == (58 as Byte) {
         return parse_time_only(&bs);
     }
-    base.Err(IpeBadFormat)
+    Err(IpeBadFormat)
 }
 
-fn parse_date(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
-    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return base.Err(IpeBadFormat); }
-    let year = match parse_int_at(bs, 0, 4) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
-    let month = match parse_int_at(bs, 5, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
-    let day = match parse_int_at(bs, 8, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
-    if !valid_ymd(year, month, day) { return base.Err(IpeOutOfRange); }
-    base.Ok(from_ymd(year, month, day))
+fn parse_date(bs: &List<Byte>) -> Result<Instant, IsoParseError> {
+    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return Err(IpeBadFormat); }
+    let year = match parse_int_at(bs, 0, 4) { Some(v) => v, None => return Err(IpeBadDate) };
+    let month = match parse_int_at(bs, 5, 2) { Some(v) => v, None => return Err(IpeBadDate) };
+    let day = match parse_int_at(bs, 8, 2) { Some(v) => v, None => return Err(IpeBadDate) };
+    if !valid_ymd(year, month, day) { return Err(IpeOutOfRange); }
+    Ok(from_ymd(year, month, day))
 }
 
-fn parse_datetime(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
-    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return base.Err(IpeBadFormat); }
-    if bs[13] != (58 as Byte) { return base.Err(IpeBadFormat); }
-    let year = match parse_int_at(bs, 0, 4) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
-    let month = match parse_int_at(bs, 5, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
-    let day = match parse_int_at(bs, 8, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
-    let h = match parse_int_at(bs, 11, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
-    let m = match parse_int_at(bs, 14, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
+fn parse_datetime(bs: &List<Byte>) -> Result<Instant, IsoParseError> {
+    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return Err(IpeBadFormat); }
+    if bs[13] != (58 as Byte) { return Err(IpeBadFormat); }
+    let year = match parse_int_at(bs, 0, 4) { Some(v) => v, None => return Err(IpeBadDate) };
+    let month = match parse_int_at(bs, 5, 2) { Some(v) => v, None => return Err(IpeBadDate) };
+    let day = match parse_int_at(bs, 8, 2) { Some(v) => v, None => return Err(IpeBadDate) };
+    let h = match parse_int_at(bs, 11, 2) { Some(v) => v, None => return Err(IpeBadTime) };
+    let m = match parse_int_at(bs, 14, 2) { Some(v) => v, None => return Err(IpeBadTime) };
     let mut s: Int = 0;
     let mut ms: Int = 0;
     if bs.len() >= 19 && bs[16] == (58 as Byte) {
         match parse_int_at(bs, 17, 2) {
-            base.Some(v) => { s = v; }
-            base.None    => return base.Err(IpeBadTime),
+            Some(v) => { s = v; }
+            None    => return Err(IpeBadTime),
         }
     }
     if bs.len() >= 23 && bs[19] == (46 as Byte) {
         match parse_int_at(bs, 20, 3) {
-            base.Some(v) => { ms = v; }
-            base.None    => {}
+            Some(v) => { ms = v; }
+            None    => {}
         }
     }
-    if !valid_ymd(year, month, day) { return base.Err(IpeOutOfRange); }
-    if !valid_hms(h, m, s) { return base.Err(IpeOutOfRange); }
-    base.Ok(from_ymd_hms(year, month, day, h, m, s, ms))
+    if !valid_ymd(year, month, day) { return Err(IpeOutOfRange); }
+    if !valid_hms(h, m, s) { return Err(IpeOutOfRange); }
+    Ok(from_ymd_hms(year, month, day, h, m, s, ms))
 }
 
-fn parse_time_only(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
-    if bs[2] != (58 as Byte) { return base.Err(IpeBadFormat); }
-    let h = match parse_int_at(bs, 0, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
-    let m = match parse_int_at(bs, 3, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
+fn parse_time_only(bs: &List<Byte>) -> Result<Instant, IsoParseError> {
+    if bs[2] != (58 as Byte) { return Err(IpeBadFormat); }
+    let h = match parse_int_at(bs, 0, 2) { Some(v) => v, None => return Err(IpeBadTime) };
+    let m = match parse_int_at(bs, 3, 2) { Some(v) => v, None => return Err(IpeBadTime) };
     let mut s: Int = 0;
     let mut ms: Int = 0;
     if bs.len() >= 8 && bs[5] == (58 as Byte) {
         match parse_int_at(bs, 6, 2) {
-            base.Some(v) => { s = v; }
-            base.None    => return base.Err(IpeBadTime),
+            Some(v) => { s = v; }
+            None    => return Err(IpeBadTime),
         }
     }
     if bs.len() >= 12 && bs[8] == (46 as Byte) {
         match parse_int_at(bs, 9, 3) {
-            base.Some(v) => { ms = v; }
-            base.None    => {}
+            Some(v) => { ms = v; }
+            None    => {}
         }
     }
-    if !valid_hms(h, m, s) { return base.Err(IpeOutOfRange); }
+    if !valid_hms(h, m, s) { return Err(IpeOutOfRange); }
     // Date-less times anchor at 2000-01-01.
-    base.Ok(from_ymd_hms(2000, 1, 1, h, m, s, ms))
+    Ok(from_ymd_hms(2000, 1, 1, h, m, s, ms))
 }
 
-fn parse_int_at(bs: &List<Byte>, off: Int, width: Int) -> base.Maybe<Int> {
+fn parse_int_at(bs: &List<Byte>, off: Int, width: Int) -> Maybe<Int> {
     // Defence-in-depth — same as datetime_fns.parse_uint: callers
     // pass small `width` for ISO date fields, but reject any width
     // that could wrap `acc * 10 + d` past Int.MAX.
-    if width > 19 { return base.None; }
+    if width > 19 { return None; }
     let mut acc: Int = 0;
     let mut i: Int = 0;
     while i < width {
-        if off + i >= bs.len() { return base.None; }
+        if off + i >= bs.len() { return None; }
         let b = bs[off + i];
-        if !is_digit(b) { return base.None; }
-        if acc > 922_337_203_685_477_580 { return base.None; }
+        if !is_digit(b) { return None; }
+        if acc > 922_337_203_685_477_580 { return None; }
         acc = acc * 10 + ((b - (48 as Byte)) as Int);
-        if acc < 0 { return base.None; }
+        if acc < 0 { return None; }
         i = i + 1;
     }
-    base.Some(acc)
+    Some(acc)
 }
 
 fn is_digit(b: Byte) -> Bool {

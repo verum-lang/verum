@@ -65,44 +65,44 @@ implement BlobEngine {
 
     /// Validate a read of `length` bytes starting at `offset`. Returns
     /// `Ok(())` if the read may proceed, else the appropriate error.
-    pub fn validate_read(&self, handle_id: Int64, offset: Int, length: Int) -> base.Result<(), BlobError> {
+    pub fn validate_read(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
         match self.find(handle_id) {
             Some(idx) => {
                 let h = &self.handles[idx];
-                if !h.is_open() { return base.Err(BeAborted); }
+                if !h.is_open() { return Err(BeAborted); }
                 if !h.in_bounds(offset, length) {
-                    return base.Err(BeOutOfRange(offset, length));
+                    return Err(BeOutOfRange(offset, length));
                 }
-                base.Ok(())
+                Ok(())
             }
-            None => base.Err(BeAborted),
+            None => Err(BeAborted),
         }
     }
 
     /// Validate a write at (offset, length). Same as read + must be RW.
-    pub fn validate_write(&self, handle_id: Int64, offset: Int, length: Int) -> base.Result<(), BlobError> {
+    pub fn validate_write(&self, handle_id: Int64, offset: Int, length: Int) -> Result<(), BlobError> {
         match self.find(handle_id) {
             Some(idx) => {
                 let h = &self.handles[idx];
-                if !h.is_open() { return base.Err(BeAborted); }
-                if !h.permits_write() { return base.Err(BeReadOnly); }
+                if !h.is_open() { return Err(BeAborted); }
+                if !h.permits_write() { return Err(BeReadOnly); }
                 if !h.in_bounds(offset, length) {
-                    return base.Err(BeOutOfRange(offset, length));
+                    return Err(BeOutOfRange(offset, length));
                 }
-                base.Ok(())
+                Ok(())
             }
-            None => base.Err(BeAborted),
+            None => Err(BeAborted),
         }
     }
 
     /// Reopen against a different rowid.
-    pub fn reopen(&mut self, handle_id: Int64, new_rowid: Int64, new_byte_size: Int) -> base.Result<(), BlobError> {
+    pub fn reopen(&mut self, handle_id: Int64, new_rowid: Int64, new_byte_size: Int) -> Result<(), BlobError> {
         match self.find(handle_id) {
             Some(idx) => {
                 self.handles[idx].reopen(new_rowid, new_byte_size);
-                base.Ok(())
+                Ok(())
             }
-            None => base.Err(BeAborted),
+            None => Err(BeAborted),
         }
     }
 

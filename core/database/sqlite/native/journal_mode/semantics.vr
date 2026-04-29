@@ -75,7 +75,7 @@ public fn is_memory_only(m: &JournalMode) -> Bool {
 
 public type CommitSpeed is CsSlow | CsMedium | CsFast;
 
-public fn speed_name(s: &CommitSpeed) -> base.Text {
+public fn speed_name(s: &CommitSpeed) -> Text {
     match s {
         CsSlow   => "slow".clone(),
         CsMedium => "medium".clone(),

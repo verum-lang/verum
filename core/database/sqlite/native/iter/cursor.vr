@@ -26,9 +26,9 @@ public type CursorState is
     | CsRowAvailable   // last step returned ROW; client may read columns
     | CsDone
     | CsBusy
-    | CsFailed(base.Text);
+    | CsFailed(Text);
 
-public fn cursor_state_name(s: &CursorState) -> base.Text {
+public fn cursor_state_name(s: &CursorState) -> Text {
     match s {
         CsReady           => "ready".clone(),
         CsRowAvailable    => "row".clone(),

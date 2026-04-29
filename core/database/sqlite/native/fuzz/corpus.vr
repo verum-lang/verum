@@ -28,7 +28,7 @@ public type CorpusEntry is {
     id: Int,
     bytes: List<Byte>,
     /// What mutation produced this entry (None for genesis / loaded seeds).
-    origin: base.Maybe<MutationKind>,
+    origin: Maybe<MutationKind>,
     /// New basic-blocks the entry exercised when first added.
     new_coverage_count: Int,
     /// Cycles since this entry's last contribution to coverage.
@@ -40,7 +40,7 @@ public type CorpusEntry is {
 public fn corpus_entry(
     id: Int,
     bytes: List<Byte>,
-    origin: base.Maybe<MutationKind>,
+    origin: Maybe<MutationKind>,
     new_coverage_count: Int,
 ) -> CorpusEntry {
     CorpusEntry {
@@ -75,7 +75,7 @@ implement Corpus {
     pub fn add(
         &mut self,
         bytes: List<Byte>,
-        origin: base.Maybe<MutationKind>,
+        origin: Maybe<MutationKind>,
         new_coverage: Int,
     ) -> Int {
         let id = self.next_id;
@@ -126,10 +126,10 @@ implement Corpus {
         dropped
     }
 
-    pub fn pick(&self, idx: Int) -> base.Maybe<CorpusEntry> {
-        if idx < 0 || idx >= self.entries.len() { return base.None; }
+    pub fn pick(&self, idx: Int) -> Maybe<CorpusEntry> {
+        if idx < 0 || idx >= self.entries.len() { return None; }
         let e = &self.entries[idx];
-        base.Some(CorpusEntry {
+        Some(CorpusEntry {
             id: e.id,
             bytes: clone_bytes(&e.bytes),
             origin: clone_origin(&e.origin),
@@ -147,10 +147,10 @@ fn clone_bytes(b: &List<Byte>) -> List<Byte> {
     out
 }
 
-fn clone_origin(o: &base.Maybe<MutationKind>) -> base.Maybe<MutationKind> {
+fn clone_origin(o: &Maybe<MutationKind>) -> Maybe<MutationKind> {
     match o {
-        base.Some(k) => base.Some(clone_kind(k)),
-        base.None    => base.None,
+        Some(k) => Some(clone_kind(k)),
+        None    => None,
     }
 }
 

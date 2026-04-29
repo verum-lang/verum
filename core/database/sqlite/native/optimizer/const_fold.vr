@@ -49,7 +49,7 @@ fn is_integer_load(e: &OpEntry) -> Bool {
 // produces SQLite's spec-defined integer-overflow error rather than
 // either crashing the SQL compiler (debug builds panic on Int overflow)
 // or baking a wrapped value into the compiled program (release builds
-// would silently emit `Some(wrapped)`). Same `base.None` convention as
+// would silently emit `Some(wrapped)`). Same `None` convention as
 // the divide-by-zero / Int.MIN÷-1 bailouts already present.
 fn add_would_overflow(a: Int, b: Int) -> Bool {
     if b > 0 { a > Int.MAX - b }
@@ -73,50 +73,50 @@ fn mul_would_overflow(a: Int, b: Int) -> Bool {
     abs_a > Int.MAX / abs_b
 }
 
-fn fold_op(name: &Text, a: Int, b: Int) -> base.Maybe<Int> {
+fn fold_op(name: &Text, a: Int, b: Int) -> Maybe<Int> {
     if name == &"Add".clone() {
-        if add_would_overflow(a, b) { return base.None; }
-        return base.Some(a + b);
+        if add_would_overflow(a, b) { return None; }
+        return Some(a + b);
     }
     if name == &"Subtract".clone() {
-        if sub_would_overflow(a, b) { return base.None; }
-        return base.Some(a - b);
+        if sub_would_overflow(a, b) { return None; }
+        return Some(a - b);
     }
     if name == &"Multiply".clone() {
-        if mul_would_overflow(a, b) { return base.None; }
-        return base.Some(a * b);
+        if mul_would_overflow(a, b) { return None; }
+        return Some(a * b);
     }
     if name == &"Divide".clone()    {
-        if b == 0 { return base.None; }
+        if b == 0 { return None; }
         // Int.MIN / -1 overflows on x86 (#DE / SIGFPE); aarch64
         // silently wraps. Bail out of folding so the runtime
         // produces the SQL-spec-defined integer-overflow error
         // rather than baking platform-divergent behaviour into
         // the compiled program.
-        if a == Int.MIN && b == -1 { return base.None; }
-        return base.Some(a / b);
+        if a == Int.MIN && b == -1 { return None; }
+        return Some(a / b);
     }
     if name == &"Remainder".clone() {
-        if b == 0 { return base.None; }
-        if a == Int.MIN && b == -1 { return base.None; }
-        return base.Some(a % b);
+        if b == 0 { return None; }
+        if a == Int.MIN && b == -1 { return None; }
+        return Some(a % b);
     }
-    if name == &"BitAnd".clone()    { return base.Some(a & b); }
-    if name == &"BitOr".clone()     { return base.Some(a | b); }
+    if name == &"BitAnd".clone()    { return Some(a & b); }
+    if name == &"BitOr".clone()     { return Some(a | b); }
     // Shifts: SQL spec says shift counts ≥ 64 (or negative) are UB at
     // the language level — bail out of folding rather than bake an
     // implementation-defined value. The runtime VDBE Shift opcodes
     // already mask the count, but const_fold can't know which width
     // the runtime path uses across operand types.
     if name == &"ShiftLeft".clone() {
-        if b < 0 || b >= 64 { return base.None; }
-        return base.Some(a << b);
+        if b < 0 || b >= 64 { return None; }
+        return Some(a << b);
     }
     if name == &"ShiftRight".clone() {
-        if b < 0 || b >= 64 { return base.None; }
-        return base.Some(a >> b);
+        if b < 0 || b >= 64 { return None; }
+        return Some(a >> b);
     }
-    base.None
+    None
 }
 
 implement OptimizationPass for ConstFold {
@@ -130,7 +130,7 @@ implement OptimizationPass for ConstFold {
         let mut i: Int = 0;
         while i < stream.len() {
             let opt = stream.entry(i);
-            let entry = match opt { base.Some(e) => e, base.None => { break; } };
+            let entry = match opt { Some(e) => e, None => { break; } };
             let nm = opcode_name(&entry.op);
             // Only consider opcodes whose p1, p2 are register operands
             // and p3 is the destination — same shape as Add/Sub/Mul/...
@@ -147,9 +147,9 @@ implement OptimizationPass for ConstFold {
             let const_a = find_recent_integer_load(&stream, i, ra);
             let const_b = find_recent_integer_load(&stream, i, rb);
             match const_a {
-                base.Some((idx_a, val_a)) => match const_b {
-                    base.Some((idx_b, val_b)) => match fold_op(&nm, val_a, val_b) {
-                        base.Some(folded) => {
+                Some((idx_a, val_a)) => match const_b {
+                    Some((idx_b, val_b)) => match fold_op(&nm, val_a, val_b) {
+                        Some(folded) => {
                             // Replace this entry with `Integer folded → dst`.
                             stream.replace_at(i, op_entry(OpInteger, folded, dst, 0, entry.original_pc));
                             // Replace the two Integer loads with Noops.
@@ -157,11 +157,11 @@ implement OptimizationPass for ConstFold {
                             stream.replace_at(idx_b, op_entry(OpNoop, 0, 0, 0, idx_b));
                             edits = edits + 1;
                         }
-                        base.None => {}
+                        None => {}
                     },
-                    base.None => {}
+                    None => {}
                 },
-                base.None => {}
+                None => {}
             }
             i = i + 1;
         }
@@ -169,14 +169,14 @@ implement OptimizationPass for ConstFold {
     }
 }
 
-fn find_recent_integer_load(stream: &OpStream, before: Int, reg: Int) -> base.Maybe<(Int, Int)> {
+fn find_recent_integer_load(stream: &OpStream, before: Int, reg: Int) -> Maybe<(Int, Int)> {
     // Integer opcode shape is `Integer value, dst` → p1=value, p2=dst (per opcode_catalog).
     let mut k: Int = before - 1;
     while k >= 0 {
         let opt = stream.entry(k);
-        let entry = match opt { base.Some(e) => e, base.None => { return base.None; } };
+        let entry = match opt { Some(e) => e, None => { return None; } };
         if is_integer_load(&entry) && entry.p2 == reg {
-            return base.Some((k, entry.p1));
+            return Some((k, entry.p1));
         }
         // If a later instruction overwrites `reg` with non-Integer,
         // stop (the literal is no longer the live value).
@@ -185,11 +185,11 @@ fn find_recent_integer_load(stream: &OpStream, before: Int, reg: Int) -> base.Ma
             _ => writes_register(&entry, reg),
         };
         if writes_reg && !is_integer_load(&entry) {
-            return base.None;
+            return None;
         }
         k = k - 1;
     }
-    base.None
+    None
 }
 
 fn writes_register(e: &OpEntry, reg: Int) -> Bool {

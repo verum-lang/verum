@@ -58,13 +58,13 @@ implement BindSet {
     pub fn note_step_finished(&mut self) { self.step_in_progress = false; }
 
     /// `idx` is 1-based.
-    pub fn bind(&mut self, idx: Int, value: TypedParam) -> base.Result<(), BindError> {
-        if self.step_in_progress { return base.Err(BeStmtBusy); }
-        if idx < 1 || idx > self.slots.len() { return base.Err(BeRange(idx)); }
+    pub fn bind(&mut self, idx: Int, value: TypedParam) -> Result<(), BindError> {
+        if self.step_in_progress { return Err(BeStmtBusy); }
+        if idx < 1 || idx > self.slots.len() { return Err(BeRange(idx)); }
         let size = param_byte_size(&value);
-        if size > self.max_payload_bytes { return base.Err(BeTooLarge(size)); }
+        if size > self.max_payload_bytes { return Err(BeTooLarge(size)); }
         self.slots[idx - 1] = value;
-        base.Ok(())
+        Ok(())
     }
 
     pub fn lookup(&self, idx: Int) -> Maybe<TypedParam> {

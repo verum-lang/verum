@@ -101,9 +101,9 @@ implement FrameBatch {
         self.ends_at_commit = was_commit;
     }
 
-    public fn last_position(&self) -> base.Maybe<Int64> {
-        if self.frames.len() == 0 { return base.None; }
+    public fn last_position(&self) -> Maybe<Int64> {
+        if self.frames.len() == 0 { return None; }
         let last = self.frames.len() - 1;
-        base.Some(frame_position(&self.frames[last]))
+        Some(frame_position(&self.frames[last]))
     }
 }

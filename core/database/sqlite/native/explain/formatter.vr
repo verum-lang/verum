@@ -80,11 +80,11 @@ public fn format_query_plan(tree: &QueryPlanTree) -> Text {
             k = k + 1;
         }
         match tree.find_by_id(id) {
-            base.Some(r) => {
+            Some(r) => {
                 push_text(&mut out, &r.detail);
                 out.push_byte(10 as Byte);
             }
-            base.None => {}
+            None => {}
         }
         let children = tree.children_of(id);
         let mut j: Int = children.len() - 1;

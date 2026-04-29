@@ -20,7 +20,7 @@ mount collections.List;
 mount core.database.sqlite.native.stmt_cache.entry.{CachedStatement};
 
 public type EvictionPolicy is protocol {
-    fn name(&self) -> base.Text;
+    fn name(&self) -> Text;
     /// Pick the index of the entry to evict, or None when no entry
     /// is evictable (every entry is pinned).
     fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int>;
@@ -34,7 +34,7 @@ public type Lru is { unit: Bool };
 public fn lru() -> Lru { Lru { unit: true } }
 
 implement EvictionPolicy for Lru {
-    fn name(&self) -> base.Text { "lru".clone() }
+    fn name(&self) -> Text { "lru".clone() }
     fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
         let mut best: Int = -1;
         let mut best_ts: Int64 = 0 as Int64;
@@ -60,7 +60,7 @@ public type Lfu is { unit: Bool };
 public fn lfu() -> Lfu { Lfu { unit: true } }
 
 implement EvictionPolicy for Lfu {
-    fn name(&self) -> base.Text { "lfu".clone() }
+    fn name(&self) -> Text { "lfu".clone() }
     fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
         let mut best: Int = -1;
         let mut best_count: Int = 0;
@@ -93,7 +93,7 @@ public type Fifo is { unit: Bool };
 public fn fifo() -> Fifo { Fifo { unit: true } }
 
 implement EvictionPolicy for Fifo {
-    fn name(&self) -> base.Text { "fifo".clone() }
+    fn name(&self) -> Text { "fifo".clone() }
     fn pick_victim(&self, entries: &List<CachedStatement>) -> Maybe<Int> {
         let mut i: Int = 0;
         while i < entries.len() {

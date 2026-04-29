@@ -132,41 +132,41 @@ public fn tokenise_query(q: &Text) -> List<Text> {
     out
 }
 
-public fn parse(q: &Text) -> base.Result<MatchExpr, Fts5VtabParseError> {
+public fn parse(q: &Text) -> Result<MatchExpr, Fts5VtabParseError> {
     let mut st = Fts5VtabParseState { tokens: tokenise_query(q), pos: 0 };
-    if st.tokens.len() == 0 { return base.Err(PeUnexpectedEnd); }
+    if st.tokens.len() == 0 { return Err(PeUnexpectedEnd); }
     let r = parse_or(&mut st);
     r
 }
 
-fn parse_or(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabParseError> {
+fn parse_or(st: &mut Fts5VtabParseState) -> Result<MatchExpr, Fts5VtabParseError> {
     let mut lhs = match parse_and(st) {
-        base.Ok(x)  => x,
-        base.Err(e) => { return base.Err(e); }
+        Ok(x)  => x,
+        Err(e) => { return Err(e); }
     };
     while st.pos < st.tokens.len() && st.tokens[st.pos] == "or".clone() {
         st.pos = st.pos + 1;
         let rhs = match parse_and(st) {
-            base.Ok(x)  => x,
-            base.Err(e) => { return base.Err(e); }
+            Ok(x)  => x,
+            Err(e) => { return Err(e); }
         };
         lhs = MeOr(Heap.new(lhs), Heap.new(rhs));
     }
-    base.Ok(lhs)
+    Ok(lhs)
 }
 
-fn parse_and(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabParseError> {
+fn parse_and(st: &mut Fts5VtabParseState) -> Result<MatchExpr, Fts5VtabParseError> {
     let mut lhs = match parse_atom(st) {
-        base.Ok(x)  => x,
-        base.Err(e) => { return base.Err(e); }
+        Ok(x)  => x,
+        Err(e) => { return Err(e); }
     };
     while st.pos < st.tokens.len() {
         let t = &st.tokens[st.pos];
         if t == &"and".clone() {
             st.pos = st.pos + 1;
             let rhs = match parse_atom(st) {
-                base.Ok(x)  => x,
-                base.Err(e) => { return base.Err(e); }
+                Ok(x)  => x,
+                Err(e) => { return Err(e); }
             };
             lhs = MeAnd(Heap.new(lhs), Heap.new(rhs));
         } else if t == &"near".clone() {
@@ -184,40 +184,40 @@ fn parse_and(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabPars
                 }
             }
             let rhs = match parse_atom(st) {
-                base.Ok(x)  => x,
-                base.Err(e) => { return base.Err(e); }
+                Ok(x)  => x,
+                Err(e) => { return Err(e); }
             };
             lhs = MeNear(Heap.new(lhs), distance, Heap.new(rhs));
         } else {
             break;
         }
     }
-    base.Ok(lhs)
+    Ok(lhs)
 }
 
-fn parse_atom(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabParseError> {
-    if st.pos >= st.tokens.len() { return base.Err(PeUnexpectedEnd); }
+fn parse_atom(st: &mut Fts5VtabParseState) -> Result<MatchExpr, Fts5VtabParseError> {
+    if st.pos >= st.tokens.len() { return Err(PeUnexpectedEnd); }
     let t = st.tokens[st.pos].clone();
     // NOT prefix
     if t == "not".clone() {
         st.pos = st.pos + 1;
         let inner = match parse_atom(st) {
-            base.Ok(x)  => x,
-            base.Err(e) => { return base.Err(e); }
+            Ok(x)  => x,
+            Err(e) => { return Err(e); }
         };
-        return base.Ok(MeNot(Heap.new(inner)));
+        return Ok(MeNot(Heap.new(inner)));
     }
     // Parenthesised group
     if t == "(".clone() {
         st.pos = st.pos + 1;
         let inner = match parse_or(st) {
-            base.Ok(x)  => x,
-            base.Err(e) => { return base.Err(e); }
+            Ok(x)  => x,
+            Err(e) => { return Err(e); }
         };
         if st.pos < st.tokens.len() && st.tokens[st.pos] == ")".clone() {
             st.pos = st.pos + 1;
         }
-        return base.Ok(inner);
+        return Ok(inner);
     }
     // Phrase: starts + ends with "
     let bs = t.as_bytes();
@@ -237,10 +237,10 @@ fn parse_atom(st: &mut Fts5VtabParseState) -> base.Result<MatchExpr, Fts5VtabPar
             i = i + 1;
         }
         if cur.len() > 0 { words.push(cur); }
-        return base.Ok(MePhrase(words));
+        return Ok(MePhrase(words));
     }
     st.pos = st.pos + 1;
-    base.Ok(MeTerm(t))
+    Ok(MeTerm(t))
 }
 
 fn parse_int_text(t: &Text) -> Int {

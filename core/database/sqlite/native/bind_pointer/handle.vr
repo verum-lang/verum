@@ -23,7 +23,7 @@ public type TypedPointer is {
     has_deleter: Bool,
 }
 
-public fn new_pointer(tag: base.Text, handle: Int64, has_deleter: Bool) -> TypedPointer {
+public fn new_pointer(tag: Text, handle: Int64, has_deleter: Bool) -> TypedPointer {
     TypedPointer { tag: new_tag(tag), handle: handle, has_deleter: has_deleter }
 }
 
