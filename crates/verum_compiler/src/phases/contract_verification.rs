@@ -1233,14 +1233,24 @@ impl ContractVerificationPhase {
             .span(super::ast_span_to_diagnostic_span(span, None))
             .add_note(format!("Failure category: {}", category));
 
-        // Add counterexample if available
-        if let Some(ce) = counterexample {
+        // Add counterexample iff config opts in. Verifiers may
+        // produce one anyway (cheap once SMT has the model in
+        // hand), but tooling that wants minimal output (CI logs,
+        // batch verify) opts out via
+        // `config.generate_counterexamples = false`.
+        if self.config.generate_counterexamples
+            && let Some(ce) = counterexample
+        {
             builder = builder.help(format!("Counterexample:\n{}", ce));
         }
 
-        // Add suggestions
-        for suggestion in suggestions {
-            builder = builder.help(suggestion.as_str());
+        // Add suggestions iff config opts in. Same gate semantics
+        // as counterexamples — when false the help lines stay
+        // suppressed even if the verifier surfaced suggestions.
+        if self.config.generate_suggestions {
+            for suggestion in suggestions {
+                builder = builder.help(suggestion.as_str());
+            }
         }
 
         builder.build()
@@ -1367,6 +1377,69 @@ mod tests {
         assert_eq!(config.timeout_ms, 30_000);
         assert!(config.generate_counterexamples);
         assert!(config.generate_suggestions);
+    }
+
+    #[test]
+    fn diagnostic_skips_counterexample_when_config_opts_out() {
+        // Pin: setting `generate_counterexamples = false` actually
+        // suppresses the rendering. Before the wire-up, the field
+        // was inert — counterexample lines appeared in diagnostics
+        // regardless of what callers configured.
+        let mut phase = ContractVerificationPhase::new();
+        phase.config.generate_counterexamples = false;
+        phase.config.generate_suggestions = true;
+
+        let mut assignments: verum_common::Map<Text, verum_smt::CounterExampleValue> =
+            verum_common::Map::new();
+        assignments.insert(
+            Text::from("x"),
+            verum_smt::CounterExampleValue::Int(0),
+        );
+        let ce = CounterExample::new(assignments, Text::from("x > 0"));
+        let suggestions: List<Text> = List::from_iter(vec![Text::from("widen the precondition")]);
+        let diag = phase.create_verification_failure_diagnostic_with_severity(
+            &Text::from("f"),
+            "precondition",
+            &Text::from("contract violated"),
+            Some(&ce),
+            &suggestions,
+            FailureCategory::Other,
+            verum_ast::Span::default(),
+            Severity::Warning,
+        );
+        let rendered = format!("{:?}", diag);
+        assert!(
+            !rendered.contains("Counterexample:"),
+            "config.generate_counterexamples=false must suppress the counterexample help: {rendered}"
+        );
+        assert!(
+            rendered.contains("widen the precondition"),
+            "suggestions still rendered when their gate is true: {rendered}"
+        );
+    }
+
+    #[test]
+    fn diagnostic_skips_suggestions_when_config_opts_out() {
+        let mut phase = ContractVerificationPhase::new();
+        phase.config.generate_counterexamples = true;
+        phase.config.generate_suggestions = false;
+
+        let suggestions: List<Text> = List::from_iter(vec![Text::from("widen the precondition")]);
+        let diag = phase.create_verification_failure_diagnostic_with_severity(
+            &Text::from("f"),
+            "precondition",
+            &Text::from("contract violated"),
+            None,
+            &suggestions,
+            FailureCategory::Other,
+            verum_ast::Span::default(),
+            Severity::Warning,
+        );
+        let rendered = format!("{:?}", diag);
+        assert!(
+            !rendered.contains("widen the precondition"),
+            "config.generate_suggestions=false must suppress the suggestion help: {rendered}"
+        );
     }
 
     #[test]
