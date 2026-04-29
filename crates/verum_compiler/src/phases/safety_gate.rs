@@ -81,6 +81,26 @@ impl SafetyPolicy {
 /// when the policy permits everything or no violations are present.
 pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic> {
     let mut diagnostics = List::new();
+
+    // Surface elevated MLS levels via tracing. The
+    // `mls_level` field documents three values (`public`,
+    // `secret`, `top_secret`) where higher levels restrict
+    // operations, but the ops list is forward-looking infra —
+    // no current safety-gate path consults the level at the
+    // walk site. Closes the inert-defense pattern by making
+    // the elevated-level state observable in logs so an
+    // embedder writing `[safety].mls_level = "secret"` sees
+    // the level was reached at the gate, even when no
+    // operation-level gating fires yet.
+    if policy.mls_level.as_str() != "public" {
+        tracing::debug!(
+            "safety_gate: mls_level = {:?} (elevated MLS) — operation-level \
+             restrictions are forward-looking infra; the gate currently logs \
+             the level but does not yet restrict specific operations",
+            policy.mls_level.as_str()
+        );
+    }
+
     // Skip the walk only when EVERY gate is at its permissive
     // default. The `ffi_boundary == "strict"` gate also fires when
     // FFI is allowed (so the policy.ffi == true short-circuit isn't
