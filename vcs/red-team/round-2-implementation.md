@@ -600,11 +600,44 @@ this scale), and `epoch == 0` (generation race must not touch epoch).
 A regression to relaxed ordering or a non-atomic add would surface as
 a final generation count below 40,000.
 
-### 7.2 Hazard-pointer reclamation race
+### 7.2 Hazard-pointer reclamation race — DEFENSE PARTIAL+ 2026-04-29
 
-**Status:** PARTIAL DEFENSE — `core/mem/hazard.vr` implements the standard
-hazard-pointer protocol. Single-reader audit confirms protocol correctness;
-multi-reader stress test pending.
+**Status:** DEFENSE PARTIAL — protocol-level test for the underlying
+CBGR generation counter is now in place. The Verum-language hazard
+pointer in `core/mem/hazard.vr` builds on this primitive; a direct
+multi-thread stress of `hazard.vr` itself awaits the .vr-side
+multi-thread test harness.
+
+**Audit:** `core/mem/hazard.vr` implements the standard hazard-pointer
+protocol; single-reader audit confirms protocol correctness.
+
+**Underlying-primitive guardrail (added 2026-04-29):**
+`crates/verum_common/tests/cbgr_use_after_free_invariant.rs` —
+4 tests pin the CBGR generation-counter use-after-free invariant
+that the higher-level hazard pointer relies on:
+
+- `use_after_free_validate_after_invalidate` — single-threaded
+  baseline: post-invalidate, every validate() returns
+  `ExpiredReference`.
+- `concurrent_readers_respect_invalidate_release_acquire` — 8
+  readers spin-validate while a writer calls `invalidate()`.
+  Release/Acquire synchronisation guarantees no reader observes
+  `Success` after the test's `done` flag is set. The test
+  asserts zero reader observations of post-invalidate
+  `Success` across 8000+ post-invalidate validate calls.
+- `writer_invalidate_then_revalidate_reuse` — pins the
+  ABA-prevention property: a fresh allocation reusing
+  `GEN_INITIAL` cannot be confused with the old one; the
+  identity defence is the address, not the generation alone.
+- `invalidate_is_idempotent_under_contention` — 8 threads ×
+  1000 concurrent `invalidate()` calls leave the header in
+  the invalidated state with no race-induced partial state.
+
+**Verdict:** the protocol-level invariant the hazard pointer
+relies on is now load-bearing. The remaining (PARTIAL) part
+is the multi-thread stress of the .vr-level hazard list, which
+needs a Verum-language multi-thread test harness still in
+infrastructure planning.
 
 ### 7.3 LocalHeap thread-affinity violation — DEFENSE CONFIRMED 2026-04-29
 
@@ -893,7 +926,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 6.2 Side-effect witness | **DEFENSE CONFIRMED** | .vr surface guardrail + 13-test PropertySet algebra invariant (2026-04-29) |
 | 6.3 Stmt refinement | **DEFENSE CONFIRMED** | recheck_function walks let-bindings + requires/ensures (2026-04-28) |
 | 7.1 Gen counter race | **DEFENSE CONFIRMED** | 8-thread × 5K stress test (2026-04-28) |
-| 7.2 Hazard reclamation | PARTIAL | concurrent stress |
+| 7.2 Hazard reclamation | **DEFENSE PARTIAL** | underlying CBGR-counter UAF invariant (4 tests, 2026-04-29); .vr-side multi-thread stress pending Verum-multi-thread harness |
 | 7.3 LocalHeap affinity | **DEFENSE CONFIRMED** | structural (NonNull-is-!Send) + 4-test runtime stress (2026-04-29) |
 | 8.1 LSP fuzz | **DEFENSE CONFIRMED** | 16 adversarial-input tests + 2 real panic paths closed (2026-04-29) |
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
