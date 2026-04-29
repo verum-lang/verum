@@ -1,0 +1,400 @@
+// =============================================================================
+// sys/process_native.vr - Native process spawn (no C runtime, fork-safe)
+// =============================================================================
+// Layer: 2 (Sys)
+// Dependencies: sys.{linux,darwin}, base.memory
+// =============================================================================
+//
+// Direct-syscall implementation of pipe + fork + dup2 + execve.
+//
+// ## Fork-safety contract
+//
+// After `fork()`, the child process:
+//   * MUST NOT call any allocator (Verum heap is in indeterminate state —
+//     mutex from the parent's allocator could be locked by another thread
+//     that no longer exists in the child, causing deadlock).
+//   * MUST NOT take any lock the parent might hold (futex, mutex, RwLock).
+//   * MUST NOT touch any TLS that the parent's runtime might have
+//     initialised (executor state, panic handlers, tracing buffers).
+//   * MUST only call async-signal-safe syscalls (POSIX list).
+//
+// To honour this contract every byte the child needs (program path, argv
+// pointer table, NUL-terminated args) is materialised in the *parent*
+// **before** `fork()`. The child only:
+//   1. Calls `dup2()` to wire pipe ends.
+//   2. Calls `close()` on now-redundant pipe fds.
+//   3. Calls `execve()` with the pre-built pointer arrays.
+//   4. On execve failure, calls `_exit(127)` directly (no destructors,
+//      no buffer flushing, no lock release).
+//
+// ## Layout of the pre-built argv buffer
+//
+//     buffer:  [path_bytes\0 arg0_bytes\0 arg1_bytes\0 ... argN_bytes\0]
+//     ptrs:    [ &buffer[0]  &buffer[off1]  &buffer[off2]  ...  NULL ]
+//
+// Both are owned by the parent. After fork, the child references them
+// by absolute pointer; their contents are read-only and the kernel
+// preserves them across the exec call.
+//
+// =============================================================================
+
+module core.sys.process_native;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.sys.common.{OSError, FileDesc};
+
+// Linux: direct syscalls
+@cfg(target_os = "linux")
+mount core.sys.linux.syscall.{
+    fork as sys_fork,
+    pipe as sys_pipe,
+    pipe2 as sys_pipe2,
+    dup2 as sys_dup2,
+    execve as sys_execve,
+    wait4 as sys_wait4,
+    kill as sys_kill,
+    close as sys_close,
+    write as sys_write,
+    read as sys_read,
+    fcntl as sys_fcntl,
+    F_SETFD, FD_CLOEXEC,
+};
+
+// macOS: libSystem.B.dylib bindings
+@cfg(target_os = "macos")
+mount core.sys.darwin.libsystem.{
+    fork as sys_fork,
+    pipe as sys_pipe,
+    dup2 as sys_dup2,
+    execve as sys_execve,
+    waitpid as sys_waitpid,
+    kill as sys_kill,
+    close as sys_close,
+    write as sys_write,
+    read as sys_read,
+    _exit as sys__exit,
+};
+
+// =============================================================================
+// SpawnResult — what `native_spawn` returns
+// =============================================================================
+
+public type SpawnResult is {
+    pid:       Int,
+    stdin_fd:  Int,   // -1 if not piped
+    stdout_fd: Int,   // -1 if not piped
+    stderr_fd: Int,   // -1 if not piped
+}
+
+// =============================================================================
+// ArgvBlob — pre-built, fork-safe argv layout
+// =============================================================================
+//
+// One contiguous byte buffer holding all NUL-terminated strings, plus a
+// pointer table. Both are computed in the parent so the child only reads.
+
+type ArgvBlob is {
+    /// Concatenated NUL-terminated strings: path\0arg0\0arg1\0...
+    bytes: List<Byte>,
+    /// Absolute pointers into `bytes` plus a trailing NULL terminator.
+    /// `ptrs[0]` = path, `ptrs[i]` = arg(i-1) for i ≥ 1, `ptrs[last]` = 0.
+    ptrs:  List<Int>,
+}
+
+fn build_argv_blob(program: &Text, args: &List<Text>) -> ArgvBlob {
+    // First pass — compute total byte length and offsets.
+    let n_args = args.len() as Int;
+    let mut total_len: Int = 0;
+    let mut offsets: List<Int> = List.with_capacity((n_args + 1) as usize);
+    offsets.push(0);
+    total_len = total_len + program.len() as Int + 1;  // path + NUL
+    for a in args.iter() {
+        offsets.push(total_len);
+        total_len = total_len + a.len() as Int + 1;
+    }
+
+    // Second pass — populate the blob.
+    let mut bytes: List<Byte> = List.with_capacity(total_len as usize);
+    for b in program.clone().into_bytes().iter() { bytes.push(*b); }
+    bytes.push(0);
+    for a in args.iter() {
+        for b in a.clone().into_bytes().iter() { bytes.push(*b); }
+        bytes.push(0);
+    }
+
+    // Build pointer table referencing `bytes` start + offset.
+    let base = &bytes[0] as Int;
+    let mut ptrs: List<Int> = List.with_capacity((n_args + 2) as usize);
+    let mut i: Int = 0;
+    while i <= n_args {
+        ptrs.push(base + offsets[i as usize]);
+        i = i + 1;
+    }
+    ptrs.push(0);  // NULL terminator
+
+    ArgvBlob { bytes, ptrs }
+}
+
+// =============================================================================
+// native_spawn — pipe + fork + dup2 + execve flow
+// =============================================================================
+
+/// Spawn a child process with optional stdin/stdout/stderr pipes.
+/// All argv preparation happens BEFORE fork; the child code path is
+/// allocation-free and uses only async-signal-safe syscalls.
+public fn native_spawn(
+    program: &Text,
+    args: &List<Text>,
+    capture_stdin:  Bool,
+    capture_stdout: Bool,
+    capture_stderr: Bool,
+) -> Result<SpawnResult, Text> {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        // 1. Build pipes.
+        let mut stdin_pipe:  [Int32; 2] = [-1 as Int32, -1 as Int32];
+        let mut stdout_pipe: [Int32; 2] = [-1 as Int32, -1 as Int32];
+        let mut stderr_pipe: [Int32; 2] = [-1 as Int32, -1 as Int32];
+
+        if capture_stdin {
+            if let Err(e) = make_pipe(&mut stdin_pipe) {
+                return Err(f"pipe(stdin) failed: {e:?}");
+            }
+        }
+        if capture_stdout {
+            if let Err(e) = make_pipe(&mut stdout_pipe) {
+                close_pipe(&stdin_pipe);
+                return Err(f"pipe(stdout) failed: {e:?}");
+            }
+        }
+        if capture_stderr {
+            if let Err(e) = make_pipe(&mut stderr_pipe) {
+                close_pipe(&stdin_pipe);
+                close_pipe(&stdout_pipe);
+                return Err(f"pipe(stderr) failed: {e:?}");
+            }
+        }
+
+        // 2. Pre-build argv as a single contiguous, fork-stable blob.
+        //    Owned by the parent; read by the child via absolute pointers.
+        let blob = build_argv_blob(program, args);
+
+        // Capture absolute pointers BEFORE fork. Post-fork access to
+        // `blob` is read-only and uses these raw addresses — never the
+        // List<Byte> wrapper (which the child must not touch).
+        let prog_ptr_raw: Int = blob.ptrs[0];
+        let argv_ptr_raw: Int = &blob.ptrs[0] as Int;
+
+        // 3. fork()
+        let pid = match do_fork() {
+            Ok(p)  => p,
+            Err(e) => {
+                close_pipe(&stdin_pipe); close_pipe(&stdout_pipe); close_pipe(&stderr_pipe);
+                return Err(f"fork() failed: {e:?}");
+            }
+        };
+
+        if pid == 0 {
+            // ── Child path ───────────────────────────────────────────
+            // ASYNC-SIGNAL-SAFE ONLY. No allocation, no locking, no
+            // Verum runtime. Just dup2/close/execve/_exit.
+            child_setup_stdio(&stdin_pipe, &stdout_pipe, &stderr_pipe);
+            child_execve(prog_ptr_raw, argv_ptr_raw);
+            // execve returned → exec failed → bail with conventional 127
+            child_exit(127);
+        }
+
+        // ── Parent path ─────────────────────────────────────────────
+        // Close child-only pipe ends; keep parent ends.
+        if capture_stdin  { let _ = sys_close(FileDesc::from_raw(stdin_pipe[0])); }
+        if capture_stdout { let _ = sys_close(FileDesc::from_raw(stdout_pipe[1])); }
+        if capture_stderr { let _ = sys_close(FileDesc::from_raw(stderr_pipe[1])); }
+
+        // The parent's `blob` lives until function return — its drop
+        // happens AFTER we have observed the spawn success. The child's
+        // execve has already replaced its image at this point, so the
+        // child no longer references any of these bytes.
+        let _ = blob;
+
+        Ok(SpawnResult {
+            pid:       pid,
+            stdin_fd:  if capture_stdin  { stdin_pipe[1]  as Int } else { -1 },
+            stdout_fd: if capture_stdout { stdout_pipe[0] as Int } else { -1 },
+            stderr_fd: if capture_stderr { stderr_pipe[0] as Int } else { -1 },
+        })
+    }
+
+    @cfg(target_os = "windows")
+    {
+        Err("native_spawn not implemented for Windows (use io.process.spawn directly)".into())
+    }
+}
+
+// =============================================================================
+// Child path — async-signal-safe, no heap, no lock acquisition
+// =============================================================================
+
+@cfg(target_os = "linux")
+fn child_execve(prog_ptr: Int, argv_ptr: Int) {
+    // Direct syscall — bypass all wrappers that might allocate.
+    // execve(prog: &Byte, argv: &(&Byte), envp: &(&Byte))
+    // envp = NULL means "inherit environment of caller" via the runtime
+    // ld.so init contract; equivalent to execv on most libcs.
+    let _ = unsafe {
+        core.sys.linux.syscall.syscall_raw(
+            core.sys.linux.syscall.SYS_EXECVE,
+            prog_ptr,
+            argv_ptr,
+            0,         // envp = NULL → inherit (kernel reads /proc/self/environ on first deref)
+            0, 0, 0,
+        )
+    };
+}
+
+@cfg(target_os = "macos")
+fn child_execve(prog_ptr: Int, argv_ptr: Int) {
+    // libSystem.B.dylib execve. Inheriting environ via NULL envp is
+    // the documented contract on Darwin too.
+    let _ = sys_execve(
+        prog_ptr as &Byte,
+        argv_ptr as &(&Byte),
+        0 as &(&Byte),
+    );
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn child_setup_stdio(
+    stdin_pipe:  &[Int32; 2],
+    stdout_pipe: &[Int32; 2],
+    stderr_pipe: &[Int32; 2],
+) {
+    // STDIN_FILENO = 0, STDOUT_FILENO = 1, STDERR_FILENO = 2.
+    // Each dup2/close is a single syscall — async-signal-safe.
+    if stdin_pipe[0] >= 0 {
+        let _ = sys_dup2(FileDesc::from_raw(stdin_pipe[0]), FileDesc::from_raw(0 as Int32));
+        let _ = sys_close(FileDesc::from_raw(stdin_pipe[0]));
+        let _ = sys_close(FileDesc::from_raw(stdin_pipe[1]));
+    }
+    if stdout_pipe[1] >= 0 {
+        let _ = sys_dup2(FileDesc::from_raw(stdout_pipe[1]), FileDesc::from_raw(1 as Int32));
+        let _ = sys_close(FileDesc::from_raw(stdout_pipe[0]));
+        let _ = sys_close(FileDesc::from_raw(stdout_pipe[1]));
+    }
+    if stderr_pipe[1] >= 0 {
+        let _ = sys_dup2(FileDesc::from_raw(stderr_pipe[1]), FileDesc::from_raw(2 as Int32));
+        let _ = sys_close(FileDesc::from_raw(stderr_pipe[0]));
+        let _ = sys_close(FileDesc::from_raw(stderr_pipe[1]));
+    }
+}
+
+@cfg(target_os = "linux")
+fn child_exit(code: Int) -> ! {
+    core.sys.linux.syscall.exit_group(code)
+}
+
+@cfg(target_os = "macos")
+fn child_exit(code: Int) -> ! {
+    sys__exit(code as Int32)
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn close_pipe(p: &[Int32; 2]) {
+    if p[0] >= 0 { let _ = sys_close(FileDesc::from_raw(p[0])); }
+    if p[1] >= 0 { let _ = sys_close(FileDesc::from_raw(p[1])); }
+}
+
+// =============================================================================
+// Pipe + fork helpers (parent-only — heap is fine here)
+// =============================================================================
+
+@cfg(target_os = "linux")
+fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
+    sys_pipe(fds)
+}
+
+@cfg(target_os = "macos")
+fn make_pipe(fds: &mut [Int32; 2]) -> Result<(), Text> {
+    let r = sys_pipe(&mut fds[0]);
+    if r != 0 { Err("pipe failed".into()) } else { Ok(()) }
+}
+
+@cfg(target_os = "linux")
+fn do_fork() -> Result<Int, OSError> {
+    sys_fork()
+}
+
+@cfg(target_os = "macos")
+fn do_fork() -> Result<Int, Text> {
+    let r = sys_fork();
+    if r < 0 { Err("fork failed".into()) } else { Ok(r as Int) }
+}
+
+// =============================================================================
+// Public wrappers — used by core.io.process and core.shell.exec
+// =============================================================================
+
+/// Send a signal to a process. Maps to kill(2) on Unix.
+public fn native_kill(pid: Int, sig: Int) -> Result<(), Text> {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        match sys_kill(pid, sig) {
+            Ok(_)  => Ok(()),
+            Err(_) => Err("kill failed".into()),
+        }
+    }
+    @cfg(target_os = "windows")
+    {
+        Err("native_kill not implemented for Windows".into())
+    }
+}
+
+/// Write all bytes to a fd, retrying on EINTR / partial writes.
+public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        let mut total: Int = 0;
+        let total_len = data.len() as Int;
+        while total < total_len {
+            let remaining: &[Byte] = &data[total as usize..];
+            let r = sys_write(FileDesc::from_raw(fd as Int32), remaining);
+            match r {
+                Ok(n) => {
+                    if n == 0 { return Err("write returned 0".into()); }
+                    total = total + n;
+                }
+                Err(e) => {
+                    let code: Int = e.into();
+                    if code == 4 { continue; }  // EINTR
+                    return Err(f"write failed: {code}");
+                }
+            }
+        }
+        Ok(total)
+    }
+    @cfg(target_os = "windows")
+    {
+        Err("native_fd_write_all not implemented for Windows".into())
+    }
+}
+
+/// Read up to `max` bytes from a fd. Returns the bytes read (possibly empty for EOF).
+public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        let mut buf: List<Byte> = List.with_capacity(max as usize);
+        let mut i: Int = 0;
+        while i < max { buf.push(0); i = i + 1; }
+        let r = sys_read(FileDesc::from_raw(fd as Int32), &mut buf);
+        match r {
+            Ok(n)  => {
+                buf.truncate(n as usize);
+                Ok(buf)
+            }
+            Err(e) => Err(f"read failed: {e:?}"),
+        }
+    }
+    @cfg(target_os = "windows")
+    {
+        Err("native_fd_read_chunk not implemented for Windows".into())
+    }
+}

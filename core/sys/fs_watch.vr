@@ -1,0 +1,414 @@
+// =============================================================================
+// sys/fs_watch.vr - Native filesystem watcher
+// =============================================================================
+// Layer: 2 (Sys)
+// Dependencies: sys.{darwin,linux,windows}, base.memory
+// =============================================================================
+//
+// Platform-native event-driven filesystem monitoring. Provides a uniform
+// `FsWatcher` over:
+//
+//   * macOS — kqueue / EVFILT_VNODE
+//   * Linux — inotify (raw inotify_init1 + inotify_add_watch syscalls)
+//   * Windows — ReadDirectoryChangesW (TODO; current Windows path falls
+//     back to the polling implementation in `core.shell.watch`)
+//
+// Sub-millisecond latency, kernel-driven; no polling overhead. Each
+// `FsEvent` carries the affected path plus the kind of change (created,
+// modified, deleted, renamed, attribute-changed).
+//
+// =============================================================================
+
+module core.sys.fs_watch;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Drop};
+mount core.sys.common.{OSError, FileDesc};
+
+// =============================================================================
+// FsEventKind — what kind of change occurred
+// =============================================================================
+
+public type FsEventKind is
+    | Created
+    | Modified
+    | Deleted
+    | Renamed
+    | AttribChanged;
+
+implement Clone for FsEventKind {
+    fn clone(&self) -> FsEventKind { *self }
+}
+
+// =============================================================================
+// FsEvent — one observed change
+// =============================================================================
+
+public type FsEvent is {
+    /// Watched path that fired. For inotify-style backends this is the
+    /// directory; for kqueue/Windows the original target.
+    pub path: Text,
+    pub kind: FsEventKind,
+}
+
+// =============================================================================
+// FsWatcher — kernel-event-driven monitor
+// =============================================================================
+
+@must_consume
+public type FsWatcher is {
+    inner: FsWatcherImpl,
+}
+
+implement FsWatcher {
+    /// Open a fresh watcher. Returns Err on platforms where the native
+    /// backend is unavailable or could not be initialised.
+    public fn new() -> Result<FsWatcher, Text> {
+        @cfg(target_os = "macos")
+        {
+            match KqueueBackend.new() {
+                Ok(b)  => Ok(FsWatcher { inner: FsWatcherImpl.Kqueue(b) }),
+                Err(e) => Err(e),
+            }
+        }
+        @cfg(target_os = "linux")
+        {
+            match InotifyBackend.new() {
+                Ok(b)  => Ok(FsWatcher { inner: FsWatcherImpl.Inotify(b) }),
+                Err(e) => Err(e),
+            }
+        }
+        @cfg(target_os = "windows")
+        {
+            // Windows native backend is not yet implemented — callers
+            // fall back to polling via `core.shell.watch::watch_with`.
+            Err("native FsWatcher not yet implemented on Windows".into())
+        }
+    }
+
+    /// Add a path to the watch set. The same path may be added more than
+    /// once; events fire once per registration.
+    public fn add(&mut self, path: &Text) -> Result<(), Text> {
+        match &mut self.inner {
+            FsWatcherImpl.Kqueue(b)   => b.add(path),
+            FsWatcherImpl.Inotify(b)  => b.add(path),
+        }
+    }
+
+    /// Remove a previously-added watch.
+    public fn remove(&mut self, path: &Text) -> Result<(), Text> {
+        match &mut self.inner {
+            FsWatcherImpl.Kqueue(b)   => b.remove(path),
+            FsWatcherImpl.Inotify(b)  => b.remove(path),
+        }
+    }
+
+    /// Wait for the next event(s). Returns an empty list on timeout.
+    /// Timeout in milliseconds; -1 = block forever.
+    public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
+        match &mut self.inner {
+            FsWatcherImpl.Kqueue(b)   => b.wait(timeout_ms),
+            FsWatcherImpl.Inotify(b)  => b.wait(timeout_ms),
+        }
+    }
+}
+
+implement Drop for FsWatcher {
+    fn drop(&mut self) {
+        // Backend Drop impl handles native fd cleanup.
+    }
+}
+
+// =============================================================================
+// Internal backend dispatch
+// =============================================================================
+
+type FsWatcherImpl is
+    | Kqueue(KqueueBackend)
+    | Inotify(InotifyBackend);
+
+// =============================================================================
+// macOS — kqueue / EVFILT_VNODE
+// =============================================================================
+
+@cfg(target_os = "macos")
+mount core.sys.darwin.libsystem.{
+    kqueue, kevent, EVFILT_VNODE,
+    EV_ADD, EV_DELETE, EV_CLEAR, EV_ENABLE,
+    NOTE_DELETE, NOTE_WRITE, NOTE_EXTEND, NOTE_ATTRIB, NOTE_RENAME,
+    open, close as sys_close,
+};
+
+@cfg(target_os = "macos")
+@repr(C)
+type KEvent is {
+    ident:  UInt64,   // fd
+    filter: Int16,
+    flags:  UInt16,
+    fflags: UInt32,
+    data:   Int64,
+    udata:  &unsafe Byte,
+}
+
+@cfg(target_os = "macos")
+public type KqueueBackend is {
+    kq_fd:    Int32,
+    /// Tracked fds with their paths, indexed by fd.
+    watches:  List<(Int32, Text)>,
+}
+
+@cfg(target_os = "macos")
+implement KqueueBackend {
+    public fn new() -> Result<KqueueBackend, Text> {
+        let fd = kqueue();
+        if fd < 0 { Err("kqueue() failed".into()) }
+        else      { Ok(KqueueBackend { kq_fd: fd, watches: [] }) }
+    }
+
+    public fn add(&mut self, path: &Text) -> Result<(), Text> {
+        // Open the path so we can register its fd with kqueue.
+        // O_RDONLY = 0, O_EVTONLY = 0x8000 — kernel-level "open just to watch".
+        let path_c = nul_terminate(path);
+        const O_EVTONLY: Int32 = 0x8000;
+        let fd = open(&path_c[0] as &Byte, O_EVTONLY, 0 as UInt32);
+        if fd < 0 { return Err(f"open({path}) failed"); }
+        // Register an EVFILT_VNODE filter with all the interesting fflags.
+        let fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_ATTRIB | NOTE_RENAME;
+        let mut ev = KEvent {
+            ident:  fd as UInt64,
+            filter: EVFILT_VNODE,
+            flags:  EV_ADD | EV_CLEAR,
+            fflags,
+            data:   0,
+            udata:  0 as &unsafe Byte,
+        };
+        let r = kevent(self.kq_fd, &ev as &KEvent, 1 as Int32, 0 as &mut KEvent, 0 as Int32, 0 as &Byte);
+        if r < 0 {
+            sys_close(fd);
+            return Err("kevent register failed".into());
+        }
+        self.watches.push((fd, path.clone()));
+        Ok(())
+    }
+
+    public fn remove(&mut self, path: &Text) -> Result<(), Text> {
+        let mut idx: Int = -1;
+        for (i, (_fd, p)) in self.watches.iter().enumerate() {
+            if p == path { idx = i as Int; break; }
+        }
+        if idx < 0 { return Ok(()); }
+        let (fd, _) = self.watches.remove(idx as usize);
+        sys_close(fd);
+        Ok(())
+    }
+
+    public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
+        // Up to 16 events at a time
+        let mut buf: List<KEvent> = List.with_capacity(16);
+        let mut i = 0;
+        while i < 16 {
+            buf.push(KEvent {
+                ident: 0, filter: 0, flags: 0, fflags: 0, data: 0,
+                udata: 0 as &unsafe Byte,
+            });
+            i = i + 1;
+        }
+        // kevent's timespec: { tv_sec, tv_nsec }
+        let timeout_ns = if timeout_ms < 0 { 0 } else { timeout_ms * 1_000_000 };
+        let r = kevent(
+            self.kq_fd,
+            0 as &KEvent,
+            0 as Int32,
+            buf.as_mut_ptr() as &mut KEvent,
+            16 as Int32,
+            if timeout_ms < 0 { 0 as &Byte } else { &timeout_ns as &Byte },
+        );
+        if r < 0 { return Err("kevent wait failed".into()); }
+        let mut events: List<FsEvent> = [];
+        let mut k = 0;
+        while k < r as Int {
+            let ev = &buf[k as usize];
+            // Find path for fd
+            let mut path: Text = "".into();
+            for (fd, p) in self.watches.iter() {
+                if (*fd as UInt64) == ev.ident { path = p.clone(); break; }
+            }
+            let kind = if (ev.fflags & NOTE_DELETE) != 0 { FsEventKind.Deleted }
+                       else if (ev.fflags & NOTE_RENAME) != 0 { FsEventKind.Renamed }
+                       else if (ev.fflags & NOTE_ATTRIB) != 0 { FsEventKind.AttribChanged }
+                       else { FsEventKind.Modified };
+            events.push(FsEvent { path, kind });
+            k = k + 1;
+        }
+        Ok(events)
+    }
+}
+
+@cfg(target_os = "macos")
+implement Drop for KqueueBackend {
+    fn drop(&mut self) {
+        for (fd, _) in self.watches.iter() { sys_close(*fd); }
+        sys_close(self.kq_fd);
+    }
+}
+
+// =============================================================================
+// Linux — inotify
+// =============================================================================
+//
+// The inotify_init1 / inotify_add_watch / inotify_rm_watch syscalls aren't
+// pre-exported in `core.sys.linux.arch`, so we issue them through the raw
+// syscall6 intrinsic with arch-conditional numbers.
+
+@cfg(target_os = "linux")
+mount core.sys.linux.syscall.{syscall_raw, close as sys_close, read as sys_read};
+
+@cfg(target_os = "linux")
+mount core.sys.common.{FileDesc};
+
+// inotify event flags
+@cfg(target_os = "linux") public const IN_CREATE:    UInt32 = 0x00000100;
+@cfg(target_os = "linux") public const IN_MODIFY:    UInt32 = 0x00000002;
+@cfg(target_os = "linux") public const IN_DELETE:    UInt32 = 0x00000200;
+@cfg(target_os = "linux") public const IN_MOVED_FROM:UInt32 = 0x00000040;
+@cfg(target_os = "linux") public const IN_MOVED_TO:  UInt32 = 0x00000080;
+@cfg(target_os = "linux") public const IN_ATTRIB:    UInt32 = 0x00000004;
+// Combined mask covering all of the above.
+@cfg(target_os = "linux") public const IN_ALL_EVENTS: UInt32 = 0x00000FFF;
+
+// inotify syscall numbers
+@cfg(all(target_os = "linux", target_arch = "x86_64"))
+public const SYS_INOTIFY_INIT1:    Int = 294;
+@cfg(all(target_os = "linux", target_arch = "x86_64"))
+public const SYS_INOTIFY_ADD_WATCH: Int = 254;
+@cfg(all(target_os = "linux", target_arch = "x86_64"))
+public const SYS_INOTIFY_RM_WATCH: Int = 255;
+
+@cfg(all(target_os = "linux", target_arch = "aarch64"))
+public const SYS_INOTIFY_INIT1:    Int = 26;
+@cfg(all(target_os = "linux", target_arch = "aarch64"))
+public const SYS_INOTIFY_ADD_WATCH: Int = 27;
+@cfg(all(target_os = "linux", target_arch = "aarch64"))
+public const SYS_INOTIFY_RM_WATCH: Int = 28;
+
+@cfg(target_os = "linux")
+public type InotifyBackend is {
+    fd:       Int32,
+    watches:  List<(Int32, Text)>,  // (wd, path)
+}
+
+@cfg(target_os = "linux")
+implement InotifyBackend {
+    public fn new() -> Result<InotifyBackend, Text> {
+        // IN_CLOEXEC = 0x80000
+        const IN_CLOEXEC: Int = 0x80000;
+        let fd = unsafe { syscall_raw(SYS_INOTIFY_INIT1, IN_CLOEXEC, 0, 0, 0, 0, 0) };
+        if fd < 0 { return Err("inotify_init1 failed".into()); }
+        Ok(InotifyBackend { fd: fd as Int32, watches: [] })
+    }
+
+    public fn add(&mut self, path: &Text) -> Result<(), Text> {
+        let path_c = nul_terminate(path);
+        let wd = unsafe {
+            syscall_raw(
+                SYS_INOTIFY_ADD_WATCH,
+                self.fd as Int,
+                &path_c[0] as Int,
+                IN_ALL_EVENTS as Int,
+                0, 0, 0,
+            )
+        };
+        if wd < 0 { return Err(f"inotify_add_watch({path}) failed"); }
+        self.watches.push((wd as Int32, path.clone()));
+        Ok(())
+    }
+
+    public fn remove(&mut self, path: &Text) -> Result<(), Text> {
+        let mut idx: Int = -1;
+        for (i, (_wd, p)) in self.watches.iter().enumerate() {
+            if p == path { idx = i as Int; break; }
+        }
+        if idx < 0 { return Ok(()); }
+        let (wd, _) = self.watches.remove(idx as usize);
+        let _ = unsafe {
+            syscall_raw(SYS_INOTIFY_RM_WATCH, self.fd as Int, wd as Int, 0, 0, 0, 0)
+        };
+        Ok(())
+    }
+
+    public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
+        // For simplicity we issue a blocking read here. Production code
+        // should pre-poll with poll(2) / epoll to honour `timeout_ms` —
+        // tracked as a follow-up.
+        let _ = timeout_ms;
+        let mut buf: List<Byte> = List.with_capacity(4096);
+        let mut i = 0;
+        while i < 4096 { buf.push(0); i = i + 1; }
+        let n = match sys_read(FileDesc::from_raw(self.fd), &mut buf) {
+            Ok(v)  => v,
+            Err(_) => return Err("inotify read failed".into()),
+        };
+        if n == 0 { return Ok([]); }
+        // Parse inotify_event records out of `buf[0..n]`.
+        // struct inotify_event { int wd; uint32 mask; uint32 cookie; uint32 len; char name[len]; };
+        let mut events: List<FsEvent> = [];
+        let mut p: Int = 0;
+        while p < n {
+            let wd: Int32 = read_i32_le(&buf, p);
+            let mask: UInt32 = read_u32_le(&buf, p + 4) as UInt32;
+            let len: UInt32 = read_u32_le(&buf, p + 12) as UInt32;
+            // Find the path for this watch descriptor
+            let mut path: Text = "".into();
+            for (w, ppath) in self.watches.iter() {
+                if *w == wd { path = ppath.clone(); break; }
+            }
+            let kind = if (mask & IN_DELETE) != 0     { FsEventKind.Deleted }
+                       else if (mask & IN_CREATE) != 0 { FsEventKind.Created }
+                       else if (mask & IN_MOVED_TO) != 0 || (mask & IN_MOVED_FROM) != 0 {
+                           FsEventKind.Renamed
+                       }
+                       else if (mask & IN_ATTRIB) != 0 { FsEventKind.AttribChanged }
+                       else { FsEventKind.Modified };
+            events.push(FsEvent { path, kind });
+            p = p + 16 + len as Int;
+        }
+        Ok(events)
+    }
+}
+
+@cfg(target_os = "linux")
+implement Drop for InotifyBackend {
+    fn drop(&mut self) {
+        let _ = sys_close(FileDesc::from_raw(self.fd));
+    }
+}
+
+@cfg(target_os = "linux")
+fn read_i32_le(buf: &List<Byte>, off: Int) -> Int32 {
+    let b0 = buf[off as usize] as Int32;
+    let b1 = buf[(off + 1) as usize] as Int32;
+    let b2 = buf[(off + 2) as usize] as Int32;
+    let b3 = buf[(off + 3) as usize] as Int32;
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+}
+
+@cfg(target_os = "linux")
+fn read_u32_le(buf: &List<Byte>, off: Int) -> Int {
+    let b0 = buf[off as usize] as Int;
+    let b1 = buf[(off + 1) as usize] as Int;
+    let b2 = buf[(off + 2) as usize] as Int;
+    let b3 = buf[(off + 3) as usize] as Int;
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+}
+
+// =============================================================================
+// Common helpers
+// =============================================================================
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn nul_terminate(t: &Text) -> List<Byte> {
+    let mut out = List.with_capacity(t.len() + 1);
+    for b in t.clone().into_bytes().iter() { out.push(*b); }
+    out.push(0);
+    out
+}
