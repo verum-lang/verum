@@ -96,6 +96,57 @@ impl SemanticAnalysisPhase {
         self
     }
 
+    /// Enable or disable higher-kinded types (`F: Type -> Type` in
+    /// generic params). Closes the inert-defense pattern around
+    /// `[types].higher_kinded` at the run_common_pipeline boundary —
+    /// pre-fix the field landed on the manifest but flowed only via
+    /// the full CompilationPipeline path; this makes it reachable
+    /// from the API entry-point too.
+    pub fn with_higher_kinded_enabled(mut self, enabled: bool) -> Self {
+        self.higher_kinded_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable universe polymorphism (`Type(u)`,
+    /// `@universe_poly`). Closes the inert-defense pattern around
+    /// `[types].universe_polymorphism`.
+    pub fn with_universe_poly_enabled(mut self, enabled: bool) -> Self {
+        self.universe_poly_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable coinductive types (`codata` declarations
+    /// with copatterns). Closes the inert-defense pattern around
+    /// `[types].coinductive`.
+    pub fn with_coinductive_enabled(mut self, enabled: bool) -> Self {
+        self.coinductive_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable quotient types (HIT-based types for
+    /// modular equivalence). Closes the inert-defense pattern
+    /// around `[types].quotient`.
+    pub fn with_quotient_enabled(mut self, enabled: bool) -> Self {
+        self.quotient_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable automatic protocol-implementation
+    /// resolution. Closes the inert-defense pattern around
+    /// `[types].instance_search`.
+    pub fn with_instance_search_enabled(mut self, enabled: bool) -> Self {
+        self.instance_search_enabled = enabled;
+        self
+    }
+
+    /// Set the maximum coherence-check depth for instance
+    /// resolution. Closes the inert-defense pattern around
+    /// `[types].coherence_check_depth` at the API entry-point.
+    pub fn with_coherence_check_depth(mut self, depth: u32) -> Self {
+        self.coherence_check_depth = depth;
+        self
+    }
+
     /// Create a semantic analysis phase with verified contracts
     pub fn with_contracts(mut self, registry: VerifiedContractRegistry) -> Self {
         self.verified_contracts = Some(registry);
