@@ -157,6 +157,38 @@ pub use universe_ascent::{KappaTier, check_universe_ascent_v2};
 pub mod cofibration;
 pub use cofibration::{Clause, FaceFormula, FaceLit};
 
+/// Native ordinal arithmetic — Cantor normal form + inaccessible
+/// cardinals + countable suprema.  Replaces ad-hoc `Int` placeholders
+/// (999_999 = ω-1 etc.) used pre-this-module.  Supports decidable
+/// `lt` / `succ` / `is_regular` / `is_limit` / `is_inaccessible` on
+/// the Cantor-normal-form fragment + κ-tower; `Sup` of countable
+/// family for ordinals beyond Cantor normal form (`ε_0` and above).
+pub mod ordinal;
+pub use ordinal::Ordinal;
+
+/// Native (∞,n)-categorical kernel infrastructure (V0).  No mainstream
+/// proof assistant carries first-class ∞-categorical reasoning in
+/// its kernel; this is Verum's novel contribution.  Ships:
+///
+///   * `InfinityCategory` / `InfinityMorphism` / `InfinityEquivalence`
+///     — native CoreTerm-adjacent representations.
+///   * `identity_is_equivalence(x, n)` — the fundamental kernel
+///     rule that `id_X` is an (∞,n)-equivalence for every `n: Ordinal`.
+///     Discharges MSFS Theorem 5.1's id_X-violates-Π_4 step in-kernel
+///     for every concrete level.
+///   * `is_equivalence_at(f, n, audit, ctx)` — V0 equivalence-decision
+///     rule with explicit `BridgeAudit` for limit-level / inaccessible
+///     cases.
+///   * `compose(f, g)` + `compose_is_associative(f, g, h)` — native
+///     composition with strict associativity at level 1.
+///
+/// V1+ promotion paths documented in module-level docs.
+pub mod infinity_category;
+pub use infinity_category::{
+    CellLevel, InfinityCategory, InfinityEquivalence, InfinityMorphism,
+    compose, compose_is_associative, identity_is_equivalence, is_equivalence_at,
+};
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
