@@ -804,19 +804,11 @@ impl MacroExpansionPhase {
                 content: value,
             },
             ParsedLiteral::ShellCmd { parts, source } => {
-                // Lower `sh#"..."` to a tagged literal carrying the original
-                // source text. Full Call-AST synthesis (resolving `core.shell.exec.sh`,
-                // wrapping each ${expr} in Escaper.posix(&expr), concatenating
-                // through `+`) requires AST builder helpers that aren't yet
-                // stabilised in this crate — tracked in #51-followup.
-                //
-                // Until that lands, the runtime `sh()` function accepts the
-                // tagged-literal form and treats it as a plain Text command.
-                let _ = parts;
-                LiteralKind::Tagged {
-                    tag:     "sh".to_string().into(),
-                    content: source,
-                }
+                // Lower `sh#"prog ${arg} more"` into a `sh(text)` call where
+                // `text` is the `+`-concatenation of literal segments and per-
+                // interpolation `Escaper.posix(&expr)` calls.  Plain literals
+                // (no interpolations) collapse to `sh("...")`.
+                return self.lower_shell_cmd(parts, &source, span);
             }
         };
 
@@ -831,13 +823,118 @@ impl MacroExpansionPhase {
         })
     }
 
-    // synth_sh_call / synth_shell_template_text were prototype helpers for
-    // emitting a real `core.shell.exec.sh(<text>)` Call AST per `sh#"..."`
-    // literal.  They were written against AST builder shapes that have
-    // since shifted — keeping them here as dead code blocked the build.
-    // The lowering today preserves the literal as a Tagged token and
-    // relies on the runtime `sh()` accepting it.  Restoring the typed-AST
-    // pass is tracked in a follow-up.
+    /// Lower a parsed `sh#"..."` literal into a real Call AST node:
+    ///
+    ///     sh(<lit0> + Escaper.posix(&<expr1>) + <lit1> + ...)
+    ///
+    /// Plain literals with no interpolations collapse to `sh("text")`.
+    fn lower_shell_cmd(
+        &self,
+        parts:  verum_common::List<(u8, verum_common::Text)>,
+        source: &verum_common::Text,
+        span:   Span,
+    ) -> Result<Expr, Diagnostic> {
+        use verum_ast::expr::{BinOp, ExprKind as EK, UnOp};
+        use verum_ast::literal::{Literal as AstLit, LiteralKind, StringLit};
+        use verum_ast::ty::{Ident, Path};
+
+        // Helper: literal Text expression.
+        let mk_lit = |s: verum_common::Text| Expr::new(
+            EK::Literal(AstLit {
+                kind: LiteralKind::Text(StringLit::Regular(s)),
+                span,
+            }),
+            span,
+        );
+
+        // Helper: parse expression source via VerumParser. Errors map to a
+        // structured Diagnostic pinning the literal location.  We pass the
+        // dummy FileId — the resulting Expr inherits `span` from its
+        // surrounding sh#"..." literal at use-site so source attribution
+        // points back to the literal, not to the synthetic re-parse buffer.
+        let file_id = verum_common::FileId::dummy();
+        let parse_expr = |src: &verum_common::Text| -> Result<Expr, Diagnostic> {
+            let parser = verum_fast_parser::VerumParser::new();
+            parser.parse_expr_str(src.as_str(), file_id).map_err(|errs| {
+                verum_diagnostics::DiagnosticBuilder::error()
+                    .message(verum_common::Text::from(format!(
+                        "failed to parse interpolation in sh#\"{}\": {:?}",
+                        source.as_str(), errs,
+                    )))
+                    .build()
+            })
+        };
+
+        // Helper: Escaper.posix(&<expr>)
+        let mk_escape = |inner: Expr| -> Expr {
+            let escaper = Expr::new(
+                EK::Path(Path::single(Ident::new("Escaper", span))),
+                span,
+            );
+            let posix_method = Expr::new(
+                EK::MethodCall {
+                    receiver: Box::new(escaper),
+                    method:   Ident::new("posix", span),
+                    type_args: verum_common::List::new(),
+                    args: verum_common::List::from(vec![Expr::new(
+                        EK::Unary { op: UnOp::Ref, expr: Box::new(inner) },
+                        span,
+                    )]),
+                },
+                span,
+            );
+            posix_method
+        };
+
+        // Combine all parts via repeated `+`.
+        let mut acc: Option<Expr> = None;
+        for (kind, payload) in parts.iter() {
+            let part_expr = match *kind {
+                0u8 => mk_lit(payload.clone()),
+                1u8 => mk_escape(parse_expr(payload)?),
+                2u8 => {
+                    // $unsafe{...} — coerce to Text via .to_text() (no escape).
+                    let inner = parse_expr(payload)?;
+                    Expr::new(
+                        EK::MethodCall {
+                            receiver: Box::new(inner),
+                            method:   Ident::new("to_text", span),
+                            type_args: verum_common::List::new(),
+                            args: verum_common::List::new(),
+                        },
+                        span,
+                    )
+                }
+                _ => continue,
+            };
+            acc = Some(match acc {
+                None => part_expr,
+                Some(prev) => Expr::new(
+                    EK::Binary {
+                        op:    BinOp::Add,
+                        left:  Box::new(prev),
+                        right: Box::new(part_expr),
+                    },
+                    span,
+                ),
+            });
+        }
+        let text_expr = acc.unwrap_or_else(|| mk_lit(verum_common::Text::from("")));
+
+        // Wrap in `sh(text_expr)` — relies on `core.shell.exec.sh` being in scope.
+        let sh_path = Expr::new(
+            EK::Path(Path::single(Ident::new("sh", span))),
+            span,
+        );
+        Ok(Expr::new(
+            EK::Call {
+                func: Box::new(sh_path),
+                type_args: verum_common::List::new(),
+                args: verum_common::List::from(vec![text_expr]),
+            },
+            span,
+        ))
+    }
 
     /// Convert a ConstValue (from meta function execution) to an AST Expr
     ///
