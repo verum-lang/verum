@@ -87,6 +87,13 @@ pub mod proof_drafting;
 /// + their algebraic laws.  Consumed by LSP / docs / `verum tactic`
 /// CLI.
 pub mod tactic_combinator;
+/// Per-theorem closure-hash incremental verification cache.  Skip
+/// the kernel re-check when the closure hash matches and the cached
+/// verdict was Ok.  Cache key includes `verum_kernel::VVA_VERSION`
+/// so any kernel-rule edit invalidates ALL caches.  Single trait
+/// boundary [`closure_cache::IncrementalCacheStore`] +
+/// memory-backed + filesystem-backed reference impls.
+pub mod closure_cache;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;

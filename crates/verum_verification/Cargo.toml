@@ -45,6 +45,7 @@ blake3 = { workspace = true }    # For content hashing (unified with compiler)
 proptest = { workspace = true }
 quickcheck = { workspace = true }
 criterion = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 default = []
