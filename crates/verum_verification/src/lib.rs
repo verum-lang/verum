@@ -121,6 +121,11 @@ pub mod llm_tactic;
 /// [`proof_repl::ReplSession`] + reference V0 impl.  Consumed by
 /// CLI batch mode + IDE / TUI integrations.
 pub mod proof_repl;
+/// Continuous benchmarking (#83) — head-to-head vs Coq / Lean4 /
+/// Isabelle / Agda.  Single trait boundary
+/// [`benchmark::BenchmarkRunner`] + per-system mock + reference
+/// landscape values + `ComparisonMatrix` aggregator.
+pub mod benchmark;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
