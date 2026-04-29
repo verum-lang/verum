@@ -492,7 +492,7 @@ impl SmtGuardVerifier {
         ctx_manager.with_config(|| {
             use z3::Solver;
             use z3::SatResult;
-            use z3::ast::{Ast, Bool, Int};
+            use z3::ast::{Bool, Int};
 
             let solver = Solver::new();
 
@@ -537,7 +537,7 @@ impl SmtGuardVerifier {
                                     bindings
                                         .insert(name.clone(), SmtValue::Bool(b));
                                     let val_const = Bool::from_bool(b);
-                                    block_clauses.push(z3_var._eq(&val_const));
+                                    block_clauses.push(z3_var.eq(&val_const));
                                 }
                             }
                         }
@@ -551,7 +551,7 @@ impl SmtGuardVerifier {
                                     );
                                     let val_const = Int::from_i64(int_val);
                                     block_clauses
-                                        .push(z3_var._eq(&val_const));
+                                        .push(z3_var.eq(&val_const));
                                 }
                             }
                         }
