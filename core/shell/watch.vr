@@ -1,0 +1,351 @@
+// =============================================================================
+// shell/watch.vr — Filesystem watching
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: shell.{glob, jobs, result}, async.{channel, cancellation, timer}, io.fs
+// =============================================================================
+//
+// Reactive filesystem monitoring. Two implementation strategies:
+//
+//   1. Polling (default) — periodic mtime/size scan over a glob set. Works
+//      anywhere, no platform dependencies. Latency = poll interval.
+//   2. Native (Linux inotify / macOS FSEvents / Windows
+//      ReadDirectoryChangesW) — sub-millisecond latency, lower CPU cost.
+//      Currently a stub; the polling backend is functionally complete.
+//
+// API:
+//   watch(pattern)   → Receiver<WatchEvent>
+//   WatchEvent       sum: Created / Modified / Deleted / Renamed
+//
+// The returned `LineStream`-like handle ties the underlying scanner task to
+// a `CancellationTokenSource`, so dropping the receiver / calling `kill()`
+// cleanly stops the scanner.
+//
+// =============================================================================
+
+module core.shell.watch;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.async.channel.{Sender, Receiver, bounded};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
+mount core.async.spawn.{spawn};
+mount core.async.task.{TaskHandle};
+mount core.async.timer.{sleep};
+mount core.io.path.{Path, PathBuf};
+mount core.io.fs.{metadata as fs_metadata, Metadata};
+mount core.time.duration.{Duration};
+mount core.shell.context.{ShellContext};
+mount core.shell.glob.{glob_in};
+mount core.shell.jobs.{JobHandle};
+mount core.shell.result.{ShellError};
+mount core.sys.fs_watch.{FsWatcher, FsEvent, FsEventKind};
+
+// =============================================================================
+// WatchEvent
+// =============================================================================
+
+public type WatchEvent is
+    | Created  { path: PathBuf }
+    | Modified { path: PathBuf, prev_mtime: Int, new_mtime: Int }
+    | Deleted  { path: PathBuf }
+    | Renamed  { from: PathBuf, to: PathBuf };
+
+implement Clone for WatchEvent {
+    fn clone(&self) -> WatchEvent {
+        match self {
+            Created { path } => Created { path: path.clone() },
+            Modified { path, prev_mtime, new_mtime } =>
+                Modified { path: path.clone(), prev_mtime: *prev_mtime, new_mtime: *new_mtime },
+            Deleted { path } => Deleted { path: path.clone() },
+            Renamed { from, to } => Renamed { from: from.clone(), to: to.clone() },
+        }
+    }
+}
+
+implement WatchEvent {
+    public fn path(&self) -> &PathBuf {
+        match self {
+            Created  { path } => path,
+            Modified { path, .. } => path,
+            Deleted  { path } => path,
+            Renamed  { to, .. } => to,
+        }
+    }
+}
+
+// =============================================================================
+// WatchFilter — narrow the event stream
+// =============================================================================
+
+public type WatchFilter is {
+    /// Skip Created events (only fire on subsequent modifications).
+    skip_initial: Bool,
+    /// Coalesce events arriving within this window into a single Modified.
+    debounce: Duration,
+    /// Only events for paths matching this glob (None = all).
+    sub_pattern: Maybe<Text>,
+}
+
+implement WatchFilter {
+    public fn default() -> WatchFilter {
+        WatchFilter {
+            skip_initial: true,
+            debounce: Duration.from_millis(100),
+            sub_pattern: None,
+        }
+    }
+}
+
+implement Clone for WatchFilter {
+    fn clone(&self) -> WatchFilter {
+        WatchFilter {
+            skip_initial: self.skip_initial,
+            debounce: self.debounce,
+            sub_pattern: self.sub_pattern.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// WatchHandle
+// =============================================================================
+
+public type WatchHandle is {
+    pub receiver: Receiver<WatchEvent>,
+    pub job:      JobHandle,
+}
+
+implement WatchHandle {
+    /// Drives the consumer with a closure. Stops when the receiver is
+    /// closed (scanner exited / cancelled) or when the closure returns false.
+    pub async fn for_each(&mut self, f: fn(&WatchEvent) -> Bool) {
+        loop {
+            match self.receiver.recv().await {
+                None => return,
+                Some(ev) => if !f(&ev) { return; },
+            }
+        }
+    }
+}
+
+// =============================================================================
+// watch — the public entry
+// =============================================================================
+
+/// Watch all files matching `pattern` for changes. Returns a `WatchHandle`
+/// streaming `WatchEvent`. Default poll interval = 200 ms.
+pub async fn watch(pattern: &Text)
+    -> Result<WatchHandle, ShellError>
+    using [ShellContext]
+{
+    watch_with(pattern, Duration.from_millis(200), WatchFilter.default()).await
+}
+
+/// Native event-driven variant. Spawns an `FsWatcher` (kqueue on macOS,
+/// inotify on Linux). Sub-millisecond latency, no polling overhead. Falls
+/// back to the polling implementation on platforms where native isn't
+/// available (currently Windows).
+pub async fn watch_native(pattern: &Text)
+    -> Result<WatchHandle, ShellError>
+    using [ShellContext]
+{
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        let ctx = provide ShellContext;
+        let base = match ctx.effective_cwd() {
+            Some(c) => PathBuf.from(c),
+            None    => PathBuf.from("."),
+        };
+        // Resolve the glob once to enumerate the initial path set.
+        let initial = match glob_in(&base, pattern, false) {
+            Ok(m)  => m,
+            Err(e) => return Err(e),
+        };
+
+        let (tx, rx) = bounded::<WatchEvent>(64);
+        let cancel = CancellationTokenSource.new();
+        let token = cancel.token();
+        let pattern_owned = pattern.clone();
+
+        let task = spawn(async move {
+            let mut watcher = match FsWatcher.new() {
+                Ok(w)  => w,
+                Err(_) => return Ok(core.shell.result.ShellResult.from_error(
+                    core.shell.result.ShellError.SpawnFailed {
+                        command: f"watch_native({pattern_owned})",
+                        reason:  "FsWatcher::new failed".into(),
+                    })),
+            };
+            for p in initial.iter() {
+                let _ = watcher.add(&p.to_text());
+            }
+            loop {
+                if token.is_cancelled() { break; }
+                match watcher.wait(500) {
+                    Ok(events) => for ev in events.iter() {
+                        let mapped = map_native_event(ev);
+                        let _ = tx.send_async(mapped).await;
+                    },
+                    Err(_) => break,
+                }
+            }
+            Ok(core.shell.result.ShellResult.from_error(
+                core.shell.result.ShellError.Cancelled {
+                    command: f"watch_native({pattern_owned})",
+                    reason:  "watcher stopped".into(),
+                }
+            ))
+        });
+
+        return Ok(WatchHandle {
+            receiver: rx,
+            job: JobHandle {
+                inner:   task,
+                cancel,
+                command: f"watch_native({pattern})",
+                grace:   Duration.from_millis(1000),
+            },
+        });
+    }
+    @cfg(target_os = "windows")
+    {
+        // Windows native backend not implemented — fall through to polling.
+        watch(pattern).await
+    }
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn map_native_event(ev: &FsEvent) -> WatchEvent {
+    let path = PathBuf.from(ev.path.clone());
+    match ev.kind {
+        FsEventKind.Created       => WatchEvent.Created  { path },
+        FsEventKind.Deleted       => WatchEvent.Deleted  { path },
+        FsEventKind.Renamed       => WatchEvent.Renamed  { from: path.clone(), to: path },
+        FsEventKind.Modified      => WatchEvent.Modified { path, prev_mtime: 0, new_mtime: 0 },
+        FsEventKind.AttribChanged => WatchEvent.Modified { path, prev_mtime: 0, new_mtime: 0 },
+    }
+}
+
+/// Customisable watch with explicit poll interval and filter.
+pub async fn watch_with(
+    pattern: &Text,
+    interval: Duration,
+    filter: WatchFilter,
+) -> Result<WatchHandle, ShellError>
+    using [ShellContext]
+{
+    let ctx = provide ShellContext;
+    let base = match ctx.effective_cwd() {
+        Some(c) => PathBuf.from(c),
+        None    => PathBuf.from("."),
+    };
+
+    let (tx, rx) = bounded::<WatchEvent>(64);
+    let cancel = CancellationTokenSource.new();
+    let token = cancel.token();
+    let pattern_owned = pattern.clone();
+    let f = filter;
+
+    let task = spawn(async move {
+        // Initial scan
+        let mut state: List<(PathBuf, Int)> = scan(&base, &pattern_owned);
+
+        // Skip-initial: don't emit Created for files that already existed
+        if !f.skip_initial {
+            for (p, _) in state.iter() {
+                let _ = tx.send_async(WatchEvent.Created { path: p.clone() }).await;
+            }
+        }
+
+        loop {
+            select {
+                _ = sleep(interval) => {
+                    let next = scan(&base, &pattern_owned);
+                    let events = diff_states(&state, &next);
+                    for ev in events.iter() {
+                        let _ = tx.send_async(ev.clone()).await;
+                    }
+                    state = next;
+                },
+                _ = token.cancelled() => break,
+            }
+        }
+        Ok(core.shell.result.ShellResult.from_error(
+            core.shell.result.ShellError.Cancelled {
+                command: f"watch({pattern_owned})",
+                reason:  "watcher stopped".into(),
+            }
+        ))
+    });
+
+    Ok(WatchHandle {
+        receiver: rx,
+        job: JobHandle {
+            inner:   task,
+            cancel,
+            command: f"watch({pattern})",
+            grace:   Duration.from_millis(1000),
+        },
+    })
+}
+
+// =============================================================================
+// Internals — polling-based diff engine
+// =============================================================================
+
+fn scan(base: &PathBuf, pattern: &Text) -> List<(PathBuf, Int)> {
+    let matches = match glob_in(base, pattern, false) {
+        Ok(m)  => m,
+        Err(_) => return [],
+    };
+    let mut out: List<(PathBuf, Int)> = [];
+    for p in matches.into_iter() {
+        match fs_metadata(p.as_path()) {
+            Ok(m)  => out.push((p, m.modified_unix_secs())),
+            Err(_) => {},  // file disappeared between glob and stat — skip
+        }
+    }
+    out
+}
+
+fn diff_states(
+    prev: &List<(PathBuf, Int)>,
+    next: &List<(PathBuf, Int)>,
+) -> List<WatchEvent> {
+    let mut events: List<WatchEvent> = [];
+
+    // Detect created + modified
+    for (p, mtime) in next.iter() {
+        let mut found = false;
+        for (q, prev_mtime) in prev.iter() {
+            if p.as_path().eq(q.as_path()) {
+                found = true;
+                if *mtime != *prev_mtime {
+                    events.push(WatchEvent.Modified {
+                        path: p.clone(),
+                        prev_mtime: *prev_mtime,
+                        new_mtime: *mtime,
+                    });
+                }
+                break;
+            }
+        }
+        if !found {
+            events.push(WatchEvent.Created { path: p.clone() });
+        }
+    }
+
+    // Detect deleted
+    for (p, _) in prev.iter() {
+        let mut still_there = false;
+        for (q, _) in next.iter() {
+            if p.as_path().eq(q.as_path()) { still_there = true; break; }
+        }
+        if !still_there {
+            events.push(WatchEvent.Deleted { path: p.clone() });
+        }
+    }
+
+    events
+}

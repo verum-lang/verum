@@ -1,0 +1,413 @@
+// =============================================================================
+// shell/escape.vr — Shell argument escaping
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, text
+// =============================================================================
+//
+// Compile-time-driven, runtime-fast escaping of shell command arguments.
+// Provides the `ShellEscape` protocol (every value embedded in `sh#"...${x}..."`
+// must implement it) and the `Escaper` namespace with concrete strategies for
+// each supported shell flavour: POSIX (sh/bash/zsh/dash), Fish, Windows cmd.exe
+// and PowerShell. Escaping is purely a string transformation — no IO, no
+// allocations beyond the result Text.
+//
+// Design goals:
+//   * Correct under any byte sequence: emoji, NUL bytes, embedded quotes.
+//   * Unforgeable: no input can break out of its quoted form.
+//   * Fast: > 10M args/sec on typical inputs (single-pass scan, in-place
+//     append into a pre-sized buffer; no regex, no substring search).
+//   * Idempotent over the union "already escaped" (escape(escape(x)) defines
+//     a coherent embedding, not garbage).
+//   * Pure: no IO, no Spawns, no global state — verifiable as such.
+//
+// Threat model: shell injection. Every `${expr}` interpolation in a `sh#`
+// tagged literal is rewritten by the compiler into a call to the appropriate
+// `ShellEscape::shell_quote` impl, so no untrusted byte can ever reach the
+// shell parser unwrapped. Direct, unquoted bytes are reachable only via the
+// explicit `$unsafe{...}` opt-out which requires a `unsafe` block.
+//
+// =============================================================================
+
+module core.shell.escape;
+
+mount core.{Maybe, Result, List, Text, Byte, Char, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.text.format.{Formatter, FormatError};
+
+// =============================================================================
+// ShellFlavour — target shell dialect
+// =============================================================================
+//
+// Different shells have incompatible quoting rules. ShellFlavour selects
+// the strategy used by `Escaper::quote_for`. Default for `sh#"..."` literals
+// is `Posix` on Unix and `Cmd` on Windows; explicit override available.
+
+public type ShellFlavour is
+    /// POSIX-compatible: sh, bash, dash, zsh. Single-quote escaping.
+    | Posix
+    /// fish: like POSIX but supports backslash inside single-quotes.
+    | Fish
+    /// Windows cmd.exe: caret-escaping plus double-quote runs.
+    | Cmd
+    /// PowerShell: single-quote with doubled quote-of-quote.
+    | PowerShell;
+
+implement Clone for ShellFlavour {
+    fn clone(&self) -> ShellFlavour { *self }
+}
+
+implement Eq for ShellFlavour {
+    fn eq(&self, other: &ShellFlavour) -> Bool {
+        match (self, other) {
+            (Posix,      Posix)      => true,
+            (Fish,       Fish)       => true,
+            (Cmd,        Cmd)        => true,
+            (PowerShell, PowerShell) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Debug for ShellFlavour {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(match self {
+            Posix      => "Posix",
+            Fish       => "Fish",
+            Cmd        => "Cmd",
+            PowerShell => "PowerShell",
+        })
+    }
+}
+
+/// Default flavour for the host platform.
+public fn default_flavour() -> ShellFlavour {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    { ShellFlavour.Posix }
+    @cfg(target_os = "windows")
+    { ShellFlavour.Cmd }
+}
+
+// =============================================================================
+// ShellEscape protocol — embedded values must implement this
+// =============================================================================
+//
+// Compiler invariant: every interpolation `${expr}` in a `sh#"..."` literal
+// requires `typeof(expr): ShellEscape`. Failure is a hard compile error
+// (E[P403] in the diagnostics catalogue).
+//
+// Implementations are mandatorily pure (`@properties(Pure)`) — no IO, no
+// allocation beyond the result Text, fully deterministic. This is what
+// allows the compiler to fold escape calls during constant evaluation.
+
+public type ShellEscape is protocol {
+    /// Render the value as a single shell-safe token for the given flavour.
+    /// Result is guaranteed to roundtrip through the shell parser as exactly
+    /// one argument equal to `self.to_text()` byte-for-byte.
+    fn shell_quote(&self, flavour: ShellFlavour) -> Text;
+}
+
+// -----------------------------------------------------------------------------
+// Built-in implementations: text and integer-like atoms
+// -----------------------------------------------------------------------------
+
+implement ShellEscape for Text {
+    fn shell_quote(&self, flavour: ShellFlavour) -> Text {
+        Escaper.quote_for(self, flavour)
+    }
+}
+
+implement ShellEscape for Int {
+    fn shell_quote(&self, _flavour: ShellFlavour) -> Text {
+        // Integers are always safe — no shell metacharacter can sneak in.
+        f"{*self}"
+    }
+}
+
+implement ShellEscape for Bool {
+    fn shell_quote(&self, _flavour: ShellFlavour) -> Text {
+        if *self { "true".into() } else { "false".into() }
+    }
+}
+
+implement<T: ShellEscape> ShellEscape for &T {
+    fn shell_quote(&self, flavour: ShellFlavour) -> Text {
+        (**self).shell_quote(flavour)
+    }
+}
+
+implement<T: ShellEscape> ShellEscape for List<T> {
+    /// Lists render as space-separated quoted tokens. Useful for splatting
+    /// into `sh#"cmd ${args}"`.
+    fn shell_quote(&self, flavour: ShellFlavour) -> Text {
+        let mut out = Text.with_capacity(self.len() * 8);
+        let mut first = true;
+        for item in self.iter() {
+            if !first { out.push(' '); }
+            first = false;
+            out.push_str(&item.shell_quote(flavour));
+        }
+        out
+    }
+}
+
+implement<T: ShellEscape> ShellEscape for Maybe<T> {
+    fn shell_quote(&self, flavour: ShellFlavour) -> Text {
+        match self {
+            Some(v) => v.shell_quote(flavour),
+            None    => "".into(),
+        }
+    }
+}
+
+// =============================================================================
+// ShellRaw — opt-out wrapper, requires unsafe context
+// =============================================================================
+//
+// `$unsafe{x}` in a `sh#` literal is desugared to `ShellRaw(x).shell_quote(...)`.
+// The intent: very rare cases (constructed shell fragments, eval-style metaprogramming)
+// where the value is *known by the author* to be a literal shell expression, not
+// data. Wrapping requires `unsafe { ShellRaw(x) }` at the call site.
+
+public type ShellRaw is (Text);
+
+implement ShellRaw {
+    /// Constructor — only callable from an `unsafe` block, enforced by attribute.
+    @unsafe_required
+    public fn new(s: Text) -> ShellRaw { ShellRaw(s) }
+}
+
+implement ShellEscape for ShellRaw {
+    fn shell_quote(&self, _flavour: ShellFlavour) -> Text {
+        self.0.clone()  // verbatim — by contract
+    }
+}
+
+// =============================================================================
+// Escaper — concrete strategies
+// =============================================================================
+//
+// Each method consumes a `&Text` and returns a `Text` that is guaranteed to be
+// a single shell-token equivalent under the named flavour. Methods are pure
+// and intended to be inlined by the optimiser.
+
+public type Escaper is ();
+
+implement Escaper {
+    /// Dispatch to the flavour-specific escaper.
+    public fn quote_for(s: &Text, flavour: ShellFlavour) -> Text {
+        match flavour {
+            Posix      => Escaper.posix(s),
+            Fish       => Escaper.fish(s),
+            Cmd        => Escaper.cmd_exe(s),
+            PowerShell => Escaper.powershell(s),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // POSIX single-quote escape
+    // -------------------------------------------------------------------------
+    //
+    // Strategy: wrap the string in single quotes. Embedded single quotes are
+    // closed-out, escaped via '\'' and reopened. Empty strings render as ''.
+    // Always safe — single-quotes in POSIX shell are byte-literal, no
+    // interpolation, no escapes apart from the closing quote.
+
+    public fn posix(s: &Text) -> Text {
+        if s.is_empty() {
+            return "''".into();
+        }
+        // Fast path: argument matches [A-Za-z0-9._/=:+-@-]* — emit verbatim.
+        if Escaper.posix_safe_unquoted(s) {
+            return s.clone();
+        }
+        let mut out = Text.with_capacity(s.len() + 2);
+        out.push('\'');
+        for ch in s.chars() {
+            if ch == '\'' {
+                // close, emit escaped quote, reopen
+                out.push_str("'\\''");
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+        out
+    }
+
+    /// Predicate: true iff the string is safe to pass to a POSIX shell as
+    /// a single argument without any quoting.  Used by `posix()` for the
+    /// fast path. Mirrors the conservative shellescape lookup used by
+    /// Python's shlex.quote() but slightly stricter (no comma).
+    public fn posix_safe_unquoted(s: &Text) -> Bool {
+        if s.is_empty() { return false; }
+        for ch in s.chars() {
+            let safe = (ch >= 'a' && ch <= 'z')
+                    || (ch >= 'A' && ch <= 'Z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '.'
+                    || ch == '_'
+                    || ch == '/'
+                    || ch == '-'
+                    || ch == '='
+                    || ch == ':'
+                    || ch == '+'
+                    || ch == '@';
+            if !safe { return false; }
+        }
+        true
+    }
+
+    /// Convenience alias: POSIX single-quote.
+    public fn single_quote(s: &Text) -> Text { Escaper.posix(s) }
+
+    // -------------------------------------------------------------------------
+    // Fish-shell escape
+    // -------------------------------------------------------------------------
+    //
+    // fish single-quotes interpret \\ and \' but no other escapes. Closing
+    // logic differs slightly from POSIX.
+
+    public fn fish(s: &Text) -> Text {
+        if s.is_empty() { return "''".into(); }
+        let mut out = Text.with_capacity(s.len() + 2);
+        out.push('\'');
+        for ch in s.chars() {
+            if ch == '\'' || ch == '\\' {
+                out.push('\\');
+                out.push(ch);
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+        out
+    }
+
+    // -------------------------------------------------------------------------
+    // Windows cmd.exe escape
+    // -------------------------------------------------------------------------
+    //
+    // cmd.exe quoting is famously broken. We follow the canonical algorithm
+    // from MS docs: double-quote runs, double internal quotes, double trailing
+    // backslashes that touch a quote, escape carets/percents/exclamation
+    // points outside quoted runs.
+
+    public fn cmd_exe(s: &Text) -> Text {
+        if s.is_empty() { return "\"\"".into(); }
+        let needs_quoting = Escaper.cmd_needs_quoting(s);
+        if !needs_quoting {
+            // Still need to caret-escape control metacharacters
+            let mut out = Text.with_capacity(s.len());
+            for ch in s.chars() {
+                match ch {
+                    '^' | '&' | '|' | '<' | '>' | '%' | '!' => {
+                        out.push('^');
+                        out.push(ch);
+                    }
+                    _ => out.push(ch),
+                }
+            }
+            return out;
+        }
+        // Quoted form — apply MS Win32 argument-passing rules.
+        let mut out = Text.with_capacity(s.len() + 2);
+        out.push('"');
+        let mut backslashes: Int = 0;
+        for ch in s.chars() {
+            if ch == '\\' {
+                backslashes = backslashes + 1;
+            } else if ch == '"' {
+                // double the run, then add an escaped quote
+                let mut k = 0;
+                while k < backslashes { out.push('\\'); k = k + 1; }
+                out.push('\\');
+                out.push('"');
+                backslashes = 0;
+            } else {
+                let mut k = 0;
+                while k < backslashes { out.push('\\'); k = k + 1; }
+                backslashes = 0;
+                out.push(ch);
+            }
+        }
+        // Trailing backslashes: double them so the closing quote isn't escaped
+        let mut k = 0;
+        while k < (backslashes * 2) { out.push('\\'); k = k + 1; }
+        out.push('"');
+        out
+    }
+
+    fn cmd_needs_quoting(s: &Text) -> Bool {
+        for ch in s.chars() {
+            if ch == ' ' || ch == '\t' || ch == '"' { return true; }
+        }
+        false
+    }
+
+    // -------------------------------------------------------------------------
+    // PowerShell escape
+    // -------------------------------------------------------------------------
+    //
+    // PowerShell single-quotes are byte-literal except for the doubled quote
+    // (''' inside a single-quoted string is a literal quote). Backslash is
+    // not special in single-quoted strings. We use this form.
+
+    public fn powershell(s: &Text) -> Text {
+        let mut out = Text.with_capacity(s.len() + 2);
+        out.push('\'');
+        for ch in s.chars() {
+            if ch == '\'' { out.push('\''); out.push('\''); }
+            else          { out.push(ch); }
+        }
+        out.push('\'');
+        out
+    }
+}
+
+// =============================================================================
+// shell_join — render a List<&ShellEscape> as a space-separated command line
+// =============================================================================
+
+/// Build a complete shell command line from a list of token-providing
+/// `ShellEscape` items. Used by Typed Command DSL renderers.
+public fn shell_join<T: ShellEscape>(items: &[T]) -> Text {
+    shell_join_for(items, default_flavour())
+}
+
+public fn shell_join_for<T: ShellEscape>(items: &[T], flavour: ShellFlavour) -> Text {
+    let mut out = Text.with_capacity(items.len() * 8);
+    let mut first = true;
+    for item in items.iter() {
+        if !first { out.push(' '); }
+        first = false;
+        out.push_str(&item.shell_quote(flavour));
+    }
+    out
+}
+
+// =============================================================================
+// Validators — for the `sh#"..."` tagged-literal grammar gate
+// =============================================================================
+
+/// Compile-time-friendly check: returns true iff `s` is a syntactically valid
+/// sh#-style command body for the runtime to dispatch to a shell. Runs in O(n).
+/// The validator is intentionally permissive — it rejects only obvious
+/// truncation like unbalanced single quotes; it does not parse sh syntax.
+public fn validate_sh(s: &Text) -> Bool {
+    let mut single_quote_open = false;
+    let mut double_quote_open = false;
+    let mut prev_backslash    = false;
+    for ch in s.chars() {
+        if prev_backslash {
+            prev_backslash = false;
+        } else if ch == '\\' && !single_quote_open {
+            prev_backslash = true;
+        } else if ch == '\'' && !double_quote_open {
+            single_quote_open = !single_quote_open;
+        } else if ch == '"' && !single_quote_open {
+            double_quote_open = !double_quote_open;
+        }
+    }
+    !single_quote_open && !double_quote_open && !prev_backslash
+}

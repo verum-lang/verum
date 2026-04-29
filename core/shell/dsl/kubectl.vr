@@ -1,0 +1,253 @@
+// =============================================================================
+// shell/dsl/kubectl.vr — Typed kubectl command DSL
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, text.regex, shell.{exec, escape, result, context}
+// =============================================================================
+//
+// Algebraic representation of kubectl subcommands with refinement-typed
+// resource references. KubeResource is a marker protocol so that
+// `KubectlCmd<Pod>` differs at the type level from `KubectlCmd<ConfigMap>`,
+// disallowing semantically incoherent constructions like
+// `KubectlCmd<ConfigMap>::Logs { ... }` (configmaps don't produce logs).
+//
+// =============================================================================
+
+module core.shell.dsl.kubectl;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.text.regex.{Regex};
+mount core.shell.escape.{Escaper, ShellEscape, ShellFlavour, default_flavour};
+mount core.shell.context.{ShellContext};
+mount core.shell.exec.{sh_check};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.io.path.{PathBuf};
+
+// =============================================================================
+// Kubernetes resource markers
+// =============================================================================
+
+public type KubeResource is protocol {
+    /// Plural lowercase resource name (`pods`, `services`, `deployments`).
+    fn resource_name() -> Text;
+    /// True iff the resource produces logs (`kubectl logs`).
+    fn supports_logs() -> Bool;
+    /// True iff the resource supports `kubectl exec`.
+    fn supports_exec() -> Bool;
+}
+
+public type Pod is ();
+implement KubeResource for Pod {
+    fn resource_name() -> Text { "pods".into() }
+    fn supports_logs() -> Bool { true }
+    fn supports_exec() -> Bool { true }
+}
+
+public type Deployment is ();
+implement KubeResource for Deployment {
+    fn resource_name() -> Text { "deployments".into() }
+    fn supports_logs() -> Bool { true }
+    fn supports_exec() -> Bool { false }
+}
+
+public type Service is ();
+implement KubeResource for Service {
+    fn resource_name() -> Text { "services".into() }
+    fn supports_logs() -> Bool { false }
+    fn supports_exec() -> Bool { false }
+}
+
+public type ConfigMap is ();
+implement KubeResource for ConfigMap {
+    fn resource_name() -> Text { "configmaps".into() }
+    fn supports_logs() -> Bool { false }
+    fn supports_exec() -> Bool { false }
+}
+
+public type Secret is ();
+implement KubeResource for Secret {
+    fn resource_name() -> Text { "secrets".into() }
+    fn supports_logs() -> Bool { false }
+    fn supports_exec() -> Bool { false }
+}
+
+public type Namespace is ();
+implement KubeResource for Namespace {
+    fn resource_name() -> Text { "namespaces".into() }
+    fn supports_logs() -> Bool { false }
+    fn supports_exec() -> Bool { false }
+}
+
+// =============================================================================
+// Refinement atoms — names, namespaces
+// =============================================================================
+//
+// Kubernetes DNS-1123 label/name rules: lowercase alphanumerics + dashes,
+// at most 63 chars, must start and end with alphanumeric.
+
+public type KubeName is (Text);
+implement KubeName {
+    public fn parse(s: Text) -> Result<KubeName, ShellError> {
+        let r = Regex.compile(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$").unwrap();
+        if r.is_match(&s) { Ok(KubeName(s)) }
+        else { Err(ShellError.SpawnFailed {
+            command: "<KubeName::parse>".into(),
+            reason:  f"invalid kubernetes name: {s}",
+        }) }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+public type KubeNamespace is (Text);
+implement KubeNamespace {
+    public fn parse(s: Text) -> Result<KubeNamespace, ShellError> {
+        let r = Regex.compile(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$").unwrap();
+        if r.is_match(&s) { Ok(KubeNamespace(s)) }
+        else { Err(ShellError.SpawnFailed {
+            command: "<KubeNamespace::parse>".into(),
+            reason:  f"invalid namespace: {s}",
+        }) }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+// =============================================================================
+// KubeOutput
+// =============================================================================
+
+public type KubeOutput is
+    | Wide
+    | Json
+    | Yaml
+    | Name
+    | Custom(Text);
+
+implement KubeOutput {
+    public fn render(&self) -> Text {
+        match self {
+            Wide      => "wide".into(),
+            Json      => "json".into(),
+            Yaml      => "yaml".into(),
+            Name      => "name".into(),
+            Custom(s) => s.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// KubectlCmd<R: KubeResource>
+// =============================================================================
+
+public type KubectlCmd<R: KubeResource> is
+    | Apply       { manifest: PathBuf, namespace: Maybe<KubeNamespace>, dry_run: Bool, prune: Bool }
+    | Get         { name: Maybe<KubeName>, namespace: Maybe<KubeNamespace>, output: KubeOutput, all_namespaces: Bool }
+    | Describe    { name: KubeName, namespace: Maybe<KubeNamespace> }
+    | Delete      { name: KubeName, namespace: Maybe<KubeNamespace>, grace_period: Maybe<Int>, force: Bool }
+    | Logs        { pod: KubeName, namespace: Maybe<KubeNamespace>, container: Maybe<Text>, follow: Bool, tail: Maybe<Int>, since: Maybe<Text> }
+    | Exec        { pod: KubeName, namespace: Maybe<KubeNamespace>, container: Maybe<Text>, cmd: List<Text>, tty: Bool }
+    | RolloutStatus { name: KubeName, namespace: Maybe<KubeNamespace>, timeout_secs: Maybe<Int> }
+    | PortForward { name: KubeName, namespace: Maybe<KubeNamespace>, local_port: Int, remote_port: Int };
+
+implement<R: KubeResource> KubectlCmd<R> {
+    public fn render(&self) -> Text { self.render_for(default_flavour()) }
+
+    public fn render_for(&self, flav: ShellFlavour) -> Text {
+        let resource = R.resource_name();
+        match self {
+            Apply { manifest, namespace, dry_run, prune } => {
+                let mut args: List<Text> = ["kubectl".into(), "apply".into(), "-f".into(), manifest.to_text()];
+                ns_flag(&mut args, namespace);
+                if *dry_run { args.push("--dry-run=client".into()); }
+                if *prune   { args.push("--prune".into()); }
+                quote_join(&args, flav)
+            }
+            Get { name, namespace, output, all_namespaces } => {
+                let mut args: List<Text> = ["kubectl".into(), "get".into(), resource.clone()];
+                if let Some(n) = name { args.push(n.as_text().clone()); }
+                if *all_namespaces { args.push("--all-namespaces".into()); } else { ns_flag(&mut args, namespace); }
+                args.push("-o".into()); args.push(output.render());
+                quote_join(&args, flav)
+            }
+            Describe { name, namespace } => {
+                let mut args: List<Text> = ["kubectl".into(), "describe".into(), resource.clone(), name.as_text().clone()];
+                ns_flag(&mut args, namespace);
+                quote_join(&args, flav)
+            }
+            Delete { name, namespace, grace_period, force } => {
+                let mut args: List<Text> = ["kubectl".into(), "delete".into(), resource.clone(), name.as_text().clone()];
+                ns_flag(&mut args, namespace);
+                if let Some(g) = grace_period { args.push(f"--grace-period={g}"); }
+                if *force { args.push("--force".into()); }
+                quote_join(&args, flav)
+            }
+            Logs { pod, namespace, container, follow, tail, since } => {
+                if !R.supports_logs() {
+                    panic("KubectlCmd::Logs invoked for resource that does not support logs");
+                }
+                let mut args: List<Text> = ["kubectl".into(), "logs".into(), pod.as_text().clone()];
+                ns_flag(&mut args, namespace);
+                if let Some(c) = container { args.push("-c".into()); args.push(c.clone()); }
+                if *follow { args.push("-f".into()); }
+                if let Some(t) = tail  { args.push(f"--tail={t}"); }
+                if let Some(s) = since { args.push(f"--since={s}"); }
+                quote_join(&args, flav)
+            }
+            Exec { pod, namespace, container, cmd, tty } => {
+                if !R.supports_exec() {
+                    panic("KubectlCmd::Exec invoked for resource that does not support exec");
+                }
+                let mut args: List<Text> = ["kubectl".into(), "exec".into(), pod.as_text().clone()];
+                ns_flag(&mut args, namespace);
+                if let Some(c) = container { args.push("-c".into()); args.push(c.clone()); }
+                if *tty { args.push("-t".into()); args.push("-i".into()); }
+                args.push("--".into());
+                for c in cmd.iter() { args.push(c.clone()); }
+                quote_join(&args, flav)
+            }
+            RolloutStatus { name, namespace, timeout_secs } => {
+                let mut args: List<Text> = ["kubectl".into(), "rollout".into(), "status".into(), f"{resource}/{name.as_text()}"];
+                ns_flag(&mut args, namespace);
+                if let Some(t) = timeout_secs { args.push(f"--timeout={t}s"); }
+                quote_join(&args, flav)
+            }
+            PortForward { name, namespace, local_port, remote_port } => {
+                let mut args: List<Text> = ["kubectl".into(), "port-forward".into(),
+                                             f"{resource}/{name.as_text()}",
+                                             f"{local_port}:{remote_port}"];
+                ns_flag(&mut args, namespace);
+                quote_join(&args, flav)
+            }
+        }
+    }
+}
+
+fn ns_flag(args: &mut List<Text>, namespace: &Maybe<KubeNamespace>) {
+    if let Some(n) = namespace {
+        args.push("-n".into());
+        args.push(n.as_text().clone());
+    }
+}
+
+fn quote_join(args: &List<Text>, flav: ShellFlavour) -> Text {
+    let mut out = Text.with_capacity(args.len() * 8);
+    let mut first = true;
+    for a in args.iter() {
+        if !first { out.push(' '); }
+        first = false;
+        out.push_str(&Escaper.quote_for(a, flav));
+    }
+    out
+}
+
+// =============================================================================
+// kubectl() — the runner
+// =============================================================================
+
+public async fn kubectl<R: KubeResource>(cmd: KubectlCmd<R>)
+    -> Result<ShellResult, ShellError>
+    using [ShellContext]
+{
+    let line = cmd.render();
+    sh_check(&line).await
+}

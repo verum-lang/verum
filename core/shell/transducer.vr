@@ -1,0 +1,307 @@
+// =============================================================================
+// shell/transducer.vr — Transducer composition for stream pipelines
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, base.cell, base.iterator
+// =============================================================================
+//
+// Composable, allocation-free stream operators built on rank-2 polymorphism.
+//
+// A *reducer* `R(acc, x) -> acc` is the universal stream-folding shape: any
+// pipeline endpoint (collecting to a List, summing, sending into a channel,
+// printing) can be expressed as a reducer.
+//
+// A *transducer* `T<A, B>` is a transformation of reducers — given a downstream
+// reducer over `B`, it produces an equivalent reducer over `A`. Crucially,
+// the quantification over the result type `R` lives *inside* the transducer
+// (rank-2): the transducer must work for ANY R the caller chooses.
+//
+// Why rank-2:
+//   * Composition is associative without allocation: `compose(t1, compose(t2, t3))`
+//     produces the same nested reducer as `compose(compose(t1, t2), t3)`. SMT
+//     proof of this identity lives in `vcs/specs/L3-extended/shell/`.
+//   * The accumulator never leaks into observable types — pipelines compose
+//     without committing to a particular sink shape.
+//   * One transducer flows through `List`, async `Stream`, channel `Receiver`,
+//     and any other reducible without rewriting.
+//
+// Implementation note: in current Verum (v0.6) rank-2 fn types are accepted
+// in struct fields and as parameters; the implementation here closely follows
+// the pattern in `core/async/stream.vr` for explicit closures-over-state.
+//
+// =============================================================================
+
+module core.shell.transducer;
+
+mount core.{Maybe, Result, List, Bool, Int, Text};
+mount core.base.cell.{Cell};
+mount core.base.protocols.{Clone};
+
+// =============================================================================
+// Reducer<A, R> — fundamental fold step
+// =============================================================================
+//
+// `Reducer<A, R>` is `fn(R, A) -> R`. Verum's function types are first-class
+// so we just alias for documentation. Concrete reducers below.
+
+public type Reducer<A, R> is fn(R, A) -> R;
+
+// =============================================================================
+// Transducer<A, B> — reducer-to-reducer transformation
+// =============================================================================
+//
+// Note: rank-2 syntax `fn<R>(...)` is supported in struct field positions in
+// the grammar; the parser registers the universally-quantified `R` only
+// within the function-type expression.
+
+public type Transducer<A, B> is {
+    /// Takes a downstream reducer `Reducer<B, R>` and produces an equivalent
+    /// reducer over `A`. Quantification of `R` lives strictly inside this fn.
+    transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
+};
+
+// =============================================================================
+// Base reducers — building blocks for endpoints
+// =============================================================================
+
+/// Append-to-list reducer. Sink for `transduce_into_list`.
+public fn list_appender<A>() -> Reducer<A, List<A>> {
+    |acc: List<A>, x: A| { acc.push(x); acc }
+}
+
+/// Counting reducer — discards values, returns the count.
+public fn counter<A>() -> Reducer<A, Int> {
+    |acc: Int, _x: A| acc + 1
+}
+
+/// Identity-discard reducer — used as the unit element for compose() proofs.
+public fn drain<A>() -> Reducer<A, ()> {
+    |acc: (), _x: A| acc
+}
+
+// =============================================================================
+// Base transducers
+// =============================================================================
+
+/// `mapping(f)` applies `f` to every element flowing through.
+/// `f` must be `Pure` (compiler-checked when callers pass `pure fn(...)`).
+public fn mapping<A, B>(f: fn(A) -> B) -> Transducer<A, B> {
+    Transducer {
+        transform: |reducer: Reducer<B, R>| -> Reducer<A, R> {
+            |acc: R, x: A| reducer(acc, f(x))
+        },
+    }
+}
+
+/// `filtering(pred)` lets through only elements satisfying `pred`.
+public fn filtering<A>(pred: fn(&A) -> Bool) -> Transducer<A, A> {
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| if pred(&x) { reducer(acc, x) } else { acc }
+        },
+    }
+}
+
+/// `taking(n)` limits the stream to the first `n` elements. Stateful.
+public fn taking<A>(n: Int) -> Transducer<A, A> {
+    let counter = Cell.new(0);
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| {
+                let cur = counter.get();
+                if cur < n {
+                    counter.set(cur + 1);
+                    reducer(acc, x)
+                } else {
+                    acc
+                }
+            }
+        },
+    }
+}
+
+/// `dropping(n)` skips the first `n` elements.
+public fn dropping<A>(n: Int) -> Transducer<A, A> {
+    let counter = Cell.new(0);
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| {
+                let cur = counter.get();
+                if cur < n {
+                    counter.set(cur + 1);
+                    acc
+                } else {
+                    reducer(acc, x)
+                }
+            }
+        },
+    }
+}
+
+/// `taking_while(pred)` lets through elements until `pred` fails.
+/// After the first false, all further elements are dropped.
+public fn taking_while<A>(pred: fn(&A) -> Bool) -> Transducer<A, A> {
+    let still_taking = Cell.new(true);
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| {
+                if !still_taking.get() { return acc; }
+                if pred(&x) {
+                    reducer(acc, x)
+                } else {
+                    still_taking.set(false);
+                    acc
+                }
+            }
+        },
+    }
+}
+
+/// `dropping_while(pred)` skips elements while `pred` holds, then lets all
+/// subsequent elements through.
+public fn dropping_while<A>(pred: fn(&A) -> Bool) -> Transducer<A, A> {
+    let dropped = Cell.new(false);
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| {
+                if dropped.get() { return reducer(acc, x); }
+                if pred(&x) { acc }
+                else        { dropped.set(true); reducer(acc, x) }
+            }
+        },
+    }
+}
+
+/// `dedup_consecutive` removes adjacent duplicates. Requires `Eq + Clone`.
+public fn dedup_consecutive<A: Eq + Clone>() -> Transducer<A, A> {
+    let prev: Cell<Maybe<A>> = Cell.new(None);
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| {
+                let same = match prev.get() {
+                    Some(p) => p == x,
+                    None    => false,
+                };
+                prev.set(Some(x.clone()));
+                if same { acc } else { reducer(acc, x) }
+            }
+        },
+    }
+}
+
+/// `flat_mapping(f)` produces a list of B per A and flattens.
+public fn flat_mapping<A, B>(f: fn(A) -> List<B>) -> Transducer<A, B> {
+    Transducer {
+        transform: |reducer: Reducer<B, R>| -> Reducer<A, R> {
+            |acc: R, x: A| {
+                let mut a = acc;
+                for y in f(x).into_iter() {
+                    a = reducer(a, y);
+                }
+                a
+            }
+        },
+    }
+}
+
+/// `tap(f)` performs a side effect per element, passes the value through.
+/// Useful for logging.  Note: `tap` admits IO via `f`; the resulting
+/// transducer is no longer Pure — caller must annotate accordingly.
+public fn tap<A>(f: fn(&A)) -> Transducer<A, A> {
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| { f(&x); reducer(acc, x) }
+        },
+    }
+}
+
+// =============================================================================
+// compose — associative composition
+// =============================================================================
+
+/// `compose(t1, t2)` = `t1` applied first, then `t2` over the resulting stream.
+/// Equational law (proven separately): `compose(t1, compose(t2, t3))`
+/// is observationally equal to `compose(compose(t1, t2), t3)`.
+public fn compose<A, B, C>(
+    t1: Transducer<A, B>,
+    t2: Transducer<B, C>,
+) -> Transducer<A, C> {
+    Transducer {
+        transform: |reducer: Reducer<C, R>| -> Reducer<A, R> {
+            (t1.transform)((t2.transform)(reducer))
+        },
+    }
+}
+
+/// `compose3` — three-way fold over compose. Pure sugar.
+public fn compose3<A, B, C, D>(
+    t1: Transducer<A, B>,
+    t2: Transducer<B, C>,
+    t3: Transducer<C, D>,
+) -> Transducer<A, D> {
+    compose(t1, compose(t2, t3))
+}
+
+/// `identity` — the unit element for `compose`. `compose(identity, t) == t`,
+/// `compose(t, identity) == t`.
+public fn identity<A>() -> Transducer<A, A> {
+    Transducer {
+        transform: |reducer: Reducer<A, R>| -> Reducer<A, R> {
+            |acc: R, x: A| reducer(acc, x)
+        },
+    }
+}
+
+// =============================================================================
+// Apply: drive a transducer over a List producing a new collection
+// =============================================================================
+
+/// Transduces a `List<A>` into `List<B>`. Single pass, no intermediate
+/// buffers per stage — the entire pipeline collapses into one inlined fold.
+public fn transduce_list<A, B>(xs: List<A>, t: Transducer<A, B>) -> List<B> {
+    let reducer: Reducer<B, List<B>> = list_appender();
+    let stream_reducer: Reducer<A, List<B>> = (t.transform)(reducer);
+    let mut acc: List<B> = [];
+    for x in xs.into_iter() { acc = stream_reducer(acc, x); }
+    acc
+}
+
+/// Transduces a `List<A>` into a single accumulator value.
+public fn transduce_into<A, B, R>(
+    xs: List<A>,
+    t: Transducer<A, B>,
+    initial: R,
+    sink: Reducer<B, R>,
+) -> R {
+    let stream_reducer: Reducer<A, R> = (t.transform)(sink);
+    let mut acc = initial;
+    for x in xs.into_iter() { acc = stream_reducer(acc, x); }
+    acc
+}
+
+// =============================================================================
+// StatefulTransducer — when the state must outlive the reducer's lifetime
+// =============================================================================
+//
+// Use this when the state is large enough that you don't want it captured
+// by the closure (e.g. windowing buffers, debounce trackers). The state is
+// supplied externally and threaded through.
+
+public type StatefulTransducer<A, B, S> is {
+    initial_state: S,
+    transform: fn<R>(Reducer<B, R>, &mut S) -> Reducer<A, R>,
+};
+
+/// Drive a stateful transducer.
+public fn transduce_stateful<A, B, S, R>(
+    xs: List<A>,
+    t: StatefulTransducer<A, B, S>,
+    initial: R,
+    sink: Reducer<B, R>,
+) -> R {
+    let mut state = t.initial_state;
+    let stream_reducer: Reducer<A, R> = (t.transform)(sink, &mut state);
+    let mut acc = initial;
+    for x in xs.into_iter() { acc = stream_reducer(acc, x); }
+    acc
+}

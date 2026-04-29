@@ -1,0 +1,20 @@
+// =============================================================================
+// shell/dsl/mod.vr — Typed Command DSLs
+// =============================================================================
+// Layer: 5 (Shell)
+// =============================================================================
+//
+// Submodules in this directory provide algebraic, refinement-typed DSLs over
+// well-known command-line tools. Each DSL exports:
+//   * A sum-type per top-level command
+//   * Refinement-typed atoms for arguments (URLs, refs, image names, …)
+//   * `render() -> Text` per command — produces a quoted shell line
+//   * A runner — `git()`, `docker()`, etc.
+//
+// =============================================================================
+
+module dsl;
+
+public module git;
+public module docker;
+public module kubectl;

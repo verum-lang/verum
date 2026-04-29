@@ -1,0 +1,351 @@
+// =============================================================================
+// shell/dsl/git.vr — Typed Git command DSL
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, text.regex, shell.{exec, escape, result, context}
+// =============================================================================
+//
+// Sum-type representation of git subcommands. Every variant binds its
+// arguments as Verum values with appropriate refinements (URLs match
+// scheme regex, refspecs match the git-refspec regex, etc.). Invalid
+// constructions are rejected at compile-time of the call-site, not at
+// runtime when the shell rejects the malformed command.
+//
+// Each variant implements `render() -> Text` returning a quoted shell
+// command line. The `git()` runner takes a `GitCmd` and dispatches via
+// `core.shell.exec.sh_check`.
+//
+// =============================================================================
+
+module core.shell.dsl.git;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.text.regex.{Regex};
+mount core.shell.escape.{Escaper, ShellEscape};
+mount core.shell.context.{ShellContext};
+mount core.shell.exec.{sh_check};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.io.path.{Path, PathBuf};
+
+// =============================================================================
+// Refinement-typed atoms
+// =============================================================================
+//
+// Constructors validate input; invalid values are unrepresentable.
+
+public type GitUrl is (Text);
+
+implement GitUrl {
+    /// Construct after validation. Pattern: scheme://… or git@host:path
+    public fn parse(s: Text) -> Result<GitUrl, ShellError> {
+        // Allow http(s)://…, git://…, ssh://…, git@host:path[.git], and
+        // local paths starting with /.
+        let r = Regex.compile(r"^((https?|git|ssh)://.+|git@[\w.-]+:.+|/.+)$").unwrap();
+        if r.is_match(&s) {
+            Ok(GitUrl(s))
+        } else {
+            Err(ShellError.SpawnFailed {
+                command: "<GitUrl::parse>".into(),
+                reason:  f"invalid git URL: {s}",
+            })
+        }
+    }
+
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+implement ShellEscape for GitUrl {
+    fn shell_quote(&self, flav: core.shell.escape.ShellFlavour) -> Text {
+        Escaper.quote_for(&self.0, flav)
+    }
+}
+
+public type GitRefspec is (Text);
+
+implement GitRefspec {
+    public fn parse(s: Text) -> Result<GitRefspec, ShellError> {
+        let r = Regex.compile(r"^[+]?[a-zA-Z0-9_/.\-]+(?::[a-zA-Z0-9_/.\-]+)?$").unwrap();
+        if r.is_match(&s) {
+            Ok(GitRefspec(s))
+        } else {
+            Err(ShellError.SpawnFailed {
+                command: "<GitRefspec::parse>".into(),
+                reason:  f"invalid git refspec: {s}",
+            })
+        }
+    }
+
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+implement ShellEscape for GitRefspec {
+    fn shell_quote(&self, flav: core.shell.escape.ShellFlavour) -> Text {
+        Escaper.quote_for(&self.0, flav)
+    }
+}
+
+public type GitBranch is (Text);
+
+implement GitBranch {
+    public fn parse(s: Text) -> Result<GitBranch, ShellError> {
+        let r = Regex.compile(r"^[a-zA-Z0-9_./\-]+$").unwrap();
+        if r.is_match(&s) && !s.starts_with("-") {
+            Ok(GitBranch(s))
+        } else {
+            Err(ShellError.SpawnFailed {
+                command: "<GitBranch::parse>".into(),
+                reason:  f"invalid git branch: {s}",
+            })
+        }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+public type ForceMode is Force | ForceWithLease;
+
+public type GitLogFormat is
+    | Oneline
+    | Short
+    | Medium
+    | Full
+    | Custom(Text);
+
+// =============================================================================
+// GitCmd — algebraic enumeration of subcommands
+// =============================================================================
+
+public type GitCmd is
+    | Clone {
+        url:                GitUrl,
+        dest:               Maybe<PathBuf>,
+        depth:              Maybe<Int>,
+        branch:             Maybe<GitBranch>,
+        recurse_submodules: Bool,
+    }
+    | Commit {
+        message:    Text,
+        amend:      Bool,
+        sign:       Bool,
+        files:      List<PathBuf>,
+        all:        Bool,
+    }
+    | Log {
+        format:     GitLogFormat,
+        max_count:  Maybe<Int>,
+        author:     Maybe<Text>,
+        since:      Maybe<Text>,
+        until:      Maybe<Text>,
+        path:       Maybe<PathBuf>,
+    }
+    | Push {
+        remote:     Text,
+        refspec:    GitRefspec,
+        force:      Maybe<ForceMode>,
+        dry_run:    Bool,
+    }
+    | Pull {
+        remote:     Text,
+        branch:     Maybe<GitBranch>,
+        rebase:     Bool,
+    }
+    | Checkout {
+        branch:     GitBranch,
+        create:     Bool,
+    }
+    | Status {
+        short:      Bool,
+        porcelain:  Bool,
+    }
+    | Add {
+        paths:      List<PathBuf>,
+        all:        Bool,
+    }
+    | Diff {
+        cached:     Bool,
+        name_only:  Bool,
+        target:     Maybe<Text>,
+    };
+
+implement GitCmd {
+    /// Render to a shell command string using the host's quoting rules.
+    public fn render(&self) -> Text {
+        self.render_for(core.shell.escape.default_flavour())
+    }
+
+    public fn render_for(&self, flav: core.shell.escape.ShellFlavour) -> Text {
+        match self {
+            Clone { url, dest, depth, branch, recurse_submodules } =>
+                render_clone(url, dest, depth, branch, *recurse_submodules, flav),
+            Commit { message, amend, sign, files, all } =>
+                render_commit(message, *amend, *sign, files, *all, flav),
+            Log { format, max_count, author, since, until, path } =>
+                render_log(format, max_count, author, since, until, path, flav),
+            Push { remote, refspec, force, dry_run } =>
+                render_push(remote, refspec, force, *dry_run, flav),
+            Pull { remote, branch, rebase } =>
+                render_pull(remote, branch, *rebase, flav),
+            Checkout { branch, create } =>
+                render_checkout(branch, *create, flav),
+            Status { short, porcelain } =>
+                render_status(*short, *porcelain),
+            Add { paths, all } =>
+                render_add(paths, *all, flav),
+            Diff { cached, name_only, target } =>
+                render_diff(*cached, *name_only, target, flav),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Per-variant renderers — each builds an arg vector then `shell_join`s.
+// -----------------------------------------------------------------------------
+
+fn render_clone(
+    url: &GitUrl,
+    dest: &Maybe<PathBuf>,
+    depth: &Maybe<Int>,
+    branch: &Maybe<GitBranch>,
+    recurse_submodules: Bool,
+    flav: core.shell.escape.ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["git".into(), "clone".into()];
+    if let Some(d) = depth { args.push("--depth".into()); args.push(f"{d}"); }
+    if let Some(b) = branch { args.push("--branch".into()); args.push(b.as_text().clone()); }
+    if recurse_submodules { args.push("--recurse-submodules".into()); }
+    args.push(url.as_text().clone());
+    if let Some(d) = dest { args.push(d.to_text()); }
+    quote_join(&args, flav)
+}
+
+fn render_commit(
+    message: &Text,
+    amend: Bool,
+    sign: Bool,
+    files: &List<PathBuf>,
+    all: Bool,
+    flav: core.shell.escape.ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["git".into(), "commit".into()];
+    if amend { args.push("--amend".into()); }
+    if sign  { args.push("-S".into()); }
+    if all   { args.push("--all".into()); }
+    args.push("-m".into());
+    args.push(message.clone());
+    for p in files.iter() { args.push(p.to_text()); }
+    quote_join(&args, flav)
+}
+
+fn render_log(
+    format: &GitLogFormat,
+    max_count: &Maybe<Int>,
+    author: &Maybe<Text>,
+    since: &Maybe<Text>,
+    until: &Maybe<Text>,
+    path: &Maybe<PathBuf>,
+    flav: core.shell.escape.ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["git".into(), "log".into()];
+    let format_text = match format {
+        Oneline    => "--oneline".into(),
+        Short      => "--format=short".into(),
+        Medium     => "--format=medium".into(),
+        Full       => "--format=full".into(),
+        Custom(p)  => f"--format={p}",
+    };
+    args.push(format_text);
+    if let Some(n) = max_count { args.push(f"-{n}"); }
+    if let Some(a) = author { args.push(f"--author={a}"); }
+    if let Some(s) = since  { args.push(f"--since={s}"); }
+    if let Some(u) = until  { args.push(f"--until={u}"); }
+    if let Some(p) = path   { args.push("--".into()); args.push(p.to_text()); }
+    quote_join(&args, flav)
+}
+
+fn render_push(
+    remote: &Text,
+    refspec: &GitRefspec,
+    force: &Maybe<ForceMode>,
+    dry_run: Bool,
+    flav: core.shell.escape.ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["git".into(), "push".into()];
+    match force {
+        None                          => {}
+        Some(ForceMode.Force)         => args.push("--force".into()),
+        Some(ForceMode.ForceWithLease)=> args.push("--force-with-lease".into()),
+    }
+    if dry_run { args.push("--dry-run".into()); }
+    args.push(remote.clone());
+    args.push(refspec.as_text().clone());
+    quote_join(&args, flav)
+}
+
+fn render_pull(
+    remote: &Text,
+    branch: &Maybe<GitBranch>,
+    rebase: Bool,
+    flav: core.shell.escape.ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["git".into(), "pull".into()];
+    if rebase { args.push("--rebase".into()); }
+    args.push(remote.clone());
+    if let Some(b) = branch { args.push(b.as_text().clone()); }
+    quote_join(&args, flav)
+}
+
+fn render_checkout(branch: &GitBranch, create: Bool, flav: core.shell.escape.ShellFlavour) -> Text {
+    let mut args: List<Text> = ["git".into(), "checkout".into()];
+    if create { args.push("-b".into()); }
+    args.push(branch.as_text().clone());
+    quote_join(&args, flav)
+}
+
+fn render_status(short: Bool, porcelain: Bool) -> Text {
+    let mut s: Text = "git status".into();
+    if porcelain { s.push_str(" --porcelain"); }
+    if short     { s.push_str(" -s"); }
+    s
+}
+
+fn render_add(paths: &List<PathBuf>, all: Bool, flav: core.shell.escape.ShellFlavour) -> Text {
+    let mut args: List<Text> = ["git".into(), "add".into()];
+    if all { args.push("--all".into()); }
+    for p in paths.iter() { args.push(p.to_text()); }
+    quote_join(&args, flav)
+}
+
+fn render_diff(
+    cached: Bool,
+    name_only: Bool,
+    target: &Maybe<Text>,
+    flav: core.shell.escape.ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["git".into(), "diff".into()];
+    if cached    { args.push("--cached".into()); }
+    if name_only { args.push("--name-only".into()); }
+    if let Some(t) = target { args.push(t.clone()); }
+    quote_join(&args, flav)
+}
+
+fn quote_join(args: &List<Text>, flav: core.shell.escape.ShellFlavour) -> Text {
+    let mut out = Text.with_capacity(args.len() * 8);
+    let mut first = true;
+    for a in args.iter() {
+        if !first { out.push(' '); }
+        first = false;
+        out.push_str(&Escaper.quote_for(a, flav));
+    }
+    out
+}
+
+// =============================================================================
+// git() — the runner
+// =============================================================================
+
+public async fn git(cmd: GitCmd) -> Result<ShellResult, ShellError>
+    using [ShellContext]
+{
+    let line = cmd.render();
+    sh_check(&line).await
+}

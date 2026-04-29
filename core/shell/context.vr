@@ -1,0 +1,432 @@
+// =============================================================================
+// shell/context.vr — ShellContext (DI for shell commands)
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, base.env, io.fs, sync, shell.escape
+// =============================================================================
+//
+// `ShellContext` is the runtime configuration carried implicitly through
+// every `using [ShellContext]` function. It centralises:
+//   * working directory (cwd) — overrides per-call rather than mutating
+//     process global state, which keeps shell calls referentially clean
+//     across nursery scopes
+//   * env-var overrides — additive, applied just before spawn, never
+//     leaked into the parent process
+//   * shell flavour (Posix / Cmd / Fish / PowerShell) — drives both auto-
+//     escape and the `-c` invocation
+//   * verbosity / dry-run knobs for diagnostics
+//   * mock layer (used by tests) — short-circuits real spawns
+//   * permission set — runtime gate before kernel-level dispatch
+//
+// The context is a value type. Mutation happens through `provide` /
+// `with_context` rather than in-place writes; this means parallel branches
+// of a nursery never observe each other's cwd or env changes — exactly the
+// invariant `using [...]` exists to enforce.
+//
+// =============================================================================
+
+module core.shell.context;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.base.env.{var_opt as env_var_opt, shell as host_shell, temp_dir as host_temp_dir};
+mount core.text.format.{Formatter, FormatError};
+mount core.io.fs.{Path, PathBuf, current_dir as fs_current_dir};
+mount core.shell.escape.{ShellFlavour, default_flavour};
+mount core.shell.result.{ShellResult, ShellError};
+
+// =============================================================================
+// PermissionKind / PermissionSet — capability declarations
+// =============================================================================
+//
+// Permissions are declarative. Frontmatter `// !@permission(run: [...])`
+// is parsed into a `PermissionSet` that is attached to the ShellContext.
+// Each spawn cross-references the requested program against `run` (or any
+// FS / NET access against the corresponding facet).
+
+public type PermissionKind is
+    | Run    { program: Text }
+    | FsRead { path: Text }
+    | FsWrite{ path: Text }
+    | Net    { host: Text }
+    | Env    { name: Text };
+
+public type PermissionSet is {
+    /// `None` = unrestricted (script-mode default for backwards compatibility).
+    /// `Some([])` = deny-all. `Some([..])` = explicit allow-list.
+    run:        Maybe<List<Text>>,
+    fs_read:    Maybe<List<Text>>,
+    fs_write:   Maybe<List<Text>>,
+    net:        Maybe<List<Text>>,
+    env:        Maybe<List<Text>>,
+    /// If `true`, deny without an allow-list. Default: false (allow when
+    /// list is None) so that legacy scripts run without frontmatter aren't
+    /// surprised on first execution.
+    strict:     Bool,
+}
+
+implement PermissionSet {
+    /// Unrestricted permissions — useful for tests and CI that explicitly
+    /// opt out of the capability gate.
+    public fn unrestricted() -> PermissionSet {
+        PermissionSet {
+            run: None, fs_read: None, fs_write: None, net: None, env: None,
+            strict: false,
+        }
+    }
+
+    /// Deny-all baseline. Caller adds allowed entries via `with_run` /
+    /// `with_fs_read` / etc.
+    public fn deny_all() -> PermissionSet {
+        PermissionSet {
+            run: Some([]), fs_read: Some([]), fs_write: Some([]),
+            net: Some([]), env: Some([]),
+            strict: true,
+        }
+    }
+
+    public fn with_run(mut self, programs: List<Text>) -> PermissionSet {
+        self.run = Some(programs);
+        self
+    }
+    public fn with_fs_read(mut self, paths: List<Text>) -> PermissionSet {
+        self.fs_read = Some(paths);
+        self
+    }
+    public fn with_fs_write(mut self, paths: List<Text>) -> PermissionSet {
+        self.fs_write = Some(paths);
+        self
+    }
+    public fn with_net(mut self, hosts: List<Text>) -> PermissionSet {
+        self.net = Some(hosts);
+        self
+    }
+
+    /// Check `run` permission — invoked by the runner before spawn.
+    /// Programs are matched by basename; full paths and bare names both work.
+    public fn check_run(&self, program: &Text) -> Result<(), ShellError> {
+        match &self.run {
+            None      => Ok(()),
+            Some(allowed) => {
+                let basename = basename_of(program);
+                for a in allowed.iter() {
+                    if a == &basename || a == program { return Ok(()); }
+                }
+                Err(ShellError.PermissionDenied {
+                    command: program.clone(),
+                    kind:    f"run({basename})",
+                })
+            }
+        }
+    }
+}
+
+implement Clone for PermissionSet {
+    fn clone(&self) -> PermissionSet {
+        PermissionSet {
+            run:      clone_opt_list(&self.run),
+            fs_read:  clone_opt_list(&self.fs_read),
+            fs_write: clone_opt_list(&self.fs_write),
+            net:      clone_opt_list(&self.net),
+            env:      clone_opt_list(&self.env),
+            strict:   self.strict,
+        }
+    }
+}
+
+fn clone_opt_list(o: &Maybe<List<Text>>) -> Maybe<List<Text>> {
+    match o {
+        None => None,
+        Some(l) => {
+            let mut out: List<Text> = [];
+            for x in l.iter() { out.push(x.clone()); }
+            Some(out)
+        }
+    }
+}
+
+fn basename_of(p: &Text) -> Text {
+    let mut last_sep: Int = -1;
+    let mut i: Int = 0;
+    for ch in p.chars() {
+        if ch == '/' || ch == '\\' { last_sep = i; }
+        i = i + 1;
+    }
+    if last_sep < 0 { p.clone() } else { p.slice(last_sep + 1, p.len()).into() }
+}
+
+// =============================================================================
+// MockResponse / MockLayer — enables unit-testable scripts
+// =============================================================================
+//
+// When a `MockLayer` is set, every `run()` / `sh()` checks for a matching
+// pattern in the layer first; if hit, no real process is spawned and the
+// canned `ShellResult` is returned. Patterns match by exact command first,
+// then by substring fallback. A wildcard `*` matches any command (catch-all
+// handler — useful for "no real shells in tests" guard).
+
+public type MockResponse is {
+    /// Pattern: exact match preferred; substring fallback after.
+    /// `*` matches any command (catch-all).
+    pattern: Text,
+    /// Stdout bytes to return.
+    stdout: List<Byte>,
+    /// Stderr bytes.
+    stderr: List<Byte>,
+    /// Exit code (will be encoded as POSIX waitpid status: code << 8).
+    exit_code: Int,
+}
+
+implement MockResponse {
+    public fn success(pattern: Text, stdout: Text) -> MockResponse {
+        MockResponse {
+            pattern,
+            stdout: stdout.into_bytes(),
+            stderr: [],
+            exit_code: 0,
+        }
+    }
+    public fn failure(pattern: Text, stderr: Text, code: Int) -> MockResponse {
+        MockResponse {
+            pattern,
+            stdout: [],
+            stderr: stderr.into_bytes(),
+            exit_code: code,
+        }
+    }
+}
+
+public type MockLayer is {
+    responses:       List<MockResponse>,
+    /// Shadow log of every dispatched command — `recorded_calls()` returns this.
+    recorded:        List<Text>,
+    /// If `true` and no pattern matches, raise `Err(SpawnFailed)` instead of
+    /// silently falling through to a real shell. Default: true (safer).
+    strict_no_match: Bool,
+}
+
+implement MockLayer {
+    public fn new(responses: List<MockResponse>) -> MockLayer {
+        MockLayer { responses, recorded: [], strict_no_match: true }
+    }
+
+    public fn lenient(responses: List<MockResponse>) -> MockLayer {
+        MockLayer { responses, recorded: [], strict_no_match: false }
+    }
+
+    /// Look up the first matching response for a command. Records the call.
+    public fn dispatch(&mut self, command: &Text) -> Maybe<MockResponse> {
+        self.recorded.push(command.clone());
+        // Exact match first
+        for r in self.responses.iter() {
+            if &r.pattern == command { return Some(r.clone()); }
+        }
+        // Substring fallback
+        for r in self.responses.iter() {
+            if r.pattern.contains(command) || command.contains(&r.pattern) {
+                return Some(r.clone());
+            }
+        }
+        // Wildcard catch-all
+        for r in self.responses.iter() {
+            if r.pattern == "*" { return Some(r.clone()); }
+        }
+        None
+    }
+
+    public fn recorded_calls(&self) -> &List<Text> { &self.recorded }
+}
+
+implement Clone for MockResponse {
+    fn clone(&self) -> MockResponse {
+        MockResponse {
+            pattern:   self.pattern.clone(),
+            stdout:    self.stdout.clone(),
+            stderr:    self.stderr.clone(),
+            exit_code: self.exit_code,
+        }
+    }
+}
+
+implement Clone for MockLayer {
+    fn clone(&self) -> MockLayer {
+        let mut rs: List<MockResponse> = [];
+        for r in self.responses.iter() { rs.push(r.clone()); }
+        let mut rec: List<Text> = [];
+        for r in self.recorded.iter() { rec.push(r.clone()); }
+        MockLayer { responses: rs, recorded: rec, strict_no_match: self.strict_no_match }
+    }
+}
+
+// =============================================================================
+// ShellContext — the value injected via `using [ShellContext]`
+// =============================================================================
+
+public type ShellContext is {
+    /// Working directory override. If None, child inherits parent's cwd.
+    cwd: Maybe<Text>,
+    /// Additive environment overrides applied to each spawn.
+    env_overrides: List<(Text, Text)>,
+    /// Shell flavour for both escaping and `-c` dispatch.
+    flavour: ShellFlavour,
+    /// Path to the shell program. None = autodetect from $SHELL / COMSPEC.
+    shell_program: Maybe<Text>,
+    /// Capability gate.
+    permissions: PermissionSet,
+    /// Mock layer — if Some, real spawns are intercepted.
+    mock: Maybe<MockLayer>,
+    /// Diagnostics: log every dispatched command.
+    verbose: Bool,
+    /// Diagnostics: print but don't actually spawn.
+    dry_run: Bool,
+}
+
+implement ShellContext {
+    /// The default context: inherit cwd, no overrides, host flavour, host
+    /// shell, unrestricted permissions, no mocks. Suitable for top-level
+    /// `provide ShellContext = ShellContext.default();`.
+    public fn default() -> ShellContext {
+        ShellContext {
+            cwd: None,
+            env_overrides: [],
+            flavour: default_flavour(),
+            shell_program: host_shell(),
+            permissions: PermissionSet.unrestricted(),
+            mock: None,
+            verbose: false,
+            dry_run: false,
+        }
+    }
+
+    /// Hermetic context for tests: no mocks set yet but mocking is mandatory
+    /// (real spawns will surface as SpawnFailed via the strict mock layer).
+    public fn for_tests() -> ShellContext {
+        let mut c = ShellContext.default();
+        c.mock = Some(MockLayer.new([]));
+        c.permissions = PermissionSet.deny_all();
+        c
+    }
+
+    /// Construct a context bound to a specific cwd.
+    public fn at(path: Text) -> ShellContext {
+        let mut c = ShellContext.default();
+        c.cwd = Some(path);
+        c
+    }
+
+    // ── Builder API (chainable, value-returning) ─────────────────────────────
+
+    public fn with_cwd(mut self, path: Text) -> ShellContext { self.cwd = Some(path); self }
+    public fn with_env(mut self, key: Text, val: Text) -> ShellContext {
+        self.env_overrides.push((key, val));
+        self
+    }
+    public fn with_flavour(mut self, f: ShellFlavour) -> ShellContext { self.flavour = f; self }
+    public fn with_shell(mut self, prog: Text) -> ShellContext { self.shell_program = Some(prog); self }
+    public fn with_permissions(mut self, p: PermissionSet) -> ShellContext { self.permissions = p; self }
+    public fn with_verbose(mut self, v: Bool) -> ShellContext { self.verbose = v; self }
+    public fn with_dry_run(mut self, v: Bool) -> ShellContext { self.dry_run = v; self }
+
+    // ── Mock helpers ─────────────────────────────────────────────────────────
+
+    public fn mock(responses: List<MockResponse>) -> ShellContext {
+        let mut c = ShellContext.default();
+        c.mock = Some(MockLayer.new(responses));
+        c
+    }
+
+    public fn lenient_mock(responses: List<MockResponse>) -> ShellContext {
+        let mut c = ShellContext.default();
+        c.mock = Some(MockLayer.lenient(responses));
+        c
+    }
+
+    // ── Resolution helpers ───────────────────────────────────────────────────
+
+    /// The cwd that the next spawn will use. Falls back to host getcwd if
+    /// no override is set.
+    public fn effective_cwd(&self) -> Maybe<Text> {
+        match &self.cwd {
+            Some(p) => Some(p.clone()),
+            None    => match fs_current_dir() {
+                Ok(pb) => Some(pb.to_text()),
+                Err(_) => None,
+            },
+        }
+    }
+
+    /// Resolve the shell binary for `-c` dispatch.
+    public fn resolve_shell(&self) -> Text {
+        match &self.shell_program {
+            Some(s) => s.clone(),
+            None    => match host_shell() {
+                Some(s) => s,
+                None    => {
+                    @cfg(any(target_os = "linux", target_os = "macos"))
+                    { "/bin/sh".into() }
+                    @cfg(target_os = "windows")
+                    { "cmd.exe".into() }
+                }
+            }
+        }
+    }
+
+    /// `-c` flag (or its platform equivalent) for spawning a shell command.
+    public fn shell_command_flag(&self) -> Text {
+        match self.flavour {
+            Posix      => "-c".into(),
+            Fish       => "-c".into(),
+            Cmd        => "/C".into(),
+            PowerShell => "-Command".into(),
+        }
+    }
+}
+
+implement Clone for ShellContext {
+    fn clone(&self) -> ShellContext {
+        let mut env: List<(Text, Text)> = [];
+        for (k, v) in self.env_overrides.iter() {
+            env.push((k.clone(), v.clone()));
+        }
+        ShellContext {
+            cwd:           self.cwd.clone(),
+            env_overrides: env,
+            flavour:       self.flavour.clone(),
+            shell_program: self.shell_program.clone(),
+            permissions:   self.permissions.clone(),
+            mock:          self.mock.clone(),
+            verbose:       self.verbose,
+            dry_run:       self.dry_run,
+        }
+    }
+}
+
+implement Debug for ShellContext {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ShellContext(cwd={self.cwd:?}, env={self.env_overrides.len()}, flavour={self.flavour:?}, mock={self.mock.is_some()})".as_str())
+    }
+}
+
+// =============================================================================
+// Free helpers — `cd`, `set_env`, `cwd` — sugar over the context system
+// =============================================================================
+
+/// Returns the current working directory considering the active ShellContext.
+public fn cwd() -> Maybe<Text> using [ShellContext] {
+    let ctx = provide ShellContext;
+    ctx.effective_cwd()
+}
+
+/// Returns a new ShellContext with cwd set to `path`. The caller is expected
+/// to `provide` it back into the relevant scope. This avoids global mutation
+/// — parallel branches see independent cwds.
+public fn cd(path: &Text) -> ShellContext using [ShellContext] {
+    let ctx = provide ShellContext;
+    ctx.clone().with_cwd(path.clone())
+}
+
+/// Returns a new ShellContext with `key=value` overlay added.
+public fn set_env(key: &Text, value: &Text) -> ShellContext using [ShellContext] {
+    let ctx = provide ShellContext;
+    ctx.clone().with_env(key.clone(), value.clone())
+}

@@ -1,0 +1,303 @@
+// =============================================================================
+// shell/resources.vr — CBGR-managed resources for shell scripting
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, base.memory, io.fs, sys, time
+// =============================================================================
+//
+// File descriptors, child processes, temporary files and lock files all
+// share an ownership pattern: the resource MUST be released exactly once,
+// at a deterministic point. Verum's CBGR (Capability-Based Generation
+// References) achieves this through:
+//
+//   * `Drop` semantics — release at scope exit, including unwind
+//   * `@must_consume` — compile error if a resource is dropped without
+//     calling its release method (e.g. `wait()` on a Child)
+//   * Generation-tagged refs — runtime use-after-free detection at ~15 ns
+//
+// This module wraps the platform-level handles (Fd, file paths, locks)
+// in CBGR-friendly types with explicit Drop impls. Where possible, we
+// reuse `core.io.fs.File` and `core.io.process.Child` directly — this
+// module exists to add shell-specific niceties (TempFile auto-unlink,
+// FileLock with flock, scoped lock guards).
+//
+// =============================================================================
+
+module core.shell.resources;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Drop};
+mount core.base.memory.{Shared};
+mount core.io.path.{Path, PathBuf};
+mount core.io.fs.{File, OpenOptions, IoResult, remove_file as fs_remove_file};
+mount core.text.format.{Formatter, FormatError};
+mount core.shell.context.{ShellContext};
+mount core.shell.result.{ShellError};
+
+// =============================================================================
+// Fd — owned file descriptor
+// =============================================================================
+//
+// A thin owning wrapper around an integer fd / handle. Drop closes
+// unconditionally; double-close is impossible because the inner fd is
+// nulled out on close.
+
+@must_consume
+public type Fd is {
+    raw:     Int,
+    closed:  Bool,
+}
+
+implement Fd {
+    /// Take ownership of a raw fd that the caller obtained via low-level
+    /// syscall (open, dup, etc). The Fd is now responsible for closing it.
+    public fn from_raw(fd: Int) -> Fd {
+        Fd { raw: fd, closed: false }
+    }
+
+    /// Get the underlying raw fd. Use only for FFI; ownership stays with self.
+    public fn as_raw(&self) -> Int { self.raw }
+
+    /// Explicitly close the fd. Idempotent — second close is a no-op.
+    public fn close(mut self) {
+        if !self.closed {
+            // Reuse the platform-specific close from io.process via the
+            // common fd-ops pathway.  On Unix this is `close(2)`, on
+            // Windows `CloseHandle`.
+            __platform_fd_close(self.raw);
+            self.closed = true;
+        }
+    }
+
+    /// True iff close() has been called.
+    public fn is_closed(&self) -> Bool { self.closed }
+}
+
+implement Drop for Fd {
+    fn drop(&mut self) {
+        if !self.closed {
+            __platform_fd_close(self.raw);
+            self.closed = true;
+        }
+    }
+}
+
+implement Debug for Fd {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Fd(raw={self.raw}, closed={self.closed})".as_str())
+    }
+}
+
+// Platform shim — single point that resolves to the right close.
+fn __platform_fd_close(fd: Int) {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        // libsystem.B / libc close(2)
+        unsafe { core.sys.darwin.libsystem.close(fd as Int32); }
+    }
+    @cfg(target_os = "windows")
+    {
+        let handle = core.sys.windows.kernel32.Handle.from_raw(fd as UInt64);
+        core.sys.windows.kernel32.CloseHandle(handle);
+    }
+}
+
+// =============================================================================
+// TempFile — temporary file that auto-unlinks on Drop
+// =============================================================================
+//
+// Created in the host's temp directory or an explicit parent. The file
+// path is removed when the `TempFile` is dropped, *regardless* of whether
+// the dispatch path was successful, errored, panicked, or unwound.
+//
+// To prevent the auto-delete (e.g. when atomically renaming to a target),
+// call `persist()` or move the path into a `PathBuf` and clear `path`.
+
+@must_consume
+public type TempFile is {
+    path:        PathBuf,
+    file:        Maybe<File>,
+    persisted:   Bool,
+}
+
+implement TempFile {
+    /// Create a temp file in the system temp directory with a unique name.
+    public fn new() -> Result<TempFile, ShellError> {
+        TempFile.new_in(&PathBuf.from(core.base.env.temp_dir()))
+    }
+
+    /// Create a temp file in `dir`. Name uses a fast random suffix.
+    public fn new_in(dir: &PathBuf) -> Result<TempFile, ShellError> {
+        let suffix = generate_suffix();
+        let mut p = dir.clone();
+        p.push(&PathBuf.from(f"verum-tmp-{suffix}"));
+        let opts = OpenOptions.new().write(true).create_new(true).read(true);
+        match opts.open(p.as_path()) {
+            Ok(file) => Ok(TempFile { path: p, file: Some(file), persisted: false }),
+            Err(io)  => Err(ShellError.SpawnFailed {
+                command: f"<temp file in {dir:?}>",
+                reason:  f"failed to create temp file: {io:?}",
+            }),
+        }
+    }
+
+    /// Path to the temp file.
+    public fn path(&self) -> &PathBuf { &self.path }
+
+    /// Mutable access to the underlying file handle.
+    public fn file(&mut self) -> Option<&mut File> { self.file.as_mut() }
+
+    /// Persist — Drop will not delete. Returns the final path.
+    public fn persist(mut self) -> PathBuf {
+        self.persisted = true;
+        self.path.clone()
+    }
+}
+
+implement Drop for TempFile {
+    fn drop(&mut self) {
+        // Close the file handle first so the unlink can succeed on Windows
+        // (where open files cannot be deleted).
+        self.file = None;
+        if !self.persisted {
+            let _ = fs_remove_file(self.path.as_path());
+        }
+    }
+}
+
+implement Debug for TempFile {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"TempFile({self.path:?}, persisted={self.persisted})".as_str())
+    }
+}
+
+fn generate_suffix() -> Text {
+    // Reuse the snowflake/nanoid generator in base for unique short ids.
+    // 12 base62 chars give >7e21 unique values — collision-free in practice.
+    core.base.nanoid.generate(12)
+}
+
+// =============================================================================
+// FileLock — flock-based mutual exclusion
+// =============================================================================
+//
+// A `FileLock` wraps an open Fd plus a flag indicating advisory-vs-exclusive
+// lock acquired via `flock(2)` (Unix) or `LockFileEx` (Windows). Drop
+// releases the lock automatically.
+
+public type LockKind is Shared | Exclusive;
+
+@must_consume
+public type FileLock is {
+    fd:       Fd,
+    kind:     LockKind,
+    released: Bool,
+}
+
+implement FileLock {
+    /// Acquire an exclusive (LOCK_EX) lock, blocking until granted.
+    public fn lock_exclusive(path: &Path) -> Result<FileLock, ShellError> {
+        FileLock.acquire(path, LockKind.Exclusive, true)
+    }
+
+    /// Acquire a shared (LOCK_SH) lock, blocking until granted.
+    public fn lock_shared(path: &Path) -> Result<FileLock, ShellError> {
+        FileLock.acquire(path, LockKind.Shared, true)
+    }
+
+    /// Try to acquire a lock without blocking. Returns `Ok(None)` if
+    /// another holder has it.
+    public fn try_lock_exclusive(path: &Path)
+        -> Result<Maybe<FileLock>, ShellError>
+    {
+        match FileLock.acquire(path, LockKind.Exclusive, false) {
+            Ok(l)  => Ok(Some(l)),
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn acquire(path: &Path, kind: LockKind, blocking: Bool) -> Result<FileLock, ShellError> {
+        // Open or create the file
+        let opts = OpenOptions.new().write(true).create(true).read(true);
+        let file = opts.open(path).map_err(|io| ShellError.SpawnFailed {
+            command: f"<flock {path:?}>",
+            reason:  f"failed to open lock file: {io:?}",
+        })?;
+        let raw_fd = file.as_raw_fd();
+        // Apply lock at the platform layer
+        let op = match kind {
+            LockKind.Exclusive => if blocking { 2 } else { 2 | 4 },  // LOCK_EX | LOCK_NB
+            LockKind.Shared    => if blocking { 1 } else { 1 | 4 },  // LOCK_SH | LOCK_NB
+        };
+        let r = __platform_flock(raw_fd, op);
+        if r != 0 {
+            return Err(ShellError.SpawnFailed {
+                command: f"<flock {path:?}>",
+                reason:  "flock failed".into(),
+            });
+        }
+        Ok(FileLock {
+            fd: Fd.from_raw(raw_fd),
+            kind,
+            released: false,
+        })
+    }
+
+    /// Release the lock explicitly. Idempotent.
+    public fn release(mut self) {
+        if !self.released {
+            let _ = __platform_flock(self.fd.as_raw(), 8);  // LOCK_UN
+            self.released = true;
+        }
+    }
+}
+
+implement Drop for FileLock {
+    fn drop(&mut self) {
+        if !self.released {
+            let _ = __platform_flock(self.fd.as_raw(), 8);
+            self.released = true;
+        }
+    }
+}
+
+fn __platform_flock(fd: Int, op: Int) -> Int {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        unsafe { core.sys.darwin.libsystem.flock(fd as Int32, op as Int32) as Int }
+    }
+    @cfg(target_os = "windows")
+    {
+        // Windows: emulate via LockFileEx / UnlockFileEx — not implemented yet
+        // in this layer; Windows callers should rely on directory-based
+        // lock conventions instead.
+        0
+    }
+}
+
+// =============================================================================
+// SharedFd — multi-owner Fd with refcount-driven close
+// =============================================================================
+//
+// When a `Fd` must be passed to multiple async tasks (e.g. fan-out reading
+// from one process stdout), `SharedFd` provides reference-counted access.
+// The underlying close happens only when the last clone is dropped.
+
+public type SharedFd is {
+    inner: Shared<Fd>,
+}
+
+implement SharedFd {
+    public fn new(fd: Fd) -> SharedFd {
+        SharedFd { inner: Shared.new(fd) }
+    }
+
+    public fn clone(&self) -> SharedFd {
+        SharedFd { inner: self.inner.clone() }
+    }
+
+    public fn as_raw(&self) -> Int { self.inner.borrow().as_raw() }
+
+    /// True iff this is the only owner. Useful for last-writer optimisations.
+    public fn is_unique(&self) -> Bool { self.inner.strong_count() == 1 }
+}

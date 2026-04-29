@@ -1,0 +1,225 @@
+// =============================================================================
+// shell/progress.vr — Progress bar and Spinner
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, io.stdio, time, async.timer, term.style (for ANSI)
+// =============================================================================
+//
+// Two interactive feedback widgets:
+//
+//   * `Progress` — bar with a known total, advance() increments and
+//     repaints. Optional rate / ETA computation.
+//   * `Spinner` — indeterminate animation for tasks of unknown duration.
+//     Auto-ticks via a background async task; `Drop` stops the animation
+//     and clears the line.
+//
+// Both widgets write directly to stdout using ANSI escape sequences for
+// cursor control (carriage return + clear-line). On non-TTY stdout they
+// degrade to printing one status line per advance — still usable in
+// log files.
+//
+// =============================================================================
+
+module core.shell.progress;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Drop};
+mount core.io.stdio.{print, println};
+mount core.time.duration.{Duration};
+mount core.time.instant.{Instant};
+mount core.async.timer.{sleep};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
+mount core.async.spawn.{spawn};
+mount core.async.task.{TaskHandle};
+
+// =============================================================================
+// Progress — bounded bar
+// =============================================================================
+
+public type ProgressStyle is
+    | Bar          // [#####     ]
+    | Bar2         // ▓▓▓▓░░░░░░ (block characters)
+    | Counter      // 5/10
+    | Percent;     // 50%
+
+implement Clone for ProgressStyle {
+    fn clone(&self) -> ProgressStyle { *self }
+}
+
+@must_consume
+public type Progress is {
+    label:    Text,
+    total:    Int,
+    current:  Int,
+    style:    ProgressStyle,
+    started:  Instant,
+    finished: Bool,
+}
+
+implement Progress {
+    /// Create a new progress bar with `total` steps.
+    public fn new(label: Text, total: Int) -> Progress {
+        Progress {
+            label,
+            total,
+            current: 0,
+            style: ProgressStyle.Bar,
+            started: Instant.now(),
+            finished: false,
+        }
+    }
+
+    public fn with_style(mut self, s: ProgressStyle) -> Progress {
+        self.style = s; self
+    }
+
+    /// Advance one step.
+    public fn advance(&mut self) {
+        self.current = self.current + 1;
+        self.repaint();
+    }
+
+    /// Set absolute current value.
+    public fn set(&mut self, current: Int) {
+        self.current = current;
+        self.repaint();
+    }
+
+    /// Mark complete and emit a final newline.
+    public fn done(mut self, message: Text) {
+        self.current = self.total;
+        self.repaint();
+        println(&"".into());
+        if !message.is_empty() { println(&message); }
+        self.finished = true;
+    }
+
+    fn repaint(&self) {
+        let pct = if self.total > 0 {
+            (self.current * 100) / self.total
+        } else { 0 };
+        let body = match self.style {
+            Bar     => render_bar(self.current, self.total, 40),
+            Bar2    => render_bar2(self.current, self.total, 40),
+            Counter => f"{self.current}/{self.total}",
+            Percent => f"{pct}%",
+        };
+        let elapsed = self.started.elapsed();
+        let elapsed_ms = elapsed.as_millis();
+        let eta_ms = if self.current > 0 && self.total > 0 {
+            let avg_ms = elapsed_ms / self.current as Int;
+            avg_ms * (self.total - self.current) as Int
+        } else { 0 };
+        let line = f"\r{self.label}: {body}  [{format_duration_ms(elapsed_ms)} / ETA {format_duration_ms(eta_ms)}]";
+        print(&line);
+    }
+}
+
+implement Drop for Progress {
+    fn drop(&mut self) {
+        if !self.finished { println(&"".into()); }
+    }
+}
+
+fn render_bar(current: Int, total: Int, width: Int) -> Text {
+    let filled = if total > 0 { (current * width) / total } else { 0 };
+    let mut out = Text.with_capacity(width as usize + 2);
+    out.push('[');
+    let mut i = 0;
+    while i < width {
+        out.push(if i < filled { '#' } else { ' ' });
+        i = i + 1;
+    }
+    out.push(']');
+    out
+}
+
+fn render_bar2(current: Int, total: Int, width: Int) -> Text {
+    let filled = if total > 0 { (current * width) / total } else { 0 };
+    let mut out = Text.with_capacity(width as usize * 4);
+    let mut i = 0;
+    while i < width {
+        if i < filled { out.push_str("▓"); } else { out.push_str("░"); }
+        i = i + 1;
+    }
+    out
+}
+
+fn format_duration_ms(ms: Int) -> Text {
+    if ms < 1000 { f"{ms}ms" }
+    else if ms < 60_000 { f"{ms / 1000}s" }
+    else { f"{ms / 60_000}m{(ms / 1000) % 60}s" }
+}
+
+// =============================================================================
+// Spinner — indeterminate
+// =============================================================================
+
+@must_consume
+public type Spinner is {
+    label:  Text,
+    cancel: CancellationTokenSource,
+    task:   Maybe<TaskHandle<()>>,
+    stopped: Bool,
+}
+
+implement Spinner {
+    public fn new(label: Text) -> Spinner {
+        Spinner {
+            label,
+            cancel: CancellationTokenSource.new(),
+            task: None,
+            stopped: false,
+        }
+    }
+
+    /// Start the animation in the background.
+    public async fn start(&mut self) {
+        let token = self.cancel.token();
+        let label = self.label.clone();
+        let task = spawn(async move {
+            let frames: List<Text> = [
+                "⠋".into(), "⠙".into(), "⠹".into(), "⠸".into(),
+                "⠼".into(), "⠴".into(), "⠦".into(), "⠧".into(),
+                "⠇".into(), "⠏".into(),
+            ];
+            let mut idx = 0;
+            loop {
+                let frame = frames[idx % frames.len()].clone();
+                print(&f"\r{frame} {label}");
+                select {
+                    _ = sleep(Duration.from_millis(80)) => {},
+                    _ = token.cancelled() => {
+                        // Clear line on stop
+                        print(&"\r\u{001b}[2K".into());
+                        return;
+                    },
+                }
+                idx = idx + 1;
+            }
+        });
+        self.task = Some(task);
+    }
+
+    /// Stop, optionally print a final message in place of the spinner.
+    public async fn stop(mut self, message: Text) {
+        if self.stopped { return; }
+        self.cancel.cancel_with(core.async.cancellation.CancelReason.Cancelled);
+        if let Some(t) = self.task.take() { let _ = t.join().await; }
+        // Clear line and write final message
+        print(&"\r\u{001b}[2K".into());
+        if !message.is_empty() { println(&message); }
+        self.stopped = true;
+    }
+}
+
+implement Drop for Spinner {
+    fn drop(&mut self) {
+        if !self.stopped {
+            // Best-effort: cancel the spawned task and clear the line.
+            self.cancel.cancel_with(core.async.cancellation.CancelReason.Cancelled);
+            print(&"\r\u{001b}[2K".into());
+            self.stopped = true;
+        }
+    }
+}

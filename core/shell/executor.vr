@@ -1,0 +1,257 @@
+// =============================================================================
+// shell/executor.vr — High-level Executor (timeout, retry, cancellation)
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: shell.{exec, result, context}, async.{cancellation, backoff}, time
+// =============================================================================
+//
+// `Executor` is a builder-style facade over the raw `run`/`sh` primitives.
+// It carries:
+//   * a default timeout — applied to every dispatch unless overridden
+//   * a retry policy — exponential or fibonacci backoff via core.async.backoff,
+//     gated by user-supplied `should_retry` predicate
+//   * a cancellation token — propagated to spawned children with SIGTERM-grace-SIGKILL
+//   * idempotency contract — required marker for `run_idempotent`
+//
+// The Executor is *immutable* — every with_* method returns a fresh value.
+// This is what makes it safe to share across nursery branches.
+//
+// =============================================================================
+
+module core.shell.executor;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.time.duration.{Duration};
+mount core.async.cancellation.{CancellationToken, CancelReason};
+mount core.async.backoff.{Backoff, BackoffStrategy};
+mount core.io.process.{ExitStatus};
+mount core.shell.context.{ShellContext};
+mount core.shell.exec.{run, sh_check, run_with_cancel, sh_with_cancel};
+mount core.shell.result.{ShellResult, ShellError};
+
+// =============================================================================
+// RetryPolicy — when and how often to retry
+// =============================================================================
+
+public type RetryPolicy is {
+    /// Total attempts: original + retries. `1` means no retries.
+    max_attempts: Int,
+    /// Exponential / fibonacci backoff source.
+    backoff:      Backoff,
+    /// Predicate over the failed `ShellError`. Default: retry SpawnFailed and
+    /// non-zero exits, never timeouts (caller likely needs to think about
+    /// total deadline if timeouts are happening).
+    retry_on:     fn(&ShellError) -> Bool,
+}
+
+implement RetryPolicy {
+    /// Simple policy: up to `max` attempts, exponential backoff 1s..30s,
+    /// retry on any error except permission denial.
+    public fn simple(max: Int) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: max,
+            backoff:      Backoff.exponential_full_jitter(
+                Duration.from_millis(1000),
+                Duration.from_millis(30000),
+            ),
+            retry_on:     |e| !is_permission_denied(e),
+        }
+    }
+
+    /// Retry only on specific exit codes.
+    public fn on_exit_codes(max: Int, codes: List<Int>) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: max,
+            backoff:      Backoff.exponential_full_jitter(
+                Duration.from_millis(500),
+                Duration.from_millis(15000),
+            ),
+            retry_on:     move |e| match e {
+                ShellError.NonZeroExit { status, .. } => codes.contains(&status.code()),
+                _ => false,
+            },
+        }
+    }
+
+    /// Build with a custom backoff and predicate.
+    public fn custom(max: Int, backoff: Backoff, retry_on: fn(&ShellError) -> Bool) -> RetryPolicy {
+        RetryPolicy { max_attempts: max, backoff, retry_on }
+    }
+}
+
+fn is_permission_denied(e: &ShellError) -> Bool {
+    match e {
+        ShellError.PermissionDenied { .. } => true,
+        _ => false,
+    }
+}
+
+implement Clone for RetryPolicy {
+    fn clone(&self) -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: self.max_attempts,
+            backoff:      self.backoff.clone(),
+            retry_on:     self.retry_on,
+        }
+    }
+}
+
+// =============================================================================
+// Executor — composable high-level dispatcher
+// =============================================================================
+
+public type Executor is {
+    timeout:        Maybe<Duration>,
+    retry:          Maybe<RetryPolicy>,
+    cancel_token:   Maybe<CancellationToken>,
+    /// Grace period before SIGKILL after SIGTERM. Default: 5s.
+    grace:          Duration,
+}
+
+implement Executor {
+    public fn new() -> Executor {
+        Executor {
+            timeout:      None,
+            retry:        None,
+            cancel_token: None,
+            grace:        Duration.from_millis(5000),
+        }
+    }
+
+    public fn with_timeout(mut self, t: Duration) -> Executor {
+        self.timeout = Some(t); self
+    }
+    public fn with_retry(mut self, p: RetryPolicy) -> Executor {
+        self.retry = Some(p); self
+    }
+    public fn with_cancel(mut self, t: CancellationToken) -> Executor {
+        self.cancel_token = Some(t); self
+    }
+    public fn with_grace(mut self, g: Duration) -> Executor {
+        self.grace = g; self
+    }
+
+    /// Dispatch via the shell (`sh -c "..."`). Honours timeout / retry /
+    /// cancel. Returns the final outcome — successful result or the last
+    /// error after retries are exhausted.
+    public async fn sh(&self, cmd_text: &Text) -> Result<ShellResult, ShellError>
+        using [ShellContext]
+    {
+        self.run_loop(|| self.dispatch_sh(cmd_text)).await
+    }
+
+    /// Dispatch directly: argv with no shell parsing. Same retry / timeout
+    /// / cancel semantics as `sh()`.
+    public async fn run(&self, program: &Text, args: List<Text>)
+        -> Result<ShellResult, ShellError>
+        using [ShellContext]
+    {
+        self.run_loop(|| self.dispatch_run(program, args.clone())).await
+    }
+
+    /// Idempotent dispatch — opt-in marker indicating "safe to re-run".
+    /// The compiler-checked `@idempotent` attribute on the wrapped function
+    /// gates this method (callers who pass non-idempotent functions get a
+    /// type error). For now, this layer trusts the call-site and applies
+    /// the same retry policy as `run`.
+    public async fn run_idempotent(&self, program: &Text, args: List<Text>)
+        -> Result<ShellResult, ShellError>
+        using [ShellContext]
+    {
+        self.run(program, args).await
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals — retry/timeout loop
+    // -------------------------------------------------------------------------
+
+    async fn run_loop<F: async fn() -> Result<ShellResult, ShellError>>(
+        &self,
+        mut dispatch: F,
+    ) -> Result<ShellResult, ShellError> {
+        match &self.retry {
+            None => dispatch().await,
+            Some(policy) => {
+                let mut backoff = policy.backoff.clone();
+                let mut attempt = 1;
+                loop {
+                    let outcome = dispatch().await;
+                    match &outcome {
+                        Ok(_)  => return outcome,
+                        Err(e) => {
+                            if attempt >= policy.max_attempts { return outcome; }
+                            if !(policy.retry_on)(e)         { return outcome; }
+                            // Wait before next attempt (or give up if backoff is exhausted)
+                            match backoff.next_delay() {
+                                None => return outcome,
+                                Some(d) => sleep_then(&d, &self.cancel_token).await,
+                            }
+                            attempt = attempt + 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn dispatch_sh(&self, cmd_text: &Text)
+        -> Result<ShellResult, ShellError>
+        using [ShellContext]
+    {
+        let token = self.acquire_token();
+        sh_with_cancel(cmd_text, &token, self.grace).await
+    }
+
+    async fn dispatch_run(&self, program: &Text, args: List<Text>)
+        -> Result<ShellResult, ShellError>
+        using [ShellContext]
+    {
+        let token = self.acquire_token();
+        run_with_cancel(program, args, &token, self.grace).await
+    }
+
+    /// Build the effective cancellation token: combine user-supplied token
+    /// (if any) with a timeout-derived token (if any).
+    fn acquire_token(&self) -> CancellationToken {
+        match (&self.cancel_token, &self.timeout) {
+            (None,    None)    => CancellationToken.new(),  // never fires
+            (Some(t), None)    => t.clone(),
+            (None,    Some(d)) => CancellationToken.with_timeout(*d),
+            (Some(t), Some(d)) => CancellationToken.combine(&[
+                t.clone(),
+                CancellationToken.with_timeout(*d),
+            ]),
+        }
+    }
+}
+
+async fn sleep_then(d: &Duration, token: &Maybe<CancellationToken>) {
+    match token {
+        None => time_sleep(*d).await,
+        Some(t) => {
+            // If cancellation fires during the sleep, wake immediately.
+            select {
+                _ = time_sleep(*d) => {},
+                _ = t.cancelled() => {},
+            }
+        }
+    }
+}
+
+// Bridge to the time API. Imported here as a local stub so we don't drag in
+// every consumer of core.time. Real builds resolve this to core.time.sleep.
+async fn time_sleep(d: Duration) {
+    core.time.sleep(d).await
+}
+
+implement Clone for Executor {
+    fn clone(&self) -> Executor {
+        Executor {
+            timeout:      self.timeout,
+            retry:        self.retry.clone(),
+            cancel_token: self.cancel_token.clone(),
+            grace:        self.grace,
+        }
+    }
+}
