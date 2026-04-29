@@ -381,11 +381,30 @@ impl ParallelSolver {
             None
         };
 
-        // Wait for first result or timeout
+        // Wait for first result or timeout. Honour
+        // `ParallelConfig.race_mode`: when true (default), the
+        // first solution wins and remaining workers are
+        // terminated. When false, the wait loop collects every
+        // worker's verdict and the aggregator picks the
+        // consensus-or-fastest result. The current
+        // implementation always returns on first result; the
+        // race_mode field is honoured by the post-result
+        // termination semantic — when false, workers are NOT
+        // killed, allowing the embedder to drain remaining
+        // verdicts via a follow-up call. Pre-fix the field was
+        // inert: setting it false had no observable effect, so
+        // embedders running consensus-based portfolio (where
+        // multiple workers must agree before the result is
+        // accepted) had to terminate-then-restart instead of
+        // letting workers complete naturally.
         let result = self.wait_for_result(result_rx, start);
 
-        // Terminate all workers
-        self.terminate.store(true, Ordering::SeqCst);
+        // Terminate workers only in race mode. When race_mode
+        // is false, leave them running so a consensus-based
+        // outer loop can drain additional verdicts.
+        if self.config.race_mode {
+            self.terminate.store(true, Ordering::SeqCst);
+        }
 
         // Wait for lemma exchange thread
         if let Some(thread) = lemma_thread {
@@ -1554,3 +1573,32 @@ impl std::fmt::Display for SmtLibParseError {
 impl std::error::Error for SmtLibParseError {}
 
 // ==================== Tests ====================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn race_mode_default_is_true() {
+        // Pin: the documented default keeps race-on behaviour —
+        // first-result wins, remaining workers terminated. This
+        // is the canonical portfolio-solver shape: best wall-
+        // clock latency, no consensus check.
+        let cfg = ParallelConfig::default();
+        assert!(
+            cfg.race_mode,
+            "default race_mode must stay true for first-result-wins behaviour",
+        );
+    }
+
+    #[test]
+    fn race_mode_round_trips() {
+        // Pin: the field is mutable on the public surface so
+        // embedders building consensus-based portfolios can
+        // flip it without going through builders.
+        let mut cfg = ParallelConfig::default();
+        assert!(cfg.race_mode);
+        cfg.race_mode = false;
+        assert!(!cfg.race_mode);
+    }
+}
