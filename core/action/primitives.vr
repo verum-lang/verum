@@ -93,3 +93,53 @@ public fn is_classification(e: Primitive) -> Bool {
 public fn primitive_eq(a: Primitive, b: Primitive) -> Bool {
     primitive_as_text(a).eq(primitive_as_text(b))
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq + Copy for Primitive
+// =============================================================================
+
+implement Eq for Primitive {
+    /// Variant-form equality across the 8-tag ε-primitive space.
+    /// Wraps the existing `primitive_eq` standalone function so
+    /// `==` works directly without forcing callers to import the
+    /// free function.
+    fn eq(&self, other: &Primitive) -> Bool {
+        match (self, other) {
+            (Primitive.EpsilonMath,      Primitive.EpsilonMath)      => true,
+            (Primitive.EpsilonCompute,   Primitive.EpsilonCompute)   => true,
+            (Primitive.EpsilonObserve,   Primitive.EpsilonObserve)   => true,
+            (Primitive.EpsilonProve,     Primitive.EpsilonProve)     => true,
+            (Primitive.EpsilonDecide,    Primitive.EpsilonDecide)    => true,
+            (Primitive.EpsilonTranslate, Primitive.EpsilonTranslate) => true,
+            (Primitive.EpsilonConstruct, Primitive.EpsilonConstruct) => true,
+            (Primitive.EpsilonClassify,  Primitive.EpsilonClassify)  => true,
+            _ => false,
+        }
+    }
+}
+
+implement Copy for Primitive {}
+
+implement Display for Primitive {
+    /// Renders as the canonical ε-tag (`ε_math`, `ε_compute`, …)
+    /// matching `primitive_as_text` so audit logs and proof-
+    /// coordinate diagnostics speak the literature's language.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(primitive_as_text(*self).as_str())
+    }
+}
+
+implement Debug for Primitive {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Primitive.EpsilonMath      => f.write_str("EpsilonMath"),
+            Primitive.EpsilonCompute   => f.write_str("EpsilonCompute"),
+            Primitive.EpsilonObserve   => f.write_str("EpsilonObserve"),
+            Primitive.EpsilonProve     => f.write_str("EpsilonProve"),
+            Primitive.EpsilonDecide    => f.write_str("EpsilonDecide"),
+            Primitive.EpsilonTranslate => f.write_str("EpsilonTranslate"),
+            Primitive.EpsilonConstruct => f.write_str("EpsilonConstruct"),
+            Primitive.EpsilonClassify  => f.write_str("EpsilonClassify"),
+        }
+    }
+}
