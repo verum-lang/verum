@@ -408,6 +408,21 @@ implement Describable for ThreadError {
     }
 }
 
+fn thread_error_tag(e: &ThreadError) -> Int {
+    match e {
+        SpawnFailed => 0,
+        JoinFailed  => 1,
+        Panicked    => 2,
+        InvalidName => 3,
+    }
+}
+
+implement Eq for ThreadError {
+    fn eq(&self, other: &ThreadError) -> Bool {
+        thread_error_tag(self) == thread_error_tag(other)
+    }
+}
+
 // =============================================================================
 // Stack Trace Capture
 // =============================================================================

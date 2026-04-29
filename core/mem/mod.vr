@@ -284,6 +284,16 @@ implement Display for UseAfterFreeError {
     }
 }
 
+implement Eq for UseAfterFreeError {
+    fn eq(&self, other: &UseAfterFreeError) -> Bool {
+        self.expected_gen == other.expected_gen
+            && self.actual_gen == other.actual_gen
+            && self.expected_epoch == other.expected_epoch
+            && self.actual_epoch == other.actual_epoch
+            && self.type_name == other.type_name
+    }
+}
+
 /// Error returned when revocation fails.
 public type RevocationError is
     | NullPointer { type_name: Text }
@@ -338,6 +348,22 @@ implement Debug for RevocationError {
 implement Display for RevocationError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.message())
+    }
+}
+
+implement Eq for RevocationError {
+    fn eq(&self, other: &RevocationError) -> Bool {
+        match (self, other) {
+            (RevocationError.NullPointer { type_name: a },
+             RevocationError.NullPointer { type_name: b }) => a == b,
+            (RevocationError.CapabilityViolation { type_name: a },
+             RevocationError.CapabilityViolation { type_name: b }) => a == b,
+            (RevocationError.AlreadyRevoked { type_name: a },
+             RevocationError.AlreadyRevoked { type_name: b }) => a == b,
+            (RevocationError.Internal { type_name: ta, reason: ra },
+             RevocationError.Internal { type_name: tb, reason: rb }) => ta == tb && ra == rb,
+            _ => false,
+        }
     }
 }
 

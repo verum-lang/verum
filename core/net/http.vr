@@ -707,6 +707,23 @@ implement Describable for HttpError {
     }
 }
 
+implement Eq for HttpError {
+    fn eq(&self, other: &HttpError) -> Bool {
+        match (self, other) {
+            (HttpError.ConnectionFailed(a), HttpError.ConnectionFailed(b)) => a == b,
+            (HttpError.DnsError(a),         HttpError.DnsError(b))         => a == b,
+            (HttpError.Timeout,             HttpError.Timeout)             => true,
+            (HttpError.InvalidUrl(a),       HttpError.InvalidUrl(b))       => a == b,
+            (HttpError.InvalidResponse(a),  HttpError.InvalidResponse(b))  => a == b,
+            (HttpError.IoError(a),          HttpError.IoError(b))          => a == b,
+            (HttpError.TlsError(a),         HttpError.TlsError(b))         => a == b,
+            (HttpError.TooManyRedirects,    HttpError.TooManyRedirects)    => true,
+            (HttpError.BodyTooLarge,        HttpError.BodyTooLarge)        => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // URL Parsing (Basic)
 // =============================================================================

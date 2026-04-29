@@ -219,6 +219,12 @@ implement Display for SystemTimeError {
     }
 }
 
+implement Eq for SystemTimeError {
+    fn eq(&self, other: &SystemTimeError) -> Bool {
+        self.duration() == other.duration()
+    }
+}
+
 // =============================================================================
 // Operator Implementations
 // =============================================================================

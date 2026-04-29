@@ -293,6 +293,12 @@ implement Display for TimeoutError {
     }
 }
 
+implement Eq for TimeoutError {
+    fn eq(&self, _other: &TimeoutError) -> Bool {
+        true
+    }
+}
+
 /// Wraps a future with a timeout.
 ///
 /// If the inner future does not complete within the timeout,
