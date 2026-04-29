@@ -591,6 +591,7 @@ pub mod mechanisation_roadmap;
 pub use mechanisation_roadmap::{
     CoverageReport, MechanisationStatus, RoadmapEntry,
     adamek_rosicky_roadmap, htt_roadmap,
+    msfs_self_contained, msfs_unmechanised_dependencies,
 };
 
 /// Kernel intrinsic dispatch — string-name → kernel-function bridge.
