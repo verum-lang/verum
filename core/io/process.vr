@@ -54,7 +54,7 @@ type Stdio is
 // =============================================================================
 
 /// Exit status of a child process.
-type ExitStatus is {
+public type ExitStatus is {
     /// Raw status value from waitpid.
     raw: Int,
 };
