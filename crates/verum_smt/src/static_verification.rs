@@ -540,15 +540,41 @@ impl StaticVerifier {
         result
     }
 
-    /// Verify multiple constraints, returning elimination decisions
+    /// Verify multiple constraints, returning elimination decisions.
+    ///
+    /// `config.timeout_ms` bounds the cumulative wall-clock of the
+    /// batch — once the budget is exhausted, every remaining
+    /// constraint is short-circuited to a `Timeout` result rather
+    /// than processed. Without this enforcement the field is inert:
+    /// per-constraint `constraint_timeout_ms` already caps each
+    /// individual verify call, but a batch of N slow constraints
+    /// still ran to N × constraint_timeout_ms regardless of what
+    /// callers configured for the session-level cap.
     pub fn verify_batch(
         &self,
         constraints: &[SafetyConstraint],
     ) -> List<(Text, VerificationResult)> {
-        constraints
-            .iter()
-            .map(|c| (c.id.clone(), self.verify(c)))
-            .collect()
+        let global_timeout = Duration::from_millis(self.config.timeout_ms);
+        let start = Instant::now();
+        let mut out: List<(Text, VerificationResult)> = List::new();
+        for c in constraints {
+            let elapsed = start.elapsed();
+            if elapsed >= global_timeout {
+                out.push((
+                    c.id.clone(),
+                    VerificationResult::Timeout {
+                        elapsed,
+                        reason: Text::from(
+                            "batch verification exceeded global timeout (StaticVerificationConfig.timeout_ms)",
+                        ),
+                        partial: Maybe::None,
+                    },
+                ));
+                continue;
+            }
+            out.push((c.id.clone(), self.verify(c)));
+        }
+        out
     }
 
     /// Verify with timeout handling (graceful degradation)

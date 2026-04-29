@@ -123,3 +123,50 @@ fn test_verification_config() {
     assert!(config.enable_proofs);
     assert!(config.enable_unsat_cores);
 }
+
+#[test]
+fn test_batch_honours_global_timeout() {
+    // Pin: `StaticVerificationConfig.timeout_ms` caps the cumulative
+    // wall-clock of a batch verification. Without this wire-up, a
+    // batch of N constraints could run to N × constraint_timeout_ms,
+    // blowing through the documented session-level cap. The fix
+    // short-circuits any constraint whose start would already be
+    // past the budget, returning `Timeout` for the rest.
+    use std::time::Duration;
+    let config = StaticVerificationConfig {
+        timeout_ms: 0, // Zero budget — every constraint should short-circuit
+        ..Default::default()
+    };
+    let verifier = StaticVerifier::new(config);
+
+    // Build two trivial constraints. Even one slow constraint past
+    // the zero-budget would not be reachable; both must bail.
+    let c1 = SafetyConstraint {
+        id: Text::from("a"),
+        formula: ConstraintFormula::NonNull { ptr_name: Text::from("p") },
+        source_location: None,
+        category: ConstraintCategory::NullCheck,
+        variables: vec![].into(),
+        description: Text::from("a"),
+    };
+    let c2 = SafetyConstraint {
+        id: Text::from("b"),
+        formula: ConstraintFormula::NonNull { ptr_name: Text::from("q") },
+        source_location: None,
+        category: ConstraintCategory::NullCheck,
+        variables: vec![].into(),
+        description: Text::from("b"),
+    };
+    let start = std::time::Instant::now();
+    let results = verifier.verify_batch(&[c1, c2]);
+    let elapsed = start.elapsed();
+    assert_eq!(results.len(), 2, "every constraint accounted for");
+    // Every result is Timeout — the global budget was zero.
+    let all_timeout = results
+        .iter()
+        .all(|(_, r)| matches!(r, VerificationResult::Timeout { .. }));
+    assert!(all_timeout, "zero-budget batch must short-circuit every constraint to Timeout");
+    // The whole batch should finish near-instantly because no real
+    // verification work happens.
+    assert!(elapsed < Duration::from_secs(1), "batch should bail near-instantly under zero budget");
+}
