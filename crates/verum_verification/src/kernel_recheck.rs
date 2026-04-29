@@ -1036,8 +1036,209 @@ pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
         }
         ExprKind::Block(b) => lift_block_tail_to_core(b),
         ExprKind::Literal(_) => CoreTerm::Var(Text::from("<lit>")),
-        _ => CoreTerm::Var(Text::from("<unsupported-expr>")),
+
+        // ----- composite expression coverage (#99 hardening) ----------------
+        //
+        // Pre-this-pass, every variant below collapsed to
+        // `Var("<unsupported-expr>")` (rank-0 atom) — modal-typed
+        // predicates nested inside any composite shape silently passed
+        // `K-Refine-omega`.  Each arm now folds children into the same
+        // App-chain shape the typed lift uses for `Call` / `Match`,
+        // so `m_depth_omega` computes max-rank correctly through:
+        //   Tuple / Array / Record / Map / Set / Tensor / Comprehension /
+        //   Pipeline / NullCoalesce / Cast / Field / OptionalChain /
+        //   TupleIndex / Index / NamedArg / InterpolatedString /
+        //   Try / TryBlock / TryRecover / TryFinally / TryRecoverFinally /
+        //   Loop / While / For / ForAwait /
+        //   Return / Throw / Yield / Await / Typeof / Async / Spawn /
+        //   Closure / Select / Nursery / Unsafe / Meta.
+
+        // ----- access / projection -----
+        ExprKind::Field { expr, .. }
+        | ExprKind::OptionalChain { expr, .. }
+        | ExprKind::TupleIndex { expr, .. } => lift_expr_to_core(expr),
+        ExprKind::Index { expr, index } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(expr)),
+            Heap::new(lift_expr_to_core(index)),
+        ),
+
+        // ----- pipelines / null-coalescing / cast / named-arg -----
+        ExprKind::Pipeline { left, right }
+        | ExprKind::NullCoalesce { left, right } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(left)),
+            Heap::new(lift_expr_to_core(right)),
+        ),
+        ExprKind::Cast { expr, .. } => lift_expr_to_core(expr),
+        ExprKind::NamedArg { value, .. } => lift_expr_to_core(value),
+
+        // ----- collection literals -----
+        ExprKind::Tuple(items) => fold_app_chain_exprs(items.iter()),
+        ExprKind::Array(arr) => lift_array_expr_to_core(arr),
+        ExprKind::Record { fields, base, .. } => {
+            // Fields carry expr children; base is an optional `..base` parent.
+            let mut acc = match base {
+                verum_common::Maybe::Some(b) => lift_expr_to_core(b),
+                verum_common::Maybe::None => CoreTerm::Var(Text::from("<record>")),
+            };
+            for f in fields.iter() {
+                acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_field_init_to_core(f)));
+            }
+            acc
+        }
+        ExprKind::MapLiteral { entries } => {
+            // Each entry is `(key, value)`; lift as App-chain of both.
+            let mut acc = CoreTerm::Var(Text::from("<map>"));
+            for (k, v) in entries.iter() {
+                acc = CoreTerm::App(
+                    Heap::new(CoreTerm::App(
+                        Heap::new(acc),
+                        Heap::new(lift_expr_to_core(k)),
+                    )),
+                    Heap::new(lift_expr_to_core(v)),
+                );
+            }
+            acc
+        }
+        ExprKind::SetLiteral { elements } => fold_app_chain_exprs(elements.iter()),
+        ExprKind::TensorLiteral { data, .. } => lift_expr_to_core(data),
+        ExprKind::InterpolatedString { exprs, .. } => fold_app_chain_exprs(exprs.iter()),
+
+        // ----- comprehensions -----
+        ExprKind::Comprehension { expr, .. }
+        | ExprKind::StreamComprehension { expr, .. }
+        | ExprKind::SetComprehension { expr, .. }
+        | ExprKind::GeneratorComprehension { expr, .. } => lift_expr_to_core(expr),
+        ExprKind::MapComprehension {
+            key_expr,
+            value_expr,
+            ..
+        } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(key_expr)),
+            Heap::new(lift_expr_to_core(value_expr)),
+        ),
+
+        // ----- error-handling -----
+        ExprKind::Try(inner) | ExprKind::TryBlock(inner) => lift_expr_to_core(inner),
+        ExprKind::TryRecover { try_block, .. } => lift_expr_to_core(try_block),
+        ExprKind::TryFinally {
+            try_block,
+            finally_block,
+        } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(try_block)),
+            Heap::new(lift_expr_to_core(finally_block)),
+        ),
+        ExprKind::TryRecoverFinally {
+            try_block,
+            finally_block,
+            ..
+        } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(try_block)),
+            Heap::new(lift_expr_to_core(finally_block)),
+        ),
+
+        // ----- control-flow -----
+        ExprKind::Loop { body, .. } => lift_block_tail_to_core(body),
+        ExprKind::While {
+            condition, body, ..
+        } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(condition)),
+            Heap::new(lift_block_tail_to_core(body)),
+        ),
+        ExprKind::For { iter, body, .. } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(iter)),
+            Heap::new(lift_block_tail_to_core(body)),
+        ),
+        ExprKind::ForAwait {
+            async_iterable,
+            body,
+            ..
+        } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(async_iterable)),
+            Heap::new(lift_block_tail_to_core(body)),
+        ),
+        ExprKind::Return(maybe) | ExprKind::Break { value: maybe, .. } => match maybe {
+            verum_common::Maybe::Some(e) => lift_expr_to_core(e),
+            verum_common::Maybe::None => CoreTerm::Var(Text::from("<unit>")),
+        },
+        ExprKind::Continue { .. } => CoreTerm::Var(Text::from("<continue>")),
+        ExprKind::Throw(inner)
+        | ExprKind::Yield(inner)
+        | ExprKind::Typeof(inner)
+        | ExprKind::Await(inner) => lift_expr_to_core(inner),
+
+        // ----- closures / async / spawn -----
+        ExprKind::Closure { body, .. } => lift_expr_to_core(body),
+        ExprKind::Async(b) => lift_block_tail_to_core(b),
+        ExprKind::Spawn { expr, .. } => lift_expr_to_core(expr),
+
+        // ----- select / nursery / unsafe / meta -----
+        ExprKind::Select { arms, .. } => {
+            let mut iter = arms.iter();
+            let first = match iter.next() {
+                Some(a) => lift_select_arm_to_core(a),
+                None => return CoreTerm::Var(Text::from("<empty-select>")),
+            };
+            let mut acc = first;
+            for a in iter {
+                acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_select_arm_to_core(a)));
+            }
+            acc
+        }
+        ExprKind::Nursery { body, .. }
+        | ExprKind::Unsafe(body)
+        | ExprKind::Meta(body) => lift_block_tail_to_core(body),
+
+        // ----- atomic / not-yet-walked variants -----
+        // Inject / StreamLiteral / Quote / StageEscape are atomic in
+        // structure (no inline Heap<Expr> children that affect
+        // m_depth_omega) — leave as named placeholders.
+        _ => CoreTerm::Var(Text::from("<atomic-expr>")),
     }
+}
+
+/// Fold a sequence of [`Expr`] children into an App chain.
+fn fold_app_chain_exprs<'a, I>(it: I) -> CoreTerm
+where
+    I: IntoIterator<Item = &'a Expr>,
+{
+    let mut iter = it.into_iter();
+    let first = match iter.next() {
+        Some(e) => lift_expr_to_core(e),
+        None => return CoreTerm::Var(Text::from("<empty>")),
+    };
+    let mut acc = first;
+    for e in iter {
+        acc = CoreTerm::App(Heap::new(acc), Heap::new(lift_expr_to_core(e)));
+    }
+    acc
+}
+
+fn lift_array_expr_to_core(arr: &verum_ast::expr::ArrayExpr) -> CoreTerm {
+    use verum_ast::expr::ArrayExpr;
+    match arr {
+        ArrayExpr::List(elems) => fold_app_chain_exprs(elems.iter()),
+        ArrayExpr::Repeat { value, count } => CoreTerm::App(
+            Heap::new(lift_expr_to_core(value)),
+            Heap::new(lift_expr_to_core(count)),
+        ),
+    }
+}
+
+fn lift_field_init_to_core(f: &verum_ast::expr::FieldInit) -> CoreTerm {
+    // FieldInit carries an optional `value` (None for shorthand
+    // `{ x }` ≡ `{ x: x }`).  When the value is omitted the field
+    // contributes only its bound name — atomic, rank 0.
+    match &f.value {
+        verum_common::Maybe::Some(v) => lift_expr_to_core(v),
+        verum_common::Maybe::None => CoreTerm::Var(f.name.name.clone()),
+    }
+}
+
+fn lift_select_arm_to_core(arm: &verum_ast::expr::SelectArm) -> CoreTerm {
+    // SelectArm carries `body: Heap<Expr>` plus the future expression.
+    // Walk the body — the future itself is structural, the modal-typed
+    // predicate (if any) sits inside the body.
+    lift_expr_to_core(&arm.body)
 }
 
 fn lift_block_tail_to_core(b: &verum_ast::expr::Block) -> CoreTerm {
@@ -2066,5 +2267,306 @@ mod tests {
         let names: Vec<&str> = bridges.iter().copied().collect();
         assert!(names.contains(&"diakrisis-A-3"));
         assert!(names.contains(&"diakrisis-131.L4"));
+    }
+
+    // =========================================================================
+    // Composite ExprKind coverage (#99 hardening)
+    // =========================================================================
+
+    fn box_method(name: &str) -> Expr {
+        method_call_expr(path_expr(name), "box")
+    }
+
+    fn diamond_method(name: &str) -> Expr {
+        method_call_expr(path_expr(name), "possibly")
+    }
+
+    fn count_modal_box(t: &CoreTerm) -> usize {
+        match t {
+            CoreTerm::ModalBox(_) => 1,
+            CoreTerm::App(l, r) => count_modal_box(l) + count_modal_box(r),
+            CoreTerm::ModalDiamond(inner) => count_modal_box(inner),
+            _ => 0,
+        }
+    }
+
+    fn count_modal_diamond(t: &CoreTerm) -> usize {
+        match t {
+            CoreTerm::ModalDiamond(_) => 1,
+            CoreTerm::App(l, r) => count_modal_diamond(l) + count_modal_diamond(r),
+            CoreTerm::ModalBox(inner) => count_modal_diamond(inner),
+            _ => 0,
+        }
+    }
+
+    fn span_dummy() -> Span {
+        span()
+    }
+
+    #[test]
+    fn lift_tuple_carries_modal_children() {
+        let mut items = List::new();
+        items.push(box_method("a"));
+        items.push(diamond_method("b"));
+        items.push(path_expr("c"));
+        let e = Expr::new(ExprKind::Tuple(items), span_dummy());
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+        assert_eq!(count_modal_diamond(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_array_list_carries_modal_children() {
+        let mut elems = List::new();
+        elems.push(box_method("a"));
+        elems.push(box_method("b"));
+        let e = Expr::new(
+            ExprKind::Array(verum_ast::expr::ArrayExpr::List(elems)),
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 2);
+    }
+
+    #[test]
+    fn lift_array_repeat_carries_modal_value() {
+        let e = Expr::new(
+            ExprKind::Array(verum_ast::expr::ArrayExpr::Repeat {
+                value: verum_common::Heap::new(box_method("a")),
+                count: verum_common::Heap::new(path_expr("n")),
+            }),
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_field_access_carries_modal_receiver() {
+        let e = Expr::new(
+            ExprKind::Field {
+                expr: verum_common::Heap::new(box_method("rec")),
+                field: Ident {
+                    name: Text::from("f"),
+                    span: span_dummy(),
+                },
+            },
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_index_carries_modal_in_both_positions() {
+        let e = Expr::new(
+            ExprKind::Index {
+                expr: verum_common::Heap::new(box_method("arr")),
+                index: verum_common::Heap::new(diamond_method("i")),
+            },
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+        assert_eq!(count_modal_diamond(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_pipeline_carries_modal_children() {
+        let e = Expr::new(
+            ExprKind::Pipeline {
+                left: verum_common::Heap::new(box_method("x")),
+                right: verum_common::Heap::new(diamond_method("f")),
+            },
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+        assert_eq!(count_modal_diamond(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_cast_carries_modal_inner() {
+        let e = Expr::new(
+            ExprKind::Cast {
+                expr: verum_common::Heap::new(box_method("x")),
+                ty: AstType::int(span_dummy()),
+            },
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_try_chain_carries_modal_children() {
+        let try_inner = Expr::new(
+            ExprKind::Try(verum_common::Heap::new(box_method("x"))),
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&try_inner);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_yield_throw_await_typeof_recurse() {
+        for kind in [
+            ExprKind::Yield(verum_common::Heap::new(box_method("y"))),
+            ExprKind::Throw(verum_common::Heap::new(box_method("err"))),
+            ExprKind::Await(verum_common::Heap::new(box_method("f"))),
+            ExprKind::Typeof(verum_common::Heap::new(box_method("v"))),
+        ] {
+            let e = Expr::new(kind, span_dummy());
+            let lifted = super::lift_expr_to_core(&e);
+            assert_eq!(
+                count_modal_box(&lifted),
+                1,
+                "control-flow expression must propagate modal: got {:?}",
+                lifted
+            );
+        }
+    }
+
+    #[test]
+    fn lift_return_carries_modal_value() {
+        let e = Expr::new(
+            ExprKind::Return(verum_common::Maybe::Some(verum_common::Heap::new(
+                box_method("x"),
+            ))),
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_named_arg_carries_modal_value() {
+        let e = Expr::new(
+            ExprKind::NamedArg {
+                name: Ident {
+                    name: Text::from("k"),
+                    span: span_dummy(),
+                },
+                value: verum_common::Heap::new(box_method("v")),
+            },
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_set_literal_carries_modal_elements() {
+        let mut elems = List::new();
+        elems.push(box_method("a"));
+        elems.push(diamond_method("b"));
+        let e = Expr::new(ExprKind::SetLiteral { elements: elems }, span_dummy());
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+        assert_eq!(count_modal_diamond(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_map_literal_carries_modal_keys_and_values() {
+        let mut entries: List<(Expr, Expr)> = List::new();
+        entries.push((box_method("k"), diamond_method("v")));
+        let e = Expr::new(ExprKind::MapLiteral { entries }, span_dummy());
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+        assert_eq!(count_modal_diamond(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_interpolated_string_carries_modal_exprs() {
+        let mut parts = List::new();
+        parts.push(Text::from("prefix "));
+        parts.push(Text::from(" suffix"));
+        let mut exprs = List::new();
+        exprs.push(box_method("inner"));
+        let e = Expr::new(
+            ExprKind::InterpolatedString {
+                handler: Text::from("f"),
+                parts,
+                exprs,
+            },
+            span_dummy(),
+        );
+        let lifted = super::lift_expr_to_core(&e);
+        assert_eq!(count_modal_box(&lifted), 1);
+    }
+
+    #[test]
+    fn lift_no_more_unsupported_expr_placeholder_for_canonical_shapes() {
+        // Pin: every variant we walk above is a previously-degraded
+        // shape.  Verify none of them produce the
+        // `<unsupported-expr>` placeholder Var any more.
+        fn contains_unsupported(t: &CoreTerm) -> bool {
+            match t {
+                CoreTerm::Var(name) => name.as_str() == "<unsupported-expr>",
+                CoreTerm::App(l, r) => contains_unsupported(l) || contains_unsupported(r),
+                CoreTerm::ModalBox(inner) | CoreTerm::ModalDiamond(inner) => {
+                    contains_unsupported(inner)
+                }
+                _ => false,
+            }
+        }
+        let cases = vec![
+            Expr::new(ExprKind::Tuple(List::new()), span_dummy()),
+            Expr::new(
+                ExprKind::Array(verum_ast::expr::ArrayExpr::List(List::new())),
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Pipeline {
+                    left: verum_common::Heap::new(path_expr("a")),
+                    right: verum_common::Heap::new(path_expr("b")),
+                },
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Cast {
+                    expr: verum_common::Heap::new(path_expr("x")),
+                    ty: AstType::int(span_dummy()),
+                },
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Field {
+                    expr: verum_common::Heap::new(path_expr("o")),
+                    field: Ident {
+                        name: Text::from("f"),
+                        span: span_dummy(),
+                    },
+                },
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Try(verum_common::Heap::new(path_expr("e"))),
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Await(verum_common::Heap::new(path_expr("f"))),
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Return(verum_common::Maybe::None),
+                span_dummy(),
+            ),
+            Expr::new(
+                ExprKind::Continue {
+                    label: verum_common::Maybe::None,
+                },
+                span_dummy(),
+            ),
+        ];
+        for e in cases {
+            let lifted = super::lift_expr_to_core(&e);
+            assert!(
+                !contains_unsupported(&lifted),
+                "lift produced <unsupported-expr> placeholder for {:?}: {:?}",
+                e.kind,
+                lifted
+            );
+        }
     }
 }
