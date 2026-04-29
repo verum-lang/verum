@@ -11176,6 +11176,28 @@ impl<'s> CompilationPipeline<'s> {
             .as_str()
             .to_string();
 
+        // Surface inert ContextConfig fields. `negative_constraints`
+        // (allow `!using [Foo]`) and `propagation_depth` (max
+        // through-call-chain depth) flow from the manifest but no
+        // current validation path consults them — the
+        // ContextValidationPhase walks the AST without these
+        // policies. Closes the inert-defense pattern by routing
+        // them through tracing so embedders writing
+        // `[context].negative_constraints = false` or
+        // `[context].propagation_depth = 8` see the values
+        // observed at the gate. The gates are forward-looking
+        // until the phase walks deep enough to consult them.
+        let ctx = &self.session.language_features().context;
+        if !ctx.negative_constraints || ctx.propagation_depth != 32 {
+            tracing::debug!(
+                "context_validation: negative_constraints={}, propagation_depth={} \
+                 (these fields land on the policy but no current validation path \
+                 consults them — forward-looking infra)",
+                ctx.negative_constraints,
+                ctx.propagation_depth,
+            );
+        }
+
         let phase = ContextValidationPhase::new();
         match phase.validate_module_public(module) {
             Ok(warnings) => {
