@@ -440,6 +440,161 @@ impl std::fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
+// =============================================================================
+// Ed25519 attestation signing / verification (#96 hardening)
+// =============================================================================
+//
+// Pre-this-module, `Attestation::signature` was an opaque `Text`
+// blob that the registry stored verbatim — `MemoryRegistry::publish`
+// accepted any string as a "signature".  An adversary could publish
+// a manifest with a fabricated `signature` field and the registry
+// would happily serve it to consumers.
+//
+// Hardening: deterministic Ed25519 over a stable canonical message
+// (`name + version + envelope.chain_hash + kind.name`).  Every
+// `RegistryClient` implementation is encouraged to call
+// `verify_attestation` against the publisher's pinned public key
+// before accepting; consumers (e.g. the CLI's `verum cog install`)
+// run the same check on download.
+//
+// Key encoding follows the standard 64-hex-character convention
+// (32 bytes hex-encoded).  Signatures are 128 hex characters
+// (64 bytes hex-encoded) — both round-trip through `serde` cleanly.
+
+use ed25519_dalek::{
+    Signature as Ed25519Signature, Signer, SigningKey, Verifier, VerifyingKey,
+    SECRET_KEY_LENGTH,
+};
+
+/// Canonical message bytes Ed25519 signs over for a given
+/// (name, version, envelope-chain-hash, attestation-kind) tuple.
+///
+/// The four components are joined by `'\n'` separators — newline
+/// is forbidden in any of them (the four are all kebab-/lowercase-
+/// identifier-shaped or hex-encoded), so the join is unambiguously
+/// invertible.
+pub fn attestation_message(
+    cog_name: &str,
+    version: &CogVersion,
+    chain_hash: &str,
+    kind: AttestationKind,
+) -> Vec<u8> {
+    let body = format!(
+        "{}\n{}\n{}\n{}",
+        cog_name,
+        version.render().as_str(),
+        chain_hash,
+        kind.name(),
+    );
+    body.into_bytes()
+}
+
+/// Ed25519 attestation-signature errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttestationCryptoError {
+    /// `public_key_hex` could not be decoded as 32 bytes.
+    InvalidPublicKey(Text),
+    /// `signature_hex` could not be decoded as 64 bytes.
+    InvalidSignature(Text),
+    /// Signature did not verify against the canonical message.
+    SignatureMismatch,
+    /// `secret_key_hex` could not be decoded as 32 bytes.
+    InvalidSecretKey(Text),
+}
+
+impl std::fmt::Display for AttestationCryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPublicKey(t) => write!(f, "invalid Ed25519 public key: {}", t.as_str()),
+            Self::InvalidSignature(t) => write!(f, "invalid Ed25519 signature: {}", t.as_str()),
+            Self::SignatureMismatch => write!(f, "Ed25519 signature did not verify"),
+            Self::InvalidSecretKey(t) => write!(f, "invalid Ed25519 secret key: {}", t.as_str()),
+        }
+    }
+}
+
+impl std::error::Error for AttestationCryptoError {}
+
+/// Render a `CogVersion` to its `MAJOR.MINOR.PATCH[-PRE]` form.
+/// (Helper used by `attestation_message`.)
+impl CogVersion {
+    pub fn render(&self) -> Text {
+        let mut s = format!("{}.{}.{}", self.major, self.minor, self.patch);
+        if let Some(pre) = &self.prerelease {
+            s.push('-');
+            s.push_str(pre.as_str());
+        }
+        Text::from(s)
+    }
+}
+
+/// Sign one attestation with an Ed25519 key.  Returns the hex-
+/// encoded 128-character signature.
+///
+/// `secret_key_hex` is a 64-character (32 byte) hex-encoded secret
+/// scalar — the same encoding `ed25519-dalek::SigningKey::from_bytes`
+/// expects after hex decoding.
+pub fn sign_attestation(
+    secret_key_hex: &str,
+    cog_name: &str,
+    version: &CogVersion,
+    chain_hash: &str,
+    kind: AttestationKind,
+) -> Result<Text, AttestationCryptoError> {
+    let sk_bytes = decode_hex_array::<{ SECRET_KEY_LENGTH }>(secret_key_hex)
+        .ok_or_else(|| AttestationCryptoError::InvalidSecretKey(Text::from(secret_key_hex)))?;
+    let signing = SigningKey::from_bytes(&sk_bytes);
+    let msg = attestation_message(cog_name, version, chain_hash, kind);
+    let sig: Ed25519Signature = signing.sign(&msg);
+    Ok(Text::from(hex_encode(&sig.to_bytes())))
+}
+
+/// Verify one attestation against a publisher public key.
+///
+/// `public_key_hex` is 64 hex chars (32 bytes); the attestation's
+/// `signature` field is 128 hex chars (64 bytes).
+pub fn verify_attestation(
+    public_key_hex: &str,
+    cog_name: &str,
+    version: &CogVersion,
+    chain_hash: &str,
+    attestation: &Attestation,
+) -> Result<(), AttestationCryptoError> {
+    let pk_bytes = decode_hex_array::<32>(public_key_hex)
+        .ok_or_else(|| AttestationCryptoError::InvalidPublicKey(Text::from(public_key_hex)))?;
+    let verifying = VerifyingKey::from_bytes(&pk_bytes)
+        .map_err(|_| AttestationCryptoError::InvalidPublicKey(Text::from(public_key_hex)))?;
+    let sig_bytes = decode_hex_array::<64>(attestation.signature.as_str())
+        .ok_or_else(|| AttestationCryptoError::InvalidSignature(attestation.signature.clone()))?;
+    let sig = Ed25519Signature::from_bytes(&sig_bytes);
+    let msg = attestation_message(cog_name, version, chain_hash, attestation.kind);
+    verifying
+        .verify(&msg, &sig)
+        .map_err(|_| AttestationCryptoError::SignatureMismatch)
+}
+
+/// Decode a fixed-size hex string into a byte array.  Returns
+/// `None` if the input isn't exactly `N * 2` hex characters.
+fn decode_hex_array<const N: usize>(hex: &str) -> Option<[u8; N]> {
+    if hex.len() != N * 2 {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for i in 0..N {
+        let pair = &hex[i * 2..i * 2 + 2];
+        out[i] = u8::from_str_radix(pair, 16).ok()?;
+    }
+    Some(out)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
+
 /// Single dispatch interface for a cog registry client.
 pub trait RegistryClient: std::fmt::Debug + Send + Sync {
     /// Stable identifier of the registry (e.g.
@@ -1258,5 +1413,256 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         let back: CogVersion = serde_json::from_str(&json).unwrap();
         assert_eq!(v, back);
+    }
+
+    // =========================================================================
+    // Ed25519 attestation signing / verification (#96 hardening)
+    // =========================================================================
+
+    /// Generate a deterministic test keypair from a 32-byte seed.
+    fn test_keypair(seed: u8) -> (String, String) {
+        let sk_bytes = [seed; 32];
+        let signing = SigningKey::from_bytes(&sk_bytes);
+        let verifying = signing.verifying_key();
+        let sk_hex = hex_encode(&signing.to_bytes());
+        let pk_hex = hex_encode(verifying.as_bytes());
+        (sk_hex, pk_hex)
+    }
+
+    fn fixture_for_signing(name: &str, version: CogVersion) -> (String, String, Text) {
+        let (sk, pk) = test_keypair(0x42);
+        let envelope = CogReproEnvelope::compute(b"input", b"build_env", b"output");
+        let chain_hash = envelope.chain_hash.clone();
+        // Make sure the manifest with this envelope has a stable
+        // chain_hash for the signing scope.
+        let _ = CogManifest::new(name, version, envelope);
+        (sk, pk, chain_hash)
+    }
+
+    #[test]
+    fn attestation_message_is_deterministic() {
+        let v = CogVersion::new(1, 2, 3);
+        let m1 = attestation_message("alpha", &v, "abcd", AttestationKind::VerifiedCi);
+        let m2 = attestation_message("alpha", &v, "abcd", AttestationKind::VerifiedCi);
+        assert_eq!(m1, m2);
+    }
+
+    #[test]
+    fn attestation_message_distinguishes_components() {
+        let v1 = CogVersion::new(1, 0, 0);
+        let v2 = CogVersion::new(2, 0, 0);
+        let base = attestation_message(
+            "alpha",
+            &v1,
+            "abcd",
+            AttestationKind::VerifiedCi,
+        );
+        // Each component change ⇒ different message bytes.
+        assert_ne!(
+            base,
+            attestation_message("beta", &v1, "abcd", AttestationKind::VerifiedCi)
+        );
+        assert_ne!(
+            base,
+            attestation_message("alpha", &v2, "abcd", AttestationKind::VerifiedCi)
+        );
+        assert_ne!(
+            base,
+            attestation_message("alpha", &v1, "ffff", AttestationKind::VerifiedCi)
+        );
+        assert_ne!(
+            base,
+            attestation_message("alpha", &v1, "abcd", AttestationKind::FrameworkSoundness)
+        );
+    }
+
+    #[test]
+    fn cog_version_render_matches_parse() {
+        let v = CogVersion::new(1, 2, 3);
+        assert_eq!(v.render().as_str(), "1.2.3");
+        let v_pre = CogVersion::new(0, 1, 0).with_prerelease("rc1");
+        assert_eq!(v_pre.render().as_str(), "0.1.0-rc1");
+    }
+
+    #[test]
+    fn sign_then_verify_attestation_round_trip() {
+        let (sk, pk, chain) = fixture_for_signing("alpha", CogVersion::new(1, 0, 0));
+        let v = CogVersion::new(1, 0, 0);
+        let sig = sign_attestation(
+            &sk,
+            "alpha",
+            &v,
+            chain.as_str(),
+            AttestationKind::VerifiedCi,
+        )
+        .unwrap();
+        // Length sanity: 128 hex chars for 64-byte signature.
+        assert_eq!(sig.as_str().len(), 128);
+        let att = Attestation {
+            kind: AttestationKind::VerifiedCi,
+            signer: Text::from("ci@verum"),
+            signature: sig,
+            timestamp: 0,
+        };
+        verify_attestation(&pk, "alpha", &v, chain.as_str(), &att).unwrap();
+    }
+
+    #[test]
+    fn verify_rejects_signature_under_different_key() {
+        let (sk, _pk_a) = test_keypair(0x01);
+        let (_sk_b, pk_b) = test_keypair(0x02);
+        let v = CogVersion::new(1, 0, 0);
+        let envelope = CogReproEnvelope::compute(b"i", b"e", b"o");
+        let chain = envelope.chain_hash.clone();
+        let sig = sign_attestation(
+            &sk,
+            "alpha",
+            &v,
+            chain.as_str(),
+            AttestationKind::FrameworkSoundness,
+        )
+        .unwrap();
+        let att = Attestation {
+            kind: AttestationKind::FrameworkSoundness,
+            signer: Text::from("ci@verum"),
+            signature: sig,
+            timestamp: 0,
+        };
+        match verify_attestation(&pk_b, "alpha", &v, chain.as_str(), &att) {
+            Err(AttestationCryptoError::SignatureMismatch) => {}
+            other => panic!("expected SignatureMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn verify_rejects_tampered_message() {
+        let (sk, pk) = test_keypair(0x10);
+        let v = CogVersion::new(1, 0, 0);
+        let envelope = CogReproEnvelope::compute(b"i", b"e", b"o");
+        let chain = envelope.chain_hash.clone();
+        let sig = sign_attestation(
+            &sk,
+            "alpha",
+            &v,
+            chain.as_str(),
+            AttestationKind::VerifiedCi,
+        )
+        .unwrap();
+        let att = Attestation {
+            kind: AttestationKind::VerifiedCi,
+            signer: Text::from("ci@verum"),
+            signature: sig,
+            timestamp: 0,
+        };
+        // Same key, but verify against a different chain_hash —
+        // signature must not validate.
+        match verify_attestation(&pk, "alpha", &v, "tamper_hash", &att) {
+            Err(AttestationCryptoError::SignatureMismatch) => {}
+            other => panic!("expected SignatureMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn verify_rejects_wrong_attestation_kind() {
+        let (sk, pk) = test_keypair(0x11);
+        let v = CogVersion::new(1, 0, 0);
+        let chain = "deadbeef".to_string();
+        let sig = sign_attestation(
+            &sk,
+            "alpha",
+            &v,
+            &chain,
+            AttestationKind::VerifiedCi,
+        )
+        .unwrap();
+        // Construct an Attestation with a *different* kind than was signed.
+        let bogus = Attestation {
+            kind: AttestationKind::FrameworkSoundness,
+            signer: Text::from("ci@verum"),
+            signature: sig,
+            timestamp: 0,
+        };
+        match verify_attestation(&pk, "alpha", &v, &chain, &bogus) {
+            Err(AttestationCryptoError::SignatureMismatch) => {}
+            other => panic!("expected SignatureMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn verify_rejects_malformed_keys_and_signatures() {
+        let v = CogVersion::new(1, 0, 0);
+        let att = Attestation {
+            kind: AttestationKind::VerifiedCi,
+            signer: Text::from("ci@verum"),
+            signature: Text::from("not-hex"),
+            timestamp: 0,
+        };
+        // Bad public key length.
+        match verify_attestation("aabb", "alpha", &v, "deadbeef", &att) {
+            Err(AttestationCryptoError::InvalidPublicKey(_)) => {}
+            other => panic!("expected InvalidPublicKey, got {:?}", other),
+        }
+        // Good key length, bad signature length.
+        let (_sk, pk) = test_keypair(0x33);
+        match verify_attestation(&pk, "alpha", &v, "deadbeef", &att) {
+            Err(AttestationCryptoError::InvalidSignature(_)) => {}
+            other => panic!("expected InvalidSignature, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sign_rejects_malformed_secret_key() {
+        let v = CogVersion::new(1, 0, 0);
+        match sign_attestation(
+            "deadbeef",
+            "alpha",
+            &v,
+            "abcd",
+            AttestationKind::VerifiedCi,
+        ) {
+            Err(AttestationCryptoError::InvalidSecretKey(_)) => {}
+            other => panic!("expected InvalidSecretKey, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn task_96_attestation_signature_is_unbypassable() {
+        // Pin the #96 hardening contract: every accepted
+        // attestation MUST carry an Ed25519 signature that
+        // verifies against the publisher's pinned public key over
+        // the canonical (name, version, chain_hash, kind) message.
+        // An adversary who fabricates the `signature` blob
+        // (non-hex, wrong key, wrong message) is rejected.
+        let (sk, pk) = test_keypair(0xab);
+        let v = CogVersion::new(1, 0, 0);
+        let envelope = CogReproEnvelope::compute(b"input", b"env", b"output");
+        let chain = envelope.chain_hash.clone();
+        // Legit signature ⇒ accept.
+        let sig = sign_attestation(
+            &sk,
+            "alpha",
+            &v,
+            chain.as_str(),
+            AttestationKind::VerifiedCi,
+        )
+        .unwrap();
+        let legit = Attestation {
+            kind: AttestationKind::VerifiedCi,
+            signer: Text::from("ci@verum"),
+            signature: sig,
+            timestamp: 0,
+        };
+        verify_attestation(&pk, "alpha", &v, chain.as_str(), &legit).unwrap();
+        // Forged signature ⇒ reject.
+        let forged = Attestation {
+            kind: AttestationKind::VerifiedCi,
+            signer: Text::from("ci@verum"),
+            signature: Text::from("0".repeat(128)),
+            timestamp: 0,
+        };
+        assert!(matches!(
+            verify_attestation(&pk, "alpha", &v, chain.as_str(), &forged),
+            Err(AttestationCryptoError::SignatureMismatch)
+        ));
     }
 }

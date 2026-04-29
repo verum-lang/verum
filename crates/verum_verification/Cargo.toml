@@ -40,6 +40,7 @@ smallvec = { workspace = true }
 indexmap = { workspace = true }
 z3 = { workspace = true }
 blake3 = { workspace = true }    # For content hashing (unified with compiler)
+ed25519-dalek = { version = "2.2.0", features = ["serde"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
