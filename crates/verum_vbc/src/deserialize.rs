@@ -174,6 +174,24 @@ fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
     Ok(())
 }
 
+/// Architectural upper bounds for module-table counts.
+///
+/// Hostile bytecode can claim `u32::MAX` (4 billion) for any
+/// `*_count` field in the header, triggering a multi-GB
+/// `Vec::with_capacity(u32::MAX as usize)` allocation before the
+/// deserializer reads a single entry — a memory-amplification
+/// denial-of-service.  Real-world Verum modules have at most a
+/// few thousand entries in any of these tables; the bounds below
+/// are 1 M, comfortably above any plausible module while staying
+/// far below the wraparound cliff.
+///
+/// Hit at parse time (before any allocation), each rejection
+/// names the offending field for triage.
+const MAX_TYPE_TABLE_ENTRIES: u32 = 1 << 20;            // 1 048 576
+const MAX_FUNCTION_TABLE_ENTRIES: u32 = 1 << 20;
+const MAX_CONSTANT_POOL_ENTRIES: u32 = 1 << 20;
+const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
+
 /// VBC module deserializer.
 struct Deserializer<'a> {
     /// Input data.
@@ -199,6 +217,38 @@ impl<'a> Deserializer<'a> {
         // 1. Parse and validate header
         let header = self.parse_header()?;
         self.header = Some(header.clone());
+
+        // Memory-amplification defense: reject implausibly large
+        // table-count fields before any allocation.  See the
+        // MAX_*_ENTRIES constants above for rationale.
+        if header.type_table_count > MAX_TYPE_TABLE_ENTRIES {
+            return Err(VbcError::TableTooLarge {
+                field: "type_table_count",
+                count: header.type_table_count,
+                max: MAX_TYPE_TABLE_ENTRIES,
+            });
+        }
+        if header.function_table_count > MAX_FUNCTION_TABLE_ENTRIES {
+            return Err(VbcError::TableTooLarge {
+                field: "function_table_count",
+                count: header.function_table_count,
+                max: MAX_FUNCTION_TABLE_ENTRIES,
+            });
+        }
+        if header.constant_pool_count > MAX_CONSTANT_POOL_ENTRIES {
+            return Err(VbcError::TableTooLarge {
+                field: "constant_pool_count",
+                count: header.constant_pool_count,
+                max: MAX_CONSTANT_POOL_ENTRIES,
+            });
+        }
+        if header.specialization_table_count > MAX_SPECIALIZATION_TABLE_ENTRIES {
+            return Err(VbcError::TableTooLarge {
+                field: "specialization_table_count",
+                count: header.specialization_table_count,
+                max: MAX_SPECIALIZATION_TABLE_ENTRIES,
+            });
+        }
 
         // 2. Parse string table
         self.offset = header.string_table_offset as usize;
