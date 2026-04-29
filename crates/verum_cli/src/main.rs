@@ -897,6 +897,42 @@ enum Commands {
     ///
     /// Default mode: supply-chain audit (vulns, checksums, signatures).
     ///
+    /// Interactive proof-drafting helper.  Given a theorem name and
+    /// a description of the focused goal, emits ranked next-step
+    /// tactic suggestions (lemma applications + tactic invocations +
+    /// state navigation) via
+    /// `verum_verification::proof_drafting::SuggestionEngine`.
+    ///
+    /// Output format:
+    ///   - `--format plain` (default) — human-readable with rationales.
+    ///   - `--format json`            — structured (LSP-friendly).
+    ProofDraft {
+        /// Theorem name (the proof body's owner — used for diagnostic
+        /// labelling and history attribution).
+        #[clap(long)]
+        theorem: String,
+
+        /// The focused goal's proposition rendering (what needs to be
+        /// proved).  Pipe via stdin with `--goal -` for multi-line
+        /// goals.
+        #[clap(long)]
+        goal: String,
+
+        /// Available lemmas in scope as `name:::signature` lines (one
+        /// per `--lemma` flag, repeatable).  Or use `--lemmas-from
+        /// <file>` to load a `\n`-separated list from a file.
+        #[clap(long, value_name = "NAME:::SIGNATURE")]
+        lemma: Vec<String>,
+
+        /// Maximum number of suggestions to emit.
+        #[clap(long, default_value = "5")]
+        max: usize,
+
+        /// Output format: `plain` or `json`.
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+
     /// With `--framework-axioms`: enumerate the trusted-framework boundary
     /// of the current project — every `@framework(name, "citation")` marker
     /// on an axiom / theorem / lemma is collected, grouped by framework,
@@ -2498,6 +2534,17 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
             };
             commands::lsp::execute(transport_mode)
+        }
+        Commands::ProofDraft {
+            theorem,
+            goal,
+            lemma,
+            max,
+            format,
+        } => {
+            commands::proof_draft::run_proof_draft(
+                &theorem, &goal, &lemma, max, &format,
+            )
         }
         Commands::Audit {
             details,
