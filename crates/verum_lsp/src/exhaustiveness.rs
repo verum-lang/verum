@@ -40,18 +40,50 @@ pub struct ExhaustivenessDiagnostic {
 }
 
 impl ExhaustivenessDiagnostic {
-    /// Convert to LSP diagnostics
+    /// Convert to LSP diagnostics using the default
+    /// [`ExhaustivenessLspConfig`]. Kept for callers that don't
+    /// thread a config through; new code should prefer
+    /// [`to_lsp_diagnostics_with_config`] so the config's
+    /// `report_*` and `max_witnesses` fields actually take effect.
     pub fn to_lsp_diagnostics(&self) -> Vec<LspDiagnostic> {
+        self.to_lsp_diagnostics_with_config(&ExhaustivenessLspConfig::default())
+    }
+
+    /// Convert to LSP diagnostics, honouring every gate on the
+    /// supplied config:
+    ///
+    /// * `report_errors`        — toggles the non-exhaustive ERROR.
+    /// * `report_all_guarded`   — toggles the all-guarded WARNING.
+    /// * `report_redundant`     — toggles a summary "match has
+    ///   redundant patterns" WARNING when the result lists any
+    ///   redundant pattern indices. Per-pattern warnings still
+    ///   come from `create_redundant_pattern_diagnostic` because
+    ///   they need range info this struct doesn't carry.
+    /// * `max_witnesses`        — caps the number of uncovered
+    ///   cases enumerated in the error message before collapsing
+    ///   to "and N other(s) not covered".
+    ///
+    /// Before the config-aware variant landed, every gate was inert:
+    /// the ERROR + WARNING were emitted unconditionally and the
+    /// witness truncation was hardcoded to 3, regardless of what
+    /// callers configured. New consumers should construct an
+    /// [`ExhaustivenessLspConfig`] reflecting the user's LSP
+    /// preferences and route through this method.
+    pub fn to_lsp_diagnostics_with_config(
+        &self,
+        config: &ExhaustivenessLspConfig,
+    ) -> Vec<LspDiagnostic> {
         let mut diagnostics = Vec::new();
 
-        // Non-exhaustive error
-        if !self.is_exhaustive {
+        // Non-exhaustive error.
+        if !self.is_exhaustive && config.report_errors {
+            let max = config.max_witnesses.max(1);
             let message = if self.uncovered_cases.len() == 1 {
                 format!(
                     "non-exhaustive patterns: `{}` not covered",
                     self.uncovered_cases.first().map(|s| s.as_str()).unwrap_or("_")
                 )
-            } else if self.uncovered_cases.len() <= 3 {
+            } else if self.uncovered_cases.len() <= max {
                 let cases: Vec<_> = self
                     .uncovered_cases
                     .iter()
@@ -62,13 +94,13 @@ impl ExhaustivenessDiagnostic {
                 let cases: Vec<_> = self
                     .uncovered_cases
                     .iter()
-                    .take(3)
+                    .take(max)
                     .map(|s| format!("`{}`", s))
                     .collect();
                 format!(
                     "non-exhaustive patterns: {} and {} other(s) not covered",
                     cases.join(", "),
-                    self.uncovered_cases.len() - 3
+                    self.uncovered_cases.len() - max
                 )
             };
 
@@ -88,8 +120,32 @@ impl ExhaustivenessDiagnostic {
             });
         }
 
-        // All guarded warning
-        if self.all_guarded && self.is_exhaustive {
+        // Redundant-patterns summary warning. Per-pattern warnings
+        // surface through `create_redundant_pattern_diagnostic` at
+        // sites that have the per-arm range; this whole-match
+        // summary is the gate `report_redundant` actually controls.
+        if config.report_redundant && !self.redundant_patterns.is_empty() {
+            diagnostics.push(LspDiagnostic {
+                range: self.range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("W0602".to_string())),
+                source: Some("verum".to_string()),
+                message: format!(
+                    "match expression has {} redundant pattern(s) — see W0602 hints",
+                    self.redundant_patterns.len()
+                ),
+                related_information: None,
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                code_description: Some(CodeDescription {
+                    href: Url::parse("https://verum-lang.org/errors/W0602")
+                        .unwrap_or_else(|_| self.uri.clone()),
+                }),
+                data: None,
+            });
+        }
+
+        // All-guarded warning.
+        if self.all_guarded && self.is_exhaustive && config.report_all_guarded {
             diagnostics.push(LspDiagnostic {
                 range: self.range,
                 severity: Some(DiagnosticSeverity::WARNING),
@@ -611,8 +667,23 @@ impl DocumentExhaustivenessTracker {
             .collect()
     }
 
-    /// Get all diagnostics for the document
+    /// Get all diagnostics for the document, using the default
+    /// [`ExhaustivenessLspConfig`]. Kept for callers that don't
+    /// thread a config through; new callers should prefer
+    /// [`get_all_diagnostics_with_config`] so user-supplied
+    /// `report_*` and `max_witnesses` settings actually apply.
     pub fn get_all_diagnostics(&self) -> Vec<LspDiagnostic> {
+        self.get_all_diagnostics_with_config(&ExhaustivenessLspConfig::default())
+    }
+
+    /// Get all diagnostics for the document, honouring every gate
+    /// on the supplied config. See
+    /// [`ExhaustivenessDiagnostic::to_lsp_diagnostics_with_config`]
+    /// for the per-gate semantics.
+    pub fn get_all_diagnostics_with_config(
+        &self,
+        config: &ExhaustivenessLspConfig,
+    ) -> Vec<LspDiagnostic> {
         let matches = self.matches.read();
         let mut diagnostics = Vec::new();
 
@@ -626,7 +697,7 @@ impl DocumentExhaustivenessTracker {
                 uri: self.uri.clone(),
             };
 
-            diagnostics.extend(diag.to_lsp_diagnostics());
+            diagnostics.extend(diag.to_lsp_diagnostics_with_config(config));
 
             // Add range overlap warnings
             for overlap in state.result.range_overlaps.iter() {
@@ -766,6 +837,133 @@ mod tests {
         assert_eq!(
             lsp_diags[0].code,
             Some(NumberOrString::String("W0603".to_string()))
+        );
+    }
+
+    #[test]
+    fn report_errors_false_suppresses_non_exhaustive_diagnostic() {
+        let diag = ExhaustivenessDiagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 10 },
+            },
+            is_exhaustive: false,
+            uncovered_cases: List::from_iter([Text::from("None")]),
+            redundant_patterns: List::new(),
+            all_guarded: false,
+            uri: test_uri(),
+        };
+        let cfg = ExhaustivenessLspConfig {
+            report_errors: false,
+            ..Default::default()
+        };
+        let lsp_diags = diag.to_lsp_diagnostics_with_config(&cfg);
+        assert!(
+            lsp_diags.is_empty(),
+            "report_errors=false must suppress the E0601 diagnostic"
+        );
+    }
+
+    #[test]
+    fn report_all_guarded_false_suppresses_warning() {
+        let diag = ExhaustivenessDiagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 10 },
+            },
+            is_exhaustive: true,
+            uncovered_cases: List::new(),
+            redundant_patterns: List::new(),
+            all_guarded: true,
+            uri: test_uri(),
+        };
+        let cfg = ExhaustivenessLspConfig {
+            report_all_guarded: false,
+            ..Default::default()
+        };
+        let lsp_diags = diag.to_lsp_diagnostics_with_config(&cfg);
+        assert!(
+            lsp_diags.is_empty(),
+            "report_all_guarded=false must suppress the W0603 diagnostic"
+        );
+    }
+
+    #[test]
+    fn report_redundant_emits_summary_only_when_enabled() {
+        let diag = ExhaustivenessDiagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 10 },
+            },
+            is_exhaustive: true,
+            uncovered_cases: List::new(),
+            redundant_patterns: List::from_iter([1usize, 3]),
+            all_guarded: false,
+            uri: test_uri(),
+        };
+
+        // Default config emits the summary.
+        let with_default = diag.to_lsp_diagnostics();
+        assert_eq!(with_default.len(), 1);
+        assert!(with_default[0].message.contains("redundant"));
+        assert_eq!(
+            with_default[0].code,
+            Some(NumberOrString::String("W0602".to_string()))
+        );
+
+        // Disabling the gate suppresses it entirely.
+        let cfg = ExhaustivenessLspConfig {
+            report_redundant: false,
+            ..Default::default()
+        };
+        let suppressed = diag.to_lsp_diagnostics_with_config(&cfg);
+        assert!(
+            suppressed.is_empty(),
+            "report_redundant=false must suppress the W0602 summary"
+        );
+    }
+
+    #[test]
+    fn max_witnesses_truncates_long_uncovered_lists() {
+        let diag = ExhaustivenessDiagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 10 },
+            },
+            is_exhaustive: false,
+            uncovered_cases: List::from_iter([
+                Text::from("A"),
+                Text::from("B"),
+                Text::from("C"),
+                Text::from("D"),
+                Text::from("E"),
+            ]),
+            redundant_patterns: List::new(),
+            all_guarded: false,
+            uri: test_uri(),
+        };
+
+        // max_witnesses=2 → enumerate 2 then "and 3 other(s)".
+        let cfg = ExhaustivenessLspConfig {
+            max_witnesses: 2,
+            ..Default::default()
+        };
+        let diags = diag.to_lsp_diagnostics_with_config(&cfg);
+        assert_eq!(diags.len(), 1);
+        assert!(
+            diags[0].message.contains("`A`") && diags[0].message.contains("`B`"),
+            "first 2 witnesses must be enumerated: {}",
+            diags[0].message
+        );
+        assert!(
+            diags[0].message.contains("3 other(s)"),
+            "remaining witnesses summarised by count: {}",
+            diags[0].message
+        );
+        assert!(
+            !diags[0].message.contains("`C`"),
+            "third witness must not appear once truncated: {}",
+            diags[0].message
         );
     }
 
