@@ -999,6 +999,22 @@ enum Commands {
         format: String,
     },
 
+    /// Auto-paper documentation generator (#84).  Walks every
+    /// `.vr` file in the project, projects every public @theorem /
+    /// @lemma / @corollary / @axiom into a typed `DocItem`, and
+    /// renders Markdown / LaTeX / HTML directly from the corpus.
+    /// Eliminates the duplicate-source problem (paper.tex +
+    /// verum-corpus): the corpus IS the paper draft.
+    ///
+    /// Subcommands:
+    ///   verum doc-render render [--format md|latex|html] [--out <PATH>] [--public]
+    ///   verum doc-render graph [--format dot|json] [--public]
+    ///   verum doc-render check-refs [--format plain|json] [--public]
+    DocRender {
+        #[clap(subcommand)]
+        sub: DocRenderSub,
+    },
+
     /// Closure-hash incremental verification cache surface.  Wires
     /// `verum_verification::closure_cache::FilesystemCacheStore` to
     /// the CLI so IDE / CI / users can inspect, list, clear, and
@@ -1450,6 +1466,38 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum DocRenderSub {
+    /// Render the corpus as a single document.
+    Render {
+        /// Output format: `markdown`, `md`, `latex`, `tex`, `html`.
+        #[clap(long, default_value = "markdown")]
+        format: String,
+        /// Write to this path instead of stdout.
+        #[clap(long)]
+        out: Option<PathBuf>,
+        /// Restrict to public-visibility declarations only.
+        #[clap(long)]
+        public: bool,
+    },
+    /// Export the citation graph (citing → cited).
+    Graph {
+        /// `dot` (Graphviz) or `json` (edge list).
+        #[clap(long, default_value = "dot")]
+        format: String,
+        #[clap(long)]
+        public: bool,
+    },
+    /// Audit broken cross-references; non-zero exit on any dangling
+    /// citation.  CI-friendly.
+    CheckRefs {
+        #[clap(long, default_value = "plain")]
+        format: String,
+        #[clap(long)]
+        public: bool,
+    },
+}
+
 #[derive(Subcommand)]
 enum CacheClosureSub {
     /// Show summary stats: entries, size, hit ratio.
@@ -2749,6 +2797,19 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             commands::proof_repair::run_proof_repair(&kind, &field, max, &format)
         }
+        Commands::DocRender { sub } => match sub {
+            DocRenderSub::Render {
+                format,
+                out,
+                public,
+            } => commands::doc_render::run_render(&format, out.as_ref(), public),
+            DocRenderSub::Graph { format, public } => {
+                commands::doc_render::run_graph(&format, public)
+            }
+            DocRenderSub::CheckRefs { format, public } => {
+                commands::doc_render::run_check_refs(&format, public)
+            }
+        },
         Commands::CacheClosure { sub } => match sub {
             CacheClosureSub::Stat { root, format } => {
                 commands::cache_closure::run_stat(root.as_deref(), &format)
