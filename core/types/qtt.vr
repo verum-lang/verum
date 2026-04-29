@@ -277,3 +277,66 @@ public fn check_binding(name: Text, declared: Quantity, observed: Int{>= 0}) -> 
         },
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for Quantity
+// =============================================================================
+
+implement Eq for Quantity {
+    /// Quantities compare by their normalised canonical form.
+    /// `AtMost { n: 0 }` and `Zero` are NOT distinct under Eq —
+    /// they admit the same set of runtime usages.  `AtMost { n: 1 }`
+    /// stays distinct from `One` (the lattice isn't total around 1
+    /// — see `normalize_quantity` doc).
+    fn eq(&self, other: &Quantity) -> Bool {
+        let a = normalize_quantity(self.clone());
+        let b = normalize_quantity(other.clone());
+        match (a, b) {
+            (Quantity.Zero,                Quantity.Zero)                => true,
+            (Quantity.One,                 Quantity.One)                 => true,
+            (Quantity.Many,                Quantity.Many)                => true,
+            (Quantity.AtMost { n: na },    Quantity.AtMost { n: nb })    => na == nb,
+            _ => false,
+        }
+    }
+}
+
+implement Clone for Quantity {
+    fn clone(&self) -> Quantity {
+        match self {
+            Quantity.Zero       => Quantity.Zero,
+            Quantity.One        => Quantity.One,
+            Quantity.Many       => Quantity.Many,
+            Quantity.AtMost { n } => Quantity.AtMost { n: *n },
+        }
+    }
+}
+
+implement Display for Quantity {
+    /// Renders quantities in their algebraic notation:
+    ///   `Zero`            → `0`     (erased — no runtime occurrence)
+    ///   `One`             → `1`     (linear — exactly one occurrence)
+    ///   `Many`            → `ω`     (unrestricted — any number)
+    ///   `AtMost { n }`    → `≤n`    (bounded affine)
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Quantity.Zero       => f.write_str("0"),
+            Quantity.One        => f.write_str("1"),
+            Quantity.Many       => f.write_str("ω"),
+            Quantity.AtMost { n } =>
+                f.write_str(f"≤{n}".as_str()),
+        }
+    }
+}
+
+implement Debug for Quantity {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Quantity.Zero       => f.write_str("Zero"),
+            Quantity.One        => f.write_str("One"),
+            Quantity.Many       => f.write_str("Many"),
+            Quantity.AtMost { n } =>
+                f.write_str(f"AtMost({n})".as_str()),
+        }
+    }
+}
