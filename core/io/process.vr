@@ -118,14 +118,26 @@ implement ExitStatus {
 }
 
 implement Display for ExitStatus {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Text> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         if self.is_signaled() {
-            f.write_str(f"signal: {self.signal()}")
+            f.write_str(f"signal: {self.signal()}".as_str())
         } else if self.success() {
             f.write_str("exit status: 0")
         } else {
-            f.write_str(f"exit status: {self.code()}")
+            f.write_str(f"exit status: {self.code()}".as_str())
         }
+    }
+}
+
+implement Debug for ExitStatus {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ExitStatus {{ raw: {self.raw} }}".as_str())
+    }
+}
+
+implement Eq for ExitStatus {
+    fn eq(&self, other: &ExitStatus) -> Bool {
+        self.raw == other.raw
     }
 }
 
