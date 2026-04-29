@@ -1006,8 +1006,29 @@ pub fn compile(
     let mut vbc_modules = List::new();
     let mut codegen_errors = List::new();
 
-    for ast_module in common_result.ast_modules.iter() {
-        let mut codegen = VbcCodegen::new();
+    // Forward `CompilerConfig.debug_info` and `optimization_level`
+    // to VBC codegen so the documented session-level toggles
+    // actually shape the emitted bytecode. Closes the inert-
+    // defense pattern: prior to wiring, both fields were held
+    // on `CompilerConfig` for show — `compile()` always called
+    // `VbcCodegen::new()` which used the codegen's own defaults
+    // (`debug_info: false`, `optimization_level: 0`) regardless
+    // of caller intent.
+    let codegen_config_template = verum_vbc::codegen::CodegenConfig {
+        debug_info: config.debug_info,
+        optimization_level: config.optimization_level,
+        ..verum_vbc::codegen::CodegenConfig::default()
+    };
+
+    for (idx, ast_module) in common_result.ast_modules.iter().enumerate() {
+        let mut module_config = codegen_config_template.clone();
+        // Per-module name keeps diagnostics and emitted
+        // artifacts distinguishable when multiple modules are
+        // compiled in one batch. The AST `Module` itself doesn't
+        // carry a path (only a `file_id`), so the index is
+        // used as a stable disambiguator.
+        module_config.module_name = format!("module_{}", idx);
+        let mut codegen = VbcCodegen::with_config(module_config);
         match codegen.compile_module(ast_module) {
             Ok(vbc_module) => {
                 vbc_modules.push(crate::phases::VbcModuleData {
