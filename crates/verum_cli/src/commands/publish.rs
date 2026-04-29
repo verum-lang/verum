@@ -917,11 +917,17 @@ fn load_readme(manifest_dir: &Path) -> Option<Text> {
         if readme_path.exists()
             && let Ok(content) = std::fs::read_to_string(&readme_path)
         {
-            // Truncate very large READMEs (> 64KB)
+            // Truncate very large READMEs (> 64KB).  Clamp the
+            // truncation point DOWN to the nearest char boundary —
+            // raw byte slicing panics when byte 65000 lands inside
+            // a multi-byte UTF-8 char, which is virtually
+            // guaranteed for any non-ASCII-only README (badges with
+            // emoji, CJK headings, accented author names, …).
             let content = if content.len() > 65536 {
+                let cut = verum_common::text_utf8::clamp_to_char_boundary(&content, 65000);
                 format!(
                     "{}...\n\n[Truncated - full README available in repository]",
-                    &content[..65000]
+                    &content[..cut]
                 )
             } else {
                 content

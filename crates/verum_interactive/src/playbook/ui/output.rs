@@ -248,8 +248,12 @@ fn format_value_brief(output: &CellOutput) -> String {
         CellOutput::Error { message, .. } => format!("Error: {}", message),
         CellOutput::Stream { stdout, .. } => {
             let preview = stdout.as_str().lines().next().unwrap_or("");
-            if preview.len() > 30 {
-                format!("{}...", &preview[..30])
+            // Truncate by *characters* — `&preview[..30]` panics on
+            // any non-ASCII content in the cell's stdout (extremely
+            // common in playbook sessions: emoji, CJK, accented Latin).
+            let truncated = verum_common::text_utf8::truncate_chars(preview, 30);
+            if truncated.len() < preview.len() {
+                format!("{}...", truncated)
             } else {
                 preview.to_string()
             }
