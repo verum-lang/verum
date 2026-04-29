@@ -81,6 +81,18 @@ pub fn decode_varint(data: &[u8], offset: &mut usize) -> VbcResult<u64> {
         let byte = data[*offset];
         *offset += 1;
 
+        // At shift=63 only bit 0 of the payload is meaningful — bits
+        // 1..6 represent positions 64..69 of the conceptual u70, which
+        // are NOT representable in u64.  The naive `result |= (...) << 63`
+        // silently drops those bits via Rust's shift-out-of-range
+        // semantics, accepting adversarial varint encodings that
+        // smuggle invalid u64 values.  Mirrors the protobuf
+        // `read_varint` Google-reference fix landed in
+        // `core/protobuf/wire.vr`.
+        if shift == 63 && (byte & 0x7E) != 0 {
+            return Err(VbcError::VarIntOverflow { offset: start });
+        }
+
         // Add 7 bits to result
         result |= ((byte & 0x7F) as u64) << shift;
 
@@ -105,6 +117,16 @@ pub fn read_varint<R: Read>(reader: &mut R) -> std::io::Result<u64> {
 
     loop {
         reader.read_exact(&mut byte)?;
+
+        // Same bits-1..6-of-byte[9] truncation defense as
+        // `decode_varint` above — adversarial encodings claiming a
+        // value past u64::MAX must be rejected.
+        if shift == 63 && (byte[0] & 0x7E) != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "VarInt overflow: byte[9] bits 1..6 must be zero for u64",
+            ));
+        }
 
         result |= ((byte[0] & 0x7F) as u64) << shift;
 
@@ -567,6 +589,46 @@ mod tests {
         let mut cursor = Cursor::new(&overflow_data[..]);
         let result = read_varint(&mut cursor);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_varint_byte9_bits_1_to_6_must_be_zero() {
+        // The 10-byte varint encoding of u64::MAX is:
+        //   [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
+        // Byte[9] must be exactly 0x01 — only bit 0 is meaningful at
+        // shift=63.  Any value with bits 1..6 set claims a position
+        // past u64::MAX and must be rejected, even though byte[9]'s
+        // continuation bit is clear (which would otherwise terminate
+        // the varint and silently drop the high bits).
+        for invalid_byte9 in [0x02u8, 0x04, 0x08, 0x10, 0x20, 0x40, 0x7F] {
+            let data: [u8; 10] = [
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, invalid_byte9,
+            ];
+            let mut offset = 0;
+            assert!(
+                decode_varint(&data, &mut offset).is_err(),
+                "byte[9]=0x{:02x} must be rejected but was accepted",
+                invalid_byte9,
+            );
+            // Same defense in the Reader-based variant.
+            let mut cursor = Cursor::new(&data[..]);
+            assert!(
+                read_varint(&mut cursor).is_err(),
+                "read_varint: byte[9]=0x{:02x} must be rejected",
+                invalid_byte9,
+            );
+        }
+
+        // u64::MAX encoding (byte[9] == 0x01) is the legitimate boundary
+        // value and MUST be accepted.
+        let valid: [u8; 10] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
+        let mut offset = 0;
+        let v = decode_varint(&valid, &mut offset).expect("u64::MAX encoding must decode");
+        assert_eq!(v, u64::MAX);
+
+        let mut cursor = Cursor::new(&valid[..]);
+        let r = read_varint(&mut cursor).expect("u64::MAX encoding must decode (reader path)");
+        assert_eq!(r, u64::MAX);
     }
 
     // ========================================================================
