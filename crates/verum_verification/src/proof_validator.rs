@@ -2475,22 +2475,53 @@ impl ProofValidator {
         })
     }
 
-    /// Check if two expressions are structurally compatible for rewriting
+    /// Check if two expressions are structurally compatible for rewriting.
+    ///
+    /// Compatibility means the rewrite is at least PLAUSIBLY a valid
+    /// transformation: source and target share the same top-level
+    /// `ExprKind` discriminant, OR they fall into one of the
+    /// explicitly-allowed cross-kind rewrites (Literal ↔ Path —
+    /// constants and named bindings can interchange under
+    /// definition unfolding).
+    ///
+    /// Pre-fix the catch-all returned `true` for every pair, which
+    /// made the "unknown rewrite rule" branch in
+    /// `validate_apply_rewrite_rule` (line ~2360) accept any
+    /// source→target pair under any unregistered rule name. Same
+    /// trust-the-user soundness pattern as the inference-rule
+    /// catch-all fixed in 8429bd4e and the quantifier rules in
+    /// 80f43418.
+    ///
+    /// The new same-discriminant fallback uses
+    /// `std::mem::discriminant` so EVERY ExprKind variant pair is
+    /// covered uniformly: Binary/Unary check the operator on top of
+    /// the discriminant match (preserving the prior strict op==
+    /// gate); explicit Literal/Path cross-pair stays accepted; all
+    /// other same-kind pairs (Forall/Forall, Block/Block, etc.) get
+    /// the structural-discriminant check; cross-kind pairs reject.
+    ///
+    /// Note: this is NOT semantic equivalence — it only confirms
+    /// the rewrite isn't trivially malformed. A rewrite that
+    /// transforms `2+3` → `2*3` has matching Binary discriminants
+    /// AND matching `Add` operators, so it passes here, but the
+    /// SMT/expr_eq pipeline catches the actual mathematical
+    /// content elsewhere.
     fn structurally_compatible(&self, source: &Expr, target: &Expr) -> bool {
-        // Expressions are compatible if they have the same type of top-level structure
-        // or if one is a subexpression transformation of the other
         match (&source.kind, &target.kind) {
-            // Same constructor types are compatible
+            // Same constructor types are compatible (Binary/Unary
+            // strengthen with operator equality).
             (ExprKind::Binary { op: op1, .. }, ExprKind::Binary { op: op2, .. }) => op1 == op2,
             (ExprKind::Unary { op: op1, .. }, ExprKind::Unary { op: op2, .. }) => op1 == op2,
-            (ExprKind::Literal(_), ExprKind::Literal(_)) => true,
-            (ExprKind::Path(_), ExprKind::Path(_)) => true,
-            (ExprKind::Call { .. }, ExprKind::Call { .. }) => true,
-            // Allow transformation between different forms
+            // Explicit Literal ↔ Path cross-pair: definition unfolding
+            // legitimately swaps a constant for its name (or vice
+            // versa). Pre-existing accepted cross-pair; preserved.
             (ExprKind::Literal(_), ExprKind::Path(_)) => true,
             (ExprKind::Path(_), ExprKind::Literal(_)) => true,
-            // Default to true for trusted transformations
-            _ => true,
+            // Same-discriminant fallback for every other ExprKind:
+            // Forall/Forall, Exists/Exists, Block/Block, Match/Match,
+            // Tuple/Tuple, Array/Array, etc. Discriminant-only check
+            // (no operator comparison) is the structural minimum.
+            (a, b) => std::mem::discriminant(a) == std::mem::discriminant(b),
         }
     }
 
