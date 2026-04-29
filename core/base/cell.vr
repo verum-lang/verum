@@ -105,6 +105,12 @@ implement<T: Clone + Debug> Debug for Cell<T> {
     }
 }
 
+implement<T: Clone + Display> Display for Cell<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.get().fmt(f)
+    }
+}
+
 // =============================================================================
 // RefCell<T> - Single-threaded interior mutability with dynamic borrow checking
 // =============================================================================
@@ -273,6 +279,20 @@ implement<T: Debug> Debug for RefCell<T> {
 implement<T: Default> Default for RefCell<T> {
     fn default() -> RefCell<T> {
         RefCell.new(T.default())
+    }
+}
+
+implement<T: Display> Display for RefCell<T> {
+    /// Display delegates to the inner value's Display.  When a mutable
+    /// borrow is currently active the cell can't safely hand out a
+    /// shared borrow for `fmt`; in that case the wrapper falls back
+    /// to the unambiguous sentinel `<borrowed>` rather than panicking.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.borrow_state.count < 0 {
+            f.write_str("<borrowed>")
+        } else {
+            self.borrow().value.fmt(f)
+        }
     }
 }
 
@@ -451,11 +471,43 @@ implement<T: Clone + Debug> Debug for OnceCell<T> {
         if self.value.is_some() {
             f.write_str("OnceCell(")?;
             self.value.clone()
-                .expect("OnceCell::fmt_debug: value is_some by guard above")
+                .expect("OnceCell.fmt_debug: value is_some by guard above")
                 .fmt_debug(f)?;
             f.write_str(")")
         } else {
             f.write_str("OnceCell(<empty>)")
+        }
+    }
+}
+
+implement<T: Clone + Display> Display for OnceCell<T> {
+    /// Display renders the inner value when the cell is set, or
+    /// `<empty>` when it isn't.  Once-only semantics mean the
+    /// rendered text is stable from the first successful set
+    /// onwards.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        if self.value.is_some() {
+            self.value.clone()
+                .expect("OnceCell.fmt: value is_some by guard above")
+                .fmt(f)
+        } else {
+            f.write_str("<empty>")
+        }
+    }
+}
+
+implement<T: Clone + Hash> Hash for OnceCell<T> {
+    /// Hash is consistent with Eq (line 431): hashes the inner
+    /// value when set, or zero when empty.  Hash-Eq invariant
+    /// holds because OnceCell is write-once — once the cell holds
+    /// a value, both Eq and Hash see the same value forever.
+    fn hash(&self, hasher: &mut Hasher) {
+        if self.value.is_some() {
+            self.value.clone()
+                .expect("OnceCell.hash: value is_some by guard above")
+                .hash(hasher);
+        } else {
+            hasher.write_int(0);
         }
     }
 }
