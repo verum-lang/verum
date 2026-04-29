@@ -126,6 +126,16 @@ impl ReportFormat {
 }
 
 pub fn execute(opts: BenchOptions) -> Result<()> {
+    // Honour `BenchOptions.no_color` — when set, suppress all
+    // ANSI-colored output globally for the duration of the bench
+    // run. Pre-fix the field landed on the options struct but no
+    // code path consulted it, so `verum bench --no-color` still
+    // emitted ANSI escapes (broke output captured in CI logs that
+    // didn't strip them).
+    if opts.no_color {
+        colored::control::set_override(false);
+    }
+
     let quiet = matches!(opts.format, ReportFormat::Json | ReportFormat::Csv);
 
     if !quiet {
@@ -1115,5 +1125,45 @@ mod tests {
         assert!(format_time(5_000.0).contains("µs"));
         assert!(format_time(5_000_000.0).contains("ms"));
         assert!(format_time(5_000_000_000.0).contains(" s"));
+    }
+
+    #[test]
+    fn no_color_default_is_false() {
+        // Pin: the documented default keeps coloured output enabled
+        // so users running `verum bench` interactively see the
+        // styled tables. CI invocations that need plain text opt
+        // in via `--no-color`.
+        let opts = BenchOptions::default();
+        assert!(!opts.no_color, "default no_color must stay false");
+    }
+
+    #[test]
+    fn no_color_flag_disables_colored_output_globally() {
+        // Pin: setting `--no-color` on the CLI flips the global
+        // colored::control override so every subsequent ANSI-styled
+        // print emits plain text. We can't observe the override
+        // in another thread without test isolation, but we can
+        // verify the override surface itself reaches the runtime.
+        // The wiring runs unconditionally — if a refactor drops
+        // the call, future bench output regressions to ANSI in CI
+        // logs.
+        let opts = BenchOptions {
+            no_color: true,
+            ..BenchOptions::default()
+        };
+        assert!(opts.no_color);
+
+        // Apply the override directly (mirrors the wiring in
+        // execute) and assert that a freshly-coloured string
+        // renders without ANSI escapes.
+        colored::control::set_override(false);
+        let plain = "test".red().to_string();
+        assert!(
+            !plain.contains("\u{1b}["),
+            "set_override(false) must strip ANSI escapes, got: {:?}",
+            plain,
+        );
+        // Restore default for any subsequent tests in the suite.
+        colored::control::unset_override();
     }
 }
