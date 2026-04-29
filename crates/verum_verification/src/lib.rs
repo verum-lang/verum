@@ -94,6 +94,14 @@ pub mod tactic_combinator;
 /// boundary [`closure_cache::IncrementalCacheStore`] +
 /// memory-backed + filesystem-backed reference impls.
 pub mod closure_cache;
+/// Canonical byte-level representation of AST nodes for the closure-
+/// hash incremental verification cache (#79 / #88 / #89 hardening).
+/// Replaces `format!("{:?}", thm.requires)`-style payloads — which
+/// rely on Rust's explicitly-unstable `Debug` impl — with a sorted-
+/// keys JSON serialiser whose schema-stability contract is documented
+/// inline.  Single source of byte-level determinism for the cache
+/// fingerprint.
+pub mod canonical_repr;
 /// Auto-paper documentation generator (#84).  Projects every
 /// public @theorem / @lemma / @corollary / @axiom plus its
 /// docstring + proof body into a typed [`doc_render::DocItem`]
