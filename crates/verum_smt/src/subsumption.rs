@@ -106,6 +106,25 @@ impl SubsumptionChecker {
         }
     }
 
+    /// Update the per-query SMT timeout (milliseconds).
+    ///
+    /// Used by `RefinementZ3Backend::set_timeout_ms` to forward
+    /// the `RefinementConfig.timeout_ms` value through to Z3 for
+    /// every subsequent `check_smt` invocation. Without this
+    /// setter the checker's timeout was frozen at construction
+    /// and the public `RefinementConfig.timeout_ms` knob was
+    /// inert past the first use.
+    pub fn set_smt_timeout_ms(&mut self, ms: u64) {
+        self.smt_timeout_ms = ms;
+    }
+
+    /// Read the currently active per-query SMT timeout in
+    /// milliseconds. Useful for tests and tooling that need to
+    /// confirm a timeout update has propagated.
+    pub fn smt_timeout_ms(&self) -> u64 {
+        self.smt_timeout_ms
+    }
+
     /// Check if phi1 => phi2 (phi1 is stronger, thus a subtype)
     ///
     /// # Performance
@@ -425,9 +444,19 @@ impl SubsumptionChecker {
         // Create Z3 solver (uses global context)
         let solver = Solver::new();
 
-        // Note: z3-rs 0.19 doesn't easily expose timeout config per-solver
-        // Timeout would need to be set globally via Z3_set_param
-        // For now, we track elapsed time manually and abort if needed
+        // Forward the per-query timeout to Z3 via the `timeout`
+        // solver parameter (milliseconds, u32). Mirrors the
+        // pattern used by `QESolver::fresh_solver` and friends.
+        // Without this the documented `smt_timeout_ms` was a
+        // post-hoc elapsed check only — Z3 itself was unbounded.
+        // Saturate at u32::MAX since `Params::set_u32` is the
+        // exposed type; in practice timeouts are sub-second.
+        let mut params = z3::Params::new();
+        params.set_u32(
+            "timeout",
+            u32::try_from(self.smt_timeout_ms).unwrap_or(u32::MAX),
+        );
+        solver.set_params(&params);
 
         // Translate expressions to Z3 (using global context)
         let z3_phi1 = match translate_to_z3(phi1) {

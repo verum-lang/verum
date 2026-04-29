@@ -182,6 +182,16 @@ impl SmtBackend for RefinementZ3Backend {
 
         Ok(verification_result)
     }
+
+    /// Forward the per-query timeout to the underlying
+    /// `SubsumptionChecker`, which forwards it to Z3 via the
+    /// `timeout` solver parameter on every `check_smt`. This is
+    /// the production wiring for `RefinementConfig.timeout_ms`:
+    /// without it the checker's timeout was frozen at
+    /// construction and any caller-side knob was ignored.
+    fn set_timeout_ms(&mut self, ms: u64) {
+        self.checker.set_smt_timeout_ms(ms);
+    }
 }
 
 /// Helper to check refinement subsumption using SMT
