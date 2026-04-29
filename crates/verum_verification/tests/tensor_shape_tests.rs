@@ -586,3 +586,64 @@ fn test_zero_dimension() {
     assert!(shape.is_fully_static());
     assert_eq!(shape.static_dims(), Maybe::Some(List::from(vec![0, 3, 4])));
 }
+
+// ============================================================================
+// Wire-up Pin Tests
+// ============================================================================
+
+#[test]
+fn max_rank_caps_verify_matmul() {
+    // Pin: VerificationConfig.max_rank actually rejects shapes
+    // whose rank exceeds the configured cap. Before the wire-up
+    // the field was inert — verify_matmul accepted any rank-2
+    // pair regardless of cap (and other operations accepted any
+    // rank). Setting max_rank = 1 must reject every rank-2
+    // matmul operand.
+    let cfg = VerificationConfig {
+        max_rank: 1,
+        ..VerificationConfig::default()
+    };
+    let v = ShapeVerifier::with_config(cfg);
+    let a = TensorShape::from_dims(vec![3, 4]);
+    let b = TensorShape::from_dims(vec![4, 5]);
+    let res = v.verify_matmul(&a, &b);
+    assert!(
+        res.is_err(),
+        "max_rank=1 must reject rank-2 matmul operands"
+    );
+    let err = format!("{:?}", res.unwrap_err());
+    assert!(
+        err.contains("max_rank") || err.contains("rank"),
+        "rejection must name the rank cap: {err}"
+    );
+}
+
+#[test]
+fn max_rank_caps_verify_reshape_output() {
+    // Pin: verify_reshape gates BOTH input and output rank.
+    // A reshape from rank-2 to rank-5 with max_rank = 3 must be
+    // rejected even though the input is within the cap.
+    let cfg = VerificationConfig {
+        max_rank: 3,
+        ..VerificationConfig::default()
+    };
+    let v = ShapeVerifier::with_config(cfg);
+    let input = TensorShape::from_dims(vec![6, 4]);
+    let new_shape = TensorShape::from_dims(vec![2, 2, 2, 1, 3]);
+    let res = v.verify_reshape(&input, &new_shape);
+    assert!(
+        res.is_err(),
+        "max_rank=3 must reject a reshape that produces rank 5"
+    );
+}
+
+#[test]
+fn max_rank_unlimited_default_accepts_high_rank() {
+    // Pin: default config (max_rank = 8) accepts any rank up to
+    // and including 8 — preserves prior behaviour for the
+    // "Maximum tensor rank to verify (default: 8)" contract.
+    let v = ShapeVerifier::new();
+    let a = TensorShape::from_dims(vec![1, 2]);
+    let b = TensorShape::from_dims(vec![2, 3]);
+    assert!(v.verify_matmul(&a, &b).is_ok());
+}
