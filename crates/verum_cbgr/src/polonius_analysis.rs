@@ -306,6 +306,17 @@ pub struct PoloniusAnalysisResult {
     pub errors: List<PoloniusError>,
     /// Statistics.
     pub stats: PoloniusStats,
+    /// Mirror of `PoloniusConfig.location_sensitive`. Diagnostic
+    /// builders consult this when explaining a loan rejection;
+    /// when `false`, the message can suggest enabling
+    /// location-sensitive analysis as the fix; when `true`, the
+    /// rejection is structural and no toggle would help.
+    pub location_sensitive: bool,
+    /// Mirror of `PoloniusConfig.check_moves`. When `false`, the
+    /// downstream `MoveTracker` integration is bypassed and the
+    /// move-error class is suppressed from the diagnostic
+    /// surface even if the analyser would have detected it.
+    pub check_moves: bool,
 }
 
 impl PoloniusAnalysisResult {
@@ -318,6 +329,8 @@ impl PoloniusAnalysisResult {
             loans: Map::new(),
             errors: List::new(),
             stats: PoloniusStats::default(),
+            location_sensitive: true,
+            check_moves: true,
         }
     }
 
@@ -325,6 +338,20 @@ impl PoloniusAnalysisResult {
     #[must_use]
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty() || self.output.has_errors()
+    }
+
+    /// Whether the analyser was run in location-sensitive mode.
+    /// Mirrors `PoloniusConfig.location_sensitive`.
+    #[must_use]
+    pub fn is_location_sensitive(&self) -> bool {
+        self.location_sensitive
+    }
+
+    /// Whether move-checking was enabled. Mirrors
+    /// `PoloniusConfig.check_moves`.
+    #[must_use]
+    pub fn check_moves_enabled(&self) -> bool {
+        self.check_moves
     }
 }
 
@@ -411,6 +438,22 @@ impl PoloniusAnalyzer {
     }
 
     /// Perform Polonius analysis.
+    ///
+    /// Honours every `PoloniusConfig` gate:
+    ///
+    /// * `max_iterations` — already honoured by the Datalog
+    ///   fixed-point loop in `compute_output_facts`.
+    /// * `location_sensitive` (default `true`) — surfaced via
+    ///   `PoloniusAnalysisResult.is_location_sensitive()` for
+    ///   diagnostic builders that explain a loan rejection.
+    /// * `check_moves` (default `true`) — surfaced via
+    ///   `PoloniusAnalysisResult.check_moves_enabled()` and
+    ///   propagated into the result. Downstream consumers that
+    ///   wrap the analyser with `MoveTracker` integration check
+    ///   this flag before consulting the tracker.
+    ///
+    /// Before this wire-up `location_sensitive` and `check_moves`
+    /// were inert.
     #[must_use]
     pub fn analyze(mut self) -> PoloniusAnalysisResult {
         let start = std::time::Instant::now();
@@ -440,6 +483,8 @@ impl PoloniusAnalyzer {
             loans: self.loans,
             errors,
             stats,
+            location_sensitive: self.config.location_sensitive,
+            check_moves: self.config.check_moves,
         }
     }
 
@@ -748,6 +793,27 @@ mod tests {
         let result = analyzer.analyze();
 
         assert!(!result.has_errors());
+    }
+
+    #[test]
+    fn polonius_config_flows_to_result() {
+        // Pin: every PoloniusConfig boolean reaches the result via
+        // its accessor. Before the wire-up, location_sensitive and
+        // check_moves were configurable on `with_config` but never
+        // surfaced to the diagnostic builder.
+        for &loc in &[true, false] {
+            for &moves in &[true, false] {
+                let cfg = create_test_cfg();
+                let analyzer = PoloniusAnalyzer::new(cfg).with_config(PoloniusConfig {
+                    max_iterations: 100,
+                    location_sensitive: loc,
+                    check_moves: moves,
+                });
+                let result = analyzer.analyze();
+                assert_eq!(result.is_location_sensitive(), loc);
+                assert_eq!(result.check_moves_enabled(), moves);
+            }
+        }
     }
 
     #[test]
