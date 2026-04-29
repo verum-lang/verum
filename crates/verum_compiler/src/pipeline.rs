@@ -6233,6 +6233,29 @@ impl<'s> CompilationPipeline<'s> {
         // Record parsing metrics
         self.session.record_phase_metrics("Parsing", parse_time, 0);
 
+        // Honour `--emit-ast`: serialise the freshly parsed module to
+        // a sidecar `.ast.json` next to the input source.  The flag
+        // was a config field with no readers — it has been declared
+        // and defaulted on `CompilerOptions` for a long while, but
+        // no compilation phase emitted anything when it was set, so
+        // the documented "Emit AST in JSON format" contract was a
+        // no-op.  We mirror the `emit_types`/`emit_vbc` pattern of
+        // best-effort write + debug log on failure (non-fatal).
+        if self.session.options().emit_ast {
+            let ast_path = self.session.options().input.with_extension("ast.json");
+            match serde_json::to_vec_pretty(&module) {
+                Ok(data) => match std::fs::write(&ast_path, &data) {
+                    Ok(()) => info!(
+                        "Exported AST: {} ({} bytes)",
+                        ast_path.display(),
+                        data.len()
+                    ),
+                    Err(e) => debug!("Failed to write AST: {}", e),
+                },
+                Err(e) => debug!("Failed to serialise AST: {}", e),
+            }
+        }
+
         // Cache the module (session still uses its own caching mechanism)
         self.session.cache_module(file_id, module.clone());
 
