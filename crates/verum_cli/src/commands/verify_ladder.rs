@@ -82,6 +82,11 @@ fn run_kernel_recheck(
             KernelRecheck::recheck_theorem(t)
         }
         ItemKind::Axiom(a) => KernelRecheck::recheck_axiom(a),
+        // #120 — functions with `@verify(proof|...)` annotations
+        // carry the richest recheck surface (params + return type +
+        // body + requires + ensures); refinement-type leakage in
+        // any of these surfaces through K-Refine-omega.
+        ItemKind::Function(f) => KernelRecheck::recheck_function(f),
         _ => return None,
     };
     let errors: Vec<&verum_verification::kernel_recheck::KernelRecheckError> = results
@@ -189,6 +194,13 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
                 // the dispatcher so the kernel-recheck bridge fires
                 // on `@verify(proof)` axiom declarations too.
                 ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
+                // #120 — functions are the richest recheck surface
+                // (params + return type + body + requires + ensures).
+                // `@verify(proof)` annotations on functions now route
+                // through `recheck_function` like theorems and axioms.
+                ItemKind::Function(decl) => {
+                    ("function", decl.name.name.clone(), &decl.attributes)
+                }
                 _ => continue,
             };
 
