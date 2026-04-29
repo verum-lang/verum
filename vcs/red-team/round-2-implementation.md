@@ -454,6 +454,30 @@ paths:
    diagnostic ranges could land inside a multi-byte char.  Fix: clamp
    both ends DOWN to char boundaries before slicing; degrade to empty
    fragment rather than panic.
+6. **`vbc::disassemble::write_constant` / `str_name` byte-truncation
+   slice** — `&s[..57]` and `&s[..37]` truncating long constant /
+   string-table entries panic when the byte boundary lands inside a
+   multi-byte UTF-8 sequence.  Disassembly output flows into LSP
+   error diagnostics, so a Unicode string constant in user code
+   (CJK identifier, emoji in a doc comment, accented Latin in a
+   string literal) crashed every dump-bytecode call.  Fix: truncate
+   by *character* count via `chars().take(N).collect()`.
+7. **`document::word_at_position` mixed byte/char index**
+   (correctness, not panic): `position_to_offset` returns a BYTE
+   offset; the function built a `Vec<char>` and indexed it using
+   that byte offset.  For ASCII coincidentally correct; for any
+   multi-byte content (Unicode identifiers, string literals with
+   emoji, CJK in comments) the cursor either returned `None`
+   prematurely or located the wrong char.  Rewrote with consistent
+   `char_indices()` walks.
+8. **`script::incremental::contains_identifier` find-result-as-char-
+   index** (correctness, not panic): used `find()`'s byte offset as
+   a char index when probing surrounding char boundaries via
+   `line.chars().nth(abs_pos - 1)`.  Same byte-vs-char conflation;
+   produced false-positive substring matches on multi-byte source.
+   Replaced with byte-anchored `chars().next_back()` /
+   `chars().next()` walks over byte slices at find-result
+   boundaries.
 
 **Guardrail:** `crates/verum_lsp/tests/malformed_input_fuzz.rs` — 20
 tests covering the empirical failure modes:
