@@ -947,6 +947,41 @@ enum Commands {
         format: String,
     },
 
+    /// Structured repair suggestions for a typed proof / kernel
+    /// failure.  Wires
+    /// `verum_diagnostics::proof_repair::DefaultRepairEngine` so IDE /
+    /// LSP / REPL consumers can request ranked drop-in code-snippet
+    /// repairs without depending on the Rust API.
+    ///
+    /// Usage:
+    ///   verum proof-repair --kind unbound-name --field name=foo
+    ///   verum proof-repair --kind refine-depth \
+    ///         --field refined_type=CategoricalLevel \
+    ///         --field predicate_depth=ω·2 --max 3 --format json
+    ///
+    /// Valid `--kind` values: refine-depth, positivity, universe,
+    /// fwax-not-prop, adjunction, type-mismatch, unbound-name,
+    /// apply-mismatch, tactic-open.
+    ProofRepair {
+        /// Failure-kind tag — see command help for the full set.
+        #[clap(long)]
+        kind: String,
+
+        /// Per-kind structured fields as `key=value`.  Repeatable.
+        /// Required keys differ per kind; missing required keys
+        /// surface as an InvalidArgument error naming the missing key.
+        #[clap(long, value_name = "KEY=VALUE")]
+        field: Vec<String>,
+
+        /// Maximum number of suggestions to emit.
+        #[clap(long, default_value = "5")]
+        max: usize,
+
+        /// Output format: `plain` or `json`.
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+
     /// With `--framework-axioms`: enumerate the trusted-framework boundary
     /// of the current project — every `@framework(name, "citation")` marker
     /// on an axiom / theorem / lemma is collected, grouped by framework,
@@ -2570,6 +2605,14 @@ fn run_command(cli: Cli) -> Result<()> {
             commands::proof_draft::run_proof_draft(
                 &theorem, &goal, &lemma, max, &format,
             )
+        }
+        Commands::ProofRepair {
+            kind,
+            field,
+            max,
+            format,
+        } => {
+            commands::proof_repair::run_proof_repair(&kind, &field, max, &format)
         }
         Commands::Audit {
             details,

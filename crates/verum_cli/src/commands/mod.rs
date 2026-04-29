@@ -29,6 +29,11 @@ pub mod profile;
 /// `verum_verification::proof_drafting::SuggestionEngine` for
 /// IDE / REPL / CLI proof-drafting integration.
 pub mod proof_draft;
+/// `verum proof-repair` subcommand — surfaces the
+/// `verum_diagnostics::proof_repair::RepairEngine` so IDE / LSP /
+/// REPL consumers can request structured repair suggestions for a
+/// typed `ProofFailureKind` without depending on the Rust API.
+pub mod proof_repair;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
