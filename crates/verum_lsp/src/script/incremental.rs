@@ -407,6 +407,11 @@ pub fn detect_dependencies(line: &str, context: &ScriptContext) -> List<usize> {
 ///
 /// This performs a more accurate check than a simple substring match.
 /// For example, "x" should match "x + 1" but not "tax".
+///
+/// Walks the line via byte offsets returned by `find`, but resolves
+/// the surrounding "char before / char after" via `chars()` walks
+/// over byte slices — `chars().nth(byte_offset)` would silently
+/// produce wrong results when the line contains multi-byte UTF-8.
 fn contains_identifier(line: &str, ident: &str) -> bool {
     if ident.is_empty() {
         return false;
@@ -415,11 +420,27 @@ fn contains_identifier(line: &str, ident: &str) -> bool {
     let mut start = 0;
     while let Some(pos) = line[start..].find(ident) {
         let abs_pos = start + pos;
-        let before_ok =
-            abs_pos == 0 || !is_ident_char(line.chars().nth(abs_pos - 1).unwrap_or(' '));
         let after_pos = abs_pos + ident.len();
-        let after_ok =
-            after_pos >= line.len() || !is_ident_char(line.chars().nth(after_pos).unwrap_or(' '));
+
+        // Char immediately before the match — `chars().next_back()`
+        // on the prefix walks the UTF-8 backwards correctly.
+        let before_ok = abs_pos == 0
+            || line[..abs_pos]
+                .chars()
+                .next_back()
+                .map(|c| !is_ident_char(c))
+                .unwrap_or(true);
+
+        // Char immediately after the match.  `find` always returns a
+        // char-boundary byte offset and the match is a complete `ident`,
+        // so after_pos is also a char boundary; safe to slice and take
+        // the next char.
+        let after_ok = after_pos >= line.len()
+            || line[after_pos..]
+                .chars()
+                .next()
+                .map(|c| !is_ident_char(c))
+                .unwrap_or(true);
 
         if before_ok && after_ok {
             return true;

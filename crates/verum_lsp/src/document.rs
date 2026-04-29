@@ -509,30 +509,51 @@ impl DocumentState {
 
     /// Get the word at a given position
     pub fn word_at_position(&self, position: Position) -> Option<String> {
+        // `position_to_offset` returns a BYTE offset.  The previous
+        // implementation built a `Vec<char>` and then indexed it
+        // using the byte offset, which silently mis-located the
+        // cursor when the document contained multi-byte UTF-8.  Walk
+        // by byte offsets consistently — `char_indices` gives real
+        // byte offsets at char boundaries, so all slices are safe.
         let offset = self.position_to_offset(position) as usize;
-        let chars: Vec<char> = self.text.chars().collect();
+        let text = self.text.as_str();
 
-        if offset >= chars.len() {
+        if offset > text.len() {
             return None;
         }
 
-        // Find start of word
-        let mut start = offset;
-        while start > 0 && is_identifier_char(chars[start - 1]) {
-            start -= 1;
+        // Clamp the cursor to the nearest preceding char boundary.
+        let mut cursor = offset.min(text.len());
+        while cursor > 0 && !text.is_char_boundary(cursor) {
+            cursor -= 1;
         }
 
-        // Find end of word
-        let mut end = offset;
-        while end < chars.len() && is_identifier_char(chars[end]) {
-            end += 1;
+        // Find start of word: walk char_indices() in reverse from the
+        // cursor, advancing `start` past identifier characters.
+        let mut start = cursor;
+        for (byte_idx, ch) in text[..cursor].char_indices().rev() {
+            if is_identifier_char(ch) {
+                start = byte_idx;
+            } else {
+                break;
+            }
+        }
+
+        // Find end of word: walk forward from the cursor.
+        let mut end = cursor;
+        for (byte_idx, ch) in text[cursor..].char_indices() {
+            if is_identifier_char(ch) {
+                end = cursor + byte_idx + ch.len_utf8();
+            } else {
+                break;
+            }
         }
 
         if start == end {
             return None;
         }
 
-        Some(chars[start..end].iter().collect())
+        Some(text[start..end].to_string())
     }
 
     /// Get the line at a given line number
