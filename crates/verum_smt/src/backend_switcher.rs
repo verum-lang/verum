@@ -1059,8 +1059,18 @@ impl SmtBackendSwitcher {
         // Try Z3 first
         let z3_result = self.solve_with_z3(assertions);
 
-        // Check if we should fallback
-        if self.config.fallback.enabled {
+        // Check if we should fallback. `max_attempts <= 1` means
+        // "primary only — Z3 result is final regardless of the
+        // on_error / on_timeout / on_unknown gates", which closes
+        // the inert-defense pattern around `FallbackConfig.max_attempts`:
+        // pre-fix the field was TOML-parsed and asserted in tests but
+        // no fallback code path consulted it, so a manifest setting
+        // `max_attempts = 1` to lock to Z3 was silently ignored.
+        // The two-backend topology of this switcher means
+        // `max_attempts = 2` (default) is also the natural ceiling
+        // (Z3 → CVC5 = 2 attempts); any higher value behaves as 2
+        // since there's no third backend to escalate to.
+        if self.config.fallback.enabled && self.config.fallback.max_attempts > 1 {
             match &z3_result {
                 SolveResult::Error { .. } if self.config.fallback.on_error => {
                     if self.config.verbose {
