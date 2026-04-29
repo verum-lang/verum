@@ -49,6 +49,21 @@ pub struct PatternRow {
     /// unrepresented at row level" and falls back to the conservative
     /// (non-SMT) exhaustiveness verdict for them.
     pub guard: Option<Arc<Expr>>,
+
+    /// Pattern-bound identifier names (`PatternKind::Ident { name, .. }`
+    /// sites) collected from the row's ORIGINAL pattern AST, before
+    /// matrix lowering throws bindings away. Populated by
+    /// `build_matrix` only when the row has a top-level guard, since
+    /// bindings are only consumed by the SMT-backed exhaustiveness
+    /// path (`extract_guarded_patterns` → `GuardedPattern.bound_vars`).
+    /// Without this, the SMT translator's `bound_vars.contains_key(name)`
+    /// check at `verum_smt::exhaustiveness_backend::translate_expr`
+    /// returns false for every variable reference in a guard like
+    /// `n if n > 0`, which silently drops the guard from the SMT
+    /// input — the path then reports `unknown_guards` and falls back
+    /// to the conservative non-SMT verdict, defeating the precision
+    /// gain of having the guard expression at all.
+    pub bindings: List<Text>,
 }
 
 impl PatternRow {
@@ -59,6 +74,7 @@ impl PatternRow {
             original_index,
             has_guard,
             guard: None,
+            bindings: List::new(),
         }
     }
 
@@ -71,6 +87,15 @@ impl PatternRow {
             self.has_guard = true;
         }
         self.guard = guard;
+        self
+    }
+
+    /// Attach pattern-bound identifier names to the row. Consumed by
+    /// the SMT exhaustiveness path so guards like `n if n > 0` can
+    /// translate the `n` reference instead of silently failing the
+    /// `bound_vars.contains_key("n")` check.
+    pub fn with_bindings(mut self, bindings: List<Text>) -> Self {
+        self.bindings = bindings;
         self
     }
 
@@ -339,6 +364,111 @@ impl CoverageMatrix {
     }
 }
 
+/// Walk a pattern AST collecting all `PatternKind::Ident` binding
+/// names. Used by `build_matrix` to populate `PatternRow.bindings`
+/// for guarded rows. The walk is structural (no env / no type info)
+/// — it's solely the set of names that the row's guard expression
+/// might reference. Order is left-to-right structural traversal;
+/// duplicates are not deduplicated (a `(x, x)` tuple-bind pattern
+/// is a separate type-checker concern).
+fn collect_pattern_bindings(pattern: &Pattern) -> List<Text> {
+    fn walk(pattern: &Pattern, out: &mut List<Text>) {
+        match &pattern.kind {
+            PatternKind::Ident { name, subpattern, .. } => {
+                out.push(Text::from(name.name.as_str()));
+                if let Maybe::Some(sub) = subpattern {
+                    walk(sub, out);
+                }
+            }
+            PatternKind::Tuple(elements) | PatternKind::Array(elements) => {
+                for p in elements.iter() {
+                    walk(p, out);
+                }
+            }
+            PatternKind::Slice { before, rest, after } => {
+                for p in before.iter() {
+                    walk(p, out);
+                }
+                if let Maybe::Some(r) = rest {
+                    walk(r, out);
+                }
+                for p in after.iter() {
+                    walk(p, out);
+                }
+            }
+            PatternKind::Record { fields, .. } => {
+                for f in fields.iter() {
+                    if let Maybe::Some(p) = &f.pattern {
+                        walk(p, out);
+                    } else {
+                        // Punned field (`{ name }`) binds `name`.
+                        out.push(Text::from(f.name.name.as_str()));
+                    }
+                }
+            }
+            PatternKind::Variant { data, .. } => match data {
+                Maybe::None => {}
+                Maybe::Some(VariantPatternData::Tuple(patterns)) => {
+                    for p in patterns.iter() {
+                        walk(p, out);
+                    }
+                }
+                Maybe::Some(VariantPatternData::Record { fields, .. }) => {
+                    for f in fields.iter() {
+                        if let Maybe::Some(p) = &f.pattern {
+                            walk(p, out);
+                        } else {
+                            out.push(Text::from(f.name.name.as_str()));
+                        }
+                    }
+                }
+            },
+            PatternKind::Or(alternatives) => {
+                // Or-arms bind the SAME names (type-checker enforces);
+                // walking every arm and pushing duplicates is harmless
+                // — `bound_vars.contains_key` only cares about set
+                // membership.
+                for p in alternatives.iter() {
+                    walk(p, out);
+                }
+            }
+            PatternKind::And(conjuncts) => {
+                // Conjuncts bind a UNION of names; walk all of them.
+                for p in conjuncts.iter() {
+                    walk(p, out);
+                }
+            }
+            PatternKind::Guard { pattern: inner, .. } => {
+                // Guards don't introduce bindings beyond their inner
+                // pattern. Recurse into the inner pattern only.
+                walk(inner, out);
+            }
+            PatternKind::Reference { inner, .. } => walk(inner, out),
+            PatternKind::Wildcard
+            | PatternKind::Rest
+            | PatternKind::Literal(_)
+            | PatternKind::Range { .. } => {}
+            PatternKind::TypeTest { binding, .. } => {
+                // `x is Type` — `binding` is the narrowed-value name
+                // (not optional in the AST shape).
+                out.push(Text::from(binding.name.as_str()));
+            }
+            PatternKind::Active { bindings, .. } => {
+                for b in bindings.iter() {
+                    walk(b, out);
+                }
+            }
+            // PatternKind variants we don't introduce bindings for
+            // (or that we don't yet model in the SMT path) silently
+            // contribute no names.
+            _ => {}
+        }
+    }
+    let mut out = List::new();
+    walk(pattern, &mut out);
+    out
+}
+
 /// Build a coverage matrix from a list of patterns
 pub fn build_matrix(
     patterns: &[Pattern],
@@ -369,7 +499,19 @@ pub fn build_matrix(
         // even if the inner pattern didn't carry a nested one — the
         // peeled top-level guard still gates this row.
         let row_has_guard = has_guard || top_guard.is_some();
-        let row = PatternRow::new(columns, idx, row_has_guard).with_guard_expr(top_guard);
+        // Collect pattern-bound identifiers so the SMT exhaustiveness
+        // path can resolve guard variable references. Skip the walk
+        // when there's no top-level guard — the bindings field is
+        // only consumed by the SMT path, which only runs on guarded
+        // rows.
+        let bindings = if top_guard.is_some() {
+            collect_pattern_bindings(top_pattern)
+        } else {
+            List::new()
+        };
+        let row = PatternRow::new(columns, idx, row_has_guard)
+            .with_guard_expr(top_guard)
+            .with_bindings(bindings);
         matrix.add_row(row);
     }
 
@@ -689,7 +831,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     }
                     specialized.add_row(
                         PatternRow::new(new_columns, row.original_index, row.has_guard)
-                            .with_guard_expr(row.guard.clone()),
+                            .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                     );
                 }
                 PatternColumn::Constructor { name, args } if name == &ctor.name => {
@@ -700,7 +843,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     }
                     specialized.add_row(
                         PatternRow::new(new_columns, row.original_index, row.has_guard)
-                            .with_guard_expr(row.guard.clone()),
+                            .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                     );
                 }
                 PatternColumn::Or(alts) => {
@@ -714,7 +858,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                             }
                             specialized.add_row(
                                 PatternRow::new(new_columns, row.original_index, row.has_guard)
-                                    .with_guard_expr(row.guard.clone()),
+                                    .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                             );
                         }
                     }
@@ -734,7 +879,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         }
                         specialized.add_row(
                             PatternRow::new(new_columns, row.original_index, true)
-                                .with_guard_expr(row.guard.clone()),
+                                .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                         );
                     }
                 }
@@ -750,7 +896,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         }
                         specialized.add_row(
                             PatternRow::new(new_columns, row.original_index, row.has_guard)
-                                .with_guard_expr(row.guard.clone()),
+                                .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                         );
                     }
                 }
@@ -765,7 +912,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         }
                         specialized.add_row(
                             PatternRow::new(new_columns, row.original_index, row.has_guard)
-                                .with_guard_expr(row.guard.clone()),
+                                .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                         );
                     }
                 }
@@ -779,7 +927,8 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     }
                     specialized.add_row(
                         PatternRow::new(new_columns, row.original_index, row.has_guard)
-                            .with_guard_expr(row.guard.clone()),
+                            .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                     );
                 }
                 // TypeTest patterns: `x is Dog` covers the `Dog` constructor
@@ -799,13 +948,19 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     // specialized row no longer carries the conditional.
                     let is_exact_match = type_name.as_str() == ctor.name.as_str();
                     let propagated_guard = if is_exact_match { None } else { row.guard.clone() };
+                    let propagated_bindings = if is_exact_match {
+                        List::new()
+                    } else {
+                        row.bindings.clone()
+                    };
                     specialized.add_row(
                         PatternRow::new(
                             new_columns,
                             row.original_index,
                             if is_exact_match { false } else { row.has_guard },
                         )
-                        .with_guard_expr(propagated_guard),
+                        .with_guard_expr(propagated_guard)
+                        .with_bindings(propagated_bindings),
                     );
                 }
                 _ => {

@@ -407,7 +407,7 @@ pub fn check_exhaustiveness_with_options<'a>(
 /// `check_exhaustiveness_with_options`'s fallback path.
 fn extract_guarded_patterns(
     matrix: &CoverageMatrix,
-    _scrutinee_ty: &Type,
+    scrutinee_ty: &Type,
 ) -> Vec<smt::GuardedPattern> {
     use std::collections::HashMap;
 
@@ -421,17 +421,33 @@ fn extract_guarded_patterns(
         let Some(ref guard_expr) = row.guard else { continue };
         let Some(first) = row.columns.first() else { continue };
 
-        // bound_vars lookup is a future extension — the AST
-        // currently doesn't carry typed binding info at the matrix
-        // boundary; the SMT verifier treats unbound variables as
-        // free and quantifies over them universally, which is the
-        // sound conservative interpretation when bindings are
-        // unknown.
+        // Populate `bound_vars` from the row's collected pattern
+        // bindings. The SMT translator's `bound_vars.contains_key(name)`
+        // check at `verum_smt::exhaustiveness_backend::translate_expr`
+        // is what gates Path-expression translation; without these
+        // entries the translator returns None for any guard variable
+        // reference (e.g. `n` in `n if n > 0`), which silently drops
+        // the guard from the SMT input and falls back to the
+        // conservative non-SMT verdict — defeating the precision
+        // gain of having lifted the guard expression at all.
+        //
+        // The Type *value* in the HashMap is currently unused by the
+        // SMT translator (only the key lookup matters), so we attach
+        // the scrutinee type as a sound default. A future precision
+        // pass that consumes typed bindings (for sort assignment in
+        // mixed-sort guards) will need real per-binding types from
+        // the type-inference pass; we surface the scrutinee type as
+        // the best available approximation until then.
+        let mut bound_vars = HashMap::new();
+        for name in row.bindings.iter() {
+            bound_vars.insert(name.clone(), scrutinee_ty.clone());
+        }
+
         guarded.push(smt::GuardedPattern {
             pattern_index: idx,
             base_pattern: first.clone(),
             guard: guard_expr.clone(),
-            bound_vars: HashMap::new(),
+            bound_vars,
         });
     }
 
@@ -822,7 +838,8 @@ fn is_specialized_matrix_exhaustive(
                         row.columns.iter().skip(1).cloned().collect();
                     Some(
                         PatternRow::new(rest_cols, row.original_index, row.has_guard)
-                            .with_guard_expr(row.guard.clone()),
+                            .with_guard_expr(row.guard.clone())
+                            .with_bindings(row.bindings.clone()),
                     )
                 } else {
                     None
@@ -1415,5 +1432,70 @@ mod tests {
         let row = &matrix.rows[0];
         assert!(!row.has_guard);
         assert!(row.guard.is_none());
+        // bindings is only populated for guarded rows (the field is
+        // only consumed by the SMT path which only runs on guarded
+        // rows — populating it for plain patterns would be wasted
+        // work on every match site in the codebase).
+        assert!(row.bindings.is_empty());
+    }
+
+    #[test]
+    fn build_matrix_collects_pattern_bindings_for_guarded_row() {
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::pattern::PatternKind;
+        // `n if n > 0` — the row's `bindings` field must contain
+        // "n" so the SMT translator's `bound_vars.contains_key("n")`
+        // check at `verum_smt::exhaustiveness_backend::translate_expr`
+        // succeeds and the guard expression actually translates
+        // (instead of silently dropping the variable reference and
+        // falling through to the `unknown_guards` skip path).
+        let inner = pat_ident("n");
+        let guard_expr = Expr::new(
+            ExprKind::Literal(Literal::bool(true, span())),
+            span(),
+        );
+        let guarded = Pattern::new(
+            PatternKind::Guard {
+                pattern: Heap::new(inner),
+                guard: Heap::new(guard_expr),
+            },
+            span(),
+        );
+        let matrix =
+            crate::exhaustiveness::matrix::build_matrix(&[guarded], &Type::Int, &env()).unwrap();
+        let row = &matrix.rows[0];
+        assert_eq!(row.bindings.len(), 1);
+        assert_eq!(row.bindings.first().map(|t| t.as_str()), Some("n"));
+    }
+
+    #[test]
+    fn build_matrix_collects_tuple_bindings_for_guarded_row() {
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::pattern::PatternKind;
+        // `(a, b) if a < b` — both names must reach `row.bindings`.
+        // A regression that walks only the first sub-pattern would
+        // surface as the SMT verifier silently dropping any guard
+        // that mentions the second binding.
+        let inner = Pattern::new(
+            PatternKind::Tuple(List::from_iter([pat_ident("a"), pat_ident("b")])),
+            span(),
+        );
+        let guard_expr = Expr::new(
+            ExprKind::Literal(Literal::bool(true, span())),
+            span(),
+        );
+        let guarded = Pattern::new(
+            PatternKind::Guard {
+                pattern: Heap::new(inner),
+                guard: Heap::new(guard_expr),
+            },
+            span(),
+        );
+        let matrix =
+            crate::exhaustiveness::matrix::build_matrix(&[guarded], &Type::Unit, &env()).unwrap();
+        let row = &matrix.rows[0];
+        let names: Vec<&str> = row.bindings.iter().map(|t| t.as_str()).collect();
+        assert!(names.contains(&"a"), "bindings missing 'a': {:?}", names);
+        assert!(names.contains(&"b"), "bindings missing 'b': {:?}", names);
     }
 }
