@@ -222,6 +222,82 @@ violations.
   surface-level deep recursion — `deep_recursion_witness` surfaces as
   `InterpreterError::StackOverflow`, not a SIGSEGV / panic.
 
+### 3.5 Bytecode-decoder integer-class attacks — DEFENSE CONFIRMED 2026-04-29
+
+**Status:** DEFENSE CONFIRMED — two integer-class defects closed
+in the byte decoders that sit one layer below the validator:
+
+1. **Varint byte[9] canonicality** (`cf1cff4c`) — at shift = 63
+   in a 10-byte u64 varint, only bit 0 of byte[9] is meaningful.
+   The naive `result |= ((byte & 0x7F) as u64) << 63` silently
+   dropped bits 1..6 via Rust's shift-out-of-range semantics,
+   accepting 64 distinct invalid encodings that all collapsed
+   onto `u64::MAX`.  Both `decode_varint` (slice) and
+   `read_varint` (Reader) now reject any byte[9] with bits 1..6
+   set, returning `VarIntOverflow`.  Mirrors the protobuf
+   `read_varint` Google-reference fix in `core/protobuf/wire.vr`.
+2. **Length-prefixed `usize::checked_add`** (`b3d87733`) —
+   `decode_string` and `decode_bytes` used unchecked
+   `*offset + len` for the bounds check.  With a hostile varint
+   length near `usize::MAX` and `*offset > 0`, the addition
+   wraps in release builds and the wrapped value passes the
+   `> data.len()` check, opening a path to read from the wrong
+   region or alias previously-decoded bytes.  Both now use
+   `checked_add` and surface overflow as `Eof`.
+
+**Guardrails:** `crates/verum_vbc/src/encoding.rs::tests`:
+`test_decode_varint_byte9_bits_1_to_6_must_be_zero` sweeps
+invalid byte[9] values 0x02..0x7F and asserts both decoders
+reject; `test_decode_string_rejects_offset_overflow` encodes a
+u64::MAX length followed by a single byte at *offset = 1 and
+asserts both `decode_string` and `decode_bytes` reject.
+
+### 3.6 Bytecode-deserializer memory-amp — DEFENSE CONFIRMED 2026-04-29
+
+**Status:** DEFENSE CONFIRMED — every `Vec::with_capacity` /
+`SmallVec::with_capacity` call in `verum_vbc::deserialize` is
+now bounded by an architectural upper bound enforced **before**
+the allocation.  Before this campaign, attacker-controlled u32
+header fields and varint counts could request 256 GB-2 TB
+allocations from a 32-byte hostile `.vbc` / `.vbca` artifact —
+a memory-amplification denial-of-service that brought the
+loader down before the file was consulted past its header.
+
+**Layered defense:**
+
+| Layer | Bound(s) | Constants |
+|---|---|---|
+| Archive | module_count, name_len, dep_count, data_size | 65 536 / 16 KB / 4 096 / 1 GB |
+| Module table | type / function / constant / specialization counts | 1 048 576 each |
+| Outer descriptor | type_params / fields / variants / protocols / methods | 64 / 4 096 / 4 096 / 256 / 4 096 |
+| Inner descriptor | type-param bounds / variant fields / type-ref args / fn params / fn contexts | 64 / 1 024 / 64 / 256 / 32 |
+| Function descriptor | type_params / params / contexts | 64 / 256 / 32 |
+| Constant pool | Constant::Array element count | 1 048 576 |
+| Specialization | type_args | 64 |
+| Source map | files / entries | 65 536 / 4 194 304 |
+| Bytecode section | uncompressed_size + zero-size-section guard | 1 GB |
+
+**Typed error:** `VbcError::TableTooLarge { field, count, max }`
+— each rejection names the offending field for triage.
+
+**Real bug fixed alongside the bounds:** `parse_bytecode`'s
+`section_size as usize - 1` underflowed silently for
+`section_size == 0`, wrapping to `usize::MAX` and driving a
+multi-EB slice attempt.  Reader now rejects zero-size sections
+at entry and uses `usize::checked_add` throughout the section-
+end computation.
+
+**Guardrails:** `read_archive` rejection tests
+(`test_read_archive_rejects_huge_module_count`,
+`test_read_archive_rejects_huge_name_len`); deserializer
+rejection test
+(`test_deserialize_rejects_huge_type_table_count`).
+
+**Commits:** `6c39e3b3` (archive), `bff966b5` (module-table),
+`05e06f0b` (outer descriptor + bytecode-section + underflow),
+`07d00fc2` (inner descriptor), `86898d78` (fn-descriptor +
+constant + source-map), `33a409a6` (pin-test).
+
 ---
 
 ## Vector 4 — AOT/LLVM lowering
@@ -710,6 +786,8 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 3.2 Arity mismatch | **DEFENSE CONFIRMED** | bytecode-validator arity check (round-1 §3.1) — 2026-04-28 |
 | 3.3 OOR FunctionId | **DEFENSE CONFIRMED** | get_function.ok_or + 4 guardrails (2026-04-28) |
 | 3.4 Frame overflow | **DEFENSE** | guardrails (2026-04-28) |
+| 3.5 Decoder integer-class | **DEFENSE CONFIRMED** | varint byte[9] + `usize::checked_add` (2026-04-29) |
+| 3.6 Deserializer memory-amp | **DEFENSE CONFIRMED** | 9-layer architectural bounds + 3 pin-tests (2026-04-29) |
 | 4.1 LibraryCall collision | **DEFENSE CONFIRMED** | strategy removed entirely under #168 (2026-04-28) |
 | 4.2 Networking arity | **DEFENSE CONFIRMED** | uniform arity-guard across 11 helpers (2026-04-28) |
 | 4.3 GlobalDCE | **DEFENSE CONFIRMED** | Phase 3.7 audit + External list pinned (2026-04-28) |
@@ -726,9 +804,13 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**22 vectors confirmed defended (was 21), 5 partial, 0 pending** post
-2026-04-29 RT-2.8.1 closure (8 real char-boundary bugs closed +
-text_utf8 module) and RT-2.1.1 closure (32 adversarial parser
+**24 vectors confirmed defended (was 22), 5 partial, 0 pending** post
+2026-04-29 RT-2.3.5 closure (varint canonicality + length-prefixed
+overflow at byte-decoder layer), RT-2.3.6 closure (9-layer
+memory-amp bounds across the entire deserializer), RT-2.7.0
+closure (5 hostile-size allocation panic/UB paths in interpreter
+dispatch), RT-2.8.1 closure (8 real char-boundary bugs closed +
+text_utf8 module), and RT-2.1.1 closure (32 adversarial parser
 fuzz tests against real VerumParser).  Earlier
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
 RT-2.2.3 + RT-2.5 + RT-2.7.1 + RT-2.3.1 + RT-2.3.2 closures.  Earlier:
