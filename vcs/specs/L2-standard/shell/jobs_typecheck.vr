@@ -15,9 +15,9 @@ mount core.shell.result.{ShellResult, ShellError};
 mount core.async.nursery.{NurseryErrorBehavior};
 mount core.time.duration.{Duration};
 
-provide ShellContext = ShellContext.for_tests();
 
-async fn exercise_background() {
+
+async fn exercise_background() using [ShellContext] {
     let job: JobHandle = background(&"true".into());
     let _: &Text = job.command();
     let _: Bool = job.is_finished();
@@ -25,29 +25,29 @@ async fn exercise_background() {
     let _ = r;
 }
 
-async fn exercise_background_with_grace() {
+async fn exercise_background_with_grace() using [ShellContext] {
     let job = background_with_grace(&"true".into(), Duration.from_millis(1000));
     let _: Result<ShellResult, ShellError> = job.kill().await;
 }
 
-async fn exercise_parallel() {
+async fn exercise_parallel() using [ShellContext] {
     let cmds: List<Text> = ["echo a".into(), "echo b".into(), "echo c".into()];
     let _: List<Result<ShellResult, ShellError>> = parallel(cmds.clone()).await;
     let _: List<Result<ShellResult, ShellError>> = parallel_bounded(cmds, 2).await;
 }
 
-async fn exercise_fail_fast() {
+async fn exercise_fail_fast() using [ShellContext] {
     let cmds: List<Text> = ["true".into(), "false".into()];
     let _: Result<List<ShellResult>, ShellError> = fail_fast(cmds).await;
 }
 
-async fn exercise_fanout() {
+async fn exercise_fanout() using [ShellContext] {
     let cmds: List<Text> = ["echo a".into(), "echo b".into()];
     let _: Result<List<Result<ShellResult, ShellError>>, ShellError> =
         fanout(cmds, NurseryErrorBehavior.WaitAll).await;
 }
 
-async fn main() {
+async fn main() using [ShellContext] {
     exercise_background().await;
     exercise_background_with_grace().await;
     exercise_parallel().await;

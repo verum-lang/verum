@@ -19,7 +19,7 @@
 //
 // =============================================================================
 
-module core.shell.signal;
+module signal;
 
 mount core.{Maybe, Result, Bool};
 mount core.base.protocols.{Drop};

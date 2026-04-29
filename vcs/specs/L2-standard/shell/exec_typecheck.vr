@@ -9,24 +9,22 @@ mount core.shell.exec.{run, sh, sh_check};
 mount core.shell.executor.{Executor, RetryPolicy};
 mount core.shell.context.{ShellContext};
 mount core.shell.result.{ShellResult, ShellError};
-mount core.async.cancellation.{CancellationToken};
-mount core.time.duration.{Duration};
+mount core.async.{CancellationToken};
+mount core.time.{Duration};
 
-provide ShellContext = ShellContext.for_tests();
-
-async fn exercise_run() {
+async fn exercise_run() using [ShellContext] {
     let r1: Result<ShellResult, ShellError> = run(&"echo".into(), ["hello".into()]).await;
     let _ = r1;
 }
 
-async fn exercise_sh() {
+async fn exercise_sh() using [ShellContext] {
     let r2: ShellResult = sh(&"true".into()).await;
     let _ = r2;
     let r3: Result<ShellResult, ShellError> = sh_check(&"true".into()).await;
     let _ = r3;
 }
 
-async fn exercise_executor() {
+async fn exercise_executor() using [ShellContext] {
     let exec = Executor.new()
         .with_timeout(Duration.from_millis(5000))
         .with_retry(RetryPolicy.simple(3));
@@ -34,12 +32,12 @@ async fn exercise_executor() {
     let _: Result<ShellResult, ShellError> = exec.run(&"echo".into(), ["x".into()]).await;
 }
 
-async fn exercise_retry_policy_variants() {
+async fn exercise_retry_policy_variants() using [ShellContext] {
     let _: RetryPolicy = RetryPolicy.simple(5);
     let _: RetryPolicy = RetryPolicy.on_exit_codes(3, [1, 2, 5]);
 }
 
-async fn exercise_cancel() {
+async fn exercise_cancel() using [ShellContext] {
     let token = CancellationToken.new();
     let exec = Executor.new()
         .with_cancel(token)
@@ -47,7 +45,7 @@ async fn exercise_cancel() {
     let _: Result<ShellResult, ShellError> = exec.sh(&"true".into()).await;
 }
 
-async fn main() {
+async fn main() using [ShellContext] {
     exercise_run().await;
     exercise_sh().await;
     exercise_executor().await;

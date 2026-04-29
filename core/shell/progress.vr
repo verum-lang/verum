@@ -20,7 +20,7 @@
 //
 // =============================================================================
 
-module core.shell.progress;
+module progress;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Drop};

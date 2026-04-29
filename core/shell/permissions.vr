@@ -19,7 +19,7 @@
 //
 // =============================================================================
 
-module core.shell.permissions;
+module permissions;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.glob.{GlobPattern, compile as glob_compile};

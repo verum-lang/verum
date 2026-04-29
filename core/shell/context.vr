@@ -25,7 +25,7 @@
 //
 // =============================================================================
 
-module core.shell.context;
+module context;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Eq};

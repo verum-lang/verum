@@ -18,7 +18,7 @@ mount core.io.path.{Path, PathBuf};
 mount core.shell.context.{ShellContext};
 mount core.shell.result.{ShellError};
 
-provide ShellContext = ShellContext.for_tests();
+
 
 fn exercise_fs_predicates() {
     let p = PathBuf.from("/tmp/verum-test");

@@ -5,7 +5,7 @@
 // Dependencies: core, text.regex, shell.{exec, escape, result, context}
 // =============================================================================
 
-module core.shell.dsl.docker;
+module docker;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};
