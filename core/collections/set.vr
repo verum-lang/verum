@@ -890,6 +890,61 @@ implement<T: Hash + Eq> From<List<T>> for Set<T> {
 }
 
 // =============================================================================
+// Foundation Protocol Impls — delegate to inner Map<T, ()>
+// =============================================================================
+
+implement<T: Hash + Eq + Clone> Clone for Set<T> {
+    fn clone(&self) -> Set<T> {
+        Set { inner: self.inner.clone() }
+    }
+}
+
+implement<T: Hash + Eq> Default for Set<T> {
+    fn default() -> Set<T> {
+        Set.new()
+    }
+}
+
+implement<T: Hash + Eq + Debug> Eq for Set<T> {
+    fn eq(&self, other: &Set<T>) -> Bool {
+        // Equality on Map<K, ()> is keyed by K — set semantics.
+        self.inner == other.inner
+    }
+}
+
+implement<T: Hash + Eq> Hash for Set<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.inner.hash(hasher);
+    }
+}
+
+implement<T: Hash + Eq + Debug> Debug for Set<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        for item in self.iter() {
+            if !first { f.write_str(", ")?; }
+            item.fmt_debug(f)?;
+            first = false;
+        }
+        f.write_str("}")
+    }
+}
+
+implement<T: Hash + Eq + Display> Display for Set<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("{")?;
+        let mut first = true;
+        for item in self.iter() {
+            if !first { f.write_str(", ")?; }
+            item.fmt(f)?;
+            first = false;
+        }
+        f.write_str("}")
+    }
+}
+
+// =============================================================================
 // Convenience Functions
 // =============================================================================
 
