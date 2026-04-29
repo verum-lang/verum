@@ -11,9 +11,10 @@ mount core.net.http.{Method, Headers, Response};
 mount core.collections.list.{List};
 mount core.net.weft.handler.{
     WeftRequest, Handler, FromRequest,
-    PathParam, QueryParam, Bytes, BodyText, Json, ClosureHandler,
+    PathParam, QueryParam, BodyBytes, BodyText, ClosureHandler,
     path_int, query_text_optional,
 };
+mount core.net.weft.json_extractor.{Json};
 mount core.net.weft.error.{WeftError, ExtractRejection};
 
 // Construction shape.

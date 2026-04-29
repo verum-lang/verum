@@ -12,7 +12,7 @@
 mount core.*;
 mount core.collections.map.{Map};
 mount core.time.{Duration};
-mount core.net.weft.metrics.{Registry};
+mount core.net.weft.metrics.{WeftMetricsRegistry};
 mount core.net.weft.metrics_otlp.{
     OtlpExporterConfig, OtlpExporter, OtlpResponse, OtlpError,
 };
@@ -39,7 +39,7 @@ fn config_builder_chains() {
 
 fn exporter_initial_counters() {
     let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app");
-    let registry = Shared.new(Registry.new());
+    let registry = Shared.new(WeftMetricsRegistry.new());
     let exporter = OtlpExporter.new(cfg, registry);
     assert(exporter.pushes_attempted() == 0);
     assert(exporter.pushes_succeeded() == 0);
@@ -48,7 +48,7 @@ fn exporter_initial_counters() {
 
 fn exporter_stop_idempotent() {
     let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app");
-    let registry = Shared.new(Registry.new());
+    let registry = Shared.new(WeftMetricsRegistry.new());
     let exporter = OtlpExporter.new(cfg, registry);
     exporter.stop();
     exporter.stop();    // second stop is no-op
@@ -59,7 +59,7 @@ fn encode_snapshot_emits_bytes() {
     // — the resource_metrics field with default resource + empty
     // scope_metrics is always present.
     let cfg = OtlpExporterConfig.new(f"http://col:4318/v1/metrics", f"app");
-    let registry = Shared.new(Registry.new());
+    let registry = Shared.new(WeftMetricsRegistry.new());
     let exporter = OtlpExporter.new(cfg, registry);
     let body = exporter.encode_snapshot();
     // Sanity bound — at minimum the outer ResourceMetrics tag plus

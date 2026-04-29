@@ -14,7 +14,7 @@ mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.router.{Router};
 mount core.net.weft.timeout.{TimeoutLayer};
 mount core.net.weft.tracing.{TracingLayer, TraceContext};
-mount core.net.weft.metrics.{MetricsLayer, Registry};
+mount core.net.weft.metrics.{MetricsLayer, WeftMetricsRegistry};
 mount core.net.weft.error.{WeftError};
 mount core.net.weft.response_ext.{resp_ok};
 
