@@ -2344,6 +2344,22 @@ impl ProofExtractor {
                 }
                 result
             }
+            TacticCombinator::Solve(inner) => {
+                // Z3 has no direct counterpart to "fail-when-open" at
+                // the Tactic level; the executor's runtime path
+                // handles the total-discharge gate.  Project to
+                // inner so the Z3 stage runs the same operations
+                // before the gate fires.  Defense in depth: the
+                // simplifier reduces `Solve(skip)` to `fail` before
+                // reaching this projection.
+                self.combinator_to_tactic(inner)
+            }
+            TacticCombinator::AllGoals(inner) => {
+                // Z3's chaining is implicitly per-open-goal — the
+                // AllGoals shape is structurally identity at the
+                // Tactic projection layer.
+                self.combinator_to_tactic(inner)
+            }
         }
     }
 

@@ -321,7 +321,9 @@ pub const SIMPLIFIER_APPLIES: &[LawId] = &[
     LawId::RepeatZeroIsSkip,
     LawId::RepeatOneIsBody,
     LawId::TryEqualsOrelseSkip,
+    LawId::SolveOfSkipFailsWhenOpen,
     LawId::FirstOfSingletonCollapses,
+    LawId::AllGoalsOfSkipIsSkip,
 ];
 
 /// Normalise a combinator to its canonical form by applying every
@@ -498,6 +500,30 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
                         Box::new(acc),
                     ))
                 }
+            }
+        }
+
+        TacticCombinator::Solve(inner) => {
+            let inner_norm = normalize_once(*inner);
+            // LawId catalogue: `solve-of-skip-fails` — Solve(skip)
+            // can never close any goal so it's equivalent to fail.
+            // `fail` is `Repeat(skip, 0)` per the canonical encoding.
+            if is_skip(&inner_norm) {
+                fail()
+            } else {
+                TacticCombinator::Solve(Box::new(inner_norm))
+            }
+        }
+
+        TacticCombinator::AllGoals(inner) => {
+            let inner_norm = normalize_once(*inner);
+            // LawId catalogue: `all-goals-of-skip-is-skip` —
+            // AllGoals(skip) preserves every goal unchanged, same
+            // as skip on a single goal.
+            if is_skip(&inner_norm) {
+                skip()
+            } else {
+                TacticCombinator::AllGoals(Box::new(inner_norm))
             }
         }
     }
@@ -771,12 +797,70 @@ mod tests {
     }
 
     #[test]
-    fn task_107_canonical_law_count_now_ten_of_twelve() {
-        // Pin: 10 of 12 catalogue laws are now wired (was 7 in V0,
-        // 8 after #103 OrelseAssociative).  The remaining two
-        // (solve-of-skip-fails-when-open, all-goals-of-skip-is-skip)
-        // need executor-side bookkeeping that's a separate task.
-        assert_eq!(SIMPLIFIER_APPLIES.len(), 10);
+    fn task_107_canonical_law_count_now_twelve_of_twelve() {
+        // Pin: all 12 catalogue laws are now wired (V0 was 7;
+        // #103 added OrelseAssociative; #107 added Try +
+        // FirstOfSingleton; #108 added Solve + AllGoals).  Closes
+        // the catalogue ↔ simplifier single-source-of-truth gap.
+        assert_eq!(SIMPLIFIER_APPLIES.len(), 12);
+        assert_eq!(SIMPLIFIER_APPLIES.len(), LawId::all().len());
+    }
+
+    // -- Solve / AllGoals desugaring (#108) -----------------------------
+
+    #[test]
+    fn solve_of_skip_reduces_to_fail() {
+        // catalogue rule `solve-of-skip-fails-when-open`:
+        // skip never closes any goal so Solve(skip) must fail
+        // unconditionally.
+        let n = normalize(TacticCombinator::Solve(Box::new(skip())));
+        assert!(is_fail(&n));
+    }
+
+    #[test]
+    fn solve_of_non_skip_preserves_constructor() {
+        let n = normalize(TacticCombinator::Solve(Box::new(smt())));
+        match n {
+            TacticCombinator::Solve(_) => {}
+            other => panic!("expected Solve(_), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn all_goals_of_skip_reduces_to_skip() {
+        // catalogue rule `all-goals-of-skip-is-skip`:
+        // skip on every goal is identical to skip on the focus.
+        let n = normalize(TacticCombinator::AllGoals(Box::new(skip())));
+        assert!(is_skip(&n));
+    }
+
+    #[test]
+    fn all_goals_of_non_skip_preserves_constructor() {
+        let n = normalize(TacticCombinator::AllGoals(Box::new(smt())));
+        match n {
+            TacticCombinator::AllGoals(_) => {}
+            other => panic!("expected AllGoals(_), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn simplifier_applies_includes_solve_and_all_goals() {
+        assert!(SIMPLIFIER_APPLIES.contains(&LawId::SolveOfSkipFailsWhenOpen));
+        assert!(SIMPLIFIER_APPLIES.contains(&LawId::AllGoalsOfSkipIsSkip));
+    }
+
+    #[test]
+    fn task_108_every_canonical_law_is_simplifier_applied() {
+        // Pin: every entry in LawId::all() appears in
+        // SIMPLIFIER_APPLIES.  No catalogue law is documentation-
+        // only any more.
+        for id in LawId::all() {
+            assert!(
+                SIMPLIFIER_APPLIES.contains(&id),
+                "catalogue law `{}` is not in SIMPLIFIER_APPLIES",
+                id.name()
+            );
+        }
     }
 
     #[test]
