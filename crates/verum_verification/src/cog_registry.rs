@@ -975,10 +975,35 @@ impl MultiMirrorClient {
     /// Look up the cog across every mirror and report consensus.
     /// `NotFound` and `Error` outcomes do NOT break consensus —
     /// only conflicting `Found` results do.
+    ///
+    /// **V0 / back-compat behaviour.**  Use [`lookup_with_consensus_policy`]
+    /// for the production gates (minimum quorum, identity match,
+    /// signature verification under publisher pubkeys).
     pub fn lookup_with_consensus(
         &self,
         name: &str,
         version: &CogVersion,
+    ) -> MirrorConsensusVerdict {
+        self.lookup_with_consensus_policy(name, version, &MirrorConsensusPolicy::default())
+    }
+
+    /// Hardened lookup that applies the supplied policy gates on top
+    /// of the V0 chain-hash agreement.  Returns `consensus = true`
+    /// only when every gate passes:
+    ///
+    ///   1. Every `Found` verdict's manifest `chain_hash` is identical.
+    ///   2. The `Found` count is ≥ `policy.min_quorum`.
+    ///   3. When `policy.require_identity_match`, every `Found`'s
+    ///      manifest name + version match the query.
+    ///   4. For every `(kind, pubkey)` pair in
+    ///      `policy.required_attestations`, every `Found`'s
+    ///      manifest carries an attestation of `kind` whose Ed25519
+    ///      signature verifies under one of the configured pubkeys.
+    pub fn lookup_with_consensus_policy(
+        &self,
+        name: &str,
+        version: &CogVersion,
+        policy: &MirrorConsensusPolicy,
     ) -> MirrorConsensusVerdict {
         let mut per_mirror: BTreeMap<Text, LookupOutcome> = BTreeMap::new();
         for m in &self.mirrors {
@@ -990,16 +1015,58 @@ impl MultiMirrorClient {
             };
             per_mirror.insert(m.registry_id(), outcome);
         }
-        let mut chain_hashes: Vec<Text> = Vec::new();
-        for o in per_mirror.values() {
-            if let LookupOutcome::Found { manifest } = o {
-                chain_hashes.push(manifest.envelope.chain_hash.clone());
-            }
-        }
-        let consensus =
-            chain_hashes.is_empty() || chain_hashes.iter().all(|h| h == &chain_hashes[0]);
+
+        let found_manifests: Vec<&CogManifest> = per_mirror
+            .values()
+            .filter_map(|o| match o {
+                LookupOutcome::Found { manifest } => Some(manifest),
+                _ => None,
+            })
+            .collect();
+        let chain_hashes: Vec<&Text> = found_manifests
+            .iter()
+            .map(|m| &m.envelope.chain_hash)
+            .collect();
+
+        // Gate 1 — chain-hash agreement.
+        let chain_consensus = match chain_hashes.first() {
+            None => true,
+            Some(first) => chain_hashes.iter().all(|h| h.as_str() == first.as_str()),
+        };
+
+        // Gate 2 — minimum quorum.
+        let quorum_ok = found_manifests.len() >= policy.min_quorum;
+
+        // Gate 3 — identity match (when required).
+        let identity_ok = !policy.require_identity_match
+            || found_manifests.iter().all(|m| {
+                m.name.as_str() == name && &m.version == version
+            });
+
+        // Gate 4 — Ed25519 attestation verification (when required).
+        let attestation_ok = policy.required_attestations.is_empty()
+            || found_manifests.iter().all(|m| {
+                policy.required_attestations.iter().all(|(kind, pubkeys)| {
+                    let chain_hash = m.envelope.chain_hash.as_str();
+                    m.attestations.iter().any(|att| {
+                        att.kind == *kind
+                            && pubkeys.iter().any(|pk| {
+                                verify_attestation(
+                                    pk,
+                                    m.name.as_str(),
+                                    &m.version,
+                                    chain_hash,
+                                    att,
+                                )
+                                .is_ok()
+                            })
+                    })
+                })
+            });
+
+        let consensus = chain_consensus && quorum_ok && identity_ok && attestation_ok;
         let agreed = if consensus {
-            chain_hashes.first().cloned()
+            chain_hashes.first().map(|h| (*h).clone())
         } else {
             None
         };
@@ -1009,6 +1076,46 @@ impl MultiMirrorClient {
             per_mirror,
             consensus,
             agreed_chain_hash: agreed,
+        }
+    }
+}
+
+// =============================================================================
+// MirrorConsensusPolicy — production-mode gates for #106 hardening
+// =============================================================================
+
+/// Policy applied by [`MultiMirrorClient::lookup_with_consensus_policy`]
+/// on top of the V0 chain-hash agreement check.  Each gate is opt-in
+/// so callers can layer them: production verifiers configure all
+/// three (quorum + identity + attestation), while the V0 default
+/// (`Default::default()`) preserves chain-hash-only behaviour.
+#[derive(Debug, Clone, Default)]
+pub struct MirrorConsensusPolicy {
+    /// Minimum number of mirrors that must return `Found` for
+    /// consensus to hold.  Default `0` accepts any number ≥ 0
+    /// (V0 behaviour).
+    pub min_quorum: usize,
+    /// When `true`, every `Found` manifest's `name` and `version`
+    /// MUST equal the query's.  Default `false` (V0 behaviour).
+    pub require_identity_match: bool,
+    /// Per-attestation-kind list of publisher Ed25519 public keys
+    /// (hex-encoded, 64 chars).  Every `Found` manifest must carry
+    /// an attestation of each listed kind whose signature verifies
+    /// under one of the listed pubkeys.  Default empty (no gate).
+    pub required_attestations: Vec<(AttestationKind, Vec<Text>)>,
+}
+
+impl MirrorConsensusPolicy {
+    /// Convenience constructor: production policy gating on all
+    /// three orthogonal factors.
+    pub fn production(
+        min_quorum: usize,
+        publisher_pubkeys_per_kind: Vec<(AttestationKind, Vec<Text>)>,
+    ) -> Self {
+        Self {
+            min_quorum,
+            require_identity_match: true,
+            required_attestations: publisher_pubkeys_per_kind,
         }
     }
 }
@@ -1664,5 +1771,204 @@ mod tests {
             verify_attestation(&pk, "alpha", &v, chain.as_str(), &forged),
             Err(AttestationCryptoError::SignatureMismatch)
         ));
+    }
+
+    // =========================================================================
+    // MirrorConsensusPolicy (#106 hardening)
+    // =========================================================================
+
+    fn publish_to(reg: &dyn RegistryClient, manifest: &CogManifest) {
+        match reg.publish(manifest).unwrap() {
+            PublishOutcome::Accepted { .. } => {}
+            other => panic!("publish failed: {:?}", other),
+        }
+    }
+
+    fn signed_manifest(name: &str, version: CogVersion, sk: &str) -> CogManifest {
+        let mut m = fixture_manifest(name, version.clone());
+        let sig = sign_attestation(
+            sk,
+            name,
+            &version,
+            m.envelope.chain_hash.as_str(),
+            AttestationKind::VerifiedCi,
+        )
+        .unwrap();
+        m.attestations.push(Attestation {
+            kind: AttestationKind::VerifiedCi,
+            signer: Text::from("ci@verum"),
+            signature: sig,
+            timestamp: 0,
+        });
+        m
+    }
+
+    #[test]
+    fn consensus_policy_default_preserves_v0_chain_hash_only() {
+        // Default policy = chain-hash agreement only.  Single-Found
+        // result still passes consensus (same as V0).
+        let m1 = MemoryRegistry::new("m1");
+        let m2 = MemoryRegistry::new("m2");
+        let manifest = fixture_manifest("alpha", CogVersion::new(1, 0, 0));
+        publish_to(&m1, &manifest);
+        // m2 has no entry — `NotFound` does NOT break consensus.
+        let composite = MultiMirrorClient::new(vec![Box::new(m1), Box::new(m2)]);
+        let v = composite.lookup_with_consensus("alpha", &CogVersion::new(1, 0, 0));
+        assert!(v.consensus);
+    }
+
+    #[test]
+    fn consensus_policy_min_quorum_enforces_minimum_found_count() {
+        let m1 = MemoryRegistry::new("m1");
+        let m2 = MemoryRegistry::new("m2");
+        let manifest = fixture_manifest("alpha", CogVersion::new(1, 0, 0));
+        publish_to(&m1, &manifest);
+        // Only m1 has the entry — quorum=2 should reject.
+        let composite = MultiMirrorClient::new(vec![Box::new(m1), Box::new(m2)]);
+        let policy = MirrorConsensusPolicy {
+            min_quorum: 2,
+            ..Default::default()
+        };
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(!v.consensus);
+    }
+
+    #[test]
+    fn consensus_policy_min_quorum_passes_when_enough_mirrors_found() {
+        let m1 = MemoryRegistry::new("m1");
+        let m2 = MemoryRegistry::new("m2");
+        let manifest = fixture_manifest("alpha", CogVersion::new(1, 0, 0));
+        publish_to(&m1, &manifest);
+        publish_to(&m2, &manifest);
+        let composite = MultiMirrorClient::new(vec![Box::new(m1), Box::new(m2)]);
+        let policy = MirrorConsensusPolicy {
+            min_quorum: 2,
+            ..Default::default()
+        };
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(v.consensus);
+    }
+
+    #[test]
+    fn consensus_policy_identity_match_rejects_confused_deputy() {
+        // Construct a manifest whose name doesn't match the query —
+        // a confused-deputy mirror returning the wrong cog.
+        let m1 = MemoryRegistry::new("m1");
+        let mut wrong_name = fixture_manifest("alpha", CogVersion::new(1, 0, 0));
+        wrong_name.name = Text::from("WRONG_COG");
+        // Bypass `publish`'s name+version key by manually inserting.
+        m1.entries
+            .lock()
+            .unwrap()
+            .insert((Text::from("alpha"), CogVersion::new(1, 0, 0)), wrong_name);
+        let composite = MultiMirrorClient::new(vec![Box::new(m1)]);
+        let policy = MirrorConsensusPolicy {
+            require_identity_match: true,
+            ..Default::default()
+        };
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(!v.consensus, "identity mismatch must break consensus");
+    }
+
+    #[test]
+    fn consensus_policy_attestation_gate_rejects_unsigned_manifest() {
+        let m1 = MemoryRegistry::new("m1");
+        // No attestation attached.
+        publish_to(&m1, &fixture_manifest("alpha", CogVersion::new(1, 0, 0)));
+        let composite = MultiMirrorClient::new(vec![Box::new(m1)]);
+        let (_sk, pk) = test_keypair(0xab);
+        let policy = MirrorConsensusPolicy {
+            min_quorum: 1,
+            required_attestations: vec![(AttestationKind::VerifiedCi, vec![Text::from(pk)])],
+            ..Default::default()
+        };
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(!v.consensus, "missing attestation must break consensus");
+    }
+
+    #[test]
+    fn consensus_policy_attestation_gate_admits_correctly_signed_manifest() {
+        let (sk, pk) = test_keypair(0xab);
+        let m1 = MemoryRegistry::new("m1");
+        let manifest = signed_manifest("alpha", CogVersion::new(1, 0, 0), &sk);
+        publish_to(&m1, &manifest);
+        let composite = MultiMirrorClient::new(vec![Box::new(m1)]);
+        let policy = MirrorConsensusPolicy {
+            min_quorum: 1,
+            required_attestations: vec![(AttestationKind::VerifiedCi, vec![Text::from(pk)])],
+            ..Default::default()
+        };
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(v.consensus);
+    }
+
+    #[test]
+    fn consensus_policy_attestation_gate_rejects_wrong_publisher_key() {
+        let (sk_legit, _pk_legit) = test_keypair(0x11);
+        let (_sk_attacker, pk_attacker) = test_keypair(0x22);
+        let m1 = MemoryRegistry::new("m1");
+        // Manifest signed by `legit` but policy expects `attacker`.
+        let manifest = signed_manifest("alpha", CogVersion::new(1, 0, 0), &sk_legit);
+        publish_to(&m1, &manifest);
+        let composite = MultiMirrorClient::new(vec![Box::new(m1)]);
+        let policy = MirrorConsensusPolicy {
+            min_quorum: 1,
+            required_attestations: vec![(
+                AttestationKind::VerifiedCi,
+                vec![Text::from(pk_attacker)],
+            )],
+            ..Default::default()
+        };
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(!v.consensus);
+    }
+
+    #[test]
+    fn task_106_production_policy_layers_all_three_gates() {
+        // Pin: the production policy = quorum + identity + signature.
+        // All three must hold simultaneously for consensus to admit.
+        let (sk, pk) = test_keypair(0x42);
+        let m1 = MemoryRegistry::new("m1");
+        let m2 = MemoryRegistry::new("m2");
+        let manifest = signed_manifest("alpha", CogVersion::new(1, 0, 0), &sk);
+        publish_to(&m1, &manifest);
+        publish_to(&m2, &manifest);
+        let composite = MultiMirrorClient::new(vec![Box::new(m1), Box::new(m2)]);
+        let policy = MirrorConsensusPolicy::production(
+            2,
+            vec![(AttestationKind::VerifiedCi, vec![Text::from(pk)])],
+        );
+        let v = composite.lookup_with_consensus_policy(
+            "alpha",
+            &CogVersion::new(1, 0, 0),
+            &policy,
+        );
+        assert!(v.consensus);
+        assert!(policy.require_identity_match);
+        assert_eq!(policy.min_quorum, 2);
     }
 }
