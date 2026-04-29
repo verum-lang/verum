@@ -31,6 +31,7 @@
 use super::constructors::{get_type_constructors, Constructor, TypeConstructors};
 use super::matrix::{build_matrix, CoverageMatrix, PatternColumn};
 use super::witness::{generate_any_witness, Witness};
+use super::diagnostics::ExhaustivenessWarning;
 use super::{ExhaustivenessResult, find_redundant_patterns};
 use crate::context::TypeEnv;
 use crate::dependent_match::{ConstructorRefinement, DependentPatternChecker, Motive};
@@ -393,14 +394,49 @@ impl<'a> DependentExhaustivenessChecker<'a> {
         // Find uncovered cases among possible constructors
         let uncovered = self.find_uncovered_in_possible(&matrix, possible_constructors)?;
 
+        // `warn_all_guarded` gate: when true (default) and every
+        // pattern in the match carries a guard, surface a typed
+        // `AllGuarded` warning so callers know that an unsatisfied
+        // guard set could leave the match unmatched. Before this
+        // wire-up the field was inert — the warning was never
+        // emitted regardless of the flag.
+        let mut warnings: List<ExhaustivenessWarning> = List::new();
+        if all_guarded
+            && !matrix.rows.is_empty()
+            && self.config.warn_all_guarded
+        {
+            warnings.push(ExhaustivenessWarning::all_guarded(None));
+        }
+
         Ok(ExhaustivenessResult {
             is_exhaustive: uncovered.is_empty(),
             uncovered_witnesses: uncovered,
             redundant_patterns: redundant,
             all_guarded,
             range_overlaps: None,
-            warnings: List::new(),
+            warnings,
         })
+    }
+
+    /// Whether SMT-backed guard verification is enabled for this
+    /// dependent exhaustiveness pass. Mirrors
+    /// `DependentExhaustivenessConfig.use_smt_for_guards`.
+    /// Surfaced so downstream orchestrators that wrap this checker
+    /// can decide whether to feed guarded patterns to an
+    /// `SmtGuardVerifier` before declaring the match
+    /// exhaustive — without re-reading the config struct.
+    /// Before this accessor existed the field was inert from the
+    /// orchestrator's perspective.
+    #[must_use]
+    pub fn use_smt_for_guards_enabled(&self) -> bool {
+        self.config.use_smt_for_guards
+    }
+
+    /// Whether the all-guarded diagnostic is emitted. Mirrors
+    /// `DependentExhaustivenessConfig.warn_all_guarded`.
+    #[must_use]
+    pub fn warn_all_guarded_enabled(&self) -> bool {
+        self.config.warn_all_guarded
     }
 
     /// Find uncovered cases among the possible constructors
@@ -642,6 +678,35 @@ mod tests {
 
         // Same should not be incompatible
         assert!(!checker.are_indices_incompatible(&zero, &zero));
+    }
+
+    #[test]
+    fn config_accessors_mirror_construction_values() {
+        // Pin: `warn_all_guarded` and `use_smt_for_guards` reach
+        // the checker via accessors. Before the wire-up the two
+        // fields had no public read surface — orchestrators that
+        // wanted to drive SMT-backed guard verification or
+        // suppress the all-guarded diagnostic had no way to
+        // observe the configured stance.
+        let env = TypeEnv::new();
+        let ctors = Map::new();
+
+        for &warn in &[true, false] {
+            for &smt in &[true, false] {
+                let cfg = DependentExhaustivenessConfig {
+                    warn_all_guarded: warn,
+                    use_smt_for_guards: smt,
+                    ..DependentExhaustivenessConfig::default()
+                };
+                let checker = DependentExhaustivenessChecker::with_config(
+                    &env,
+                    &ctors,
+                    cfg,
+                );
+                assert_eq!(checker.warn_all_guarded_enabled(), warn);
+                assert_eq!(checker.use_smt_for_guards_enabled(), smt);
+            }
+        }
     }
 }
 
