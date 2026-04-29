@@ -222,3 +222,51 @@ public fn autopoiesis(e: Enactment) -> Enactment {
     }
     e
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for Enactment
+// =============================================================================
+
+implement Eq for Enactment {
+    /// Structural equality across all four fields.  Two enactments
+    /// are equal iff they share name, step sequence, activation
+    /// rank, and articulation.
+    fn eq(&self, other: &Enactment) -> Bool {
+        if self.name != other.name { return false; }
+        if self.activation_rank != other.activation_rank { return false; }
+        if !(self.articulation == other.articulation) { return false; }
+        if self.steps.len() != other.steps.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.steps.len() {
+            if !(self.steps[i] == other.steps[i]) { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+implement Display for Enactment {
+    /// Renders a compact one-line summary suitable for audit logs:
+    ///   `<name> [step1, step2, …] @<articulation> rank=<N>`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.name.as_str())?;
+        f.write_str(" [")?;
+        let mut i: Int = 0;
+        while i < self.steps.len() {
+            if i > 0 { f.write_str(", ")?; }
+            self.steps[i].fmt(f)?;
+            i = i + 1;
+        }
+        f.write_str("] @")?;
+        self.articulation.fmt(f)?;
+        f.write_str(f" rank={self.activation_rank}".as_str())
+    }
+}
+
+implement Debug for Enactment {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Enactment {{ name: {self.name}, steps: {self.steps.len()}, rank: {self.activation_rank}, articulation: ".as_str())?;
+        self.articulation.fmt_debug(f)?;
+        f.write_str(" }")
+    }
+}

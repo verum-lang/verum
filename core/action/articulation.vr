@@ -67,3 +67,40 @@ public fn articulation_as_text(a: Articulation) -> Text {
 public fn is_raw_actic(a: Articulation) -> Bool {
     a.framework.eq("actic.raw")
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for Articulation
+// =============================================================================
+
+implement Eq for Articulation {
+    /// Structural equality across all three fields — same shape as
+    /// the existing `articulation_eq` standalone fn (same file).
+    fn eq(&self, other: &Articulation) -> Bool {
+        self.framework == other.framework
+            && self.citation == other.citation
+            && self.lineage == other.lineage
+    }
+}
+
+implement Hash for Articulation {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.framework.hash(hasher);
+        self.citation.hash(hasher);
+        self.lineage.hash(hasher);
+    }
+}
+
+implement Display for Articulation {
+    /// Renders as `<framework>:<lineage>` — same canonical form
+    /// as the existing `articulation_as_text` helper, suitable
+    /// for audit logs and proof-coordinate rendering.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.framework}:{self.lineage}".as_str())
+    }
+}
+
+implement Debug for Articulation {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Articulation {{ framework: {self.framework}, lineage: {self.lineage}, citation: {self.citation} }}".as_str())
+    }
+}
