@@ -389,40 +389,50 @@ pub fn check_exhaustiveness_with_options<'a>(
     })
 }
 
-/// Extract guarded patterns from matrix for SMT verification
+/// Extract guarded patterns from matrix for SMT verification.
+///
+/// Honours the row's `guard: Option<Arc<Expr>>` field populated by
+/// `build_matrix` from `PatternKind::Guard { pattern, guard }`. Pre-fix
+/// the matrix didn't carry the real guard expression — a placeholder
+/// `true` literal was substituted, which made the SMT solver
+/// trivially declare every all-guarded match exhaustive (a silent
+/// false-positive that defeated the entire SMT-backed exhaustiveness
+/// path).
+///
+/// Rows whose `guard` is `None` but whose `has_guard` is `true`
+/// represent the nested-guard case (a `Guarded` column inside an
+/// or-pattern) where the expression isn't liftable to the row level.
+/// We skip those rows in the SMT extraction — the conservative
+/// (non-SMT) all-guarded verdict will still apply via
+/// `check_exhaustiveness_with_options`'s fallback path.
 fn extract_guarded_patterns(
     matrix: &CoverageMatrix,
     _scrutinee_ty: &Type,
 ) -> Vec<smt::GuardedPattern> {
     use std::collections::HashMap;
-    use std::sync::Arc;
-    use verum_ast::literal::{Literal, LiteralKind};
-    use verum_ast::expr::{Expr, ExprKind};
-    use verum_ast::span::Span;
 
     let mut guarded = Vec::new();
 
     for (idx, row) in matrix.rows.iter().enumerate() {
-        if row.has_guard {
-            // For now, we extract guarded patterns without the actual guard expression
-            // A full implementation would parse the guard from the AST
-            // Use a "true" literal as placeholder - represents "always true" guard
-            if let Some(first) = row.columns.first() {
-                let placeholder_guard = Expr::new(
-                    ExprKind::Literal(Literal {
-                        kind: LiteralKind::Bool(true),
-                        span: Span::dummy(),
-                    }),
-                    Span::dummy(),
-                );
-                guarded.push(smt::GuardedPattern {
-                    pattern_index: idx,
-                    base_pattern: first.clone(),
-                    guard: Arc::new(placeholder_guard),
-                    bound_vars: HashMap::new(),
-                });
-            }
-        }
+        // Only extract rows whose guard expression is known at the
+        // row level. `has_guard && guard.is_none()` rows are nested-
+        // guard rows that the SMT path can't represent; they fall
+        // through to the conservative verdict path.
+        let Some(ref guard_expr) = row.guard else { continue };
+        let Some(first) = row.columns.first() else { continue };
+
+        // bound_vars lookup is a future extension — the AST
+        // currently doesn't carry typed binding info at the matrix
+        // boundary; the SMT verifier treats unbound variables as
+        // free and quantifies over them universally, which is the
+        // sound conservative interpretation when bindings are
+        // unknown.
+        guarded.push(smt::GuardedPattern {
+            pattern_index: idx,
+            base_pattern: first.clone(),
+            guard: guard_expr.clone(),
+            bound_vars: HashMap::new(),
+        });
     }
 
     guarded
@@ -810,7 +820,10 @@ fn is_specialized_matrix_exhaustive(
                 if row.columns.first().is_some_and(|c| matches!(c, PatternColumn::Wildcard)) {
                     let rest_cols: List<PatternColumn> =
                         row.columns.iter().skip(1).cloned().collect();
-                    Some(PatternRow::new(rest_cols, row.original_index, row.has_guard))
+                    Some(
+                        PatternRow::new(rest_cols, row.original_index, row.has_guard)
+                            .with_guard_expr(row.guard.clone()),
+                    )
                 } else {
                     None
                 }
@@ -1348,5 +1361,59 @@ mod tests {
         let patterns = vec![pat_wildcard()];
         let result = check_exhaustiveness(&patterns, &Type::Unit, &env()).unwrap();
         assert!(result.is_exhaustive);
+    }
+
+    #[test]
+    fn build_matrix_lifts_top_level_guard_expression_into_row() {
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::pattern::PatternKind;
+        // `n if n > 0 => ...` — the row's `guard` field must carry
+        // the actual `n > 0` expression (or a structural surrogate),
+        // not the placeholder `true` literal that the pre-fix path
+        // baked in.
+        let inner = pat_ident("n");
+        let guard_expr = Expr::new(
+            ExprKind::Literal(Literal::bool(true, span())),
+            span(),
+        );
+        let guarded = Pattern::new(
+            PatternKind::Guard {
+                pattern: Heap::new(inner),
+                guard: Heap::new(guard_expr.clone()),
+            },
+            span(),
+        );
+        let matrix =
+            crate::exhaustiveness::matrix::build_matrix(&[guarded], &Type::Int, &env()).unwrap();
+        assert_eq!(matrix.rows.len(), 1, "expected exactly one matrix row");
+        let row = &matrix.rows[0];
+        assert!(
+            row.has_guard,
+            "row.has_guard must reflect the peeled top-level guard"
+        );
+        let guard = row.guard.as_ref().expect(
+            "row.guard must be Some after build_matrix peels a top-level Guard pattern; \
+             None means extract_guarded_patterns will silently fall back to the placeholder \
+             path, defeating SMT-backed exhaustiveness verification",
+        );
+        // The lifted guard must be the SAME structural expression we
+        // attached to the pattern. We compare via Debug formatting
+        // rather than pulling in PartialEq/Eq on Expr (which the AST
+        // doesn't derive).
+        assert_eq!(format!("{:?}", **guard), format!("{:?}", guard_expr));
+    }
+
+    #[test]
+    fn build_matrix_no_guard_leaves_row_guard_field_none() {
+        // Pin the symmetric contract: a non-guarded pattern must
+        // populate `row.guard = None`. A regression that defaults
+        // guard to `Some(_)` would turn every match into an
+        // SMT-routed match, exploding compile time.
+        let plain = pat_int(0);
+        let matrix =
+            crate::exhaustiveness::matrix::build_matrix(&[plain], &Type::Int, &env()).unwrap();
+        let row = &matrix.rows[0];
+        assert!(!row.has_guard);
+        assert!(row.guard.is_none());
     }
 }
