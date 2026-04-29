@@ -271,6 +271,51 @@ impl Ordinal {
         matches!(self, Ordinal::Kappa(_))
     }
 
+    /// **Next inaccessible cardinal** above `self` in the κ-tower —
+    /// the universe-ascent operation used for `PSh(C)` (HTT 5.5),
+    /// dependent universe hierarchies, and Grothendieck-universe
+    /// stratification.
+    ///
+    /// Distinguished from [`Ordinal::succ`] which returns the
+    /// *successor ordinal* `α + 1` (a small step within the same
+    /// universe).  `next_inaccessible` performs a *universe* step:
+    /// it bumps to the next strongly-inaccessible cardinal `κ`,
+    /// which is the smallest cardinal that bounds *all* small
+    /// constructions on the source universe.
+    ///
+    /// Behaviour:
+    ///   * `Finite(_)` / `Omega` / sub-ω² ordinals → `Kappa(0)`
+    ///     (the first inaccessible, sometimes denoted `U`).
+    ///   * `Kappa(n)` → `Kappa(n + 1)` (saturating at `u32::MAX`
+    ///     defensively; in practice κ-towers of arbitrary finite
+    ///     height are admitted via `Kappa(n)` plus framework-axiom
+    ///     extension).
+    ///   * `Sup(_)` → `Kappa(0)` if the supremum is below κ-tower,
+    ///     otherwise the next κ above the largest part.
+    ///
+    /// This is the operation invoked by `presheaf_category` to
+    /// realise the HTT 5.5 universe ascent in the kernel surface.
+    pub fn next_inaccessible(&self) -> Self {
+        match self {
+            Ordinal::Kappa(n) => Ordinal::Kappa(n.saturating_add(1)),
+            Ordinal::Sup(parts) => {
+                // Find the largest κ-tier in the parts; bump it.
+                let mut best = None;
+                for p in parts {
+                    if let Ordinal::Kappa(k) = p {
+                        best = Some(best.map_or(*k, |b: u32| b.max(*k)));
+                    }
+                }
+                match best {
+                    Some(k) => Ordinal::Kappa(k.saturating_add(1)),
+                    None => Ordinal::Kappa(0),
+                }
+            }
+            // Anything strictly below the κ-tower ascends to κ_0.
+            _ => Ordinal::Kappa(0),
+        }
+    }
+
     /// Render the ordinal in standard mathematical notation.  Used for
     /// diagnostics and audit reports.
     pub fn render(&self) -> String {
@@ -431,6 +476,69 @@ mod tests {
             Ordinal::OmegaTimes(3).succ(),
             Ordinal::OmegaTimesPlus { k: 3, n: 1 }
         );
+    }
+
+    #[test]
+    fn next_inaccessible_finite_ascends_to_kappa_0() {
+        assert_eq!(Ordinal::Finite(0).next_inaccessible(), Ordinal::Kappa(0));
+        assert_eq!(Ordinal::Finite(99).next_inaccessible(), Ordinal::Kappa(0));
+    }
+
+    #[test]
+    fn next_inaccessible_omega_ascends_to_kappa_0() {
+        assert_eq!(Ordinal::Omega.next_inaccessible(), Ordinal::Kappa(0));
+        assert_eq!(
+            Ordinal::OmegaSquared.next_inaccessible(),
+            Ordinal::Kappa(0)
+        );
+        assert_eq!(
+            Ordinal::OmegaPow(7).next_inaccessible(),
+            Ordinal::Kappa(0)
+        );
+    }
+
+    #[test]
+    fn next_inaccessible_climbs_kappa_tower() {
+        assert_eq!(Ordinal::Kappa(0).next_inaccessible(), Ordinal::Kappa(1));
+        assert_eq!(Ordinal::Kappa(1).next_inaccessible(), Ordinal::Kappa(2));
+        assert_eq!(
+            Ordinal::Kappa(7).next_inaccessible(),
+            Ordinal::Kappa(8)
+        );
+    }
+
+    #[test]
+    fn next_inaccessible_saturates_at_u32_max() {
+        assert_eq!(
+            Ordinal::Kappa(u32::MAX).next_inaccessible(),
+            Ordinal::Kappa(u32::MAX)
+        );
+    }
+
+    #[test]
+    fn next_inaccessible_distinct_from_succ() {
+        // For κ_n, succ goes to Sup([κ_n, 1]) (ordinal step), but
+        // next_inaccessible goes to κ_{n+1} (universe step).  These
+        // are *not* the same operation.
+        let k = Ordinal::Kappa(3);
+        assert_ne!(k.succ(), k.next_inaccessible());
+        assert_eq!(k.next_inaccessible(), Ordinal::Kappa(4));
+    }
+
+    #[test]
+    fn next_inaccessible_sup_picks_largest_kappa() {
+        let s = Ordinal::Sup(vec![
+            Ordinal::Kappa(2),
+            Ordinal::Kappa(5),
+            Ordinal::Kappa(3),
+        ]);
+        assert_eq!(s.next_inaccessible(), Ordinal::Kappa(6));
+    }
+
+    #[test]
+    fn next_inaccessible_sup_below_kappa_ascends_to_kappa_0() {
+        let s = Ordinal::Sup(vec![Ordinal::Omega, Ordinal::OmegaSquared]);
+        assert_eq!(s.next_inaccessible(), Ordinal::Kappa(0));
     }
 
     #[test]
