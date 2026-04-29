@@ -592,6 +592,19 @@ impl StaticVerifier {
         if self.config.enable_proofs {
             cfg.set_proof_generation(true);
         }
+        // Forward the configured memory ceiling to Z3.
+        // `memory_max_size` is a *global* Z3 parameter (process-wide,
+        // applied via `Z3_global_param_set`) rather than a context-
+        // or solver-level option — those latter scopes silently
+        // mis-route queries when handed the unknown key. We set it
+        // here so the value is in effect for every Z3 query
+        // initiated through the static verifier; subsequent calls
+        // overwrite, so the most-recent verifier configuration
+        // wins. `None` means "no caller-imposed limit" — leave Z3
+        // at its native default.
+        if let Some(mb) = self.config.memory_limit_mb {
+            z3::set_global_param("memory_max_size", &mb.to_string());
+        }
 
         // Execute verification in Z3 context
         let result = z3::with_z3_config(&cfg, || {
