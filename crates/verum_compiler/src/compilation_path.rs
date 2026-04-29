@@ -162,6 +162,43 @@ impl TargetConfig {
         self.force_path = Some(path);
         self
     }
+
+    /// Preferred GPU target for code emission.
+    ///
+    /// Returns the first entry in `gpu_targets` when GPU
+    /// compilation is available, `None` otherwise. Downstream
+    /// codegen layers (kernel compiler, MLIR GPU pipeline) call
+    /// this to decide which target-specific lowering pass list
+    /// to install — pre-fix the field was inert: the routing
+    /// only consulted `has_gpu` boolean and downstream layers
+    /// had to re-derive the preferred target from environment
+    /// variables or hardcode CUDA.
+    ///
+    /// Selection policy: first-declared. The manifest order is
+    /// authoritative — embedders that need a different priority
+    /// reorder the list at construction time.
+    pub fn preferred_gpu_target(&self) -> Option<&GpuTarget> {
+        if !self.has_gpu {
+            return None;
+        }
+        self.gpu_targets.first()
+    }
+
+    /// Whether the configured target list includes a specific
+    /// GPU target.
+    ///
+    /// Surfaces a query API for downstream layers that need to
+    /// branch on target availability without iterating the
+    /// `gpu_targets` list themselves. Discriminator-only match
+    /// (a `Cuda { sm_versions: [80] }` query matches a configured
+    /// `Cuda { sm_versions: [70, 80] }` entry — the SM versions
+    /// drive intra-target capability checks at codegen time, not
+    /// presence checks at routing time).
+    pub fn supports_target(&self, target: &GpuTarget) -> bool {
+        self.gpu_targets.iter().any(|t| {
+            std::mem::discriminant(t) == std::mem::discriminant(target)
+        })
+    }
 }
 
 /// GPU target specification.
@@ -647,5 +684,44 @@ mod tests {
         let hybrid = CompilationPath::Hybrid { gpu_regions: vec![(0, 10)] };
         assert!(hybrid.requires_cpu());
         assert!(hybrid.requires_gpu());
+    }
+
+    #[test]
+    fn preferred_gpu_target_returns_none_when_cpu_only() {
+        // Pin: cpu_only configuration must report no preferred
+        // GPU target — downstream codegen layers should fall
+        // back to CPU lowering without consulting GPU emit paths.
+        let cfg = TargetConfig::cpu_only();
+        assert!(cfg.preferred_gpu_target().is_none());
+    }
+
+    #[test]
+    fn preferred_gpu_target_returns_first_when_gpu_present() {
+        // Pin: when GPU compilation is available, the FIRST entry
+        // in `gpu_targets` is the preferred target. Manifest
+        // ordering is authoritative — embedders that need a
+        // different priority reorder the list at construction.
+        let cuda = GpuTarget::Cuda { sm_versions: vec![80] };
+        let rocm = GpuTarget::Rocm { gfx_versions: vec!["gfx906".into()] };
+        let cfg = TargetConfig::with_gpu(vec![cuda.clone(), rocm.clone()]);
+        let preferred = cfg.preferred_gpu_target().expect("preferred target");
+        assert!(matches!(preferred, GpuTarget::Cuda { .. }));
+    }
+
+    #[test]
+    fn supports_target_matches_on_discriminant() {
+        // Pin: `supports_target` matches on the GpuTarget
+        // discriminant only — SM versions / GFX versions are
+        // capability filters consumed at codegen time, not
+        // routing-time presence checks. A configured
+        // `Cuda { sm_versions: [70, 80] }` entry matches a
+        // query for `Cuda { sm_versions: [90] }` because both
+        // are CUDA targets; codegen then handles the version
+        // matching.
+        let cfg = TargetConfig::with_gpu(vec![
+            GpuTarget::Cuda { sm_versions: vec![70, 80] },
+        ]);
+        assert!(cfg.supports_target(&GpuTarget::Cuda { sm_versions: vec![90] }));
+        assert!(!cfg.supports_target(&GpuTarget::Rocm { gfx_versions: vec![] }));
     }
 }
