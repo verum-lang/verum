@@ -61,6 +61,50 @@ public type Tls13RecordError is
     | BadContentType
     | InnerPlaintextMalformed;
 
+// AeadFailure surfaces no detail — RFC 8446 §5.2 mandates
+// value-blind record decryption (oracle-attack discipline
+// carried across from QUIC AEAD / TLS ticket / address-token).
+
+implement Display for Tls13RecordError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SequenceOverflow         => f.write_str("TLS 1.3 record: sequence overflow"),
+            AeadFailure              => f.write_str("TLS 1.3 record: AEAD open failed"),
+            PlaintextTooLarge(n)     => f.write_str(f"TLS 1.3 record: plaintext {n} bytes exceeds 2^14".as_str()),
+            CiphertextTooShort       => f.write_str("TLS 1.3 record: ciphertext too short"),
+            BadContentType           => f.write_str("TLS 1.3 record: bad outer content_type"),
+            InnerPlaintextMalformed  => f.write_str("TLS 1.3 record: inner plaintext malformed"),
+        }
+    }
+}
+
+implement Debug for Tls13RecordError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SequenceOverflow         => f.write_str("SequenceOverflow"),
+            AeadFailure              => f.write_str("AeadFailure"),
+            PlaintextTooLarge(n)     => f.write_str(f"PlaintextTooLarge({n})".as_str()),
+            CiphertextTooShort       => f.write_str("CiphertextTooShort"),
+            BadContentType           => f.write_str("BadContentType"),
+            InnerPlaintextMalformed  => f.write_str("InnerPlaintextMalformed"),
+        }
+    }
+}
+
+implement Eq for Tls13RecordError {
+    fn eq(&self, other: &Tls13RecordError) -> Bool {
+        match (self, other) {
+            (SequenceOverflow,        SequenceOverflow)        => true,
+            (AeadFailure,             AeadFailure)             => true,
+            (PlaintextTooLarge(a),    PlaintextTooLarge(b))    => a == b,
+            (CiphertextTooShort,      CiphertextTooShort)      => true,
+            (BadContentType,          BadContentType)          => true,
+            (InnerPlaintextMalformed, InnerPlaintextMalformed) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // AeadState — one per direction (client→server, server→client)
 // =============================================================================

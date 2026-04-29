@@ -104,6 +104,37 @@ public type Fts5ParseError is
     | PeUnclosedQuote
     | PeEmpty;
 
+implement Display for Fts5ParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PeUnexpected(tok)  => f.write_str(f"FTS5 query parse: unexpected token {tok}".as_str()),
+            PeUnclosedQuote    => f.write_str("FTS5 query parse: unclosed quote"),
+            PeEmpty            => f.write_str("FTS5 query parse: empty query"),
+        }
+    }
+}
+
+implement Debug for Fts5ParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            PeUnexpected(tok)  => f.write_str(f"PeUnexpected({tok})".as_str()),
+            PeUnclosedQuote    => f.write_str("PeUnclosedQuote"),
+            PeEmpty            => f.write_str("PeEmpty"),
+        }
+    }
+}
+
+implement Eq for Fts5ParseError {
+    fn eq(&self, other: &Fts5ParseError) -> Bool {
+        match (self, other) {
+            (PeUnexpected(a),  PeUnexpected(b))  => a == b,
+            (PeUnclosedQuote,  PeUnclosedQuote)  => true,
+            (PeEmpty,          PeEmpty)          => true,
+            _ => false,
+        }
+    }
+}
+
 public fn parse(text: &Text) -> base.Result<MatchAst, Fts5ParseError> {
     let toks = lex(text);
     if toks.len() == 1 { return base.Err(PeEmpty); }

@@ -137,6 +137,40 @@ public type H3ServerError is
     | H3Layer(H3Error)
     | Closed;
 
+implement Display for H3ServerError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Bind(reason)        => f.write_str(f"HTTP/3 server: bind failed ({reason})".as_str()),
+            Transport(reason)   => f.write_str(f"HTTP/3 server transport: {reason}".as_str()),
+            H3Layer(e)          => f.write_str(f"HTTP/3 server: {e}".as_str()),
+            Closed              => f.write_str("HTTP/3 server: closed"),
+        }
+    }
+}
+
+implement Debug for H3ServerError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Bind(reason)        => f.write_str(f"Bind({reason})".as_str()),
+            Transport(reason)   => f.write_str(f"Transport({reason})".as_str()),
+            H3Layer(e)          => f.write_str(f"H3Layer({e:?})".as_str()),
+            Closed              => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for H3ServerError {
+    fn eq(&self, other: &H3ServerError) -> Bool {
+        match (self, other) {
+            (Bind(a),       Bind(b))       => a == b,
+            (Transport(a),  Transport(b))  => a == b,
+            (H3Layer(a),    H3Layer(b))    => a == b,
+            (Closed,        Closed)        => true,
+            _ => false,
+        }
+    }
+}
+
 implement H3Server {
     /// Bind a UDP socket + prepare the accept loop. The returned
     /// server is idle until `run` / `run_with` drives it.
