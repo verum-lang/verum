@@ -211,6 +211,20 @@ const MAX_VARIANTS_PER_DESCRIPTOR: usize = 4 * 1024;
 const MAX_PROTOCOLS_PER_DESCRIPTOR: usize = 256;
 const MAX_METHODS_PER_PROTOCOL_IMPL: usize = 4 * 1024;
 
+/// Type-param-level architectural upper bounds.  Each type
+/// parameter can declare protocol bounds (`fn f<T: P + Q>`) and
+/// each variant can have its own field list — both varint-driven.
+const MAX_BOUNDS_PER_TYPE_PARAM: usize = 64;
+const MAX_FIELDS_PER_VARIANT: usize = 1024;
+
+/// Type-reference-level architectural upper bounds.  `TypeRef`
+/// carries varint-driven counts for instantiation args, function
+/// params, and context names — all reachable from hostile
+/// bytecode in arbitrarily-deep type expressions.
+const MAX_TYPE_REF_INSTANTIATION_ARGS: usize = 64;
+const MAX_FN_TYPE_REF_PARAMS: usize = 256;
+const MAX_FN_TYPE_REF_CONTEXTS: usize = 32;
+
 /// Maximum decompressed bytecode size for a single module.
 ///
 /// Adversarial bytecode can claim a near-`u32::MAX` decompressed
@@ -719,6 +733,13 @@ impl<'a> Deserializer<'a> {
 
         // Bounds
         let bounds_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if bounds_count > MAX_BOUNDS_PER_TYPE_PARAM {
+            return Err(VbcError::TableTooLarge {
+                field: "type_param_bounds_count",
+                count: bounds_count.min(u32::MAX as usize) as u32,
+                max: MAX_BOUNDS_PER_TYPE_PARAM as u32,
+            });
+        }
         let mut bounds = SmallVec::with_capacity(bounds_count);
         for _ in 0..bounds_count {
             bounds.push(ProtocolId(decode_u32(self.data, &mut self.offset)?));
@@ -775,6 +796,13 @@ impl<'a> Deserializer<'a> {
 
         // Fields
         let fields_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if fields_count > MAX_FIELDS_PER_VARIANT {
+            return Err(VbcError::TableTooLarge {
+                field: "variant_fields_count",
+                count: fields_count.min(u32::MAX as usize) as u32,
+                max: MAX_FIELDS_PER_VARIANT as u32,
+            });
+        }
         let mut fields = SmallVec::with_capacity(fields_count);
         for _ in 0..fields_count {
             fields.push(self.parse_field()?);
@@ -806,6 +834,13 @@ impl<'a> Deserializer<'a> {
             0x03 => {
                 let base = TypeId(decode_u32(self.data, &mut self.offset)?);
                 let count = decode_varint(self.data, &mut self.offset)? as usize;
+                if count > MAX_TYPE_REF_INSTANTIATION_ARGS {
+                    return Err(VbcError::TableTooLarge {
+                        field: "type_ref_instantiation_args",
+                        count: count.min(u32::MAX as usize) as u32,
+                        max: MAX_TYPE_REF_INSTANTIATION_ARGS as u32,
+                    });
+                }
                 let mut args = Vec::with_capacity(count);
                 for _ in 0..count {
                     args.push(self.parse_type_ref()?);
@@ -814,12 +849,26 @@ impl<'a> Deserializer<'a> {
             }
             0x04 => {
                 let params_count = decode_varint(self.data, &mut self.offset)? as usize;
+                if params_count > MAX_FN_TYPE_REF_PARAMS {
+                    return Err(VbcError::TableTooLarge {
+                        field: "fn_type_ref_params",
+                        count: params_count.min(u32::MAX as usize) as u32,
+                        max: MAX_FN_TYPE_REF_PARAMS as u32,
+                    });
+                }
                 let mut params = Vec::with_capacity(params_count);
                 for _ in 0..params_count {
                     params.push(self.parse_type_ref()?);
                 }
                 let return_type = Box::new(self.parse_type_ref()?);
                 let ctx_count = decode_varint(self.data, &mut self.offset)? as usize;
+                if ctx_count > MAX_FN_TYPE_REF_CONTEXTS {
+                    return Err(VbcError::TableTooLarge {
+                        field: "fn_type_ref_contexts",
+                        count: ctx_count.min(u32::MAX as usize) as u32,
+                        max: MAX_FN_TYPE_REF_CONTEXTS as u32,
+                    });
+                }
                 let mut contexts = SmallVec::with_capacity(ctx_count);
                 for _ in 0..ctx_count {
                     contexts.push(ContextRef(decode_u32(self.data, &mut self.offset)?));
