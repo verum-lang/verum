@@ -4187,6 +4187,14 @@ pub fn lower_instruction<'ctx>(
             lower_log_extended(ctx, *sub_op, operands)
         }
 
+        // ==================================================================
+        // Generic Extended (#167 Part A): general-purpose extension byte.
+        // Wire format: `[0x1F] [sub_op:u8] [operands...]`.
+        // ==================================================================
+        Instruction::Extended { sub_op, operands } => {
+            lower_extended(ctx, *sub_op, operands)
+        }
+
         Instruction::Raw { .. } => {
             // Raw bytecode: should not appear after decoding
             Ok(())
@@ -15357,6 +15365,89 @@ fn lower_log_extended<'ctx>(
         }
         _ => {
             ctx.emit_unimplemented_sub_op("LogExtended", sub_op);
+            Ok(())
+        }
+    }
+}
+
+/// Lower the generic `Opcode::Extended` (#167 Part A) instruction to LLVM IR.
+///
+/// The Extended opcode carves a 256-entry secondary opcode space out of one
+/// byte (0x1F) of the primary opcode space; sub-ops here are first-class
+/// instructions that don't fit any pre-existing extension namespace
+/// (Math/Tensor/Cbgr/Ffi/...).  Currently defined sub-ops:
+///
+///   * `0x00` Reserved — forward-compat anchor; encoders MUST NOT emit;
+///     decoders accept it as a no-op.
+///   * `0x10` ProcessExit — first-class divergent termination
+///     primitive.  Operand is one register byte (1-2 bytes via the
+///     short/long reg-encoding) carrying the i64 exit code.  Lowers
+///     to `_exit(code)` + `unreachable` for byte-identical semantics
+///     with the Tier-0 dispatcher (`std::process::exit`).
+fn lower_extended<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sub_op: u8,
+    operands: &[u8],
+) -> Result<()> {
+    use verum_vbc::instruction::ExtendedSubOpcode;
+
+    match ExtendedSubOpcode::from_byte(sub_op) {
+        Some(ExtendedSubOpcode::Reserved) => {
+            // No-op anchor — encoders shouldn't emit, but tolerate.
+            Ok(())
+        }
+        Some(ExtendedSubOpcode::ProcessExit) => {
+            if operands.is_empty() {
+                return Err(LlvmLoweringError::internal(
+                    "ProcessExit: missing register operand",
+                ));
+            }
+            // Decode the reg byte(s).  `operands[0]` is the short-form
+            // reg (one byte) when its top bit is clear; otherwise it's
+            // the high-7 of a two-byte encoding.
+            let reg_idx: u16 = if operands[0] & 0x80 == 0 {
+                operands[0] as u16
+            } else {
+                if operands.len() < 2 {
+                    return Err(LlvmLoweringError::internal(
+                        "ProcessExit: truncated long-form register encoding",
+                    ));
+                }
+                (((operands[0] & 0x7F) as u16) << 8) | operands[1] as u16
+            };
+
+            // Load the exit code from the register; it's stored as i64
+            // in the VBC NaN-boxed value model — `_exit` takes int (32-
+            // or 64-bit per platform; we declare the param as i64 to
+            // match Verum's value layout and trust ABI truncation on
+            // the int → i32 narrowing).
+            let code_val = ctx.get_register(reg_idx)?;
+            let code_i64 = as_i64(ctx, code_val, "exit_code")?;
+
+            let module = ctx.get_module();
+            let llvm_ctx = ctx.llvm_context();
+            let i64_ty = llvm_ctx.i64_type();
+            let exit_fn = if let Some(f) = module.get_function("_exit") {
+                f
+            } else {
+                let fn_type = llvm_ctx.void_type().fn_type(&[i64_ty.into()], false);
+                let f = module.add_function("_exit", fn_type, None);
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    llvm_ctx.create_string_attribute("noreturn", ""),
+                );
+                f
+            };
+            ctx.builder()
+                .build_call(exit_fn, &[code_i64.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.builder()
+                .build_unreachable()
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            Ok(())
+        }
+        None => {
+            ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
         }
     }
