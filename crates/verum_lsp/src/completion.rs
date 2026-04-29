@@ -1246,6 +1246,11 @@ const FORMAT_TAGS: &[(&str, &str, &str)] = &[
     ("ipv4", "IPv4 address", "ipv4#\"192.168.1.1\""),
     ("ipv6", "IPv6 address", "ipv6#\"::1\""),
     ("jwt", "JWT token", "jwt#\"eyJhbGciOiJIUzI1NiJ9...\""),
+
+    // Shell command literal — auto-escapes ${expr} interpolations through
+    // ShellEscape::shell_quote. See `internal/specs/shell-scripting.md`.
+    ("sh",  "Shell command (auto-escaped interpolation)",
+            "sh#\"git log --oneline ${branch} -10\""),
 ];
 
 /// Add tagged literal format completions

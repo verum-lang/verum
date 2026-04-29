@@ -125,8 +125,8 @@ fn render_field(
     for attr in field.attributes.iter() {
         match attr.name.as_str() {
             "flag" => {
-                if let Some(arg) = attr.first_string_arg() {
-                    flag_text = Some(arg.clone());
+                if let Some(arg) = first_string_arg(attr) {
+                    flag_text = Some(arg);
                 }
             }
             "positional" => positional = true,
@@ -135,26 +135,105 @@ fn render_field(
     }
 
     let mut stmts: Vec<Statement> = Vec::new();
+    let field_value = field_access(&field.name, span);
 
-    // Insert separator (space) between fields
+    // Type-aware rendering paths:
+    //
+    // 1. List<T>     — repeat the flag once per element.  If positional, just
+    //                  splat the values space-separated.
+    // 2. Maybe<T>    — emit only when the value is `Some(_)`; nothing on `None`.
+    // 3. Bool + flag — emit just the flag when true; skip when false.
+    // 4. Other       — emit `<flag-or-default> <escaped-value>`.
+
+    if field.is_list() {
+        // for x in &self.<field> { ... emit flag + escape(x) ... }
+        let body_stmts = if positional {
+            vec![
+                append_lit(out, Text::from(" "), span),
+                append_escape(out, ident_expr(&Ident::new("__elem", span), span), span),
+            ]
+        } else {
+            let flag = flag_text.unwrap_or_else(||
+                Text::from(format!("--{}", to_kebab_case(field.name.as_str()))));
+            vec![
+                append_lit(out, Text::from(" "), span),
+                append_lit(out, flag, span),
+                append_lit(out, Text::from(" "), span),
+                append_escape(out, ident_expr(&Ident::new("__elem", span), span), span),
+            ]
+        };
+        let for_loop = Statement::Expr(Expr::new(
+            ExprKind::For {
+                pattern: verum_ast::pattern::Pattern::ident(Ident::new("__elem", span), span),
+                iter: Heap::new(field_value),
+                body: Box::new(Block {
+                    statements: List::from(body_stmts),
+                    last_expr: None,
+                    span,
+                }),
+                label: None,
+                span,
+            },
+            span,
+        ));
+        stmts.push(for_loop);
+        return stmts;
+    }
+
+    if field.is_maybe() {
+        // if let Some(x) = &self.<field> { ... }
+        let inner_value = ident_expr(&Ident::new("__some", span), span);
+        let inner_stmts = if positional {
+            vec![
+                append_lit(out, Text::from(" "), span),
+                append_escape(out, inner_value, span),
+            ]
+        } else {
+            let flag = flag_text.unwrap_or_else(||
+                Text::from(format!("--{}", to_kebab_case(field.name.as_str()))));
+            vec![
+                append_lit(out, Text::from(" "), span),
+                append_lit(out, flag, span),
+                append_lit(out, Text::from(" "), span),
+                append_escape(out, inner_value, span),
+            ]
+        };
+        let if_let = Statement::Expr(Expr::new(
+            ExprKind::IfLet {
+                pattern: verum_ast::pattern::Pattern::variant(
+                    "Some".to_string().into(),
+                    vec![Ident::new("__some", span).into()],
+                    span,
+                ),
+                expr: Heap::new(field_value),
+                then_block: Box::new(Block {
+                    statements: List::from(inner_stmts),
+                    last_expr: None,
+                    span,
+                }),
+                else_block: None,
+                span,
+            },
+            span,
+        ));
+        stmts.push(if_let);
+        return stmts;
+    }
+
+    // Non-collection field — single emission point. Insert separator first.
     if !is_first {
         stmts.push(append_lit(out, Text::from(" "), span));
     }
 
-    let field_value = field_access(&field.name, span);
-
     if positional {
-        // Just append the escaped value.
         stmts.push(append_escape(out, field_value, span));
     } else if let Some(flag) = flag_text {
-        // For Bool flags: emit only the flag when true.
         if field.is_bool() {
             // if self.<field> { out.push_str("<flag>"); }
-            let cond = field_access(&field.name, span);
             let then_stmt = append_lit(out, flag.clone(), span);
-            stmts.push(Statement::Expr(Expr {
-                kind: ExprKind::If(Heap::new(verum_ast::expr::IfExpr {
-                    condition: Heap::new(cond),
+            stmts.push(Statement::Expr(Expr::new(
+                ExprKind::If(Heap::new(verum_ast::expr::IfExpr {
+                    condition: Heap::new(field_value),
                     then_block: Block {
                         statements: List::from(vec![then_stmt]),
                         last_expr: None,
@@ -164,17 +243,13 @@ fn render_field(
                     span,
                 })),
                 span,
-                ref_kind: None,
-                check_eliminated: false,
-            }));
+            )));
         } else {
-            // Emit `<flag> <escaped-value>`.
             stmts.push(append_lit(out, flag, span));
             stmts.push(append_lit(out, Text::from(" "), span));
             stmts.push(append_escape(out, field_value, span));
         }
     } else {
-        // Default: --<field-name> <value>
         let derived_flag = Text::from(format!("--{}", to_kebab_case(field.name.as_str())));
         stmts.push(append_lit(out, derived_flag, span));
         stmts.push(append_lit(out, Text::from(" "), span));
@@ -182,6 +257,20 @@ fn render_field(
     }
 
     stmts
+}
+
+/// Extract the first string-literal argument from an attribute, if any.
+fn first_string_arg(attr: &verum_ast::Attribute) -> Option<Text> {
+    use verum_ast::expr::ExprKind as EK;
+    use verum_ast::literal::{LiteralKind, StringLit};
+    for arg in attr.args.iter() {
+        if let EK::Literal(lit) = &arg.kind {
+            if let LiteralKind::Text(StringLit::Regular(s)) = &lit.kind {
+                return Some(s.clone());
+            }
+        }
+    }
+    None
 }
 
 // ----- AST helpers ----------------------------------------------------------
