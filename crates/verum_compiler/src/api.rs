@@ -581,11 +581,22 @@ pub fn run_common_pipeline(
     let mut all_diagnostics: List<Diagnostic> = List::new();
     let mut phase_metrics: List<PhaseMetrics> = List::new();
 
-    // Phase context
+    // Phase context.
+    //
+    // `verify_mode` is enabled when EITHER `verify_contracts` (SMT
+    // proof of `requires` / `ensures` clauses) or `check_refinements`
+    // (refinement-type predicate verification) is set.  The two flags
+    // historically described overlapping but conceptually-distinct
+    // checks; in the current architecture both flow through the same
+    // SMT-backed verification phase, so they're now treated as
+    // siblings on the same gate.  Pre-fix `check_refinements` was an
+    // inert config field — set in three preset constructors but never
+    // read, making the documented "Enable refinement type checking"
+    // contract a no-op when `verify_contracts` happened to be false.
     let context = PhaseContext {
         profile: LanguageProfile::Application,
         target_tier: ExecutionTier::Interpreter,
-        verify_mode: if config.verify_contracts {
+        verify_mode: if config.verify_contracts || config.check_refinements {
             PhaseVerifyMode::Proof
         } else {
             PhaseVerifyMode::None
@@ -698,7 +709,10 @@ pub fn run_common_pipeline(
     // Phase 3a: Contract Verification (if enabled)
     let mut verification_results = VerificationResults::default();
 
-    if config.verify_contracts {
+    // Run the contract-verification phase when EITHER flag is on —
+    // see the `verify_mode` rationale in the PhaseContext setup
+    // above for why these two flags are sibling gates.
+    if config.verify_contracts || config.check_refinements {
         let mut contract_phase = contract_verification::ContractVerificationPhase::new();
         if let Some(stats) = config.routing_stats.clone() {
             contract_phase = contract_phase.with_routing_stats(stats);
