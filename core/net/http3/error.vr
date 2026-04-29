@@ -45,3 +45,67 @@ public type Http3Error is
     | QpackError(Text)
     | NeedMore
     | Closed;
+
+implement Display for Http3ErrorCode {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"0x{self.code:x}".as_str())
+    }
+}
+
+implement Debug for Http3ErrorCode {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"Http3ErrorCode(0x{self.code:x})".as_str())
+    }
+}
+
+implement Eq for Http3ErrorCode {
+    fn eq(&self, other: &Http3ErrorCode) -> Bool {
+        self.code == other.code
+    }
+}
+
+implement Display for Http3Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Http3Error.ConnectionError { code, reason } =>
+                f.write_str(f"HTTP/3 connection error {code}: {reason}".as_str()),
+            Http3Error.StreamError { stream_id, code, reason } =>
+                f.write_str(f"HTTP/3 stream {stream_id} error {code}: {reason}".as_str()),
+            Http3Error.FrameError(reason)  => f.write_str(f"HTTP/3 frame error: {reason}".as_str()),
+            Http3Error.QpackError(reason)  => f.write_str(f"HTTP/3 QPACK error: {reason}".as_str()),
+            Http3Error.NeedMore            => f.write_str("HTTP/3: need more bytes"),
+            Http3Error.Closed              => f.write_str("HTTP/3: closed"),
+        }
+    }
+}
+
+implement Debug for Http3Error {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Http3Error.ConnectionError { code, reason } =>
+                f.write_str(f"ConnectionError {{ code: {code:?}, reason: {reason} }}".as_str()),
+            Http3Error.StreamError { stream_id, code, reason } =>
+                f.write_str(f"StreamError {{ stream_id: {stream_id}, code: {code:?}, reason: {reason} }}".as_str()),
+            Http3Error.FrameError(reason)  => f.write_str(f"FrameError({reason})".as_str()),
+            Http3Error.QpackError(reason)  => f.write_str(f"QpackError({reason})".as_str()),
+            Http3Error.NeedMore            => f.write_str("NeedMore"),
+            Http3Error.Closed              => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for Http3Error {
+    fn eq(&self, other: &Http3Error) -> Bool {
+        match (self, other) {
+            (Http3Error.ConnectionError { code: ca, reason: ra },
+             Http3Error.ConnectionError { code: cb, reason: rb }) => ca == cb && ra == rb,
+            (Http3Error.StreamError { stream_id: sa, code: ca, reason: ra },
+             Http3Error.StreamError { stream_id: sb, code: cb, reason: rb }) => sa == sb && ca == cb && ra == rb,
+            (Http3Error.FrameError(a),  Http3Error.FrameError(b))  => a == b,
+            (Http3Error.QpackError(a),  Http3Error.QpackError(b))  => a == b,
+            (Http3Error.NeedMore,       Http3Error.NeedMore)       => true,
+            (Http3Error.Closed,         Http3Error.Closed)         => true,
+            _ => false,
+        }
+    }
+}

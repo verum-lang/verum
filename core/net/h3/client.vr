@@ -119,6 +119,58 @@ public type H3ClientError is
     | EarlyDataTooLarge(Int)
     | Closed;
 
+implement Display for H3ClientError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UrlParse(e)            => f.write_str(f"HTTP/3 client: URL parse failed ({e})".as_str()),
+            UnsupportedScheme(s)   => f.write_str(f"HTTP/3 client: unsupported scheme {s}".as_str()),
+            Resolve(reason)        => f.write_str(f"HTTP/3 client: DNS resolve failed ({reason})".as_str()),
+            Trust(e)               => f.write_str(f"HTTP/3 client: trust failure ({e})".as_str()),
+            Transport(reason)      => f.write_str(f"HTTP/3 client transport: {reason}".as_str()),
+            Handshake(reason)      => f.write_str(f"HTTP/3 client handshake: {reason}".as_str()),
+            H3Layer(e)             => f.write_str(f"HTTP/3 client: {e}".as_str()),
+            Timeout                => f.write_str("HTTP/3 client: timeout"),
+            EarlyDataTooLarge(n)   => f.write_str(f"HTTP/3 client: early-data {n} bytes exceeds limit".as_str()),
+            Closed                 => f.write_str("HTTP/3 client: closed"),
+        }
+    }
+}
+
+implement Debug for H3ClientError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            UrlParse(e)            => f.write_str(f"UrlParse({e:?})".as_str()),
+            UnsupportedScheme(s)   => f.write_str(f"UnsupportedScheme({s})".as_str()),
+            Resolve(reason)        => f.write_str(f"Resolve({reason})".as_str()),
+            Trust(e)               => f.write_str(f"Trust({e:?})".as_str()),
+            Transport(reason)      => f.write_str(f"Transport({reason})".as_str()),
+            Handshake(reason)      => f.write_str(f"Handshake({reason})".as_str()),
+            H3Layer(e)             => f.write_str(f"H3Layer({e:?})".as_str()),
+            Timeout                => f.write_str("Timeout"),
+            EarlyDataTooLarge(n)   => f.write_str(f"EarlyDataTooLarge({n})".as_str()),
+            Closed                 => f.write_str("Closed"),
+        }
+    }
+}
+
+implement Eq for H3ClientError {
+    fn eq(&self, other: &H3ClientError) -> Bool {
+        match (self, other) {
+            (UrlParse(a),          UrlParse(b))          => a == b,
+            (UnsupportedScheme(a), UnsupportedScheme(b)) => a == b,
+            (Resolve(a),           Resolve(b))           => a == b,
+            (Trust(a),             Trust(b))             => a == b,
+            (Transport(a),         Transport(b))         => a == b,
+            (Handshake(a),         Handshake(b))         => a == b,
+            (H3Layer(a),           H3Layer(b))           => a == b,
+            (Timeout,              Timeout)              => true,
+            (EarlyDataTooLarge(a), EarlyDataTooLarge(b)) => a == b,
+            (Closed,               Closed)               => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // connect()
 // =============================================================================
