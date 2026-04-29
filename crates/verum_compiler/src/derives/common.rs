@@ -673,6 +673,7 @@ mod tests {
             is_public: true,
             has_default: false,
             default_value: verum_common::Maybe::None,
+            attributes: List::new(),
             span,
         };
 
@@ -695,6 +696,7 @@ mod tests {
                 is_public: false,
                 has_default: false,
                 default_value: verum_common::Maybe::None,
+                attributes: List::new(),
                 span,
             }]),
             is_unit: false,

@@ -926,6 +926,7 @@ mod tests {
             is_public: true,
             has_default: false,
             default_value: Maybe::None,
+            attributes: List::new(),
             span,
         };
 
@@ -945,6 +946,7 @@ mod tests {
                 }),
                 span,
             )),
+            attributes: List::new(),
             span,
         };
 
