@@ -61,7 +61,12 @@ pub enum Ordinal {
     /// `ω·k + n` for `k ≥ 1`, `n ≥ 1`.  Supports values like `ω·3 + 5`.
     /// Lower-bound-normalisation: when `k == 1` we use `OmegaPlus(n)`
     /// and when `n == 0` we collapse to `OmegaTimes(k)`.
-    OmegaTimesPlus { k: u32, n: u32 },
+    OmegaTimesPlus {
+        /// Coefficient on ω: `ω·k + …`.
+        k: u32,
+        /// Finite tail: `… + n`.
+        n: u32,
+    },
 
     /// `ω²` — the second-order limit.
     OmegaSquared,

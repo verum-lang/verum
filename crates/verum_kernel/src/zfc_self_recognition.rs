@@ -137,6 +137,8 @@ pub enum InaccessibleLevel {
 }
 
 impl InaccessibleLevel {
+    /// Canonical short name (`"κ_1"` / `"κ_2"`) used by audit + cert
+    /// export targets.
     pub fn name(self) -> &'static str {
         match self {
             InaccessibleLevel::Kappa1 => "κ_1",
@@ -178,6 +180,9 @@ pub enum KernelRuleId {
 }
 
 impl KernelRuleId {
+    /// Canonical short name (`"K-Refine"` / `"K-Univ"` / etc.) used
+    /// by audit + cert export targets and by ZFC-self-recognition
+    /// reports per Diakrisis A.Z.4.
     pub fn name(self) -> &'static str {
         match self {
             KernelRuleId::Refine => "K-Refine",
@@ -341,6 +346,7 @@ pub struct SelfRecognitionAudit {
 }
 
 impl SelfRecognitionAudit {
+    /// Construct an empty audit — no citations recorded yet.
     pub fn new() -> Self {
         Self::default()
     }

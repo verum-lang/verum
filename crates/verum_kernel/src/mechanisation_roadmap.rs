@@ -63,6 +63,8 @@ pub enum MechanisationStatus {
 }
 
 impl MechanisationStatus {
+    /// Canonical kebab-case name of the status (used by audit
+    /// reports + the `verum audit --kernel-rules` CLI surface).
     pub fn name(self) -> &'static str {
         match self {
             MechanisationStatus::Mechanised => "mechanised",
@@ -104,6 +106,8 @@ pub struct RoadmapEntry {
 }
 
 impl RoadmapEntry {
+    /// Construct a fully-mechanised roadmap entry — `status =
+    /// Mechanised`, with the discharging kernel module(s) recorded.
     pub fn mechanised(
         section: impl Into<Text>,
         title: impl Into<Text>,
@@ -117,6 +121,8 @@ impl RoadmapEntry {
         }
     }
 
+    /// Construct a still-pending roadmap entry — `status = Pending`,
+    /// with no kernel modules attributed yet.
     pub fn pending(section: impl Into<Text>, title: impl Into<Text>) -> Self {
         Self {
             section: section.into(),

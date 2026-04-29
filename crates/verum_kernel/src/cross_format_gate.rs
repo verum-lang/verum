@@ -114,10 +114,14 @@ pub enum FormatStatus {
 }
 
 impl FormatStatus {
+    /// True iff the per-format export passed (round-tripped + the
+    /// foreign re-checker accepted).
     pub fn is_passed(&self) -> bool {
         matches!(self, FormatStatus::Passed { .. })
     }
 
+    /// True iff the per-format export failed (round-trip mismatch
+    /// or foreign re-checker rejected).
     pub fn is_failed(&self) -> bool {
         matches!(self, FormatStatus::Failed { .. })
     }
@@ -138,6 +142,8 @@ pub struct CrossFormatReport {
 }
 
 impl CrossFormatReport {
+    /// Construct a fresh report keyed by the artefact name.  Per-
+    /// format statuses are pushed via the recording helpers.
     pub fn new(artefact: impl Into<Text>) -> Self {
         Self {
             artefact: artefact.into(),
