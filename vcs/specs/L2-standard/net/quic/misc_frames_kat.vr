@@ -18,11 +18,11 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_frame};
 
 fn padding_run_is_all_zero_bytes() {
     // N=5 padding run encodes as 5 × 0x00.
-    let f = Frame.PaddingRun(5);
+    let f = QuicFrame.PaddingRun(5);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 5);
@@ -34,7 +34,7 @@ fn padding_run_is_all_zero_bytes() {
 }
 
 fn padding_run_zero_length_is_empty() {
-    let f = Frame.PaddingRun(0);
+    let f = QuicFrame.PaddingRun(0);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 0);
@@ -42,20 +42,20 @@ fn padding_run_zero_length_is_empty() {
 
 fn ping_is_single_byte_01() {
     let mut out: List<Byte> = [];
-    let _ = encode_frame(&Frame.PingFrame, &mut out);
+    let _ = encode_frame(&QuicFrame.PingFrame, &mut out);
     assert(out.len() == 1);
     assert(out[0] == 0x01_u8);
 }
 
 fn handshake_done_is_single_byte_1E() {
     let mut out: List<Byte> = [];
-    let _ = encode_frame(&Frame.HandshakeDone, &mut out);
+    let _ = encode_frame(&QuicFrame.HandshakeDone, &mut out);
     assert(out.len() == 1);
     assert(out[0] == 0x1E_u8);
 }
 
 fn reset_stream_byte_exact() {
-    let f = Frame.ResetStream {
+    let f = QuicFrame.ResetStream {
         stream_id:  4_u64,
         error_code: 3_u64,
         final_size: 100_u64,
@@ -73,7 +73,7 @@ fn reset_stream_byte_exact() {
 }
 
 fn stop_sending_byte_exact() {
-    let f = Frame.StopSending { stream_id: 8_u64, error_code: 0_u64 };
+    let f = QuicFrame.StopSending { stream_id: 8_u64, error_code: 0_u64 };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 3);
@@ -84,7 +84,7 @@ fn stop_sending_byte_exact() {
 
 fn new_token_byte_exact() {
     let token: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
-    let f = Frame.NewToken(token);
+    let f = QuicFrame.NewToken(token);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     // Wire: type(1) + token_len varint(1) + 4 bytes = 6.
@@ -100,7 +100,7 @@ fn path_challenge_exactly_eight_bytes_after_type() {
         0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8,
         0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
     ];
-    let f = Frame.PathChallenge(data);
+    let f = QuicFrame.PathChallenge(data);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     // Type(1) + 8 data bytes = 9.
@@ -118,7 +118,7 @@ fn path_response_distinct_from_challenge() {
         0xFF_u8, 0xEE_u8, 0xDD_u8, 0xCC_u8,
         0xBB_u8, 0xAA_u8, 0x99_u8, 0x88_u8,
     ];
-    let f = Frame.PathResponse(data);
+    let f = QuicFrame.PathResponse(data);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 9);
@@ -130,28 +130,30 @@ fn path_response_distinct_from_challenge() {
 fn path_frames_are_probing_not_ack_eliciting_handshake_done() {
     // §9.1 probing frames: PATH_CHALLENGE / PATH_RESPONSE / NEW_CONNECTION_ID /
     // PADDING — but path frames are ack-eliciting; PADDING is not.
-    let pc = Frame.PathChallenge([0_u8; 8]);
-    let pr = Frame.PathResponse([0_u8; 8]);
+    let pc = QuicFrame.PathChallenge([0_u8; 8]);
+    let pr = QuicFrame.PathResponse([0_u8; 8]);
     assert(pc.is_probing());
     assert(pr.is_probing());
-    assert(Frame.PaddingRun(3).is_probing());
+    assert(QuicFrame.PaddingRun(3).is_probing());
     assert(pc.is_ack_eliciting());
     assert(pr.is_ack_eliciting());
-    assert(!Frame.PaddingRun(3).is_ack_eliciting());
+    assert(!QuicFrame.PaddingRun(3).is_ack_eliciting());
     // HANDSHAKE_DONE is ack-eliciting, not probing.
-    assert(Frame.HandshakeDone.is_ack_eliciting());
-    assert(!Frame.HandshakeDone.is_probing());
+    assert(QuicFrame.HandshakeDone.is_ack_eliciting());
+    assert(!QuicFrame.HandshakeDone.is_probing());
 }
 
 fn ping_handshake_done_decode_roundtrip() {
     let mut w1: List<Byte> = [];
     let mut w2: List<Byte> = [];
-    let _ = encode_frame(&Frame.PingFrame, &mut w1);
-    let _ = encode_frame(&Frame.HandshakeDone, &mut w2);
+    let _ = encode_frame(&QuicFrame.PingFrame, &mut w1);
+    let _ = encode_frame(&QuicFrame.HandshakeDone, &mut w2);
     let (d1, _) = decode_frame(w1.as_slice(), 0).unwrap();
     let (d2, _) = decode_frame(w2.as_slice(), 0).unwrap();
-    match d1 { Frame.PingFrame => {}, _ => panic("expected PingFrame"), }
-    match d2 { Frame.HandshakeDone => {}, _ => panic("expected HandshakeDone"), }
+    match d1 { QuicFrame.PingFrame => {}, _ => panic("expected PingFrame")
+}
+    match d2 { QuicFrame.HandshakeDone => {}, _ => panic("expected HandshakeDone")
+}
 }
 
 @main

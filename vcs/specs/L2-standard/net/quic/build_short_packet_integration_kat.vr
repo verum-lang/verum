@@ -23,7 +23,8 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.connection_id.{ConnectionId};
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame
+};
 mount core.net.quic.connection_sm.tx.{ShortPacketInput, build_short_packet, TxError};
 mount core.net.quic.connection_sm.mod.{QuicSpaceKeys};
 mount core.net.quic.crypto.header_protection.{HpKey};
@@ -53,7 +54,7 @@ fn build_minimum_short_packet(spin: Bool, key_phase: Bool) -> List<Byte> {
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
     let keys = synth_initial_keys_for_short(dcid_bytes.as_slice()).unwrap();
 
-    let frames: List<Frame> = [ Frame.PingFrame ];
+    let frames: List<Frame> = [ QuicFrame.PingFrame ];
 
     let input = ShortPacketInput {
         dcid:          &dcid,
@@ -114,7 +115,7 @@ fn two_builds_with_different_pns_produce_different_wires() {
     let dcid_bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
     let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
     let keys = synth_initial_keys_for_short(dcid_bytes.as_slice()).unwrap();
-    let frames: List<Frame> = [ Frame.PingFrame ];
+    let frames: List<Frame> = [ QuicFrame.PingFrame ];
 
     let input_a = ShortPacketInput {
         dcid: &dcid, spin_bit: false, key_phase: false,

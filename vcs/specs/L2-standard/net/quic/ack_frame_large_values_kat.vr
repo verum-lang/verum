@@ -18,7 +18,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, AckRange, EcnCounts, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, AckRange, EcnCounts, encode_frame, decode_frame};
 
 fn ack_largest_in_two_byte_varint_range() {
     // largest_acked = 100 → 2-byte varint 0x40 0x64.
@@ -27,7 +27,7 @@ fn ack_largest_in_two_byte_varint_range() {
     // first_range_len = 0 → 1 byte.
     // Wire: 0x02 0x40 0x64 0x00 0x00 0x00 = 6 bytes.
     let ranges: List<AckRange> = [ AckRange { smallest: 100_u64, largest: 100_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 100_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -48,7 +48,7 @@ fn ack_largest_at_four_byte_varint_boundary() {
     // largest_acked = 16384 → first value requiring 4-byte varint.
     //   = 0x80 0x00 0x40 0x00 (top 2 bits = 10, 30-bit value = 16384).
     let ranges: List<AckRange> = [ AckRange { smallest: 16384_u64, largest: 16384_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 16384_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -71,7 +71,7 @@ fn ack_first_range_spans_100_packets() {
     // first range = 100 packets wide. Largest = 100, smallest = 1.
     //   first_len = 99 → 2-byte varint 0x40 0x63.
     let ranges: List<AckRange> = [ AckRange { smallest: 1_u64, largest: 100_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 100_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -91,7 +91,7 @@ fn ack_ecn_counts_large_values() {
     // ECN counts at 1000 each — each is a 2-byte varint.
     // 1000 = 0x3E8 → 0x43 0xE8.
     let ranges: List<AckRange> = [ AckRange { smallest: 5_u64, largest: 5_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 5_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -115,7 +115,7 @@ fn ack_frame_multi_byte_decode_roundtrip() {
         AckRange { smallest: 16000_u64, largest: 16384_u64 },   // first_len = 384 (2-byte)
         AckRange { smallest: 1_u64,     largest: 15_000_u64 },   // gap + len vary
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 16384_u64,
         ack_delay:     200_u64,
         ranges:        ranges,
@@ -126,7 +126,7 @@ fn ack_frame_multi_byte_decode_roundtrip() {
     let (decoded, next) = decode_frame(wire.as_slice(), 0).unwrap();
     assert(next == wire.len());
     match decoded {
-        Frame.AckFrame { largest_acked, ack_delay, ranges: dec_ranges, ecn } => {
+        QuicFrame.AckFrame { largest_acked, ack_delay, ranges: dec_ranges, ecn } => {
             assert(largest_acked == 16384_u64);
             assert(ack_delay == 200_u64);
             assert(dec_ranges.len() == 2);

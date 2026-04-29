@@ -13,7 +13,8 @@ mount core.net.quic.connection_sm.stream_assembler.{
 };
 mount core.net.quic.recovery.{NewReno, CongestionCtrl};
 mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame
+};
 
 fn check_budget() {
     let cc = NewReno.new();

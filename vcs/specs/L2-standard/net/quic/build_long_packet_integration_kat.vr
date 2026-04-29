@@ -35,7 +35,8 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.connection_id.{ConnectionId};
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame
+};
 mount core.net.quic.packet.{LongPacketType};
 mount core.net.quic.version.{VERSION_1};
 mount core.net.quic.connection_sm.tx.{LongPacketInput, build_long_packet, TxError};
@@ -68,7 +69,7 @@ fn build_minimum_initial_packet() -> List<Byte> {
 
     // One small CRYPTO frame — offset 0 + 4 bytes of synthetic TLS data.
     let frames: List<Frame> = [
-        Frame.CryptoFrame {
+        QuicFrame.CryptoFrame {
             offset: 0_u64,
             data:   [0x01_u8, 0x00_u8, 0x00_u8, 0x10_u8],
         },

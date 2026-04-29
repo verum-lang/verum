@@ -13,13 +13,13 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_frame};
 
 fn stream_id_64_uses_two_byte_varint() {
     // stream_id = 64 → 2-byte varint 0x40 0x40.
     // offset=0 (no OFF bit), type=0x0A (OFF=0 LEN=1 FIN=0).
     let data: List<Byte> = [0x01_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 64_u64,
         offset:    0_u64,
         data:      data,
@@ -41,7 +41,7 @@ fn stream_offset_16384_uses_four_byte_varint_and_sets_off_bit() {
     // Setting offset > 0 sets the OFF bit in the type; base 0x08 |
     // 0x04 (OFF) | 0x02 (LEN) | 0x00 (FIN) = 0x0E.
     let data: List<Byte> = [0xFF_u8, 0xEE_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 4_u64,
         offset:    16_384_u64,
         data:      data,
@@ -70,7 +70,7 @@ fn stream_very_large_id_uses_eight_byte_varint() {
     // 1073741823, so 2^30 = 1073741824 needs 62-bit encoding).
     // Wire: top 2 bits = 11 → 0xC0 prefix.
     let data: List<Byte> = [0x00_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 1_073_741_824_u64,
         offset:    0_u64,
         data:      data,
@@ -88,7 +88,7 @@ fn stream_fin_with_large_offset() {
     // Offset=100 (2-byte varint 0x40 0x64), FIN=true, LEN=true, OFF=true.
     // Type = 0x08 | 0x04 | 0x02 | 0x01 = 0x0F.
     let data: List<Byte> = [0xAB_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 0_u64,
         offset:    100_u64,
         data:      data,
@@ -112,7 +112,7 @@ fn stream_fin_with_large_offset() {
 
 fn stream_large_values_decode_roundtrip() {
     let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 16_383_u64,           // max 2-byte varint
         offset:    16_384_u64,           // first 4-byte varint
         data:      data,
@@ -123,7 +123,7 @@ fn stream_large_values_decode_roundtrip() {
     let (decoded, next) = decode_frame(wire.as_slice(), 0).unwrap();
     assert(next == wire.len());
     match decoded {
-        Frame.StreamFrame { stream_id, offset, data: dec, fin } => {
+        QuicFrame.StreamFrame { stream_id, offset, data: dec, fin } => {
             assert(stream_id == 16_383_u64);
             assert(offset == 16_384_u64);
             assert(dec.len() == 3);

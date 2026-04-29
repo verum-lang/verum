@@ -17,7 +17,8 @@
 mount core.*;
 mount core.collections.List;
 mount core.time.instant.{Instant};
-mount core.net.quic.frame.{AckRange, Frame};
+mount core.net.quic.frame.{AckRange, QuicFrame
+};
 mount core.net.quic.recovery.pn_space.{PnSpace, PnSpaceKind, SentPacketInfo};
 
 fn mk_sent(pn: UInt64) -> SentPacketInfo {
@@ -106,7 +107,7 @@ fn build_ack_frame_some_after_on_packet_received() {
     match s.build_ack_frame(123_u64) {
         Some(frame) => {
             match frame {
-                Frame.AckFrame { largest_acked, ack_delay, .. } => {
+                QuicFrame.AckFrame { largest_acked, ack_delay, .. } => {
                     assert(largest_acked == 42_u64);
                     assert(ack_delay == 123_u64);
                 },
@@ -123,7 +124,7 @@ fn build_ack_frame_reflects_multiple_received_pns() {
     s.on_packet_received(1_u64);
     s.on_packet_received(2_u64);
     match s.build_ack_frame(0_u64) {
-        Some(Frame.AckFrame { largest_acked, ranges, .. }) => {
+        Some(QuicFrame.AckFrame { largest_acked, ranges, .. }) => {
             assert(largest_acked == 2_u64);
             // Contiguous 0..2 collapses to 1 range.
             assert(ranges.len() == 1);

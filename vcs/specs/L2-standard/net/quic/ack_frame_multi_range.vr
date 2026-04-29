@@ -11,7 +11,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, AckRange, encode_frame, decode_all_frames};
+mount core.net.quic.frame.{QuicFrame, AckRange, encode_frame, decode_all_frames};
 
 fn three_descending_ranges_roundtrip() {
     // Ranges (largest→smallest): [100..102], [50..60], [10..15].
@@ -20,7 +20,7 @@ fn three_descending_ranges_roundtrip() {
         AckRange { smallest: 50_u64,  largest: 60_u64  },
         AckRange { smallest: 10_u64,  largest: 15_u64  },
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 102_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -33,7 +33,7 @@ fn three_descending_ranges_roundtrip() {
     let frames = decode_all_frames(&buf).unwrap();
     assert(frames.len() == 1);
     match &frames[0] {
-        Frame.AckFrame { largest_acked, ack_delay: _, ranges: rs, ecn: _ } => {
+        QuicFrame.AckFrame { largest_acked, ack_delay: _, ranges: rs, ecn: _ } => {
             assert(largest_acked == 102_u64);
             assert(rs.len() == 3);
             // Ranges strictly descending + non-overlapping + gap ≥ 2.
@@ -57,7 +57,7 @@ fn ack_delay_roundtrips() {
     let ranges: List<AckRange> = [
         AckRange { smallest: 0_u64, largest: 0_u64 },
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 0_u64,
         ack_delay:     12345_u64,
         ranges:        ranges,
@@ -67,7 +67,7 @@ fn ack_delay_roundtrips() {
     let _ = encode_frame(&f, &mut buf);
     let frames = decode_all_frames(&buf).unwrap();
     match &frames[0] {
-        Frame.AckFrame { ack_delay, .. } => assert(ack_delay == 12345_u64),
+        QuicFrame.AckFrame { ack_delay, .. } => assert(ack_delay == 12345_u64),
         _ => panic("expected AckFrame"),
     }
 }
@@ -77,7 +77,7 @@ fn single_range_spanning_largest_acked() {
     let ranges: List<AckRange> = [
         AckRange { smallest: 50_u64, largest: 100_u64 },
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 100_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -87,7 +87,7 @@ fn single_range_spanning_largest_acked() {
     let _ = encode_frame(&f, &mut buf);
     let frames = decode_all_frames(&buf).unwrap();
     match &frames[0] {
-        Frame.AckFrame { ranges: rs, .. } => {
+        QuicFrame.AckFrame { ranges: rs, .. } => {
             assert(rs.len() == 1);
             assert(rs[0].smallest == 50_u64);
             assert(rs[0].largest  == 100_u64);

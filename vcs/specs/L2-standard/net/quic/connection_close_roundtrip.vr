@@ -7,9 +7,9 @@
 
 // RFC 9000 §19.19 + §19.20 — CONNECTION_CLOSE encode/decode surface:
 //
-//   * Frame.ConnectionCloseTransport   (type 0x1C) carries error_code,
+//   * QuicFrame.ConnectionCloseTransport   (type 0x1C) carries error_code,
 //     frame_type (source frame type or 0 if generic), reason phrase.
-//   * Frame.ConnectionCloseApplication (type 0x1D) carries error_code
+//   * QuicFrame.ConnectionCloseApplication (type 0x1D) carries error_code
 //     and reason phrase only — used for application-layer errors.
 //   * Neither frame is ack-eliciting (RFC 9000 §13.2.1).
 //
@@ -18,10 +18,10 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_all_frames};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_all_frames};
 
 fn build_transport(err: UInt64, ft: UInt64, reason: List<Byte>) -> Frame {
-    Frame.ConnectionCloseTransport {
+    QuicFrame.ConnectionCloseTransport {
         error_code: err,
         frame_type: ft,
         reason:     reason,
@@ -29,7 +29,7 @@ fn build_transport(err: UInt64, ft: UInt64, reason: List<Byte>) -> Frame {
 }
 
 fn build_application(err: UInt64, reason: List<Byte>) -> Frame {
-    Frame.ConnectionCloseApplication {
+    QuicFrame.ConnectionCloseApplication {
         error_code: err,
         reason:     reason,
     }

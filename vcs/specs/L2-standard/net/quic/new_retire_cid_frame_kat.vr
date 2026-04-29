@@ -28,7 +28,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_frame};
 
 fn new_connection_id_minimum_byte_exact() {
     // seq=3, retire_prior_to=1, 4-byte CID, all-zero reset token.
@@ -41,7 +41,7 @@ fn new_connection_id_minimum_byte_exact() {
     //   [8..24] 16-byte reset token
     let cid: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
     let token: [Byte; 16] = [0_u8; 16];
-    let f = Frame.NewConnectionId {
+    let f = QuicFrame.NewConnectionId {
         sequence_number:       3_u64,
         retire_prior_to:       1_u64,
         connection_id:         cid,
@@ -69,7 +69,7 @@ fn new_connection_id_stateless_reset_token_preserved() {
     let mut token: [Byte; 16] = [0_u8; 16];
     let mut i: Int = 0;
     while i < 16 { token[i] = (0x40_u8 | (i as Byte)); i = i + 1; }
-    let f = Frame.NewConnectionId {
+    let f = QuicFrame.NewConnectionId {
         sequence_number:       0_u64,
         retire_prior_to:       0_u64,
         connection_id:         cid,
@@ -88,7 +88,7 @@ fn new_connection_id_stateless_reset_token_preserved() {
 
 fn retire_connection_id_byte_exact() {
     // RETIRE with seq=7.  Wire: 0x19 0x07.
-    let f = Frame.RetireConnectionId(7_u64);
+    let f = QuicFrame.RetireConnectionId(7_u64);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 2);
@@ -101,7 +101,7 @@ fn new_connection_id_decode_roundtrip() {
     let mut token: [Byte; 16] = [0_u8; 16];
     let mut i: Int = 0;
     while i < 16 { token[i] = 0xA5_u8; i = i + 1; }
-    let f = Frame.NewConnectionId {
+    let f = QuicFrame.NewConnectionId {
         sequence_number:       5_u64,
         retire_prior_to:       2_u64,
         connection_id:         cid.clone(),
@@ -111,7 +111,7 @@ fn new_connection_id_decode_roundtrip() {
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.NewConnectionId {
+        QuicFrame.NewConnectionId {
             sequence_number, retire_prior_to, connection_id, stateless_reset_token
         } => {
             assert(sequence_number == 5_u64);
@@ -133,12 +133,12 @@ fn new_connection_id_decode_roundtrip() {
 }
 
 fn retire_connection_id_decode_roundtrip() {
-    let f = Frame.RetireConnectionId(42_u64);
+    let f = QuicFrame.RetireConnectionId(42_u64);
     let mut wire: List<Byte> = [];
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.RetireConnectionId(seq) => assert(seq == 42_u64),
+        QuicFrame.RetireConnectionId(seq) => assert(seq == 42_u64),
         _ => panic("expected RetireConnectionId"),
     }
 }

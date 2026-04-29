@@ -19,7 +19,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_all_frames};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_all_frames};
 
 fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
     if a.len() != b.len() { return false; }
@@ -33,7 +33,7 @@ fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
 
 fn assert_decoded_new_token(f: &Frame, want: &[Byte]) {
     match f {
-        Frame.NewToken(tok) => {
+        QuicFrame.NewToken(tok) => {
             assert(bytes_eq(tok, want));
         },
         _ => panic("expected NewToken"),
@@ -42,7 +42,7 @@ fn assert_decoded_new_token(f: &Frame, want: &[Byte]) {
 
 fn assert_decoded_datagram(f: &Frame, want: &[Byte], want_with_length: Bool) {
     match f {
-        Frame.Datagram { data, with_length } => {
+        QuicFrame.Datagram { data, with_length } => {
             assert(bytes_eq(data, want));
             assert(with_length == want_with_length);
         },
@@ -52,7 +52,7 @@ fn assert_decoded_datagram(f: &Frame, want: &[Byte], want_with_length: Bool) {
 
 fn new_token_roundtrip_surface() {
     let token: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
-    let f = Frame.NewToken(token.clone());
+    let f = QuicFrame.NewToken(token.clone());
     assert(f.is_ack_eliciting());
 
     let mut buf: List<Byte> = [];
@@ -65,7 +65,7 @@ fn new_token_roundtrip_surface() {
 
 fn datagram_with_length_surface() {
     let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
-    let f = Frame.Datagram { data: data.clone(), with_length: true };
+    let f = QuicFrame.Datagram { data: data.clone(), with_length: true };
     assert(f.is_ack_eliciting());
 
     let mut buf: List<Byte> = [];
@@ -78,7 +78,7 @@ fn datagram_with_length_surface() {
 
 fn datagram_no_length_surface() {
     let data: List<Byte> = [0x04_u8, 0x05_u8];
-    let f = Frame.Datagram { data: data.clone(), with_length: false };
+    let f = QuicFrame.Datagram { data: data.clone(), with_length: false };
     assert(f.is_ack_eliciting());
 
     let mut buf: List<Byte> = [];

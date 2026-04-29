@@ -28,7 +28,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.frame.{
-    Frame, AckRange, EcnCounts, encode_frame, decode_frame,
+    QuicFrame, AckRange, EcnCounts, encode_frame, decode_frame,
 };
 
 fn ack_frame_no_ranges_no_ecn_byte_exact() {
@@ -36,7 +36,7 @@ fn ack_frame_no_ranges_no_ecn_byte_exact() {
     //   -> first_len = 0, range_count = 0.
     // Wire: 0x02 0x0A 0x05 0x00 0x00
     let ranges: List<AckRange> = [ AckRange { smallest: 10_u64, largest: 10_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 10_u64,
         ack_delay:     5_u64,
         ranges:        ranges,
@@ -55,7 +55,7 @@ fn ack_frame_no_ranges_no_ecn_byte_exact() {
 fn ack_frame_with_first_range_width_3() {
     // largest=20, first range {smallest:17, largest:20} → first_len = 3.
     let ranges: List<AckRange> = [ AckRange { smallest: 17_u64, largest: 20_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 20_u64,
         ack_delay:     1_u64,
         ranges:        ranges,
@@ -81,7 +81,7 @@ fn ack_frame_two_ranges_gap_between() {
         AckRange { smallest: 17_u64, largest: 20_u64 },
         AckRange { smallest: 10_u64, largest: 15_u64 },
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 20_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -103,7 +103,7 @@ fn ack_ecn_type_is_three_and_three_trailing_varints() {
     // Smallest wire ACK-ECN: largest=3, delay=0, single range, ECN 0/0/0.
     // Wire: 0x03 0x03 0x00 0x00 0x00 [ect0 ect1 ce each 0x00] = 8 bytes.
     let ranges: List<AckRange> = [ AckRange { smallest: 3_u64, largest: 3_u64 } ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 3_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -125,7 +125,7 @@ fn ack_frame_decode_roundtrip() {
         AckRange { smallest: 17_u64, largest: 20_u64 },
         AckRange { smallest: 10_u64, largest: 15_u64 },
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 20_u64,
         ack_delay:     2_u64,
         ranges:        ranges,
@@ -135,7 +135,7 @@ fn ack_frame_decode_roundtrip() {
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.AckFrame { largest_acked, ack_delay, ranges: dec_ranges, ecn } => {
+        QuicFrame.AckFrame { largest_acked, ack_delay, ranges: dec_ranges, ecn } => {
             assert(largest_acked == 20_u64);
             assert(ack_delay == 2_u64);
             assert(dec_ranges.len() == 2);
