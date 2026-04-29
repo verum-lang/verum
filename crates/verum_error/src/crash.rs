@@ -104,6 +104,10 @@ pub enum CrashKind {
 /// time. Cheap to include in every report.
 #[derive(Clone, Debug)]
 pub struct EnvSnapshot {
+    /// The configured `app_name`. Mirrored into the snapshot so the
+    /// renderer (which only sees the report, not the live config) can
+    /// surface the correct branding for embedders.
+    pub app_name: String,
     pub verum_version: String,
     pub build_profile: String,
     pub build_target: String,
@@ -141,6 +145,7 @@ impl EnvSnapshot {
             .collect();
 
         Self {
+            app_name: config.app_name.clone(),
             verum_version: config.app_version.clone(),
             build_profile: option_env!("VERUM_BUILD_PROFILE").unwrap_or("unknown").into(),
             build_target: option_env!("VERUM_BUILD_TARGET").unwrap_or("unknown").into(),
@@ -325,7 +330,8 @@ impl CrashReport {
         let e = &self.environment;
         s.push(',');
         s.push_str("\"environment\":{");
-        kv_str(&mut s, "verum_version", &e.verum_version, true);
+        kv_str(&mut s, "app_name", &e.app_name, true);
+        kv_str(&mut s, "verum_version", &e.verum_version, false);
         kv_str(&mut s, "build_profile", &e.build_profile, false);
         kv_str(&mut s, "build_target", &e.build_target, false);
         kv_str(&mut s, "build_host", &e.build_host, false);
@@ -366,6 +372,19 @@ impl CrashReport {
         s
     }
 
+    /// Title-case the first character of `app_name` for headers /
+    /// prose. The lowercase form (e.g. CLI prefix `verum:`) uses the
+    /// snapshot value verbatim — embedders that want a different
+    /// casing should set `app_name` accordingly.
+    fn app_name_titlecased(&self) -> String {
+        let raw = self.environment.app_name.as_str();
+        let mut chars = raw.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().chain(chars).collect(),
+            None => String::new(),
+        }
+    }
+
     /// Human-readable rendering for the `.log` sibling file and for the
     /// short summary printed on stderr at crash time.
     pub fn to_human(&self) -> String {
@@ -373,7 +392,8 @@ impl CrashReport {
         use std::fmt::Write as _;
         let _ = writeln!(
             out,
-            "=== Verum crash report ==========================================="
+            "=== {} crash report ===========================================",
+            self.app_name_titlecased()
         );
         let _ = writeln!(out, "Report ID:   {}", self.report_id);
         let _ = writeln!(
@@ -398,7 +418,8 @@ impl CrashReport {
         let e = &self.environment;
         let _ = writeln!(
             out,
-            "\nBuild:       verum {} ({}, {}, {}, git {} {})",
+            "\nBuild:       {} {} ({}, {}, {}, git {} {})",
+            e.app_name,
             e.verum_version,
             e.build_profile,
             e.build_target,
@@ -784,7 +805,8 @@ fn write_and_notify(report: &CrashReport) {
     let _ = writeln!(stderr);
     let _ = writeln!(
         stderr,
-        "verum: internal compiler error — a crash report has been saved."
+        "{}: internal compiler error — a crash report has been saved.",
+        s.config.app_name
     );
     match &report.kind {
         CrashKind::Panic => {
@@ -804,14 +826,23 @@ fn write_and_notify(report: &CrashReport) {
     if let Some(p) = &json_path {
         let _ = writeln!(stderr, "       {}", p.display());
     }
+    let app_titlecased = {
+        let mut chars = s.config.app_name.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+            None => String::new(),
+        }
+    };
     let _ = writeln!(
         stderr,
-        "\nThis is a bug in the Verum compiler. Please file an issue at:"
+        "\nThis is a bug in the {} compiler. Please file an issue at:",
+        app_titlecased
     );
     let _ = writeln!(stderr, "  {}", s.config.issue_tracker_url);
     let _ = writeln!(
         stderr,
-        "and attach the crash report above (run `verum diagnose bundle` to make a tarball)."
+        "and attach the crash report above (run `{} diagnose bundle` to make a tarball).",
+        s.config.app_name
     );
 
     // Short breadcrumb preview — often tells the reader *exactly* where
@@ -1138,6 +1169,7 @@ mod tests {
             breadcrumbs: vec![],
             context: CrashContext::default(),
             environment: EnvSnapshot {
+                app_name: "verum".into(),
                 verum_version: "0.1.0".into(),
                 build_profile: "release".into(),
                 build_target: "aarch64-apple-darwin".into(),
@@ -1182,6 +1214,7 @@ mod tests {
             breadcrumbs: vec![],
             context: CrashContext::default(),
             environment: EnvSnapshot {
+                app_name: "verum".into(),
                 verum_version: "0".into(),
                 build_profile: "x".into(),
                 build_target: "x".into(),
@@ -1218,5 +1251,94 @@ mod tests {
         // 2001-09-09T01:46:40 UTC.
         let s = format_timestamp(1_000_000_000 * 1000);
         assert_eq!(s, "2001-09-09T01-46-40");
+    }
+
+    fn make_minimal_report(app_name: &str) -> CrashReport {
+        CrashReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            report_id: "id".into(),
+            timestamp_ms: 1,
+            kind: CrashKind::Panic,
+            message: "boom".into(),
+            location: None,
+            backtrace: None,
+            thread_name: "t".into(),
+            breadcrumbs: vec![],
+            context: CrashContext::default(),
+            environment: EnvSnapshot {
+                app_name: app_name.into(),
+                verum_version: "0".into(),
+                build_profile: "x".into(),
+                build_target: "x".into(),
+                build_host: "x".into(),
+                build_rustc: "x".into(),
+                build_git_sha: "x".into(),
+                build_git_dirty: "x".into(),
+                build_timestamp: "0".into(),
+                os: "x".into(),
+                arch: "x".into(),
+                os_family: "x".into(),
+                cpu_cores: 1,
+                rust_backtrace_env: "".into(),
+                argv: vec![],
+                cwd: "".into(),
+                pid: 1,
+                env_vars: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn human_header_uses_titlecased_app_name() {
+        // Pin: header surfaces the configured app_name with a title-
+        // cased first letter so embedders that set `app_name = "myapp"`
+        // get `"=== Myapp crash report ==="` without needing to
+        // pre-capitalise the field.
+        let report = make_minimal_report("myapp");
+        let h = report.to_human();
+        assert!(
+            h.contains("=== Myapp crash report"),
+            "header must titlecase the app_name, got: {h}"
+        );
+    }
+
+    #[test]
+    fn human_build_line_uses_app_name_verbatim() {
+        // Pin: the Build line uses app_name verbatim (lowercased
+        // matches `verum --version` style); embedders set the casing
+        // they want via `CrashReporterConfig.app_name`.
+        let report = make_minimal_report("myapp");
+        let h = report.to_human();
+        assert!(
+            h.contains("Build:       myapp 0"),
+            "Build line must surface app_name verbatim, got: {h}"
+        );
+    }
+
+    #[test]
+    fn json_envelope_emits_app_name_in_environment() {
+        // Pin: the JSON sidecar carries app_name in `environment` so
+        // a downstream collector can route reports per-tool without
+        // grepping the human format.
+        let report = make_minimal_report("myapp");
+        let s = report.to_json();
+        assert!(
+            s.contains("\"app_name\":\"myapp\""),
+            "JSON must carry app_name in environment block, got: {s}"
+        );
+    }
+
+    #[test]
+    fn default_app_name_keeps_verum_branding() {
+        // Pin: with `CrashReporterConfig::default()`, app_name flows
+        // through as `"verum"`, the header titlecases to `"Verum"`,
+        // and existing tooling that greps `"Verum crash report"` keeps
+        // working.
+        let report = make_minimal_report(&CrashReporterConfig::default().app_name);
+        let h = report.to_human();
+        assert!(
+            h.contains("=== Verum crash report"),
+            "default app_name = \"verum\" must render \"=== Verum crash report\", got: {h}",
+        );
     }
 }
