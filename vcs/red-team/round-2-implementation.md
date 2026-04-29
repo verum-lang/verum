@@ -606,9 +606,56 @@ a final generation count below 40,000.
 hazard-pointer protocol. Single-reader audit confirms protocol correctness;
 multi-reader stress test pending.
 
-### 7.3 LocalHeap thread-affinity violation
+### 7.3 LocalHeap thread-affinity violation — DEFENSE CONFIRMED 2026-04-29
 
-**Status:** PENDING — needs cross-thread-access guardrail test.
+**Status:** DEFENSE CONFIRMED — structural + behavioural defenses
+both pinned. The original PENDING flag noted the absence of a
+cross-thread-access guardrail test; this closes that gap.
+
+**Adversarial scenario:** a malicious / pathological caller tries
+to share an `InterpreterState` (or its owned `Heap`) across
+threads. If this succeeded, the bump-allocator + object-table
+consistency invariants in `interpreter::heap` would be violated
+by concurrent allocation, and the `CURRENT_INTERPRETER`
+thread-local pointer in `interpreter::state` would alias
+inconsistent state.
+
+**Structural defense (compile time):**
+
+1. `Heap` owns `Vec<NonNull<ObjectHeader>>`. `NonNull<T>` is
+   `!Send + !Sync` by default. Rust's type system rejects
+   cross-thread sharing of `InterpreterState` at compile time —
+   no runtime check needed because the unsafe program never
+   compiles.
+2. `CURRENT_INTERPRETER: thread_local! { Option<*mut
+   InterpreterState> }` binds the active state pointer
+   per-thread. A spawned thread starts with `None`; no risk of
+   inheriting a stale pointer to another thread's state.
+
+**Behavioural defense (runtime):**
+
+The `VbcModule` (immutable bytecode) is held behind `Arc` and
+shared across threads; the per-thread `InterpreterState` owns
+the heap, registers, call stack, etc. Per-thread isolation
+falls out automatically from the type-system constraints.
+
+**Guardrail (added 2026-04-29):**
+`crates/verum_vbc/tests/interpreter_thread_affinity.rs` —
+4 tests pin the behavioural side:
+
+- `per_thread_interpreter_construct_drop_no_panic` — 8 threads
+  each construct + drop their own `InterpreterState` from a
+  shared `Arc<VbcModule>`; no panic, no deadlock.
+- `per_thread_interpreters_have_independent_heaps` — every
+  thread's heap starts at zero allocations regardless of
+  scheduling order; no cross-pollination.
+- `per_thread_interpreter_with_distinct_configs` — 4 threads
+  each set distinct `max_instructions` budgets and observe
+  their own (not a sibling's) value, demonstrating the config
+  field is owned by state, not a thread-local global.
+- `module_is_shareable_across_threads` — the `Arc<VbcModule>`
+  IS `Send + Sync` (architectural complement: code is shared,
+  state is not), pinned via a `Send + Sync` trait-bound check.
 
 ---
 
@@ -847,7 +894,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 6.3 Stmt refinement | **DEFENSE CONFIRMED** | recheck_function walks let-bindings + requires/ensures (2026-04-28) |
 | 7.1 Gen counter race | **DEFENSE CONFIRMED** | 8-thread × 5K stress test (2026-04-28) |
 | 7.2 Hazard reclamation | PARTIAL | concurrent stress |
-| 7.3 LocalHeap affinity | PENDING | cross-thread test |
+| 7.3 LocalHeap affinity | **DEFENSE CONFIRMED** | structural (NonNull-is-!Send) + 4-test runtime stress (2026-04-29) |
 | 8.1 LSP fuzz | **DEFENSE CONFIRMED** | 16 adversarial-input tests + 2 real panic paths closed (2026-04-29) |
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
 | 8.3 vtest recovery | PARTIAL | edge cases |
