@@ -339,9 +339,20 @@ impl ParallelSolver {
             self.generate_cubes();
         }
 
-        // Create communication channels
+        // Create communication channels.
+        //
+        // `enable_sharing` gates lemma exchange in addition to
+        // `enable_lemma_exchange`: lemma exchange is the concrete
+        // mechanism by which workers share intermediate results
+        // (learned clauses), so disabling sharing must also
+        // disable the exchange channel even when the more
+        // specific knob is on. This closes the inert-defense
+        // pattern around `enable_sharing`: without this gate the
+        // field had no observable effect.
         let (result_tx, result_rx) = bounded(self.config.num_workers);
-        let (lemma_tx, lemma_rx) = if self.config.enable_lemma_exchange {
+        let sharing_active =
+            self.config.enable_sharing && self.config.enable_lemma_exchange;
+        let (lemma_tx, lemma_rx) = if sharing_active {
             let (tx, rx) = unbounded();
             (Maybe::Some(tx), Maybe::Some(rx))
         } else {
@@ -351,8 +362,9 @@ impl ParallelSolver {
         // Spawn workers
         let num_workers = self.spawn_workers(result_tx, lemma_tx.clone());
 
-        // Start lemma exchange thread if enabled
-        let lemma_thread = if self.config.enable_lemma_exchange {
+        // Start lemma exchange thread when sharing is active
+        // (both `enable_sharing` and `enable_lemma_exchange` on).
+        let lemma_thread = if sharing_active {
             if let Maybe::Some(rx) = lemma_rx {
                 let tx_clone = lemma_tx.clone();
                 let config = self.config.clone();
