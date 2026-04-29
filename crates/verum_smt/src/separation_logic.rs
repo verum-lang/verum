@@ -1072,6 +1072,45 @@ impl UnfoldingState {
         current < max_depth
     }
 
+    /// Check if we can unfold a list-segment predicate further,
+    /// using the config's `max_lseg_depth` as the cap. Closes the
+    /// inert-defense pattern around `UnfoldingConfig.max_lseg_depth`:
+    /// pre-fix the field was carried on the config but no consumer
+    /// read it, so the caller had to know the right limit and pass
+    /// it manually to `can_unfold`. Now embedders just call this
+    /// method; the predicate-shape-specific cap is consulted at the
+    /// only producer site.
+    pub fn can_unfold_lseg(&self, predicate: &str) -> bool {
+        self.can_unfold(predicate, self.config.max_lseg_depth)
+    }
+
+    /// Check if we can unfold a tree predicate further, using the
+    /// config's `max_tree_depth` as the cap. Sibling to
+    /// `can_unfold_lseg` — closes the inert-defense pattern around
+    /// `UnfoldingConfig.max_tree_depth`.
+    pub fn can_unfold_tree(&self, predicate: &str) -> bool {
+        self.can_unfold(predicate, self.config.max_tree_depth)
+    }
+
+    /// Whether lazy unfolding is enabled at the config layer.
+    /// Embedders that have a choice between eager (unfold every
+    /// predicate at entailment-check entry) vs lazy (unfold only
+    /// when the goal forces it) consult this flag. Closes the
+    /// inert-defense pattern around `UnfoldingConfig.lazy_unfolding`.
+    pub fn lazy_unfolding_enabled(&self) -> bool {
+        self.config.lazy_unfolding
+    }
+
+    /// Whether fold/unfold lemma generation is enabled. When
+    /// `false`, callers should skip the lemma-generation paths to
+    /// save the formatting + bookkeeping cost — the boolean answer
+    /// is the same, just without the proof-witness annotations.
+    /// Closes the inert-defense pattern around
+    /// `UnfoldingConfig.generate_lemmas`.
+    pub fn lemma_generation_enabled(&self) -> bool {
+        self.config.generate_lemmas
+    }
+
     /// Increment the unfolding depth for a predicate
     pub fn increment_depth(&mut self, predicate: &str) {
         let key = Text::from(predicate);
@@ -1079,9 +1118,15 @@ impl UnfoldingState {
         self.depths.insert(key, current + 1);
     }
 
-    /// Add a generated lemma
+    /// Add a generated lemma. Only stores the lemma when
+    /// `lemma_generation_enabled()` returns true; embedders that
+    /// want the boolean answer without the witness annotations
+    /// pay zero allocation cost on this path. Pre-wire the call
+    /// always pushed regardless.
     pub fn add_lemma(&mut self, lemma: SepAssertion) {
-        self.lemmas.push(lemma);
+        if self.config.generate_lemmas {
+            self.lemmas.push(lemma);
+        }
     }
 }
 
