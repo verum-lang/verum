@@ -73,6 +73,9 @@ pub mod bounds_elimination;
 pub mod cbgr_elimination;
 pub mod context;
 pub mod contract;
+/// 13-strategy verification ladder dispatcher.  Foundation-neutral
+/// trait + reference V0 dispatcher + ν-monotonicity invariant.
+pub mod ladder_dispatch;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
