@@ -284,11 +284,19 @@ impl IncrementalDiagnosticsProvider {
         } else if !text.ends_with(';') && self.looks_like_statement(node) {
             ("Missing semicolon".to_string(), "E0020".to_string())
         } else {
-            // Generic syntax error
-            let preview = if text.len() > 20 {
-                format!("{}...", &text[..20])
+            // Generic syntax error.  Truncate the preview by *characters*,
+            // not by raw bytes — naive `&text[..20]` panics with
+            // "byte index 20 is not a char boundary" when the source
+            // contains multi-byte UTF-8 (combining marks, emoji, CJK
+            // identifiers, non-ASCII string literals).  Take the first
+            // 20 chars and append an ellipsis only if more content
+            // followed.
+            let text_string = text.to_string();
+            let preview: String = text_string.chars().take(20).collect();
+            let preview = if preview.chars().count() < text_string.chars().count() {
+                format!("{}...", preview)
             } else {
-                text.to_string()
+                preview
             };
             (format!("Syntax error near '{}'", preview), "E0099".to_string())
         };
