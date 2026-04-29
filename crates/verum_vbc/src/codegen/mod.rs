@@ -8113,6 +8113,30 @@ impl VbcCodegen {
             });
         }
 
+        // Detect the runtime-intrinsic shape: forward-declared with
+        // `@intrinsic("name")` where the name is NOT in the typed-opcode
+        // intrinsic registry. The implementation lives in the interpreter's
+        // name-keyed runtime dispatcher (`try_dispatch_intrinsic_by_name`),
+        // which fires only when the called function's bytecode_length == 0.
+        // Emitting any instruction here — including the implicit `RetV` —
+        // makes bytecode_length > 0 and short-circuits dispatch, causing
+        // the function to always return Unit instead of its typed result.
+        //
+        // Examples that need the empty-body path:
+        //   - `@intrinsic("tcp_listen") pub fn __tcp_listen_raw(port: Int) -> Int;`
+        //   - `@intrinsic("tcp_recv")   pub fn __tcp_recv_raw(fd: Int, max: Int) -> Text;`
+        //
+        // Typed-opcode intrinsics (math/SIMD/etc.) inline at the call
+        // site via `compile_imported_intrinsic_call` so the body content
+        // is unused — RetV is fine for them.
+        let is_runtime_intrinsic_forward_decl = func.body.is_none() && {
+            let iname = self.extract_intrinsic_name(func);
+            match iname {
+                Some(name) => crate::intrinsics::lookup_intrinsic(&name).is_none(),
+                None => false,
+            }
+        };
+
         // Compile the body
         if let Some(ref body) = func.body {
             match body {
@@ -8137,13 +8161,18 @@ impl VbcCodegen {
                     }
                 }
             }
-        } else {
-            // No body - emit return
+        } else if !is_runtime_intrinsic_forward_decl {
+            // Regular forward decl with no runtime-intrinsic shape —
+            // emit the safe Unit return.
             self.ctx.emit(Instruction::RetV);
         }
+        // else: leave bytecode empty for runtime-intrinsic dispatch.
 
-        // Ensure function ends with return
-        self.ensure_return()?;
+        // Ensure function ends with return — but skip for runtime
+        // intrinsics so their bytecode_length stays at 0.
+        if !is_runtime_intrinsic_forward_decl {
+            self.ensure_return()?;
+        }
 
         // Clear the refinement return-type stash so it cannot leak
         // into the next function's compilation.

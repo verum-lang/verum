@@ -1,0 +1,73 @@
+// @test: run
+// @expected-stdout: connect ok\nsent\nreceived: pong
+// @tier: 0
+// @level: L2
+// @timeout: 30000
+// @tags: net, tcp, runtime, loopback, intrinsic
+// @description: Single-process TCP loopback round-trip. The first
+// listener thread is implicit through the OS — we bind, write to a
+// peer that the OS pairs (loopback), read it back. Validates that
+// the std-net-backed TCP intrinsics in the Tier-0 interpreter
+// transit real bytes.
+//
+// Loopback model: bind ephemeral, then connect immediately to the
+// same fixed port the OS reports. Since the test runs single-threaded
+// without spawn, we use a fixed port and rely on TCP's listen
+// queue: connect blocks briefly, the kernel completes the
+// handshake, accept then drains it. Lightweight and deterministic
+// enough for CI.
+//
+// We test the simpler write+drop pattern: bind -> connect (kernel
+// pairs locally) -> write from server side after accept -> read
+// from client side. This covers send/recv/connect/listen/accept/close
+// in one verified roundtrip.
+
+mount core.sys.raw.{
+    __tcp_listen_raw, __tcp_accept_raw,
+    __tcp_connect_raw, __tcp_send_raw, __tcp_recv_raw,
+    __tcp_close_raw,
+};
+
+fn main() {
+    // Use a high port unlikely to clash on most CI runners. If it does,
+    // the test would surface as 'connect failed' which is recoverable.
+    let port: Int = 57821;
+
+    let listen_fd = __tcp_listen_raw(port);
+    if listen_fd <= 0 {
+        print("listen failed");
+        return;
+    }
+
+    // Connect to ourselves before accept — the kernel will queue the
+    // SYN and accept will hand it to us. No threading required.
+    let client_fd = __tcp_connect_raw("127.0.0.1", port);
+    if client_fd <= 0 {
+        print("connect failed");
+        let _ = __tcp_close_raw(listen_fd);
+        return;
+    }
+    print("connect ok");
+
+    let server_fd = __tcp_accept_raw(listen_fd);
+    if server_fd <= 0 {
+        print("accept failed");
+        let _ = __tcp_close_raw(client_fd);
+        let _ = __tcp_close_raw(listen_fd);
+        return;
+    }
+
+    let n = __tcp_send_raw(server_fd, "pong");
+    if n <= 0 {
+        print("send failed");
+    } else {
+        print("sent");
+    }
+
+    let body = __tcp_recv_raw(client_fd, 64);
+    print(f"received: {body}");
+
+    let _ = __tcp_close_raw(server_fd);
+    let _ = __tcp_close_raw(client_fd);
+    let _ = __tcp_close_raw(listen_fd);
+}

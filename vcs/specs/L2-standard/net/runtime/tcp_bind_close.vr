@@ -1,0 +1,29 @@
+// @test: run
+// @expected-stdout: bind ok\nclose ok
+// @tier: 0
+// @level: L2
+// @tags: net, tcp, runtime, intrinsic
+// @description: Tier-0 runtime smoke — bind a TCP listener on an
+// ephemeral port, get a positive synthetic fd back, close it.
+// Exercises the real std-net-backed __tcp_listen_raw / __tcp_close_raw
+// intrinsics through the VBC interpreter.
+
+mount core.sys.raw.{__tcp_listen_raw, __tcp_close_raw};
+
+fn main() {
+    // Port 0 = OS picks ephemeral port.
+    let fd = __tcp_listen_raw(0);
+    if fd > 0 {
+        print("bind ok");
+    } else {
+        print("bind failed");
+        return;
+    }
+
+    let rc = __tcp_close_raw(fd);
+    if rc == 0 {
+        print("close ok");
+    } else {
+        print("close failed");
+    }
+}
