@@ -20,14 +20,14 @@ fn exercise_bootstrap() {
     let _: Result<ShellContext, ShellError> = bootstrap(&source);
 }
 
-async fn exercise_main_runner() {
+async fn exercise_main_runner() using [ShellContext] {
     // Type-check the call shape only — script_main never returns
     if false {
         script_main(|| async { Ok(()) }).await;
     }
 }
 
-async fn main() {
+async fn main() using [ShellContext] {
     exercise_args();
     exercise_bootstrap();
     exercise_main_runner().await;

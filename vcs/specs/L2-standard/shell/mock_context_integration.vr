@@ -22,7 +22,7 @@ async fn deploy(version: &Text) -> Result<(), ShellError>
     Ok(())
 }
 
-async fn exercise_mock_dispatch() -> Result<(), ShellError> {
+async fn exercise_mock_dispatch() -> Result<(), ShellError> using [ShellContext] {
     let mock_ctx = ShellContext.mock([
         MockResponse.success("kubectl apply".into(), "deployment.apps/api created".into()),
         MockResponse.success("kubectl rollout".into(), "successfully rolled out".into()),
@@ -31,7 +31,7 @@ async fn exercise_mock_dispatch() -> Result<(), ShellError> {
     deploy(&"1.2.3".into()).await
 }
 
-async fn exercise_failure_path() -> Result<(), ShellError> {
+async fn exercise_failure_path() -> Result<(), ShellError> using [ShellContext] {
     let mock_ctx = ShellContext.mock([
         MockResponse.failure(
             "kubectl apply".into(),
@@ -46,7 +46,7 @@ async fn exercise_failure_path() -> Result<(), ShellError> {
     Ok(())
 }
 
-async fn main() {
+async fn main() using [ShellContext] {
     let _ = exercise_mock_dispatch().await;
     let _ = exercise_failure_path().await;
 }

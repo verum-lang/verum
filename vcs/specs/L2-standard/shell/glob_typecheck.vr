@@ -10,7 +10,7 @@ mount core.shell.context.{ShellContext};
 mount core.shell.result.{ShellError};
 mount core.io.path.{PathBuf};
 
-provide ShellContext = ShellContext.for_tests();
+
 
 fn exercise_glob_basic() {
     let _: Result<List<PathBuf>, ShellError> = glob(&"src/**/*.vr".into());

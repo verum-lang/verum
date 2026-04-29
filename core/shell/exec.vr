@@ -30,7 +30,7 @@
 //
 // =============================================================================
 
-module core.shell.exec;
+module exec;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone};

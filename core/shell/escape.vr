@@ -29,7 +29,7 @@
 //
 // =============================================================================
 
-module core.shell.escape;
+module escape;
 
 mount core.{Maybe, Result, List, Text, Byte, Char, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Eq};

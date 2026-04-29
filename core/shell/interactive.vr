@@ -12,7 +12,7 @@
 //
 // =============================================================================
 
-module core.shell.interactive;
+module interactive;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.base.protocols.{Display};

@@ -12,7 +12,7 @@
 //
 // =============================================================================
 
-module core.shell.text_utils;
+module text_utils;
 
 mount core.{Maybe, Result, List, Text, Bool, Int};
 mount core.text.regex.{Regex, RegexError, Match};

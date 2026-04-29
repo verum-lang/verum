@@ -48,7 +48,7 @@ fn exercise_progress() {
     p.done("ok".into());
 }
 
-async fn exercise_spinner() {
+async fn exercise_spinner() using [ShellContext] {
     let mut s = Spinner.new("Working".into());
     s.start().await;
     s.stop("done".into()).await;
@@ -63,7 +63,7 @@ fn exercise_signal() {
     let _: Result<SignalGuard, SignalError> = SignalGuard.install(Signal.Int, || {});
 }
 
-async fn main() {
+async fn main() using [ShellContext] {
     exercise_input_signatures();
     exercise_select();
     exercise_progress();

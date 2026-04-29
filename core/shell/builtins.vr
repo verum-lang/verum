@@ -14,7 +14,7 @@
 //
 // =============================================================================
 
-module core.shell.builtins;
+module builtins;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.env.{var_opt as env_var_opt, temp_dir as host_temp_dir, args, exit};

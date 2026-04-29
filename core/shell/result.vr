@@ -21,14 +21,17 @@
 //
 // =============================================================================
 
-module core.shell.result;
+module result;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.protocols.{Display, Debug, Clone, Eq};
 mount core.base.iterator.{Iterator, IntoIterator};
 mount core.text.format.{Formatter, FormatError};
 mount core.text.text.{Text as TextOps};
-mount core.io.process.{ExitStatus};
+// Re-exported so user tests / scripts can `mount core.shell.result.{ExitStatus}`
+// without an explicit `mount core.io.process` (the latter is an internal
+// path that the user-mode module-resolver doesn't always trace).
+public mount core.io.process.{ExitStatus};
 mount core.time.duration.{Duration};
 
 // =============================================================================

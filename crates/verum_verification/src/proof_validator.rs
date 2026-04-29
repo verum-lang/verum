@@ -1248,6 +1248,16 @@ impl HypothesisContext {
             Maybe::None
         }
     }
+
+    /// Iterate over every (name, proposition) currently in scope across
+    /// all enclosing scopes. Used by soundness checks that need to
+    /// recognise a target proposition as available, regardless of which
+    /// name it was bound to.
+    pub fn iter_propositions(&self) -> impl Iterator<Item = (&Text, &Expr)> + '_ {
+        self.scopes
+            .iter()
+            .flat_map(|scope| scope.hypotheses.iter())
+    }
 }
 
 impl Default for HypothesisContext {
@@ -2176,23 +2186,31 @@ impl ProofValidator {
             // Apply bindings to RHS and check it matches target
             let expected_target = self.apply_bindings(&rule.rhs, &bindings);
             if self.expr_eq(&expected_target, target) {
-                // Validate conditions if any
+                // Discharge each condition rather than trust it. A
+                // conditional rewrite is only sound when its conditions
+                // actually hold; previously this loop discarded the
+                // instantiated condition and accepted the rewrite
+                // unconditionally.
                 for condition in &rule.conditions {
                     let instantiated_cond = self.apply_bindings(condition, &bindings);
-                    // In a full implementation, verify condition holds
-                    // For now, we trust the condition is satisfied
-                    let _ = instantiated_cond;
+                    self.discharge_rewrite_condition(&rule.name, &instantiated_cond)?;
                 }
                 return Ok(());
             }
         }
 
-        // Try reverse direction if bidirectional
+        // Try reverse direction if bidirectional. Reverse rewrites must
+        // also discharge their conditions.
         if rule.bidirectional {
             let mut reverse_bindings = Map::new();
             if self.pattern_match(&rule.rhs, source, &mut reverse_bindings) {
                 let expected_target = self.apply_bindings(&rule.lhs, &reverse_bindings);
                 if self.expr_eq(&expected_target, target) {
+                    for condition in &rule.conditions {
+                        let instantiated_cond =
+                            self.apply_bindings(condition, &reverse_bindings);
+                        self.discharge_rewrite_condition(&rule.name, &instantiated_cond)?;
+                    }
                     return Ok(());
                 }
             }
@@ -2204,6 +2222,83 @@ impl ProofValidator {
                 rule.name,
                 self.expr_to_text(source),
                 self.expr_to_text(target)
+            )
+            .into(),
+        })
+    }
+
+    /// Discharge a single instantiated rewrite condition.
+    ///
+    /// Soundness gate for conditional rewrites — a conditional rule is
+    /// only valid when its conditions actually hold at the rewrite site.
+    /// We accept exactly the cases that can be checked syntactically
+    /// against state already in the validator (axioms, hypotheses,
+    /// trivial truths). Anything beyond that returns an error so the
+    /// proof author can either register an axiom, introduce a
+    /// hypothesis, or use a different proof tactic.
+    ///
+    /// Pre-fix this was an empty trust-the-user path that accepted any
+    /// condition without checking — a soundness leak: a malformed proof
+    /// could apply `safe_div(a, b) → a/b` claiming `b ≠ 0` while it
+    /// actually doesn't hold.
+    ///
+    /// Accepted shapes:
+    /// 1. The literal `true`.
+    /// 2. Reflexive equality (`x == x` for any x).
+    /// 3. The condition matches a registered axiom's formula.
+    /// 4. The condition matches a hypothesis currently in scope.
+    fn discharge_rewrite_condition(
+        &self,
+        rule_name: &Text,
+        condition: &Expr,
+    ) -> ValidationResult<()> {
+        // 1. Literal `true`.
+        if let ExprKind::Literal(lit) = &condition.kind {
+            if matches!(lit.kind, verum_ast::LiteralKind::Bool(true)) {
+                return Ok(());
+            }
+            // Literal `false` is decisively unprovable.
+            if matches!(lit.kind, verum_ast::LiteralKind::Bool(false)) {
+                return Err(ValidationError::RewriteError {
+                    message: format!(
+                        "rewrite rule '{}' has condition that is literally false",
+                        rule_name
+                    )
+                    .into(),
+                });
+            }
+        }
+        // 2. Reflexive equality `x == x`.
+        if let ExprKind::Binary {
+            op: BinOp::Eq,
+            left,
+            right,
+        } = &condition.kind
+        {
+            if self.expr_eq(left, right) {
+                return Ok(());
+            }
+        }
+        // 3. Axiom match.
+        for (_axiom_name, axiom_formula) in self.axioms.iter() {
+            if self.expr_eq(axiom_formula, condition) {
+                return Ok(());
+            }
+        }
+        // 4. Hypothesis match. `HypothesisContext.contains` is name-keyed;
+        //    here we need to recognise the proposition regardless of
+        //    which name it was bound to, so iterate across scopes.
+        for (_name, prop) in self.hypotheses.iter_propositions() {
+            if self.expr_eq(prop, condition) {
+                return Ok(());
+            }
+        }
+
+        Err(ValidationError::RewriteError {
+            message: format!(
+                "rewrite rule '{}' has unverified condition '{}' — register it as an axiom or introduce it as a hypothesis before rewriting",
+                rule_name,
+                self.expr_to_text(condition)
             )
             .into(),
         })
