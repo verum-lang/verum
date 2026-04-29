@@ -898,6 +898,25 @@ implement Clone for RecvError {
     }
 }
 
+fn try_recv_error_tag(e: &TryRecvError) -> Int {
+    match e {
+        Empty        => 0,
+        Disconnected => 1,
+    }
+}
+
+implement Eq for TryRecvError {
+    fn eq(&self, other: &TryRecvError) -> Bool {
+        try_recv_error_tag(self) == try_recv_error_tag(other)
+    }
+}
+
+implement Eq for RecvError {
+    fn eq(&self, _other: &RecvError) -> Bool {
+        true
+    }
+}
+
 // =============================================================================
 // Channel Constructors
 // =============================================================================

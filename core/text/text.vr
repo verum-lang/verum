@@ -3775,6 +3775,12 @@ implement Display for Utf8Error {
     }
 }
 
+implement Eq for Utf8Error {
+    fn eq(&self, other: &Utf8Error) -> Bool {
+        self.valid_up_to == other.valid_up_to
+    }
+}
+
 /// UTF-16 decoding error.
 ///
 /// Indicates an invalid surrogate pair at the given index in the input slice.
@@ -3792,6 +3798,12 @@ implement Display for Utf16Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("invalid utf-16: unpaired surrogate at index ")?;
         f.write_str(&self.index.to_text())
+    }
+}
+
+implement Eq for Utf16Error {
+    fn eq(&self, other: &Utf16Error) -> Bool {
+        self.index == other.index
     }
 }
 
@@ -3816,6 +3828,12 @@ implement Debug for ParseError {
 implement Display for ParseError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.message)
+    }
+}
+
+implement Eq for ParseError {
+    fn eq(&self, other: &ParseError) -> Bool {
+        self.message == other.message
     }
 }
 

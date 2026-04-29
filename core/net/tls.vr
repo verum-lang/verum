@@ -996,6 +996,34 @@ implement Describable for LegacyTlsError {
     }
 }
 
+implement Eq for LegacyTlsError {
+    fn eq(&self, other: &LegacyTlsError) -> Bool {
+        match (self, other) {
+            (LegacyTlsError.HandshakeFailed(a),
+             LegacyTlsError.HandshakeFailed(b)) => a == b,
+            (LegacyTlsError.InvalidCertificate(a),
+             LegacyTlsError.InvalidCertificate(b)) => a == b,
+            (LegacyTlsError.InvalidKey(a),
+             LegacyTlsError.InvalidKey(b)) => a == b,
+            (LegacyTlsError.CertificateVerificationFailed(a),
+             LegacyTlsError.CertificateVerificationFailed(b)) => a == b,
+            (LegacyTlsError.CertificateExpired,
+             LegacyTlsError.CertificateExpired) => true,
+            (LegacyTlsError.HostnameMismatch(a),
+             LegacyTlsError.HostnameMismatch(b)) => a == b,
+            (LegacyTlsError.AlertReceived(ca, ma),
+             LegacyTlsError.AlertReceived(cb, mb)) => ca == cb && ma == mb,
+            (LegacyTlsError.IoError(a),
+             LegacyTlsError.IoError(b)) => a == b,
+            (LegacyTlsError.UnsupportedVersion(a),
+             LegacyTlsError.UnsupportedVersion(b)) => a == b,
+            (LegacyTlsError.NoCipherSuites,
+             LegacyTlsError.NoCipherSuites) => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Helper: base64 decode (minimal, for PEM parsing)
 // =============================================================================

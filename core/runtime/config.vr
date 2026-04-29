@@ -319,6 +319,34 @@ implement Display for RuntimeIoError {
     }
 }
 
+/// Tag for `RuntimeIoError` cross-variant comparison: 0 = WouldBlock,
+/// 1 = Interrupted, 2 = InvalidFd, 3 = PermissionDenied,
+/// 4 = ConnectionRefused, 5 = ConnectionReset, 6 = NotConnected,
+/// 7 = TimedOut, 8 = Other.
+fn runtime_io_error_tag(e: &RuntimeIoError) -> Int32 {
+    match e {
+        WouldBlock        => 0,
+        Interrupted       => 1,
+        InvalidFd         => 2,
+        PermissionDenied  => 3,
+        ConnectionRefused => 4,
+        ConnectionReset   => 5,
+        NotConnected      => 6,
+        TimedOut          => 7,
+        Other(_)          => 8,
+    }
+}
+
+implement Eq for RuntimeIoError {
+    fn eq(&self, other: &RuntimeIoError) -> Bool {
+        match (self, other) {
+            (RuntimeIoError.Other(a), RuntimeIoError.Other(b)) => a == b,
+            _ => runtime_io_error_tag(self) == runtime_io_error_tag(other)
+                 && runtime_io_error_tag(self) != 8,
+        }
+    }
+}
+
 /// Noop I/O driver for embedded
 public type NoopDriver is ();
 

@@ -1201,6 +1201,12 @@ implement Display for ExecutorTimeoutError {
     }
 }
 
+implement Eq for ExecutorTimeoutError {
+    fn eq(&self, _other: &ExecutorTimeoutError) -> Bool {
+        true
+    }
+}
+
 /// Future that wraps another future with a timeout.
 public type ExecutorTimeout<F: Future> is {
     future: F,

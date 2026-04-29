@@ -569,3 +569,15 @@ implement Describable for SignalError {
         }
     }
 }
+
+implement Eq for SignalError {
+    fn eq(&self, other: &SignalError) -> Bool {
+        match (self, other) {
+            (SignalError.Uncatchable(a),       SignalError.Uncatchable(b))       => a == b,
+            (SignalError.InvalidSignal(a),     SignalError.InvalidSignal(b))     => a == b,
+            (SignalError.RegistrationFailed(a),SignalError.RegistrationFailed(b))=> a == b,
+            (SignalError.RaiseFailed(a),       SignalError.RaiseFailed(b))       => a == b,
+            _ => false,
+        }
+    }
+}
