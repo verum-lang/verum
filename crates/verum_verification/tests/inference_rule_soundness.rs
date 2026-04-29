@@ -149,3 +149,79 @@ fn registered_inference_rule_rejects_arity_mismatch() {
         msg
     );
 }
+
+// ============================================================================
+// Quantifier-rule soundness gates (forall_elim / exists_intro)
+//
+// Pre-fix `apply_inference_rule` returned `Ok(expected.clone())` for both
+// forall_elim and exists_intro WITHOUT verifying the premise / expected
+// was actually quantified. Same trust-the-user soundness leak as the
+// catch-all arm fixed in 8429bd4e — `forall_elim` called on a premise
+// that ISN'T a Forall would silently validate any expected.
+// ============================================================================
+
+#[test]
+fn forall_elim_rejects_non_forall_premise() {
+    // Pin: forall_elim called with a non-quantified premise (here: a
+    // bare bool literal `true`) MUST be rejected. Pre-fix the rule
+    // accepted any premise + any expected as if the elimination
+    // succeeded.
+    let mut validator = ProofValidator::new();
+    validator.register_axiom("p_holds", bool_lit(true));
+
+    let mut premises: List<Heap<ProofTerm>> = List::new();
+    premises.push(axiom_premise());
+
+    let proof = ProofTerm::Apply {
+        rule: "forall_elim".into(),
+        premises,
+    };
+
+    // Claim a wholly unrelated conclusion. The pre-fix path would
+    // accept this trivially.
+    let claimed_conclusion = bool_lit(false);
+
+    let result = validator.validate(&proof, &claimed_conclusion);
+    assert!(
+        result.is_err(),
+        "forall_elim must reject non-quantified premise — premise is bool literal, not Forall"
+    );
+    let msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        msg.contains("forall_elim requires a universally-quantified premise"),
+        "error must explain the soundness gate. got: {}",
+        msg
+    );
+}
+
+#[test]
+fn exists_intro_rejects_non_exists_expected() {
+    // Symmetric pin for exists_intro: when the expected conclusion
+    // isn't an existential, the rule must reject. Pre-fix any premise
+    // would validate any expected.
+    let mut validator = ProofValidator::new();
+    validator.register_axiom("p_holds", bool_lit(true));
+
+    let mut premises: List<Heap<ProofTerm>> = List::new();
+    premises.push(axiom_premise());
+
+    let proof = ProofTerm::Apply {
+        rule: "exists_intro".into(),
+        premises,
+    };
+
+    // Claim a non-existential expected — bool literal.
+    let claimed_conclusion = bool_lit(false);
+
+    let result = validator.validate(&proof, &claimed_conclusion);
+    assert!(
+        result.is_err(),
+        "exists_intro must reject non-existential expected"
+    );
+    let msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        msg.contains("exists_intro requires an existentially-quantified expected"),
+        "error must explain the soundness gate. got: {}",
+        msg
+    );
+}
