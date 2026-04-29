@@ -308,6 +308,39 @@ pub struct LadderObligation {
     ///     (Coherent strict).
     #[serde(default)]
     pub epsilon_claim: Option<EpsilonClaim>,
+    /// **Pre-computed kernel re-check result** (#118 hardening).
+    /// When `Some(Ok(()))`, the caller has already run
+    /// `KernelRecheck::recheck_theorem` (or equivalent) against
+    /// the elaborated declaration and the kernel admitted it.
+    /// `Proof`-strategy obligations carrying this flag close
+    /// directly with a `kernel-recheck-theorem` witness, without
+    /// requiring a typed `core_term` payload.
+    /// `Some(Err)` records a kernel-rejection that the dispatcher
+    /// surfaces as `Open` instead of falling through.  `None` means
+    /// no recheck was performed — caller's other paths (typed
+    /// CoreTerm, SMT, trivial-decider) take over.
+    #[serde(default)]
+    pub kernel_recheck_outcome: Option<KernelRecheckOutcome>,
+}
+
+/// Pre-computed outcome of a `KernelRecheck::recheck_theorem` call,
+/// projected to a serde-friendly shape.  Drives the `Proof`
+/// strategy when the elaboration phase has already attested the
+/// declaration, sparing the dispatcher a redundant kernel call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KernelRecheckOutcome {
+    /// `recheck_theorem` returned an empty error list — kernel admits.
+    Admitted {
+        /// Diagnostic context (theorem name, file location, …).
+        context: Text,
+    },
+    /// `recheck_theorem` flagged at least one K-rule violation.
+    Rejected {
+        /// One representative rejection reason for the verdict.
+        reason: Text,
+        /// Total error count from the recheck.
+        error_count: usize,
+    },
 }
 
 // =============================================================================
@@ -380,6 +413,7 @@ impl PartialEq for LadderObligation {
             && self.smt_assertions == other.smt_assertions
             && self.ast_assertions == other.ast_assertions
             && self.epsilon_claim == other.epsilon_claim
+            && self.kernel_recheck_outcome == other.kernel_recheck_outcome
         // axiom_registry intentionally excluded — Arc identity is
         // not part of the obligation's structural identity.
     }
@@ -404,7 +438,17 @@ impl LadderObligation {
             smt_assertions: Vec::new(),
             ast_assertions: Vec::new(),
             epsilon_claim: None,
+            kernel_recheck_outcome: None,
         }
+    }
+
+    /// Attach a pre-computed kernel re-check outcome.  When
+    /// `Admitted`, the `Proof` strategy closes directly without
+    /// needing a `core_term` payload.  When `Rejected`, the
+    /// strategy returns `Open` with the recorded reason.
+    pub fn with_kernel_recheck_outcome(mut self, outcome: KernelRecheckOutcome) -> Self {
+        self.kernel_recheck_outcome = Some(outcome);
+        self
     }
 
     /// Attach a typed ε-side coherence claim.  Required by the
@@ -713,6 +757,36 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::Proof => {
+                // #118 hardening — pre-computed kernel re-check
+                // takes precedence: when the elaboration phase has
+                // already run `KernelRecheck::recheck_theorem` and
+                // attached the outcome, we close (or reject) on
+                // that attestation directly.
+                if let Some(outcome) = &obligation.kernel_recheck_outcome {
+                    return match outcome {
+                        KernelRecheckOutcome::Admitted { context } => {
+                            LadderVerdict::Closed {
+                                strategy: LadderStrategy::Proof,
+                                witness: Text::from(format!(
+                                    "kernel-recheck-theorem: {}",
+                                    context.as_str()
+                                )),
+                                elapsed_ms: 0,
+                            }
+                        }
+                        KernelRecheckOutcome::Rejected { reason, error_count } => {
+                            LadderVerdict::Open {
+                                strategy: LadderStrategy::Proof,
+                                reason: Text::from(format!(
+                                    "kernel-recheck-theorem: {} (and {} more rejection{})",
+                                    reason.as_str(),
+                                    error_count.saturating_sub(1),
+                                    if *error_count == 2 { "" } else { "s" }
+                                )),
+                            }
+                        }
+                    };
+                }
                 // #113 hardening — when the obligation carries a
                 // typed `core_term` + `axiom_registry`, route
                 // through the real kernel re-check via
@@ -2155,6 +2229,92 @@ mod tests {
                 assert!(witness.as_str().contains("trivial-tautology"));
             }
             other => panic!("expected Closed (trivial), got {:?}", other),
+        }
+    }
+
+    #[test]
+    // -- Pre-computed kernel re-check outcome (#118) --------------------
+
+    #[test]
+    fn proof_strategy_admits_when_kernel_recheck_outcome_is_admitted() {
+        let outcome = KernelRecheckOutcome::Admitted {
+            context: Text::from("thm.x"),
+        };
+        let o = LadderObligation::text("thm.x", LadderStrategy::Proof, "irrelevant")
+            .with_kernel_recheck_outcome(outcome);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::Proof);
+                assert!(witness.as_str().contains("kernel-recheck-theorem"));
+                assert!(witness.as_str().contains("thm.x"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proof_strategy_rejects_when_kernel_recheck_outcome_is_rejected() {
+        let outcome = KernelRecheckOutcome::Rejected {
+            reason: Text::from("K-Refine-omega failed for binder 'x'"),
+            error_count: 3,
+        };
+        let o = LadderObligation::text("thm.x", LadderStrategy::Proof, "irrelevant")
+            .with_kernel_recheck_outcome(outcome);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { strategy, reason } => {
+                assert_eq!(strategy, LadderStrategy::Proof);
+                assert!(reason.as_str().contains("kernel-recheck-theorem"));
+                assert!(reason.as_str().contains("K-Refine-omega"));
+                assert!(reason.as_str().contains("2 more rejections"));
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proof_strategy_recheck_outcome_takes_precedence_over_typed_payload() {
+        // When BOTH the recheck outcome and a typed core_term are
+        // present, the recheck outcome wins (the elaboration phase
+        // is authoritative because it has access to the full
+        // context the dispatcher's standalone infer call lacks).
+        let outcome = KernelRecheckOutcome::Admitted {
+            context: Text::from("thm.x"),
+        };
+        let registry = std::sync::Arc::new(verum_kernel::AxiomRegistry::new());
+        // Unbound var would normally cause kernel rejection.
+        let bad_term = verum_kernel::CoreTerm::Var(Text::from("nonexistent"));
+        let o = LadderObligation::text("thm.x", LadderStrategy::Proof, "irrelevant")
+            .with_core_term(bad_term, registry)
+            .with_kernel_recheck_outcome(outcome);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        // Closed (recheck wins), not Open (typed payload would lose).
+        match v {
+            LadderVerdict::Closed { witness, .. } => {
+                assert!(witness.as_str().contains("kernel-recheck-theorem"));
+            }
+            other => panic!("expected Closed (recheck takes precedence), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn task_118_recheck_outcome_singular_grammar_at_two_errors() {
+        // Pin the diagnostic-grammar invariant: 2 errors → "1 more
+        // rejection" (singular); 3 → "2 more rejections" (plural).
+        let outcome_two = KernelRecheckOutcome::Rejected {
+            reason: Text::from("K-Refine-omega failed"),
+            error_count: 2,
+        };
+        let o = LadderObligation::text("t", LadderStrategy::Proof, "x")
+            .with_kernel_recheck_outcome(outcome_two);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { reason, .. } => {
+                assert!(reason.as_str().contains("1 more rejection"));
+                assert!(!reason.as_str().contains("rejections"));
+            }
+            other => panic!("expected Open, got {:?}", other),
         }
     }
 

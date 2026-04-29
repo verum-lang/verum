@@ -39,11 +39,62 @@ use crate::error::{CliError, Result};
 use crate::ui;
 use verum_ast::decl::ItemKind;
 use verum_common::Text;
+use verum_verification::kernel_recheck::KernelRecheck;
 use verum_verification::ladder_dispatch::{
-    DefaultLadderDispatcher, LadderDispatcher, LadderObligation, LadderStrategy, LadderVerdict,
+    DefaultLadderDispatcher, KernelRecheckOutcome, LadderDispatcher, LadderObligation,
+    LadderStrategy, LadderVerdict,
 };
 
 use super::audit::{discover_vr_files, parse_file_for_audit, strictest_verify_strategy};
+
+/// True iff `strategy` is on the kernel-attestation tier of the
+/// backbone (Proof or stricter).  Only these strata benefit from a
+/// pre-computed `KernelRecheck::recheck_theorem` outcome — the
+/// lower strata (Runtime/Static/Fast/CT/Formal) admit through
+/// SMT/dataflow paths that don't consult the kernel attestation.
+fn requires_kernel_recheck(strategy: LadderStrategy) -> bool {
+    matches!(
+        strategy,
+        LadderStrategy::Proof
+            | LadderStrategy::Thorough
+            | LadderStrategy::Reliable
+            | LadderStrategy::Certified
+    )
+}
+
+/// Run `KernelRecheck::recheck_theorem` against a theorem-shaped
+/// item and project the result list to a single dispatcher-facing
+/// `KernelRecheckOutcome`.
+///
+/// Returns `None` when the item isn't theorem-shaped (the
+/// dispatcher then routes through other paths).
+fn run_kernel_recheck(
+    item_kind: &ItemKind,
+    item_name: &Text,
+) -> Option<KernelRecheckOutcome> {
+    use verum_ast::decl::TheoremDecl;
+    let theorem: &TheoremDecl = match item_kind {
+        ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => t,
+        _ => return None,
+    };
+    let results = KernelRecheck::recheck_theorem(theorem);
+    let errors: Vec<&verum_verification::kernel_recheck::KernelRecheckError> = results
+        .iter()
+        .filter_map(|(_, r)| r.as_ref().err())
+        .collect();
+    if errors.is_empty() {
+        Some(KernelRecheckOutcome::Admitted {
+            context: item_name.clone(),
+        })
+    } else {
+        // Pick the first rejection as the representative reason.
+        let reason = Text::from(format!("{}", errors[0]));
+        Some(KernelRecheckOutcome::Rejected {
+            reason,
+            error_count: errors.len(),
+        })
+    }
+}
 
 /// One per-theorem verdict line.
 struct VerdictRecord {
@@ -162,15 +213,22 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
                 }
             };
 
-            // V0 CLI surface: kernel re-check + SMT plumbing
-            // construction lands in a separate elaboration pass.
-            // The trivial-tautology decider handles the dispatch
-            // when typed payloads are absent.
-            let obligation = LadderObligation::text(
+            // #118 — when the strategy is `Proof` (or stricter on
+            // the backbone) AND the item is theorem-shaped, run
+            // `KernelRecheck::recheck_theorem` and stash the
+            // outcome so the dispatcher can admit / reject on
+            // kernel attestation directly.  The other strategies
+            // continue through the trivial-decider for V0 surface.
+            let mut obligation = LadderObligation::text(
                 item_name.clone(),
                 typed_strategy,
-                "(elaborated obligation pending V1)",
+                "(elaborated obligation)",
             );
+            if requires_kernel_recheck(typed_strategy) {
+                if let Some(outcome) = run_kernel_recheck(&item.kind, &item_name) {
+                    obligation = obligation.with_kernel_recheck_outcome(outcome);
+                }
+            }
             let verdict = dispatcher.dispatch(&obligation);
             totals.record(&verdict);
             records.push(VerdictRecord {
