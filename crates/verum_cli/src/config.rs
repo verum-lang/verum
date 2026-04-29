@@ -1572,6 +1572,55 @@ impl Manifest {
             .validate()
             .map_err(|e| CliError::Custom(format!("Cross-compile config: {}", e)))?;
 
+        // Surface inert top-level manifest sections via tracing.
+        // The CLI parses `[optimization]`, `[lto]`, `[pgo]` from
+        // verum.toml and validates the values, but no production
+        // code path threads them into the actual codegen
+        // pipeline — `[optimization].level`/`size_opt`/`inline`,
+        // `[lto].enabled`/`mode`, and `[pgo].enabled`/`profile_path`
+        // all land on the manifest but are forward-looking
+        // until the corresponding pipeline integration arrives.
+        // The actual LTO control today comes from
+        // `[linker].lto = "thin" | "full"` (handled by
+        // verum_compiler::linker_config::LinkerSection).
+        //
+        // Closes the inert-defense pattern at the only loader
+        // entry-point (validate() runs once per manifest read)
+        // so embedders see when their `[optimization]` /
+        // `[lto]` / `[pgo]` settings are observed-but-unused
+        // rather than silently no-op'd.
+        if self.optimization.level != 0
+            || self.optimization.size_opt
+            || self.optimization.inline
+        {
+            tracing::debug!(
+                "manifest [optimization] section observed (level={}, size_opt={}, inline={}) \
+                 — these fields are forward-looking; the active codegen optimization knob is \
+                 [profile.<dev|release>].optimization (per-profile)",
+                self.optimization.level,
+                self.optimization.size_opt,
+                self.optimization.inline,
+            );
+        }
+        if self.lto.enabled || self.lto.mode.is_some() {
+            tracing::debug!(
+                "manifest [lto] section observed (enabled={}, mode={:?}) — these fields are \
+                 forward-looking; the active LTO control is [linker].lto = \"thin\" | \"full\" \
+                 (handled by linker_config::LinkerSection)",
+                self.lto.enabled,
+                self.lto.mode.as_ref().map(|t| t.as_str()),
+            );
+        }
+        if self.pgo.enabled || self.pgo.profile_path.is_some() {
+            tracing::debug!(
+                "manifest [pgo] section observed (enabled={}, profile_path={:?}) — these \
+                 fields are forward-looking; PGO integration is not yet wired into the \
+                 LLVM/MLIR backend",
+                self.pgo.enabled,
+                self.pgo.profile_path.as_ref().map(|t| t.as_str()),
+            );
+        }
+
         Ok(())
     }
 }
