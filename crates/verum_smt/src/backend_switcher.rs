@@ -959,6 +959,29 @@ impl SmtBackendSwitcher {
     fn solve_cross_validate(&mut self, assertions: &List<Expr>) -> SolveResult {
         use std::time::Instant;
 
+        // Honour `ValidationConfig.enabled` as the master kill-
+        // switch: when `false`, skip the dual-solver overhead
+        // entirely and route through `solve_auto`. The caller
+        // selected `BackendChoice::CrossValidate` (or one of the
+        // strategies that map to cross-validation), but the
+        // operator chose to disable validation at runtime —
+        // honour the operator's intent without forcing the
+        // BackendChoice to be edited. Closes the inert-defense
+        // pattern around `ValidationConfig.enabled`: pre-fix the
+        // field was set on the policy + flowed from manifest +
+        // env (`VERUM_SMT_CROSS_VALIDATE`) but the dispatch
+        // itself never consulted it — the BackendChoice enum
+        // alone drove the cross-validate decision.
+        if !self.config.validation.enabled {
+            if self.config.verbose {
+                eprintln!(
+                    "[CROSS-VALIDATE] disabled by ValidationConfig.enabled = false; \
+                     falling back to single-solver auto routing"
+                );
+            }
+            return self.solve_auto(assertions);
+        }
+
         let t_z3 = Instant::now();
         let z3_result = self.solve_with_z3(assertions);
         let z3_elapsed = t_z3.elapsed();
