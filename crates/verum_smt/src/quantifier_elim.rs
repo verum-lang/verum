@@ -984,12 +984,31 @@ pub struct QuantifierEliminator {
 impl QuantifierEliminator {
     /// Create a new quantifier eliminator
     pub fn new() -> Self {
+        Self::with_config(QEConfig::default())
+    }
+
+    /// Create with custom configuration
+    ///
+    /// The `simplify_tactic` is built from `config.simplify_level`
+    /// so the documented `0-3` range maps to escalating Z3 tactic
+    /// chains:
+    /// - `0`: identity (no simplification at all)
+    /// - `1`: `simplify` only (cheap rewriting)
+    /// - `2`: `simplify` + `propagate-values` (default)
+    /// - `>=3`: `simplify` + `propagate-values` + `ctx-simplify`
+    ///   (context-sensitive, more expensive)
+    ///
+    /// This is the wiring for `QEConfig.simplify_level`: prior
+    /// builds always used a bare `Tactic::new("simplify")`
+    /// regardless of the configured level, so the field was
+    /// inert.
+    pub fn with_config(config: QEConfig) -> Self {
         let qe_tactic = Tactic::new("qe");
         let qe_lite_tactic = Tactic::new("qe-light");
-        let simplify_tactic = Tactic::new("simplify");
+        let simplify_tactic = Self::build_simplify_tactic(config.simplify_level);
 
         Self {
-            config: QEConfig::default(),
+            config,
             stats: QEStats::default(),
             qe_tactic,
             qe_lite_tactic,
@@ -997,11 +1016,25 @@ impl QuantifierEliminator {
         }
     }
 
-    /// Create with custom configuration
-    pub fn with_config(config: QEConfig) -> Self {
-        let mut eliminator = Self::new();
-        eliminator.config = config;
-        eliminator
+    /// Build a simplification tactic chain for the requested
+    /// level. See `with_config` for the level-to-chain mapping.
+    fn build_simplify_tactic(level: u8) -> Tactic {
+        match level {
+            // Level 0: no-op tactic. Z3's `skip` is a true identity
+            // tactic that leaves the goal unchanged — using it keeps
+            // call sites uniform (they always have a `simplify_tactic`
+            // to compose with `and_then`) without doing any rewriting.
+            0 => Tactic::new("skip"),
+            1 => Tactic::new("simplify"),
+            2 => Tactic::new("simplify").and_then(&Tactic::new("propagate-values")),
+            // Level 3+: clamp to 3 — the additional chain element
+            // (`ctx-simplify`) is the heaviest the QE engine
+            // currently asks for. Higher numeric values reuse the
+            // level-3 chain rather than no-op'ing.
+            _ => Tactic::new("simplify")
+                .and_then(&Tactic::new("propagate-values"))
+                .and_then(&Tactic::new("ctx-simplify")),
+        }
     }
 
     /// Construct a Z3 solver carrying this eliminator's

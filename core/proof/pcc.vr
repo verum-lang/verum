@@ -129,3 +129,69 @@ public fn bundle_lookup(b: &ProofBundle, digest: Text) -> Maybe<ProofCertificate
 public fn bundle_size(b: &ProofBundle) -> Int {
     b.certificates.len()
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for GoalHash / ProofCertificate
+// =============================================================================
+
+implement Eq for GoalHash {
+    fn eq(&self, other: &GoalHash) -> Bool {
+        self.digest == other.digest
+    }
+}
+
+implement Hash for GoalHash {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.digest.hash(hasher);
+    }
+}
+
+implement Clone for GoalHash {
+    fn clone(&self) -> GoalHash {
+        GoalHash { digest: self.digest.clone() }
+    }
+}
+
+implement Display for GoalHash {
+    /// Renders as the bare digest — content-addressed identifiers
+    /// flow through logs and audit reports as-is, so `print(h)`
+    /// produces a copy-paste-able key.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.digest.as_str())
+    }
+}
+
+implement Debug for GoalHash {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"GoalHash({self.digest})".as_str())
+    }
+}
+
+implement Eq for ProofCertificate {
+    /// Structural equality on every field.  Two certificates are
+    /// equal iff they were emitted by the same solver for the same
+    /// goal text with the same proof object, duration, and
+    /// timestamp — useful for re-running deterministic-proof
+    /// regression tests.
+    fn eq(&self, other: &ProofCertificate) -> Bool {
+        self.goal_text == other.goal_text
+            && self.solver == other.solver
+            && self.proof_object == other.proof_object
+            && self.duration_ms == other.duration_ms
+            && self.timestamp == other.timestamp
+    }
+}
+
+implement Display for ProofCertificate {
+    /// Renders a single-line summary suitable for log lines:
+    /// `<solver> proved <goal> in <Nms> at <timestamp>`.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"{self.solver} proved `{self.goal_text}` in {self.duration_ms}ms at {self.timestamp}".as_str())
+    }
+}
+
+implement Debug for ProofCertificate {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ProofCertificate {{ goal: {self.goal_text}, solver: {self.solver}, duration_ms: {self.duration_ms}, timestamp: {self.timestamp}, proof_object_len: {self.proof_object.len()} }}".as_str())
+    }
+}
