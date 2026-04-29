@@ -198,6 +198,39 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     options.incremental = profile.incremental && !using_release;
     options.verbose = if timings { 2 } else { 0 };
 
+    // Surface inert Profile fields. The current build path
+    // consumes `verification`, `opt_level`, `incremental`, `lto`
+    // (via linker_config) — but not `tier` (CompilationTier
+    // selection beyond the `--release` flag), `debug_assertions`
+    // (runtime debug_assertions! macro gate), `overflow_checks`
+    // (panic-on-arithmetic-overflow gate), `codegen_units`
+    // (parallel-compilation unit count), or `cbgr_checks`
+    // (`All` / `Optimized` / `Proven` per-reference gate).
+    //
+    // Embedders writing `[profile.dev].overflow_checks = true`
+    // or `[profile.release].cbgr_checks = "Proven"` saw zero
+    // observable effect. Surface the values via tracing::debug!,
+    // gated on any non-default value, so the request is audible
+    // at the build entry until the pipeline integration lands.
+    let prof_default = crate::config::Profile::default();
+    if profile.tier != prof_default.tier
+        || profile.debug_assertions != prof_default.debug_assertions
+        || profile.overflow_checks != prof_default.overflow_checks
+        || profile.codegen_units != prof_default.codegen_units
+        || profile.cbgr_checks != prof_default.cbgr_checks
+    {
+        tracing::debug!(
+            "build: profile fields not yet wired into NewCompilerOptions: \
+             tier={:?}, debug_assertions={}, overflow_checks={}, \
+             codegen_units={:?}, cbgr_checks={:?}",
+            profile.tier,
+            profile.debug_assertions,
+            profile.overflow_checks,
+            profile.codegen_units,
+            profile.cbgr_checks,
+        );
+    }
+
     // Advanced linking options
     if let Some(ref lto_mode) = lto {
         if let Some(mode) = LtoMode::from_str(lto_mode.as_str()) {
