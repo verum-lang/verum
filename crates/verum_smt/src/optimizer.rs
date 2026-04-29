@@ -357,14 +357,33 @@ impl Z3Optimizer {
         }
     }
 
-    /// Push scope for incremental solving
+    /// Push scope for incremental solving.
+    ///
+    /// Honours `OptimizerConfig.incremental`: when disabled,
+    /// scope manipulation is a no-op so callers that build the
+    /// optimizer in non-incremental mode can't accidentally rely
+    /// on push/pop semantics that aren't active. Without this
+    /// gate the field had no observable effect.
     pub fn push(&mut self) {
-        self.opt.push();
+        if self.config.incremental {
+            self.opt.push();
+        }
     }
 
-    /// Pop scope
+    /// Pop scope. See [`push`] — no-op when incremental mode is
+    /// disabled so push/pop pair stays balanced regardless of
+    /// configuration.
     pub fn pop(&mut self) {
-        self.opt.pop();
+        if self.config.incremental {
+            self.opt.pop();
+        }
+    }
+
+    /// Whether incremental scope management is active. Mirrors
+    /// `OptimizerConfig.incremental` for callers that need to
+    /// branch on the policy without re-reading the config.
+    pub fn is_incremental(&self) -> bool {
+        self.config.incremental
     }
 }
 
