@@ -416,6 +416,44 @@ through the verifier.
 
 ## Vector 7 — CBGR memory safety
 
+### 7.0 VBC interpreter hostile-size allocation — DEFENSE CONFIRMED 2026-04-29
+
+**Status:** DEFENSE CONFIRMED — 5 panic / UB paths closed in the
+VBC interpreter trust boundary.
+
+**Audit:** the interpreter is the trust boundary that consumes
+user-compiled bytecode; any panic / UB in a dispatch handler is
+a denial-of-service or memory-safety vector reachable from
+adversarial bytecode.  A grep for `Layout::from_size_align` in
+the dispatch handlers found 5 sites where layout-construction
+failures (reachable from sizes near `isize::MAX`) were either:
+
+  - **Panicked** via `.unwrap()` on a chained fallback —
+    `interpreter/dispatch_table/handlers/ffi_extended.rs`
+    `CbgrAlloc` handler.  Adversarial size DoS.
+  - **Silently downgraded** to a 1-byte layout via
+    `.unwrap_or(Layout::new::<u8>())` in
+    `handlers/gpu.rs::Alloc / MallocManaged / GpuMemAlloc`.
+    Caller believed they got `size` bytes but actually got 1 →
+    heap overflow on the first write past byte 0.
+  - **Undefined-behaviour** dealloc in `handlers/gpu.rs::Free` —
+    same silent-downgrade pattern would have called
+    `dealloc(ptr, 1-byte-layout)` for a buffer originally
+    allocated with `N`-byte layout.  Mismatched layout in
+    `std::alloc::dealloc` is documented UB.
+
+**Fix:** the alloc paths now return null pointer (standard
+malloc-fail contract) on layout failure; caller's `Err` arm
+fires.  The dealloc path now leaks the buffer on layout failure
+rather than calling dealloc with a wrong layout — leak is
+strictly safer than UB.  The architectural invariant
+(`allocated_buffers` only contains sizes that successfully
+constructed an alloc layout) means the dealloc-failure case is
+impossible in practice; leak is documented as the safe-by-default
+fallback.
+
+**Commit:** `a9abae5b`.
+
 ### 7.1 Generation counter race — DEFENSE CONFIRMED 2026-04-28
 
 **Status:** DEFENSE CONFIRMED — atomic increment with Acquire-Release
