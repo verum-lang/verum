@@ -521,24 +521,61 @@ impl<'a> Deserializer<'a> {
     /// Parses the string table.
     fn parse_string_table(&mut self, size: u32) -> VbcResult<StringTable> {
         let mut table = StringTable::new();
-        let end = self.offset + size as usize;
+        // Use checked_add for the section-end calculation — on
+        // 32-bit targets the cast `size as usize` covers full u32
+        // (4 GB) and adding *offset can overflow.  On 64-bit the
+        // overflow is unreachable but the checked path is
+        // platform-portable and zero-cost when no overflow occurs.
+        let end = self.offset
+            .checked_add(size as usize)
+            .ok_or_else(|| VbcError::SectionOverflow {
+                section: "string_table",
+                offset: self.offset as u32,
+                size,
+            })?;
+        if end > self.data.len() {
+            return Err(VbcError::SectionOverflow {
+                section: "string_table",
+                offset: self.offset as u32,
+                size,
+            });
+        }
 
         while self.offset < end {
             let str_start = self.offset;
             let len = decode_u32(self.data, &mut self.offset)? as usize;
 
-            if self.offset + len > end {
+            // Per-string bound: a single string entry larger than
+            // the entire string table is structurally malformed,
+            // and even a string approaching `u32::MAX` (4 GB) is
+            // unreasonable for real Verum module-level strings.
+            // `size` itself is bounded by the file size, so a
+            // string larger than `size` is always invalid; cap
+            // each string at the section size for an explicit
+            // diagnostic before the slice is computed.
+            if len > size as usize {
+                return Err(VbcError::TableTooLarge {
+                    field: "string_entry_len",
+                    count: len.min(u32::MAX as usize) as u32,
+                    max: size,
+                });
+            }
+
+            let str_end = self.offset
+                .checked_add(len)
+                .ok_or_else(|| VbcError::eof(self.offset, len))?;
+            if str_end > end {
                 return Err(VbcError::eof(self.offset, len));
             }
 
-            let bytes = &self.data[self.offset..self.offset + len];
+            let bytes = &self.data[self.offset..str_end];
             let s = std::str::from_utf8(bytes).map_err(|_| VbcError::InvalidUtf8 {
                 offset: str_start as u32,
                 error: String::from_utf8(bytes.to_vec()).unwrap_err(),
             })?;
 
             table.intern(s);
-            self.offset += len;
+            self.offset = str_end;
         }
 
         Ok(table)
