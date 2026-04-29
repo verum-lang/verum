@@ -6119,9 +6119,32 @@ impl EscapeAnalyzer {
     /// CBGR promotions to &checked T.
     #[must_use]
     pub fn track_concrete_values(&self) -> crate::value_tracking::ValueTrackingResult {
+        self.track_concrete_values_with_config(
+            crate::value_tracking::ValueTrackingConfig::default(),
+        )
+    }
+
+    /// Concrete value tracking with explicit configuration.
+    ///
+    /// Honours every documented field on `ValueTrackingConfig`:
+    ///
+    ///  * `enable_constant_propagation` / `enable_range_analysis` /
+    ///    `enable_symbolic_execution` — flow into the propagator
+    ///    via `ValuePropagator::with_config`, gating per-domain
+    ///    transfer-function paths.
+    ///  * `max_iterations` — caps the worklist iteration count to
+    ///    prevent runaway analysis on pathological CFGs. When
+    ///    exceeded, propagation stops with whatever block states
+    ///    have been recorded so far (best-effort partial result).
+    #[must_use]
+    pub fn track_concrete_values_with_config(
+        &self,
+        config: crate::value_tracking::ValueTrackingConfig,
+    ) -> crate::value_tracking::ValueTrackingResult {
         use crate::value_tracking::{ValuePropagator, ValueState, ValueTrackingResult};
 
-        let mut propagator = ValuePropagator::new();
+        let max_iterations = config.max_iterations;
+        let mut propagator = ValuePropagator::with_config(config);
         let mut result = ValueTrackingResult::new();
 
         // Initialize entry state (empty for now, would come from parameters)
@@ -6132,8 +6155,16 @@ impl EscapeAnalyzer {
         let mut worklist = List::new();
         worklist.push(self.cfg.entry);
         let mut visited = Set::new();
+        let mut iterations: usize = 0;
 
         while let Some(block_id) = worklist.pop() {
+            // Honour `config.max_iterations` — cap the worklist
+            // walk so a pathological CFG can't spin unbounded.
+            if iterations >= max_iterations {
+                break;
+            }
+            iterations += 1;
+
             // Skip if already visited in this iteration
             if visited.contains(&block_id) {
                 continue;

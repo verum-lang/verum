@@ -659,3 +659,117 @@ fn test_value_state_merge_performance() {
         );
     }
 }
+
+// ==================================================================================
+// ValueTrackingConfig wire-up: per-domain gates honoured by ValuePropagator
+// ==================================================================================
+
+#[test]
+fn enable_constant_propagation_false_skips_concrete_set() {
+    // Pin: with `enable_constant_propagation = false`, the
+    // propagator does not record concrete values even when the
+    // caller hands one in. The symbolic mirror is still recorded
+    // (because `enable_symbolic_execution` is independently true)
+    // — proving the two domain gates are wired separately.
+    let config = ValueTrackingConfig {
+        enable_constant_propagation: false,
+        enable_range_analysis: true,
+        enable_symbolic_execution: true,
+        max_iterations: 100,
+    };
+    let mut propagator = ValuePropagator::with_config(config);
+    let mut state = ValueState::new();
+
+    propagator.propagate_constant(&mut state, 0, ConcreteValue::Integer(42));
+
+    assert_eq!(
+        state.get_concrete(0),
+        Maybe::None,
+        "concrete-propagation gate off → no concrete value recorded",
+    );
+    assert!(
+        matches!(state.get_symbolic(0), Maybe::Some(_)),
+        "symbolic-execution gate stays on → symbolic mirror still recorded",
+    );
+    assert_eq!(
+        propagator.stats().concrete_propagated, 0,
+        "concrete-propagation gate off → no concrete-stat increment",
+    );
+}
+
+#[test]
+fn enable_symbolic_execution_false_skips_symbolic_set() {
+    // Pin: with `enable_symbolic_execution = false`, the
+    // propagator does not record symbolic mirrors of constants
+    // even though concrete-propagation is on.
+    let config = ValueTrackingConfig {
+        enable_constant_propagation: true,
+        enable_range_analysis: true,
+        enable_symbolic_execution: false,
+        max_iterations: 100,
+    };
+    let mut propagator = ValuePropagator::with_config(config);
+    let mut state = ValueState::new();
+
+    propagator.propagate_constant(&mut state, 7, ConcreteValue::Integer(99));
+
+    assert_eq!(
+        state.get_concrete(7),
+        Maybe::Some(ConcreteValue::Integer(99)),
+        "concrete-propagation gate on → concrete value recorded",
+    );
+    assert_eq!(
+        state.get_symbolic(7),
+        Maybe::None,
+        "symbolic-execution gate off → no symbolic mirror recorded",
+    );
+}
+
+#[test]
+fn all_gates_off_records_nothing() {
+    // Pin: with every per-domain gate off, the propagator is a
+    // no-op transfer function — neither concrete, range, nor
+    // symbolic state changes for any operation. Useful as a
+    // measurement baseline and as a regression guard against
+    // accidental ungated work.
+    let config = ValueTrackingConfig {
+        enable_constant_propagation: false,
+        enable_range_analysis: false,
+        enable_symbolic_execution: false,
+        max_iterations: 100,
+    };
+    let mut propagator = ValuePropagator::with_config(config);
+    let mut state = ValueState::new();
+
+    propagator.propagate_constant(&mut state, 1, ConcreteValue::Integer(11));
+    propagator.propagate_binop(&mut state, 2, ValueBinaryOp::Add, 1, 1);
+
+    assert_eq!(state.get_concrete(1), Maybe::None);
+    assert_eq!(state.get_concrete(2), Maybe::None);
+    assert_eq!(state.get_symbolic(1), Maybe::None);
+    assert_eq!(state.get_symbolic(2), Maybe::None);
+    assert_eq!(state.get_range(2), Maybe::None);
+    assert_eq!(propagator.stats().concrete_propagated, 0);
+    assert_eq!(propagator.stats().symbolic_created, 0);
+    assert_eq!(propagator.stats().ranges_refined, 0);
+}
+
+#[test]
+fn config_accessor_round_trips() {
+    // Pin: `with_config` + `config()` round-trip every documented
+    // field, so callers can construct a propagator and re-inspect
+    // its configured stance without a separate copy.
+    let original = ValueTrackingConfig {
+        enable_constant_propagation: false,
+        enable_range_analysis: true,
+        enable_symbolic_execution: false,
+        max_iterations: 73,
+    };
+    let propagator = ValuePropagator::with_config(original.clone());
+    let read_back = propagator.config();
+
+    assert_eq!(read_back.enable_constant_propagation, original.enable_constant_propagation);
+    assert_eq!(read_back.enable_range_analysis, original.enable_range_analysis);
+    assert_eq!(read_back.enable_symbolic_execution, original.enable_symbolic_execution);
+    assert_eq!(read_back.max_iterations, original.max_iterations);
+}

@@ -679,6 +679,11 @@ pub struct ValuePropagator {
 
     /// Propagation statistics
     stats: PropagationStats,
+
+    /// Active configuration. Gates the per-domain propagation paths
+    /// (constants, ranges, symbolic) so callers can opt out of
+    /// expensive subsystems without forking the propagator.
+    config: ValueTrackingConfig,
 }
 
 impl ValuePropagator {
@@ -689,7 +694,37 @@ impl ValuePropagator {
             block_entry_states: Map::new(),
             block_exit_states: Map::new(),
             stats: PropagationStats::default(),
+            config: ValueTrackingConfig::default(),
         }
+    }
+
+    /// Create a propagator with a custom configuration.
+    ///
+    /// The active configuration controls which value-tracking
+    /// domains run when transfer functions execute:
+    ///
+    ///  * `enable_constant_propagation` — gates the concrete-value
+    ///    set in `propagate_constant` and the constant fast-path
+    ///    inside `propagate_binop`.
+    ///  * `enable_range_analysis` — gates the range-refinement
+    ///    branch inside `propagate_binop`.
+    ///  * `enable_symbolic_execution` — gates the symbolic-value
+    ///    construction in `propagate_constant`, `propagate_binop`,
+    ///    and `propagate_phi`.
+    #[must_use]
+    pub fn with_config(config: ValueTrackingConfig) -> Self {
+        Self {
+            block_entry_states: Map::new(),
+            block_exit_states: Map::new(),
+            stats: PropagationStats::default(),
+            config,
+        }
+    }
+
+    /// Borrow the active configuration.
+    #[must_use]
+    pub fn config(&self) -> &ValueTrackingConfig {
+        &self.config
     }
 
     /// Get value state at block entry
@@ -731,9 +766,16 @@ impl ValuePropagator {
         ssa_version: u32,
         value: ConcreteValue,
     ) {
-        state.set_concrete(ssa_version, value.clone());
-        state.set_symbolic(ssa_version, SymbolicValue::from_concrete(value));
-        self.stats.concrete_propagated += 1;
+        // Honour per-domain gates: caller can disable either
+        // constant tracking or symbolic tracking independently
+        // without losing the other.
+        if self.config.enable_constant_propagation {
+            state.set_concrete(ssa_version, value.clone());
+            self.stats.concrete_propagated += 1;
+        }
+        if self.config.enable_symbolic_execution {
+            state.set_symbolic(ssa_version, SymbolicValue::from_concrete(value));
+        }
     }
 
     /// Propagate binary operation: x = a op b
@@ -745,36 +787,47 @@ impl ValuePropagator {
         left_ssa: u32,
         right_ssa: u32,
     ) {
-        // Try concrete evaluation first
-        if let (Maybe::Some(left_val), Maybe::Some(right_val)) =
-            (state.get_concrete(left_ssa), state.get_concrete(right_ssa))
-        {
-            let result = left_val.eval_binop(op, &right_val);
-            state.set_concrete(ssa_version, result.clone());
-            state.set_symbolic(ssa_version, SymbolicValue::from_concrete(result));
-            self.stats.concrete_propagated += 1;
-            return;
+        // Try concrete evaluation first — only when constant
+        // propagation is enabled, otherwise concrete values never
+        // get set by upstream `propagate_constant` calls anyway and
+        // the lookup is wasted work.
+        if self.config.enable_constant_propagation {
+            if let (Maybe::Some(left_val), Maybe::Some(right_val)) =
+                (state.get_concrete(left_ssa), state.get_concrete(right_ssa))
+            {
+                let result = left_val.eval_binop(op, &right_val);
+                state.set_concrete(ssa_version, result.clone());
+                if self.config.enable_symbolic_execution {
+                    state.set_symbolic(ssa_version, SymbolicValue::from_concrete(result));
+                }
+                self.stats.concrete_propagated += 1;
+                return;
+            }
         }
 
         // Try range evaluation
-        if let (Maybe::Some(left_range), Maybe::Some(right_range)) =
-            (state.get_range(left_ssa), state.get_range(right_ssa))
-            && let Maybe::Some(result_range) = left_range.eval_binop(op, &right_range)
-        {
-            state.set_range(ssa_version, result_range);
-            self.stats.ranges_refined += 1;
+        if self.config.enable_range_analysis {
+            if let (Maybe::Some(left_range), Maybe::Some(right_range)) =
+                (state.get_range(left_ssa), state.get_range(right_ssa))
+                && let Maybe::Some(result_range) = left_range.eval_binop(op, &right_range)
+            {
+                state.set_range(ssa_version, result_range);
+                self.stats.ranges_refined += 1;
+            }
         }
 
         // Create symbolic expression
-        let left_sym = state
-            .get_symbolic(left_ssa)
-            .unwrap_or(SymbolicValue::variable(left_ssa));
-        let right_sym = state
-            .get_symbolic(right_ssa)
-            .unwrap_or(SymbolicValue::variable(right_ssa));
+        if self.config.enable_symbolic_execution {
+            let left_sym = state
+                .get_symbolic(left_ssa)
+                .unwrap_or(SymbolicValue::variable(left_ssa));
+            let right_sym = state
+                .get_symbolic(right_ssa)
+                .unwrap_or(SymbolicValue::variable(right_ssa));
 
-        state.set_symbolic(ssa_version, SymbolicValue::binop(op, left_sym, right_sym));
-        self.stats.symbolic_created += 1;
+            state.set_symbolic(ssa_version, SymbolicValue::binop(op, left_sym, right_sym));
+            self.stats.symbolic_created += 1;
+        }
     }
 
     /// Propagate phi node: x = φ(x1, x2, ...)
@@ -803,7 +856,7 @@ impl ValuePropagator {
         }
 
         // Merge concrete values
-        if !concrete_values.is_empty() {
+        if self.config.enable_constant_propagation && !concrete_values.is_empty() {
             let mut merged = concrete_values[0].clone();
             for val in concrete_values.iter().skip(1) {
                 merged = merged.merge(val);
@@ -812,13 +865,15 @@ impl ValuePropagator {
         }
 
         // Create phi symbolic value
-        state.set_symbolic(
-            ssa_version,
-            SymbolicValue::Phi {
-                block,
-                incoming: symbolic_incoming,
-            },
-        );
+        if self.config.enable_symbolic_execution {
+            state.set_symbolic(
+                ssa_version,
+                SymbolicValue::Phi {
+                    block,
+                    incoming: symbolic_incoming,
+                },
+            );
+        }
 
         self.stats.phi_nodes += 1;
     }
