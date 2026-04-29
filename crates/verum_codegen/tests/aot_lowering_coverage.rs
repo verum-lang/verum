@@ -27,9 +27,22 @@ use std::path::PathBuf;
 /// requiring a Tier-1 lowering arm. Document the reason inline so the
 /// next person to read this list can decide whether to remove an entry.
 const ALLOW_LIST: &[&str] = &[
-    // Empty: every opcode is currently lowered. This list exists for
-    // future expansion (e.g. GPU debug ops that genuinely cannot
-    // appear in AOT output).
+    // Permission gates (SCRIPT-5 PermissionRouter). Emitted only by
+    // script-mode codegen ahead of FFI / process-exit boundary calls;
+    // enforced by the Tier-0 interpreter against the per-script
+    // ScriptPermissionPolicy installed in the Session.
+    //
+    // The AOT path is the trusted-binary route — applications with
+    // `fn main`, no shebang — and the documented mode split puts
+    // script mode strictly on the interpreter. A future "sandboxed
+    // AOT" feature would need real LLVM lowering for these (calling
+    // into a runtime PermissionRouter hook); until that lands, AOT-
+    // compiled output never contains Permission* opcodes because
+    // script-mode codegen is not an AOT entry point.
+    "PermissionAssert",
+    "PermissionCheckWire",
+    "PermissionStatsClear",
+    "PermissionStatsRead",
 ];
 
 fn workspace_root() -> PathBuf {
