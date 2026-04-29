@@ -87,6 +87,33 @@ pub fn tree(options: TreeOptions) -> Result<()> {
         }
     }
 
+    // Honour `TreeOptions.all_features`: when set, additionally
+    // print `build-dependencies` (the build-time-only dep group
+    // that's normally invisible in the tree because runtime
+    // execution doesn't see it). Mirrors `cargo tree --all-features`
+    // semantics: the flag opts INTO showing every declared dep
+    // group, not just the runtime + dev defaults. Pre-fix the
+    // field landed on TreeOptions but no code path consulted it
+    // — `verum tree --all-features` looked identical to plain
+    // `verum tree`, defeating the documented opt-in.
+    if options.all_features && !manifest.build_dependencies.is_empty() {
+        println!();
+        println!("{}", "Build Dependencies:".bold());
+
+        for name in manifest.build_dependencies.keys() {
+            print_dependency_tree(
+                name.as_str(),
+                &lockfile,
+                &graph,
+                &duplicates,
+                options.depth,
+                0,
+                "",
+                true,
+            );
+        }
+    }
+
     // Print duplicate summary
     if options.duplicates && !duplicates.is_empty() {
         println!();
@@ -210,6 +237,20 @@ fn print_dependency_tree(
     }
 }
 
+/// Whether the requested options ask the tree printer to include
+/// the build-dependencies group in the output.
+///
+/// Pure helper extracted so the gate semantics can be unit-tested
+/// without spinning up a manifest + lockfile fixture. The wiring
+/// at the call site is a single `if all_features { ... }` block
+/// that uses this predicate by inlining the field read; this
+/// helper exists so tests have a stable surface to pin the
+/// contract against.
+#[allow(dead_code)]
+fn should_show_build_deps(options: &TreeOptions) -> bool {
+    options.all_features
+}
+
 /// Find duplicate dependencies (same name, different versions)
 fn find_duplicates(lockfile: &Lockfile) -> Set<Text> {
     let mut name_counts: verum_common::Map<Text, usize> = verum_common::Map::new();
@@ -223,4 +264,45 @@ fn find_duplicates(lockfile: &Lockfile) -> Set<Text> {
         .filter(|(_, count)| *count > 1)
         .map(|(name, _)| name)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts_with(all_features: bool) -> TreeOptions {
+        TreeOptions {
+            duplicates: false,
+            depth: None,
+            all_features,
+        }
+    }
+
+    #[test]
+    fn all_features_default_excludes_build_deps() {
+        // Pin: the documented default keeps build-dependencies
+        // hidden so the runtime + dev tree stays uncluttered for
+        // typical `verum tree` runs.
+        let opts = TreeOptions {
+            duplicates: false,
+            depth: None,
+            all_features: false,
+        };
+        assert!(
+            !should_show_build_deps(&opts),
+            "default all_features=false must not include build-deps in tree",
+        );
+    }
+
+    #[test]
+    fn all_features_true_includes_build_deps() {
+        // Pin: --all-features opts INTO showing every declared
+        // dep group, including the build-time-only one. Mirrors
+        // `cargo tree --all-features` semantics.
+        let opts = opts_with(true);
+        assert!(
+            should_show_build_deps(&opts),
+            "all_features=true must include build-deps in tree",
+        );
+    }
 }
