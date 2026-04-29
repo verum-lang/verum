@@ -2208,6 +2208,20 @@ pub struct ProofSearchEngine {
     /// layer to emit exhaustiveness claims (`p == T.A || p == T.B
     /// || ...`) for parameters typed as a variant.
     variant_map: std::collections::HashMap<Text, Vec<Text>>,
+
+    /// Names of hypotheses whose static type is `Bool`.
+    ///
+    /// Populated externally via `register_bool_hypothesis` from the
+    /// caller's typing context. Drives the `cases_on h` flow for plain
+    /// path-typed hypotheses: when the hypothesis identifier is in this
+    /// set, `try_cases_on` splits into `h := true` / `h := false`
+    /// subgoals. Without this, plain Path hypotheses fall through to
+    /// the catch-all error arm (no metadata = no case split).
+    ///
+    /// Same architectural shape as `variant_map`: the engine itself
+    /// holds zero hardcoded knowledge of which variables are Bool —
+    /// the truth comes from registration, never from name matching.
+    bool_typed_hypotheses: std::collections::HashSet<Text>,
 }
 
 /// Record of an incomplete proof (accepted via Sorry tactic)
@@ -2236,6 +2250,7 @@ impl ProofSearchEngine {
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
+            bool_typed_hypotheses: std::collections::HashSet::new(),
         }
     }
 
@@ -2253,6 +2268,7 @@ impl ProofSearchEngine {
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
+            bool_typed_hypotheses: std::collections::HashSet::new(),
         }
     }
 
@@ -2328,6 +2344,18 @@ impl ProofSearchEngine {
     /// for parameters typed as a variant.
     pub fn register_variant_type(&mut self, type_name: Text, ctors: Vec<Text>) {
         self.variant_map.insert(type_name, ctors);
+    }
+
+    /// Mark a hypothesis identifier as Bool-typed so `cases_on h` can
+    /// split it into the two boolean cases (h := true / h := false).
+    /// Idempotent — re-registering the same name has no effect.
+    ///
+    /// Without this registration, the engine has no way to tell whether
+    /// a Path-shaped hypothesis is a Bool variable or some other type.
+    /// Pre-fix the dispatcher had a permanently-false stub here, which
+    /// silently broke every Bool case-split.
+    pub fn register_bool_hypothesis(&mut self, name: Text) {
+        self.bool_typed_hypotheses.insert(name);
     }
 
     /// Read-only access to the variant registry.
@@ -4127,6 +4155,22 @@ impl ProofSearchEngine {
         )
     }
 
+    /// Build the equality `lhs == rhs` for use as a derived hypothesis
+    /// during case analysis. The resulting expression has dummy spans
+    /// since it's synthesized inside the proof engine, not a source
+    /// construct.
+    fn make_eq(lhs: Expr, rhs: Expr) -> Expr {
+        use verum_ast::span::Span;
+        Expr::new(
+            ExprKind::Binary {
+                op: BinOp::Eq,
+                left: Heap::new(lhs),
+                right: Heap::new(rhs),
+            },
+            Span::dummy(),
+        )
+    }
+
     // ==================== Tactic-DSL control flow ====================
 
     /// Execute a `ProofTactic::Let`: simplify the bound value, push
@@ -5871,16 +5915,20 @@ impl ProofSearchEngine {
                 Ok(List::from_iter(vec![goal_left, goal_right]))
             }
 
-            // Case analysis on Boolean: b ∨ ¬b
-            ExprKind::Path(p) if self.is_boolean_hypothesis(&hyp) => {
-                // Case 1: Assume hypothesis is true
+            // Case analysis on a Bool-typed hypothesis: split into the
+            // two boolean cases. Each subgoal carries an extra equality
+            // hypothesis (`hyp == true` / `hyp == false`) so downstream
+            // SMT discharge can substitute the chosen value into the
+            // goal — pre-fix the subgoals only got bare `true`/`false`
+            // literals, which the solver couldn't connect back to the
+            // variable being analyzed.
+            ExprKind::Path(_) if self.is_boolean_hypothesis(&hyp) => {
                 let mut goal_true = goal.clone();
-                goal_true.add_hypothesis(Self::make_bool(true));
+                goal_true.add_hypothesis(Self::make_eq(hyp.clone(), Self::make_bool(true)));
                 goal_true.label = Maybe::Some(format!("case_true_{}", hypothesis).into());
 
-                // Case 2: Assume hypothesis is false
                 let mut goal_false = goal.clone();
-                goal_false.add_hypothesis(Self::make_bool(false));
+                goal_false.add_hypothesis(Self::make_eq(hyp.clone(), Self::make_bool(false)));
                 goal_false.label = Maybe::Some(format!("case_false_{}", hypothesis).into());
 
                 Ok(List::from_iter(vec![goal_true, goal_false]))
@@ -6053,11 +6101,21 @@ impl ProofSearchEngine {
         ))
     }
 
-    /// Check if hypothesis is a boolean type
-    fn is_boolean_hypothesis(&self, _hyp: &Expr) -> bool {
-        // In a full implementation, this would check the type
-        // For now, return false to be conservative
-        false
+    /// Whether the hypothesis is a Bool-typed variable. The check is
+    /// metadata-driven: we look the path's identifier up in
+    /// `bool_typed_hypotheses`, populated externally via
+    /// `register_bool_hypothesis`. The engine ships with the set
+    /// empty — there is no hardcoded "this name looks like a Bool"
+    /// heuristic, no compiler-side knowledge of stdlib type names.
+    fn is_boolean_hypothesis(&self, hyp: &Expr) -> bool {
+        let ExprKind::Path(p) = &hyp.kind else {
+            return false;
+        };
+        let Maybe::Some(ident) = p.as_ident() else {
+            return false;
+        };
+        self.bool_typed_hypotheses
+            .contains(&Text::from(ident.as_str()))
     }
 
     /// Resolve a constructor expression to the constructor list of its variant
