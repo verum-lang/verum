@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, builtins, fs, cross-platform, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.builtins.{
+    cp, mv, rm, rm_rf,
+    mkdir, mkdir_p,
+    cat, cat_bytes,
+    write, write_str, append,
+    exists, is_file, is_dir,
+    which, command_exists,
+    temp_dir,
+};
+mount core.io.path.{Path, PathBuf};
+mount core.shell.context.{ShellContext};
+mount core.shell.result.{ShellError};
+
+provide ShellContext = ShellContext.for_tests();
+
+fn exercise_fs_predicates() {
+    let p = PathBuf.from("/tmp/verum-test");
+    let _: Bool = exists(p.as_path());
+    let _: Bool = is_file(p.as_path());
+    let _: Bool = is_dir(p.as_path());
+}
+
+fn exercise_path_writers() {
+    let _: Result<(), ShellError> = mkdir_p(&PathBuf.from("/tmp/x/y").as_path());
+    let _: Result<(), ShellError> = write_str(
+        &PathBuf.from("/tmp/x/y/file").as_path(),
+        &"hello".into(),
+    );
+    let _: Result<Text, ShellError> = cat(&PathBuf.from("/tmp/x/y/file").as_path());
+}
+
+fn exercise_path_query() {
+    let q1: Maybe<PathBuf> = which(&"git".into());
+    let q2: Bool = command_exists(&"echo".into());
+    let _ = q1;
+    let _ = q2;
+}
+
+fn exercise_temp_dir() {
+    let _: PathBuf = temp_dir();
+}
+
+fn main() {
+    exercise_fs_predicates();
+    exercise_path_writers();
+    exercise_path_query();
+    exercise_temp_dir();
+}

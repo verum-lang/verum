@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, verify, refinement, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.verify.{
+    NonEmpty, BoundedText, EnvName, EnvValue, SemVerRef,
+    PortNumber, HostName, DeployConfig, S3Bucket,
+};
+mount core.shell.result.{ShellError};
+
+fn exercise_non_empty() {
+    let _: NonEmpty<Int> = NonEmpty.new(1);
+    let _: Result<NonEmpty<Int>, ShellError> = NonEmpty.from_list([1, 2, 3]);
+    let _: Result<NonEmpty<Int>, ShellError> = NonEmpty.from_list([]);
+}
+
+fn exercise_bounded_text() {
+    let _: Result<BoundedText, ShellError> = BoundedText.parse("hello".into(), 1, 100);
+    let _: Result<BoundedText, ShellError> = BoundedText.parse("".into(), 1, 100);
+}
+
+fn exercise_env_atoms() {
+    let _: Result<EnvName, ShellError> = EnvName.parse("PATH".into());
+    let _: Result<EnvName, ShellError> = EnvName.parse("123BAD".into());
+    let _: Result<EnvValue, ShellError> = EnvValue.parse("hello\0world".into());
+    let _: Result<EnvValue, ShellError> = EnvValue.parse("hello".into());
+}
+
+fn exercise_semver() {
+    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("1.2.3".into());
+    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("1.2.3-alpha+build".into());
+    let _: Result<SemVerRef, ShellError> = SemVerRef.parse("not-a-version".into());
+}
+
+fn exercise_port() {
+    let _: Result<PortNumber, ShellError> = PortNumber.parse(443);
+    let _: Result<PortNumber, ShellError> = PortNumber.parse(0);
+    let _: Result<PortNumber, ShellError> = PortNumber.parse(99999);
+}
+
+fn exercise_hostname() {
+    let _: Result<HostName, ShellError> = HostName.parse("example.com".into());
+    let _: Result<HostName, ShellError> = HostName.parse("api.v2.example.com".into());
+    let _: Result<HostName, ShellError> = HostName.parse(".bad".into());
+}
+
+fn exercise_deploy_config() {
+    let _: Result<DeployConfig, ShellError> = DeployConfig.parse(
+        "myservice".into(),
+        "1.2.3".into(),
+        "production".into(),
+        "manifest.yaml".into(),
+        300,
+    );
+    let _: Result<DeployConfig, ShellError> = DeployConfig.parse(
+        "myservice".into(),
+        "bad-version".into(),  // refinement violated
+        "production".into(),
+        "manifest.txt".into(),
+        300,
+    );
+}
+
+fn exercise_s3_bucket() {
+    let _: Result<S3Bucket, ShellError> = S3Bucket.parse("my-bucket".into());
+    let _: Result<S3Bucket, ShellError> = S3Bucket.parse("a..b".into());  // double dot — invalid
+}
+
+fn main() {
+    exercise_non_empty();
+    exercise_bounded_text();
+    exercise_env_atoms();
+    exercise_semver();
+    exercise_port();
+    exercise_hostname();
+    exercise_deploy_config();
+    exercise_s3_bucket();
+}

@@ -1,0 +1,34 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, glob, fs, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.glob.{glob, glob_with_hidden, glob_in, glob_files, glob_dirs};
+mount core.shell.context.{ShellContext};
+mount core.shell.result.{ShellError};
+mount core.io.path.{PathBuf};
+
+provide ShellContext = ShellContext.for_tests();
+
+fn exercise_glob_basic() {
+    let _: Result<List<PathBuf>, ShellError> = glob(&"src/**/*.vr".into());
+    let _: Result<List<PathBuf>, ShellError> = glob_with_hidden(&"*.cfg".into(), true);
+}
+
+fn exercise_glob_in() {
+    let base = PathBuf.from("/tmp");
+    let _: Result<List<PathBuf>, ShellError> = glob_in(&base, &"*.log".into(), false);
+}
+
+fn exercise_glob_filtered() {
+    let _: Result<List<PathBuf>, ShellError> = glob_files(&"**/*.rs".into());
+    let _: Result<List<PathBuf>, ShellError> = glob_dirs(&"src/*".into());
+}
+
+fn main() {
+    exercise_glob_basic();
+    exercise_glob_in();
+    exercise_glob_filtered();
+}

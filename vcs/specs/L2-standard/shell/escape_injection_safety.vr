@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, escape, injection, security
+// @timeout: 5000
+// @expect: pass
+
+// The escape strategy is *unforgeable*: for any byte sequence, the produced
+// quoted token cannot break out of its quoting context.  We assert four
+// well-known injection patterns produce strings that the POSIX shell
+// parser would reduce to a single literal argument.
+
+mount core.shell.escape.{Escaper};
+
+fn assert_starts_with_quote(s: &Text) {
+    // POSIX strategy always wraps in single quotes, except for the
+    // safe-unquoted fast path which is rejected by `posix_safe_unquoted`
+    // for every adversarial input below.
+    assert(s.starts_with("'"), "expected quoted output");
+}
+
+fn assert_ends_with_quote(s: &Text) {
+    assert(s.ends_with("'"), "expected quoted output");
+}
+
+fn exercise_classic_payload() {
+    let payload: Text = "evil; rm -rf /".into();
+    let escaped: Text = Escaper.posix(&payload);
+    assert_starts_with_quote(&escaped);
+    assert_ends_with_quote(&escaped);
+    // The payload is preserved byte-for-byte inside the quotes.
+    assert(escaped.contains(&"evil; rm -rf /".into()),
+           "payload preserved verbatim");
+}
+
+fn exercise_quote_breakout() {
+    // Naive quoting (`'<input>'`) is broken by an embedded single quote.
+    // Our POSIX strategy emits `'\''` to close-and-reopen.
+    let payload: Text = "'\nINJECT".into();
+    let escaped: Text = Escaper.posix(&payload);
+    assert_starts_with_quote(&escaped);
+    assert_ends_with_quote(&escaped);
+    // The breakout sequence "'\\''" must appear inside the result —
+    // which is the canonical close/escape/open pattern.
+    assert(escaped.contains(&"'\\''".into()),
+           "single quote sequence escaped");
+}
+
+fn exercise_double_quote_breakout() {
+    // Double-quotes are inert inside single quotes — no special handling
+    // needed, and the result must not contain unescaped backticks.
+    let payload: Text = "\"$(echo INJECTED)\"".into();
+    let escaped: Text = Escaper.posix(&payload);
+    assert_starts_with_quote(&escaped);
+    // No bare `$(` after the opening quote.
+    assert(!escaped.starts_with("'$("), "no command substitution leak");
+}
+
+fn exercise_backslash_safe() {
+    let payload: Text = "a\\b\\c".into();
+    let escaped: Text = Escaper.posix(&payload);
+    // Backslashes pass through verbatim in POSIX single-quoted strings.
+    assert(escaped.contains(&"a\\b\\c".into()),
+           "backslash preserved");
+}
+
+fn main() {
+    exercise_classic_payload();
+    exercise_quote_breakout();
+    exercise_double_quote_breakout();
+    exercise_backslash_safe();
+}

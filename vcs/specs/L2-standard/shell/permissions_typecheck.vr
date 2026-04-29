@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, permissions, security, frontmatter, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.context.{PermissionSet};
+mount core.shell.permissions.{parse_frontmatter};
+mount core.shell.result.{ShellError};
+mount core.io.path.{Path, PathBuf};
+
+fn exercise_path_checks() {
+    let p = PermissionSet.deny_all()
+        .with_fs_read(["/etc/*".into()])
+        .with_fs_write(["/tmp/*".into()]);
+    let etc = PathBuf.from("/etc/hosts");
+    let var = PathBuf.from("/var/log/x");
+    let tmp = PathBuf.from("/tmp/file");
+    let _: Result<(), ShellError> = p.check_fs_read(etc.as_path());
+    let _: Result<(), ShellError> = p.check_fs_read(var.as_path());
+    let _: Result<(), ShellError> = p.check_fs_write(tmp.as_path());
+    let _: Result<(), ShellError> = p.check_fs_write(var.as_path());
+}
+
+fn exercise_net_checks() {
+    let p = PermissionSet.deny_all()
+        .with_net(["api.github.com:443".into(), "*.example.com".into()]);
+    let _: Result<(), ShellError> = p.check_net(&"api.github.com".into(), 443);
+    let _: Result<(), ShellError> = p.check_net(&"api.github.com".into(), 80);
+    let _: Result<(), ShellError> = p.check_net(&"foo.example.com".into(), 0);
+    let _: Result<(), ShellError> = p.check_net(&"badhost.com".into(), 0);
+}
+
+fn exercise_env_check() {
+    let p = PermissionSet.deny_all();
+    p.env = Some(["HOME".into(), "PATH".into()]);
+    let _: Result<(), ShellError> = p.check_env(&"HOME".into());
+    let _: Result<(), ShellError> = p.check_env(&"SECRET_TOKEN".into());
+}
+
+fn exercise_frontmatter_parse() {
+    let source = "// !@permission(run: [\"git\", \"kubectl\"])\n\
+                  // !@permission(fs_read: [\"/etc/*\"])\n\
+                  fn main() { }".into();
+    let _: Result<PermissionSet, ShellError> = parse_frontmatter(&source);
+
+    let no_frontmatter = "fn main() {}".into();
+    let _: Result<PermissionSet, ShellError> = parse_frontmatter(&no_frontmatter);
+}
+
+fn main() {
+    exercise_path_checks();
+    exercise_net_checks();
+    exercise_env_check();
+    exercise_frontmatter_parse();
+}

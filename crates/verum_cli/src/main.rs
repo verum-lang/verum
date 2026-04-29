@@ -3137,6 +3137,32 @@ fn run_command(cli: Cli) -> Result<()> {
                                 )
                             });
                         feature_overrides::apply_global(&mut m)?;
+                        // Surface inert DebugConfig fields not yet wired
+                        // through to the DAP server. `dap_enabled` and
+                        // `port` reach the dispatch logic below; the
+                        // remaining three (`step_granularity`,
+                        // `inspect_depth`, `show_erased_proofs`) flow
+                        // from the manifest into LanguageFeatures but
+                        // verum_dap doesn't consult them at session
+                        // setup. Trace the values at the dispatch entry
+                        // so embedders writing
+                        // `[debug].step_granularity = "instruction"`
+                        // see the value was observed at the CLI
+                        // boundary, gated on any non-default value.
+                        if m.debug.step_granularity.as_str() != "statement"
+                            || m.debug.inspect_depth != 8
+                            || m.debug.show_erased_proofs
+                        {
+                            tracing::debug!(
+                                "dap dispatch: step_granularity={:?}, inspect_depth={}, \
+                                 show_erased_proofs={} — these fields land on the manifest \
+                                 but verum_dap does not yet consult them at session setup; \
+                                 forward-looking infra",
+                                m.debug.step_granularity.as_str(),
+                                m.debug.inspect_depth,
+                                m.debug.show_erased_proofs,
+                            );
+                        }
                         (m.debug.dap_enabled, m.debug.port)
                     }
                     None => (true, 0),

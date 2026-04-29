@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, context, di, mock, permissions, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.context.{
+    ShellContext, PermissionSet, PermissionKind,
+    MockLayer, MockResponse,
+    cd, set_env, cwd,
+};
+mount core.shell.escape.{ShellFlavour};
+mount core.shell.result.{ShellError};
+
+fn exercise_default_context() {
+    let ctx: ShellContext = ShellContext.default();
+    let _: Maybe<Text> = ctx.effective_cwd();
+    let _: Text = ctx.resolve_shell();
+    let _: Text = ctx.shell_command_flag();
+    let _: ShellFlavour = ctx.flavour;
+}
+
+fn exercise_builders() {
+    let ctx = ShellContext.default()
+        .with_cwd("/tmp".into())
+        .with_env("KEY".into(), "VALUE".into())
+        .with_flavour(ShellFlavour.Posix)
+        .with_shell("/bin/zsh".into())
+        .with_verbose(true)
+        .with_dry_run(false);
+    let _: ShellContext = ctx;
+}
+
+fn exercise_permissions() {
+    let p1 = PermissionSet.unrestricted();
+    let p2 = PermissionSet.deny_all();
+    let p3 = PermissionSet.deny_all().with_run(["git".into(), "kubectl".into()]);
+    let _: PermissionSet = p1;
+    let _: PermissionSet = p2;
+    let _: Result<(), ShellError> = p3.check_run(&"git".into());
+    let _: Result<(), ShellError> = p3.check_run(&"/usr/bin/kubectl".into());
+}
+
+fn exercise_mock_layer() {
+    let resps: List<MockResponse> = [
+        MockResponse.success("git status".into(), "On branch main".into()),
+        MockResponse.failure("git push".into(), "rejected".into(), 1),
+    ];
+    let mut mock = MockLayer.new(resps);
+    let r: Maybe<MockResponse> = mock.dispatch(&"git status".into());
+    let _: &List<Text> = mock.recorded_calls();
+    let _ = r;
+}
+
+fn exercise_test_context() {
+    let ctx = ShellContext.for_tests();
+    // No further imperative steps — just a constructor sanity check
+    let _ = ctx;
+}
+
+fn main() {
+    exercise_default_context();
+    exercise_builders();
+    exercise_permissions();
+    exercise_mock_layer();
+    exercise_test_context();
+}

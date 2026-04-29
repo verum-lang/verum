@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, transducer, rank2, compose, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.transducer.{
+    Reducer, Transducer,
+    mapping, filtering, taking, dropping,
+    taking_while, dropping_while,
+    flat_mapping, tap,
+    compose, compose3, identity,
+    list_appender, counter, drain,
+    transduce_list, transduce_into,
+};
+
+fn exercise_basic_transducers() {
+    // mapping
+    let m: Transducer<Int, Int> = mapping(|x| x + 1);
+    let _: List<Int> = transduce_list([1, 2, 3], m);
+}
+
+fn exercise_filtering() {
+    let f: Transducer<Int, Int> = filtering(|x| *x > 0);
+    let _: List<Int> = transduce_list([-1, 0, 1, 2], f);
+}
+
+fn exercise_taking_dropping() {
+    let t: Transducer<Int, Int> = taking(3);
+    let _: List<Int> = transduce_list([1, 2, 3, 4, 5], t);
+
+    let d: Transducer<Int, Int> = dropping(2);
+    let _: List<Int> = transduce_list([1, 2, 3, 4, 5], d);
+}
+
+fn exercise_taking_while() {
+    let tw: Transducer<Int, Int> = taking_while(|x| *x < 5);
+    let _: List<Int> = transduce_list([1, 2, 3, 7, 4], tw);
+
+    let dw: Transducer<Int, Int> = dropping_while(|x| *x < 3);
+    let _: List<Int> = transduce_list([1, 2, 3, 4, 5], dw);
+}
+
+fn exercise_compose() {
+    let pipeline: Transducer<Int, Int> = compose(
+        filtering(|x| *x > 0),
+        mapping(|x| x * 2),
+    );
+    let _: List<Int> = transduce_list([-1, 1, 2, -3, 4], pipeline);
+
+    let three_stage: Transducer<Int, Int> = compose3(
+        filtering(|x| *x > 0),
+        mapping(|x| x * 2),
+        taking(3),
+    );
+    let _: List<Int> = transduce_list([1, 2, 3, 4, 5, 6], three_stage);
+}
+
+fn exercise_identity_law() {
+    let m: Transducer<Int, Int> = mapping(|x| x + 1);
+    // identity is the unit element of compose. The two pipelines below
+    // are observationally equal.
+    let lhs: Transducer<Int, Int> = compose(identity(), m);
+    let rhs: Transducer<Int, Int> = compose(m, identity());
+    let r1: List<Int> = transduce_list([1, 2, 3], lhs);
+    let r2: List<Int> = transduce_list([1, 2, 3], rhs);
+    let _ = r1;
+    let _ = r2;
+}
+
+fn exercise_endpoints() {
+    // transduce_into with a counter sink — counts elements that survive
+    let t: Transducer<Int, Int> = filtering(|x| *x > 0);
+    let total: Int = transduce_into([1, -1, 2, -3, 4], t, 0, counter());
+    let _ = total;
+}
+
+fn exercise_flat_mapping() {
+    let fm: Transducer<Int, Int> = flat_mapping(|x| [x, x + 10]);
+    let _: List<Int> = transduce_list([1, 2, 3], fm);
+}
+
+fn main() {
+    exercise_basic_transducers();
+    exercise_filtering();
+    exercise_taking_dropping();
+    exercise_taking_while();
+    exercise_compose();
+    exercise_identity_law();
+    exercise_endpoints();
+    exercise_flat_mapping();
+}

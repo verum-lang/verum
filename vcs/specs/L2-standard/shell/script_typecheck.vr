@@ -1,0 +1,34 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, script, frontmatter, exit, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.script.{args, arg, args_count, exit, die, bootstrap, script_main};
+mount core.shell.context.{ShellContext};
+mount core.shell.result.{ShellError};
+
+fn exercise_args() {
+    let _: List<Text> = args();
+    let _: Maybe<Text> = arg(0);
+    let _: Int = args_count();
+}
+
+fn exercise_bootstrap() {
+    let source: Text = "// !@permission(run: [\"git\"])\nfn main() {}".into();
+    let _: Result<ShellContext, ShellError> = bootstrap(&source);
+}
+
+async fn exercise_main_runner() {
+    // Type-check the call shape only — script_main never returns
+    if false {
+        script_main(|| async { Ok(()) }).await;
+    }
+}
+
+async fn main() {
+    exercise_args();
+    exercise_bootstrap();
+    exercise_main_runner().await;
+}

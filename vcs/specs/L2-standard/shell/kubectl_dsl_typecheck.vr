@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, dsl, kubectl, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.dsl.kubectl.{
+    KubectlCmd, KubeName, KubeNamespace, KubeOutput, KubeResource,
+    Pod, Deployment, Service, ConfigMap, Namespace,
+};
+mount core.shell.result.{ShellError};
+mount core.io.path.{PathBuf};
+
+fn exercise_kube_atoms() {
+    let _: Result<KubeName, ShellError> = KubeName.parse("api-server".into());
+    let _: Result<KubeName, ShellError> = KubeName.parse("BadName".into());
+    let _: Result<KubeNamespace, ShellError> = KubeNamespace.parse("production".into());
+}
+
+fn exercise_apply() -> Result<Text, ShellError> {
+    let cmd: KubectlCmd<Pod> = KubectlCmd.Apply {
+        manifest:  PathBuf.from("manifests/app.yaml"),
+        namespace: Some(KubeNamespace.parse("default".into())?),
+        dry_run:   false,
+        prune:     false,
+    };
+    Ok(cmd.render())
+}
+
+fn exercise_get() -> Result<Text, ShellError> {
+    let cmd: KubectlCmd<Service> = KubectlCmd.Get {
+        name:           Some(KubeName.parse("api".into())?),
+        namespace:      Some(KubeNamespace.parse("default".into())?),
+        output:         KubeOutput.Json,
+        all_namespaces: false,
+    };
+    Ok(cmd.render())
+}
+
+fn exercise_logs_pod() -> Result<Text, ShellError> {
+    let cmd: KubectlCmd<Pod> = KubectlCmd.Logs {
+        pod:       KubeName.parse("api-7d9f-xyz".into())?,
+        namespace: Some(KubeNamespace.parse("default".into())?),
+        container: Some("nginx".into()),
+        follow:    true,
+        tail:      Some(100),
+        since:     Some("1h".into()),
+    };
+    Ok(cmd.render())
+}
+
+fn exercise_rollout() -> Result<Text, ShellError> {
+    let cmd: KubectlCmd<Deployment> = KubectlCmd.RolloutStatus {
+        name:         KubeName.parse("api".into())?,
+        namespace:    Some(KubeNamespace.parse("default".into())?),
+        timeout_secs: Some(300),
+    };
+    Ok(cmd.render())
+}
+
+fn exercise_port_forward() -> Result<Text, ShellError> {
+    let cmd: KubectlCmd<Pod> = KubectlCmd.PortForward {
+        name:        KubeName.parse("api-pod".into())?,
+        namespace:   None,
+        local_port:  8080,
+        remote_port: 80,
+    };
+    Ok(cmd.render())
+}
+
+fn main() {
+    exercise_kube_atoms();
+    let _ = exercise_apply();
+    let _ = exercise_get();
+    let _ = exercise_logs_pod();
+    let _ = exercise_rollout();
+    let _ = exercise_port_forward();
+}

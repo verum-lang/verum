@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, text-utils, grep, sed, awk, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.text_utils.{
+    grep, grep_i, grep_v, grep_re, grep_capture,
+    sed_replace, sed_replace_re, sed_each_line,
+    awk_field, awk_field_sep,
+    sort, uniq, sort_unique,
+    Counts, wc,
+    column_format, t_grep, t_sed,
+};
+mount core.text.regex.{Regex};
+mount core.shell.transducer.{Transducer};
+
+fn exercise_grep() {
+    let lines: List<Text> = ["foo".into(), "bar".into(), "FoOt".into()];
+    let _: List<Text> = grep(&"foo".into(), &lines);
+    let _: List<Text> = grep_i(&"foo".into(), &lines);
+    let _: List<Text> = grep_v(&"foo".into(), &lines);
+}
+
+fn exercise_grep_re() {
+    let lines: List<Text> = ["foo".into(), "bar123".into()];
+    let rx = Regex.compile(r"\d+").unwrap();
+    let _: List<Text> = grep_re(&rx, &lines);
+    let _: List<Text> = grep_capture(&rx, &lines);
+}
+
+fn exercise_sed() {
+    let _: Text = sed_replace(&"hello world".into(), &"world".into(), &"verum".into());
+    let rx = Regex.compile(r"\d+").unwrap();
+    let _: Text = sed_replace_re(&"abc 123 def 456".into(), &rx, &"NUM".into());
+    let lines: List<Text> = ["a 1".into(), "b 2".into()];
+    let _: List<Text> = sed_each_line(&lines, &"a".into(), &"A".into());
+}
+
+fn exercise_awk() {
+    let lines: List<Text> = ["alice 25 admin".into(), "bob 30 user".into()];
+    let _: List<Text> = awk_field(&lines, 1);
+    let _: List<Text> = awk_field_sep(&lines, &" ".into(), 0);
+}
+
+fn exercise_sort() {
+    let lines: List<Text> = ["b".into(), "a".into(), "a".into(), "c".into()];
+    let _: List<Text> = sort(&lines);
+    let _: List<Text> = uniq(&lines);
+    let _: List<Text> = sort_unique(&lines);
+}
+
+fn exercise_wc() {
+    let c: Counts = wc(&"hello world\ntwo lines".into());
+    let _: Int = c.lines;
+    let _: Int = c.words;
+    let _: Int = c.bytes;
+}
+
+fn exercise_column_format() {
+    let rows: List<List<Text>> = [
+        ["NAME".into(), "AGE".into(), "ROLE".into()],
+        ["alice".into(), "25".into(), "admin".into()],
+    ];
+    let _: Text = column_format(&rows);
+}
+
+fn exercise_transducer_factories() {
+    let _: Transducer<Text, Text> = t_grep("error".into());
+    let _: Transducer<Text, Text> = t_sed("foo".into(), "bar".into());
+}
+
+fn main() {
+    exercise_grep();
+    exercise_grep_re();
+    exercise_sed();
+    exercise_awk();
+    exercise_sort();
+    exercise_wc();
+    exercise_column_format();
+    exercise_transducer_factories();
+}
