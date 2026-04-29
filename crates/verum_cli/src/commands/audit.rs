@@ -1666,49 +1666,42 @@ fn print_kernel_recheck_report_json(
     total_admitted: usize,
     total_rejected: usize,
 ) {
-    use std::fmt::Write;
-    let mut out = String::new();
-    let _ = writeln!(out, "{{");
-    let _ = writeln!(out, "  \"schema_version\": 1,");
-    let _ = writeln!(out, "  \"command\": \"audit-kernel-recheck\",");
-    let _ = writeln!(out, "  \"total_files\": {},", total_files);
-    let _ = writeln!(out, "  \"parsed_files\": {},", parsed_files);
-    let _ = writeln!(out, "  \"skipped_files\": {},", skipped_files);
-    let _ = writeln!(out, "  \"total_admitted\": {},", total_admitted);
-    let _ = writeln!(out, "  \"total_rejected\": {},", total_rejected);
-    let _ = writeln!(out, "  \"reports\": [");
-    for (i, r) in reports.iter().enumerate() {
-        let _ = writeln!(out, "    {{");
-        let _ = writeln!(
-            out,
-            "      \"file\": \"{}\",",
-            r.file.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
-        );
-        let _ = writeln!(out, "      \"admitted\": {},", r.admitted);
-        let _ = writeln!(out, "      \"rejected\": [");
-        for (j, rej) in r.rejected.iter().enumerate() {
-            let _ = writeln!(out, "        {{");
-            let _ = writeln!(
-                out,
-                "          \"item_name\": \"{}\",",
-                rej.item_name.as_str().replace('\\', "\\\\").replace('"', "\\\"")
-            );
-            let _ = writeln!(out, "          \"item_kind\": \"{}\",", rej.item_kind);
-            let _ = writeln!(
-                out,
-                "          \"reason\": \"{}\"",
-                rej.reason.as_str().replace('\\', "\\\\").replace('"', "\\\"")
-            );
-            let comma = if j + 1 < r.rejected.len() { "," } else { "" };
-            let _ = writeln!(out, "        }}{}", comma);
-        }
-        let _ = writeln!(out, "      ]");
-        let comma = if i + 1 < reports.len() { "," } else { "" };
-        let _ = writeln!(out, "    }}{}", comma);
-    }
-    let _ = writeln!(out, "  ]");
-    let _ = writeln!(out, "}}");
-    print!("{}", out);
+    // #124 — RFC-8259-safe JSON via serde_json (replaces the
+    // hand-rolled writeln! pipeline that only escaped `\\` + `"`
+    // and produced invalid JSON when KernelRecheckError Display
+    // output carried control chars, newlines, or ` ` bytes).
+    let reports_json: Vec<serde_json::Value> = reports
+        .iter()
+        .map(|r| {
+            let rejected: Vec<serde_json::Value> = r
+                .rejected
+                .iter()
+                .map(|rej| {
+                    serde_json::json!({
+                        "item_name": rej.item_name.as_str(),
+                        "item_kind": rej.item_kind,
+                        "reason": rej.reason.as_str(),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "file": r.file.display().to_string(),
+                "admitted": r.admitted,
+                "rejected": rejected,
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-kernel-recheck",
+        "total_files": total_files,
+        "parsed_files": parsed_files,
+        "skipped_files": skipped_files,
+        "total_admitted": total_admitted,
+        "total_rejected": total_rejected,
+        "reports": reports_json,
+    });
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
 }
 
 /// Legacy entry-point for `verum audit --epsilon` with plain output.
