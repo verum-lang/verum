@@ -1,0 +1,164 @@
+// =============================================================================
+// shell/mod.vr — Verum Shell Scripting Framework public API
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, io, async, text, time
+// =============================================================================
+//
+// Single-import surface for shell scripting. After `mount core.shell.*;` a
+// caller has access to:
+//
+//   * sh#"..." — tagged-literal shell dispatch (parser-level, see grammar)
+//   * sh()   / sh_check() / run() — function-level executors
+//   * Executor with timeout/retry/cancel
+//   * background() / parallel() / fanout() / fail_fast() — concurrency
+//   * stream_lines() / stream_lines_bounded() / LineStream — streaming
+//   * Pipeline<A,B> — typed builder
+//   * Transducer<A,B> — composable stream operators
+//   * GitCmd / DockerCmd — typed command DSLs
+//   * cp / mv / rm / mkdir_p / cat / write / which — built-ins
+//   * Fd / TempFile / FileLock — CBGR resources
+//   * ShellContext / PermissionSet / MockLayer — DI primitives
+//   * Escaper / ShellEscape / ShellRaw — escape protocol
+//   * ShellResult / ShellError — return / error types
+//
+// The expectation is that scripts only need this one mount line plus
+// `mount core.*;` for primitives.
+//
+// =============================================================================
+
+module shell;
+
+// =============================================================================
+// Submodules
+// =============================================================================
+
+public module escape;
+public module result;
+public module context;
+public module permissions;
+public module exec;
+public module executor;
+public module jobs;
+public module stream;
+public module transducer;
+public module pipeline;
+public module resources;
+public module builtins;
+public module glob;
+public module watch;
+public module interactive;
+public module progress;
+public module signal;
+public module text_utils;
+public module verify;
+public module script;
+public module dsl;
+
+// =============================================================================
+// Core re-exports
+// =============================================================================
+
+public mount .escape.{
+    ShellFlavour, ShellEscape, ShellRaw, Escaper,
+    default_flavour, shell_join, shell_join_for, validate_sh,
+};
+
+public mount .result.{ ShellResult, ShellError };
+
+public mount .context.{
+    ShellContext, PermissionSet, PermissionKind,
+    MockLayer, MockResponse,
+    cd, set_env, cwd,
+};
+
+public mount .exec.{
+    run, sh, sh_check,
+    run_with_cancel, sh_with_cancel,
+};
+
+public mount .executor.{ Executor, RetryPolicy };
+
+public mount .jobs.{
+    JobHandle, background, background_with_grace,
+    wait_all, parallel, parallel_bounded,
+    fail_fast, fanout,
+};
+
+public mount .stream.{
+    OverflowPolicy, StreamConfig, LineStream,
+    stream_lines, stream_lines_bounded,
+};
+
+public mount .transducer.{
+    Reducer, Transducer, StatefulTransducer,
+    mapping, filtering, taking, dropping,
+    taking_while, dropping_while, dedup_consecutive,
+    flat_mapping, tap,
+    compose, compose3, identity,
+    list_appender, counter, drain,
+    transduce_list, transduce_into, transduce_stateful,
+};
+
+public mount .pipeline.{ Pipeline, PipelineStage, pipeline };
+
+public mount .resources.{ Fd, TempFile, FileLock, LockKind, SharedFd };
+
+public mount .builtins.{
+    cp, mv, rm, rm_rf,
+    mkdir, mkdir_p,
+    cat, cat_bytes,
+    write, write_str, append,
+    exists, is_file, is_dir,
+    which, command_exists,
+    temp_dir, temp_file,
+};
+
+// DSLs (re-exported under their own paths)
+public mount .dsl.git.{
+    GitCmd, GitUrl, GitRefspec, GitBranch, ForceMode, GitLogFormat,
+    git,
+};
+public mount .dsl.docker.{
+    DockerCmd, DockerImage, DockerTag, PortMapping, VolumeMount,
+    docker,
+};
+public mount .dsl.kubectl.{
+    KubectlCmd, KubeName, KubeNamespace, KubeOutput, KubeResource,
+    Pod, Deployment, Service, ConfigMap, Secret, Namespace,
+    kubectl,
+};
+
+// New modules
+public mount .glob.{ glob, glob_with_hidden, glob_in, glob_files, glob_dirs };
+public mount .watch.{ WatchEvent, WatchFilter, WatchHandle, watch, watch_with, watch_native };
+public mount .interactive.{
+    input, input_opt, input_default, input_required, input_validated,
+    password, confirm, confirm_default_yes,
+    select, multi_select,
+};
+public mount .progress.{ Progress, ProgressStyle, Spinner };
+public mount .signal.{
+    trap, on_interrupt, on_terminate, cleanup_on_exit,
+    with_trap, with_interrupt_trap, with_signal_ignored,
+    SignalGuard,
+};
+public mount .text_utils.{
+    grep, grep_i, grep_v, grep_re, grep_capture,
+    sed_replace, sed_replace_re, sed_each_line,
+    awk_field, awk_field_sep,
+    sort, uniq, sort_unique,
+    Counts, wc,
+    column_format, t_grep, t_sed,
+};
+public mount .verify.{
+    NonEmpty, BoundedText, EnvName, EnvValue, SemVerRef, PortNumber, HostName,
+    DeployConfig, S3Bucket,
+};
+public mount .script.{
+    args, arg, args_count,
+    exit, exit_success, exit_failure, die,
+    bootstrap, bootstrap_from_file,
+    script_main,
+};
+public mount .permissions.{ parse_frontmatter };

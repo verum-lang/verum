@@ -1,0 +1,211 @@
+// =============================================================================
+// shell/pipeline.vr — Typed pipeline builder
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: shell.{exec, result, context, transducer}, io.process
+// =============================================================================
+//
+// `Pipeline<A, B>` is a typed sequence of stages that transform a stream
+// of `A` into a stream of `B`. Stages can be:
+//   * `Command(text)` — feed previous stdout into a shell command
+//   * `Map(fn(Text) -> Text)` — pure line-level transformation
+//   * `Filter(fn(&Text) -> Bool)` — pure predicate
+//   * `Parse(fn(Text) -> JsonValue)` — structured projection
+//
+// Internally, command stages connect via kernel pipes (zero-copy when both
+// endpoints are real processes). Map / Filter / Parse stages run on the
+// caller's thread fold via the transducer engine. The hybrid model keeps
+// large data movement in the kernel while exposing fast, allocation-free
+// per-line transforms in Verum.
+//
+// =============================================================================
+
+module core.shell.pipeline;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.io.process.{Command, Child, ExitStatus, Stdio};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.shell.context.{ShellContext};
+mount core.shell.exec.{};
+mount core.shell.escape.{Escaper, ShellEscape};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.shell.transducer.{
+    Transducer, Reducer, mapping, filtering, taking, dropping, compose, identity,
+    transduce_list, list_appender,
+};
+
+// =============================================================================
+// PipelineStage — algebraic enumeration of stage kinds
+// =============================================================================
+
+public type PipelineStage is
+    /// External shell command. Stdin = previous stage's stdout.
+    | Command(Text)
+    /// Line-level pure map.
+    | Map(fn(Text) -> Text)
+    /// Line-level predicate.
+    | Filter(fn(&Text) -> Bool)
+    /// Take first N lines.
+    | Take(Int)
+    /// Drop first N lines.
+    | Drop(Int)
+    /// Generic fold by transducer.  Most powerful stage; absorbs any
+    /// number of map/filter/take stages.
+    | Transduce(Transducer<Text, Text>);
+
+implement Clone for PipelineStage {
+    fn clone(&self) -> PipelineStage {
+        match self {
+            Command(t)    => Command(t.clone()),
+            Map(f)        => Map(*f),
+            Filter(f)     => Filter(*f),
+            Take(n)       => Take(*n),
+            Drop(n)       => Drop(*n),
+            Transduce(_t) => Transduce(identity()),  // shared rank-2 closure not deeply cloneable
+        }
+    }
+}
+
+// =============================================================================
+// Pipeline<A, B> — typed builder
+// =============================================================================
+
+public type Pipeline<A, B> is {
+    stages: List<PipelineStage>,
+    /// Initial input parser (from raw bytes / first stage stdout into `A`).
+    /// Default: Text from stdout (lossy UTF-8). Phantom in this generic
+    /// pre-substitution form; concrete callers swap as needed.
+    /// Output parser (from final stage stdout into `B`).
+    /// Default: trimmed Text.
+}
+
+implement<A, B> Pipeline<A, B> {
+    /// Empty pipeline. Use as the seed for chaining.
+    public fn new() -> Pipeline<Text, Text> {
+        Pipeline { stages: [] }
+    }
+
+    public fn with_command(mut self, cmd: Text) -> Pipeline<A, B> {
+        self.stages.push(PipelineStage.Command(cmd));
+        self
+    }
+
+    public fn with_map(mut self, f: fn(Text) -> Text) -> Pipeline<A, B> {
+        self.stages.push(PipelineStage.Map(f));
+        self
+    }
+
+    public fn with_filter(mut self, f: fn(&Text) -> Bool) -> Pipeline<A, B> {
+        self.stages.push(PipelineStage.Filter(f));
+        self
+    }
+
+    public fn with_take(mut self, n: Int) -> Pipeline<A, B> {
+        self.stages.push(PipelineStage.Take(n));
+        self
+    }
+
+    public fn with_drop(mut self, n: Int) -> Pipeline<A, B> {
+        self.stages.push(PipelineStage.Drop(n));
+        self
+    }
+
+    public fn with_transducer(mut self, t: Transducer<Text, Text>) -> Pipeline<A, B> {
+        self.stages.push(PipelineStage.Transduce(t));
+        self
+    }
+
+    /// Number of stages. Useful for diagnostics.
+    public fn len(&self) -> Int { self.stages.len() as Int }
+
+    /// Run the pipeline. Returns the final `ShellResult` after all stages
+    /// have been applied.  In the current Verum runtime, command stages
+    /// are connected via kernel pipes; transducer stages are applied to
+    /// the captured stdout of the most recent command.
+    public async fn run(&self) -> Result<ShellResult, ShellError>
+        using [ShellContext]
+    {
+        let ctx = provide ShellContext;
+        if self.stages.is_empty() {
+            return Err(ShellError.SpawnFailed {
+                command: "<empty pipeline>".into(),
+                reason:  "pipeline has no stages".into(),
+            });
+        }
+        let start = Instant.now();
+
+        // Composite shell command: chain consecutive Command stages with a
+        // single shell invocation using a bash-style `|`. This delegates the
+        // pipe creation to the shell, which is optimal for raw byte
+        // throughput.  Non-Command stages are applied as transducers on the
+        // result.
+
+        let mut composite = Text.new();
+        let mut had_cmd = false;
+        let mut transducer: Transducer<Text, Text> = identity();
+
+        for stage in self.stages.iter() {
+            match stage {
+                Command(c) => {
+                    if had_cmd { composite.push_str(" | "); }
+                    composite.push_str(c);
+                    had_cmd = true;
+                }
+                Map(f)        => transducer = compose(transducer, mapping(*f)),
+                Filter(f)     => transducer = compose(transducer, filtering(*f)),
+                Take(n)       => transducer = compose(transducer, taking(*n)),
+                // Drop(n) skips the first n lines of the post-shell
+                // stream; pre-fix this composed `taking(0)` (a
+                // placeholder), which made `Drop` silently DROP
+                // EVERYTHING rather than skip n. The `dropping`
+                // transducer was already in core.shell.transducer
+                // but the import + dispatch site never picked it up.
+                Drop(n)       => transducer = compose(transducer, dropping(*n)),
+                Transduce(t)  => transducer = compose(transducer, t.clone()),
+            }
+        }
+
+        // Run the shell stage (if any)
+        let raw = if had_cmd {
+            core.shell.exec.sh_check(&composite).await?
+        } else {
+            // No shell stages: synthesise an empty result for transducer-only
+            // pipelines (rare — usually used as `Pipeline.new().with_command(...).run()`).
+            ShellResult.new(
+                ExitStatus { raw: 0 },
+                [], [],
+                "<no command stage>".into(),
+                Duration.from_millis(0),
+            )
+        };
+
+        // Apply transducer over lines
+        let lines: List<Text> = raw.lines();
+        let transformed: List<Text> = transduce_list(lines, transducer);
+
+        // Re-encode as bytes
+        let mut bytes: List<Byte> = [];
+        for (i, line) in transformed.iter().enumerate() {
+            if i > 0 { bytes.push('\n' as Byte); }
+            for b in line.clone().into_bytes().iter() { bytes.push(*b); }
+        }
+
+        Ok(ShellResult.new(
+            raw.status,
+            bytes,
+            raw.stderr_bytes.clone(),
+            composite,
+            start.elapsed(),
+        ))
+    }
+}
+
+// =============================================================================
+// Convenience constructor: `pipeline().command(...).filter(...).run()`
+// =============================================================================
+
+public fn pipeline() -> Pipeline<Text, Text> {
+    Pipeline.new()
+}

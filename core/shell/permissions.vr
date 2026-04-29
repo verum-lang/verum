@@ -1,0 +1,247 @@
+// =============================================================================
+// shell/permissions.vr — Capability gate (extension of shell.context.PermissionSet)
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, io.path, base.glob, shell.{context, result}
+// =============================================================================
+//
+// Extension API for `PermissionSet` providing path/host matching with glob
+// semantics. The base `PermissionSet` (in `shell.context`) carries the
+// allow-lists; this module adds:
+//
+//   * `check_fs_read` / `check_fs_write` — canonicalise the requested path
+//     and prefix-match against the allow-list (each entry interpreted as
+//     a glob pattern).
+//   * `check_net` — match host:port against the `net` list, supporting
+//     plain hostnames, wildcards (*.example.com) and CIDRs.
+//   * `check_env` — exact-match for env-var read/write capability.
+//   * Frontmatter parser for `// !@permission(...)` blocks.
+//
+// =============================================================================
+
+module core.shell.permissions;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.glob.{GlobPattern, compile as glob_compile};
+mount core.io.path.{Path, PathBuf};
+mount core.io.fs.{current_dir as fs_current_dir};
+mount core.shell.context.{PermissionSet};
+mount core.shell.result.{ShellError};
+
+// =============================================================================
+// Path checks — read / write
+// =============================================================================
+
+implement PermissionSet {
+    /// Validate that `path` is permitted for read access.
+    public fn check_fs_read(&self, path: &Path) -> Result<(), ShellError> {
+        check_path(&self.fs_read, path, "fs_read")
+    }
+
+    /// Validate that `path` is permitted for write access.
+    public fn check_fs_write(&self, path: &Path) -> Result<(), ShellError> {
+        check_path(&self.fs_write, path, "fs_write")
+    }
+
+    /// Validate that `host:port` is permitted for outbound network.
+    /// `port` may be 0 to skip port matching.
+    public fn check_net(&self, host: &Text, port: Int) -> Result<(), ShellError> {
+        match &self.net {
+            None => Ok(()),
+            Some(allowed) => {
+                for pat in allowed.iter() {
+                    if host_matches(pat, host, port) { return Ok(()); }
+                }
+                Err(ShellError.PermissionDenied {
+                    command: f"net({host}:{port})",
+                    kind:    "net".into(),
+                })
+            }
+        }
+    }
+
+    /// Validate env-var read/write access by name.
+    public fn check_env(&self, name: &Text) -> Result<(), ShellError> {
+        match &self.env {
+            None => Ok(()),
+            Some(allowed) => {
+                for n in allowed.iter() {
+                    if n == name { return Ok(()); }
+                }
+                Err(ShellError.PermissionDenied {
+                    command: f"env({name})",
+                    kind:    "env".into(),
+                })
+            }
+        }
+    }
+}
+
+fn check_path(
+    allowed: &Maybe<List<Text>>,
+    path:    &Path,
+    kind:    &str,
+) -> Result<(), ShellError> {
+    match allowed {
+        None => Ok(()),
+        Some(rules) => {
+            let canonical = canonicalise(path);
+            for pat_str in rules.iter() {
+                if path_matches(pat_str, &canonical) { return Ok(()); }
+            }
+            Err(ShellError.PermissionDenied {
+                command: f"{kind}({path:?})",
+                kind:    kind.into(),
+            })
+        }
+    }
+}
+
+fn canonicalise(path: &Path) -> Text {
+    // Best-effort: prepend cwd if the path is relative. Avoids symlink
+    // resolution to keep the check deterministic and side-effect-free.
+    let p = path.to_text();
+    if p.starts_with("/") || p.starts_with("\\") || (p.len() >= 2 && p.byte_at(1) == (':' as Byte)) {
+        return p;
+    }
+    match fs_current_dir() {
+        Ok(cwd) => f"{cwd:?}/{p}",
+        Err(_)  => p,
+    }
+}
+
+fn path_matches(pattern: &Text, path: &Text) -> Bool {
+    // 1. Exact prefix match
+    if path.starts_with(pattern) { return true; }
+    // 2. Glob match (supports ** for recursive any-directory, * within component)
+    match glob_compile(pattern.as_str()) {
+        Ok(g)  => g.matches_path(path.as_str()),
+        Err(_) => false,
+    }
+}
+
+fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
+    // pattern forms:
+    //   "example.com"       — exact host, any port
+    //   "example.com:443"   — exact host + port
+    //   "*.example.com"     — suffix wildcard
+    //   "10.0.0.0/8"        — CIDR (TODO: full IP arithmetic)
+    let (pat_host, pat_port): (Text, Int) = match pattern.find(':') {
+        Some(idx) => {
+            let h: Text = pattern.slice(0, idx).into();
+            let p_str: Text = pattern.slice(idx + 1, pattern.len()).into();
+            let p: Int = p_str.parse::<Int>().unwrap_or(0);
+            (h, p)
+        }
+        None => (pattern.clone(), 0),
+    };
+    if pat_port != 0 && port != 0 && pat_port != port { return false; }
+    if pat_host.starts_with("*.") {
+        let suffix: Text = pat_host.slice(1, pat_host.len()).into();  // ".example.com"
+        host.ends_with(&suffix) || (suffix.starts_with(".") && {
+            let bare: Text = suffix.slice(1, suffix.len()).into();
+            host == &bare
+        })
+    } else {
+        host == &pat_host
+    }
+}
+
+// =============================================================================
+// Frontmatter — parse `// !@permission(...)` blocks
+// =============================================================================
+//
+// Recognises lines of the form:
+//   // !@permission(run: ["git", "kubectl"], fs_read: ["/etc/kube/*"])
+//   // !@permission(net: ["api.github.com:443"])
+//
+// The grammar is intentionally simple — single-line per directive,
+// comma-separated key=value pairs, lists in `["..."]` syntax. Multiple
+// directives accumulate into the same PermissionSet.
+
+public fn parse_frontmatter(source: &Text) -> Result<PermissionSet, ShellError> {
+    let mut perms = PermissionSet.deny_all();
+    let mut started = false;
+
+    for line in source.lines() {
+        let trimmed: Text = line.trim().into();
+        if !trimmed.starts_with("//") { continue; }
+        let body: Text = trimmed.slice(2, trimmed.len()).trim().into();
+        if !body.starts_with("!@permission") {
+            // First non-permission line ends the frontmatter section
+            if started { break; }
+            continue;
+        }
+        started = true;
+        // Parse the body: !@permission(...)
+        let inner = match (body.find('('), body.rfind(')')) {
+            (Some(l), Some(r)) if r > l => body.slice(l + 1, r),
+            _ => continue,
+        };
+        let inner_text: Text = inner.into();
+        merge_directive(&mut perms, &inner_text)?;
+    }
+
+    if started {
+        // Frontmatter present — we keep deny-all baseline + explicit allows.
+        Ok(perms)
+    } else {
+        // No frontmatter — leave permissions unrestricted (legacy mode).
+        Ok(PermissionSet.unrestricted())
+    }
+}
+
+fn merge_directive(p: &mut PermissionSet, body: &Text) -> Result<(), ShellError> {
+    // Format: key: ["a", "b", ...], key2: [...], ...
+    let mut depth = 0;
+    let mut current = Text.with_capacity(64);
+    let mut entries: List<Text> = [];
+    for ch in body.chars() {
+        if ch == '[' { depth = depth + 1; current.push(ch); }
+        else if ch == ']' { depth = depth - 1; current.push(ch); }
+        else if ch == ',' && depth == 0 {
+            entries.push(current.trim().into());
+            current = Text.with_capacity(64);
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() { entries.push(current.trim().into()); }
+
+    for entry in entries.iter() {
+        let kv: List<Text> = entry.splitn(2, ":").map(|s| s.trim().into()).collect();
+        if kv.len() != 2 { continue; }
+        let key: &Text = &kv[0];
+        let values: List<Text> = parse_string_list(&kv[1]);
+        match key.as_str() {
+            "run"      => p.run      = Some(merge_lists(&p.run,      values)),
+            "fs_read"  => p.fs_read  = Some(merge_lists(&p.fs_read,  values)),
+            "fs_write" => p.fs_write = Some(merge_lists(&p.fs_write, values)),
+            "net"      => p.net      = Some(merge_lists(&p.net,      values)),
+            "env"      => p.env      = Some(merge_lists(&p.env,      values)),
+            _ => {},  // unknown key — ignored
+        }
+    }
+    Ok(())
+}
+
+fn parse_string_list(text: &Text) -> List<Text> {
+    let mut out: List<Text> = [];
+    let trimmed: Text = text.trim().into();
+    if !trimmed.starts_with("[") || !trimmed.ends_with("]") { return out; }
+    let inner: Text = trimmed.slice(1, trimmed.len() - 1).into();
+    for token in inner.split(',') {
+        let t: Text = token.trim().trim_matches('"').into();
+        if !t.is_empty() { out.push(t); }
+    }
+    out
+}
+
+fn merge_lists(prev: &Maybe<List<Text>>, new: List<Text>) -> List<Text> {
+    let mut out: List<Text> = match prev {
+        None => [],
+        Some(v) => v.clone(),
+    };
+    for x in new.into_iter() { out.push(x); }
+    out
+}

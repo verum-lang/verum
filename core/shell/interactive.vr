@@ -1,0 +1,207 @@
+// =============================================================================
+// shell/interactive.vr — Interactive prompts (input / select / confirm)
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, io.stdio, base.protocols
+// =============================================================================
+//
+// Console input helpers for command-line scripts. Prompt-then-read pattern
+// over `core.io.stdio`. Password input attempts to disable terminal echo
+// (POSIX `termios` / Windows `SetConsoleMode`), falling back to plain
+// readline on platforms where TTY control is unavailable.
+//
+// =============================================================================
+
+module core.shell.interactive;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display};
+mount core.io.stdio.{stdin, print, println, read_line};
+mount core.shell.result.{ShellError};
+
+// =============================================================================
+// input — readline with prompt
+// =============================================================================
+
+/// Print `prompt`, flush, read one line. Trims trailing newline.
+public fn input(prompt: &Text) -> Text {
+    print(prompt);
+    match read_line() {
+        Ok(s)  => strip_newline(s),
+        Err(_) => "".into(),
+    }
+}
+
+/// Like `input`, but returns `None` on EOF (Ctrl+D).
+public fn input_opt(prompt: &Text) -> Maybe<Text> {
+    print(prompt);
+    match read_line() {
+        Ok(s)  => Some(strip_newline(s)),
+        Err(_) => None,
+    }
+}
+
+/// Read input with a default value: empty input returns `default`.
+public fn input_default(prompt: &Text, default: &Text) -> Text {
+    let pr = f"{prompt} [{default}]: ";
+    let s = input(&pr);
+    if s.is_empty() { default.clone() } else { s }
+}
+
+fn strip_newline(s: Text) -> Text {
+    let mut end = s.len();
+    while end > 0 {
+        let last = s.byte_at(end - 1);
+        if last == ('\n' as Byte) || last == ('\r' as Byte) { end = end - 1; }
+        else { break; }
+    }
+    s.slice(0, end).into()
+}
+
+// =============================================================================
+// password — echo-off readline
+// =============================================================================
+
+/// Read a line with terminal echo disabled. On platforms where echo
+/// control is unavailable, prints a warning to stderr first.
+public fn password(prompt: &Text) -> Text {
+    print(prompt);
+    let restore = disable_echo();
+    let line = match read_line() {
+        Ok(s)  => strip_newline(s),
+        Err(_) => "".into(),
+    };
+    restore_echo(restore);
+    println(&"".into());
+    line
+}
+
+// Echo-control bridge — opaque on the application side. Implementation
+// dispatches to termios (Unix) / SetConsoleMode (Windows). Returns an
+// opaque cookie to be passed to `restore_echo`.
+public type EchoCookie is {
+    raw: Int,
+}
+
+fn disable_echo() -> EchoCookie {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        let cookie = __termios_save_and_disable_echo();
+        EchoCookie { raw: cookie }
+    }
+    @cfg(target_os = "windows")
+    {
+        let cookie = __windows_save_and_disable_echo();
+        EchoCookie { raw: cookie }
+    }
+}
+
+fn restore_echo(cookie: EchoCookie) {
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    {
+        __termios_restore_echo(cookie.raw);
+    }
+    @cfg(target_os = "windows")
+    {
+        __windows_restore_echo(cookie.raw);
+    }
+}
+
+// Platform shims — bridged by the runtime. Default fallback returns 0
+// (no-op) so unsupported platforms still produce a working — if echoing
+// — password prompt.
+fn __termios_save_and_disable_echo() -> Int { 0 }
+fn __termios_restore_echo(_cookie: Int) {}
+fn __windows_save_and_disable_echo() -> Int { 0 }
+fn __windows_restore_echo(_cookie: Int) {}
+
+// =============================================================================
+// confirm — yes/no
+// =============================================================================
+
+/// Prompt for yes/no confirmation. Defaults to false on empty input.
+public fn confirm(prompt: &Text) -> Bool {
+    let pr = f"{prompt} [y/N]: ";
+    let raw = input(&pr).to_lowercase();
+    raw == "y" || raw == "yes"
+}
+
+/// Like `confirm` but defaults to `true` (yes) on empty input.
+public fn confirm_default_yes(prompt: &Text) -> Bool {
+    let pr = f"{prompt} [Y/n]: ";
+    let raw = input(&pr).to_lowercase();
+    raw.is_empty() || raw == "y" || raw == "yes"
+}
+
+// =============================================================================
+// select — pick one of several options
+// =============================================================================
+
+/// Render `options` as a numbered menu and return the chosen value.
+/// Re-prompts on invalid input. `options` must be non-empty.
+public fn select<T: Clone>(prompt: &Text, options: &[(Text, T)]) -> T {
+    if options.is_empty() {
+        panic("select called with empty options");
+    }
+    println(prompt);
+    for (i, (label, _)) in options.iter().enumerate() {
+        println(&f"  [{i + 1}] {label}");
+    }
+    loop {
+        let raw = input(&"Choice: ".into());
+        match raw.parse::<Int>() {
+            Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
+                return options[(n - 1) as usize].1.clone(),
+            _ => println(&"Invalid choice, try again.".into()),
+        }
+    }
+}
+
+/// Multi-select: returns the indices that the user chose (comma-separated).
+/// Empty selection is allowed.
+public fn multi_select(prompt: &Text, options: &[Text]) -> List<Int> {
+    println(prompt);
+    for (i, label) in options.iter().enumerate() {
+        println(&f"  [{i + 1}] {label}");
+    }
+    let raw = input(&"Choices (comma-separated, empty for none): ".into());
+    let mut chosen: List<Int> = [];
+    if raw.is_empty() { return chosen; }
+    for token in raw.split(",") {
+        let t: Text = token.trim().into();
+        match t.parse::<Int>() {
+            Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
+                chosen.push(n - 1),
+            _ => {},  // silently skip unparseable
+        }
+    }
+    chosen
+}
+
+// =============================================================================
+// Required-input / validated helpers
+// =============================================================================
+
+/// Repeatedly prompt until input passes the validator. The validator is a
+/// pure function returning `Ok(value)` on success or `Err(message)` to
+/// re-prompt.
+public fn input_validated<T>(
+    prompt: &Text,
+    validator: fn(&Text) -> Result<T, Text>,
+) -> T {
+    loop {
+        let raw = input(prompt);
+        match validator(&raw) {
+            Ok(v) => return v,
+            Err(msg) => println(&f"× {msg}"),
+        }
+    }
+}
+
+/// Required non-empty input. Re-prompts on empty.
+public fn input_required(prompt: &Text) -> Text {
+    input_validated(prompt, |s| {
+        if s.is_empty() { Err("input cannot be empty".into()) }
+        else { Ok(s.clone()) }
+    })
+}

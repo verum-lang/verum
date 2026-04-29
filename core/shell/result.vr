@@ -1,0 +1,293 @@
+// =============================================================================
+// shell/result.vr — ShellResult and ShellError
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, io.process, time
+// =============================================================================
+//
+// Standard return-and-error types for shell-command execution. Provides:
+//   * `ShellResult` — successful or terminating capture of a child process,
+//     bundling stdout/stderr bytes, exit status, the dispatched command and
+//     wall-clock duration. Methods for re-decoding output as Text/JSON/YAML/
+//     CSV/TSV/lines, plus pipeline/iteration ergonomics.
+//   * `ShellError` — sum of every failure mode the shell layer can report:
+//     non-zero exit, spawn failure, timeout, permission denial, parse failure
+//     of post-execution decoding, cancellation.
+//
+// `ShellResult` is intentionally a *byte-precise* container. UTF-8 decoding
+// is opt-in via `text()`, never enforced — many shell pipelines (binary tools
+// like `jq` over base64 streams, image manipulation, hashes) pass through
+// non-UTF-8 bytes and conflating that with text would lose information.
+//
+// =============================================================================
+
+module core.shell.result;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.base.iterator.{Iterator, IntoIterator};
+mount core.text.format.{Formatter, FormatError};
+mount core.text.text.{Text as TextOps};
+mount core.io.process.{ExitStatus};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// ShellResult — standard outcome of a command
+// =============================================================================
+
+public type ShellResult is {
+    /// Raw stdout bytes (UTF-8 lossy decode via .text()).
+    stdout_bytes: List<Byte>,
+    /// Raw stderr bytes.
+    stderr_bytes: List<Byte>,
+    /// Exit status (or simulated ExitStatus on cancel/timeout).
+    status:       ExitStatus,
+    /// The command line as dispatched. Intended for diagnostics — caller
+    /// should not parse it.
+    command:      Text,
+    /// Wall-clock duration from spawn() to wait() return.
+    duration:     Duration,
+}
+
+implement ShellResult {
+    /// Construct a result from (status, stdout, stderr) and the dispatched
+    /// command + duration. Pure.
+    public fn new(
+        status: ExitStatus,
+        stdout_bytes: List<Byte>,
+        stderr_bytes: List<Byte>,
+        command: Text,
+        duration: Duration,
+    ) -> ShellResult {
+        ShellResult { stdout_bytes, stderr_bytes, status, command, duration }
+    }
+
+    // ── Accessors ────────────────────────────────────────────────────────────
+
+    /// stdout as Text (UTF-8 lossy). Allocates a fresh Text.
+    public fn stdout(&self) -> Text {
+        Text.from_utf8_lossy(&self.stdout_bytes)
+    }
+
+    /// stdout trimmed of leading/trailing whitespace — the most common
+    /// projection (matches `$(cmd)` semantics in POSIX shells).
+    public fn text(&self) -> Text {
+        self.stdout().trim().into()
+    }
+
+    /// stdout split into lines without trailing newlines. Empty trailing
+    /// line is dropped, matching `lines` iteration in Unix tools.
+    public fn lines(&self) -> List<Text> {
+        let s = self.stdout();
+        let mut out: List<Text> = [];
+        for line in s.lines() { out.push(line.into()); }
+        out
+    }
+
+    /// stderr as Text.
+    public fn stderr(&self) -> Text {
+        Text.from_utf8_lossy(&self.stderr_bytes)
+    }
+
+    /// Reference to raw stdout bytes. Zero-copy.
+    public fn bytes(&self) -> &[Byte] { &self.stdout_bytes }
+
+    /// Process exit code; meaningful when `status.is_exited()` is true.
+    public fn code(&self) -> Int { self.status.code() }
+
+    /// True iff the process exited normally with code 0.
+    public fn success(&self) -> Bool { self.status.success() }
+
+    /// True iff stdout has zero bytes (independent of stderr).
+    public fn is_empty(&self) -> Bool { self.stdout_bytes.is_empty() }
+
+    /// Duration of the process from spawn to wait return.
+    public fn elapsed(&self) -> Duration { self.duration }
+
+    /// Underlying command string as dispatched. Intended for diagnostics.
+    public fn command_text(&self) -> &Text { &self.command }
+
+    // ── Convert to error if non-zero exit ────────────────────────────────────
+
+    /// Returns `Ok(self)` if the process exited successfully, otherwise
+    /// `Err(ShellError::NonZeroExit { … })` carrying status + stderr.
+    public fn ok(self) -> Result<ShellResult, ShellError> {
+        if self.status.success() {
+            Ok(self)
+        } else {
+            Err(ShellError.NonZeroExit {
+                command: self.command.clone(),
+                status:  self.status,
+                stderr:  self.stderr(),
+            })
+        }
+    }
+
+    /// Construct a result that synthesises a failed `ExitStatus` from an
+    /// error — used by run/sh fallback paths so callers see a uniform shape
+    /// even when the spawn never reached the kernel.
+    public fn from_error(err: ShellError) -> ShellResult {
+        let cmd = match &err {
+            ShellError.NonZeroExit { command, .. }       => command.clone(),
+            ShellError.SpawnFailed { command, .. }       => command.clone(),
+            ShellError.Timeout     { command, .. }       => command.clone(),
+            ShellError.PermissionDenied { command, .. }  => command.clone(),
+            ShellError.ParseError  { command, .. }       => command.clone(),
+            ShellError.Cancelled   { command, .. }       => command.clone(),
+        };
+        ShellResult {
+            stdout_bytes: [],
+            stderr_bytes: err.to_string().into_bytes(),
+            // raw=255 is the conventional "unknown error" exit code in POSIX
+            status:   ExitStatus { raw: (255 << 8) },
+            command:  cmd,
+            duration: Duration.from_millis(0),
+        }
+    }
+}
+
+implement Display for ShellResult {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.stdout())
+    }
+}
+
+implement Debug for ShellResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"ShellResult(cmd={self.command:?}, status={self.status}, stdout={self.stdout_bytes.len()}B, stderr={self.stderr_bytes.len()}B)".as_str())
+    }
+}
+
+implement Clone for ShellResult {
+    fn clone(&self) -> ShellResult {
+        ShellResult {
+            stdout_bytes: self.stdout_bytes.clone(),
+            stderr_bytes: self.stderr_bytes.clone(),
+            status:       self.status,
+            command:      self.command.clone(),
+            duration:     self.duration,
+        }
+    }
+}
+
+/// Iterating a ShellResult yields stdout lines without trailing newline.
+implement IntoIterator for ShellResult {
+    type Item    = Text;
+    type IntoIter = ShellLinesIter;
+
+    fn into_iter(self) -> ShellLinesIter {
+        ShellLinesIter { lines: self.lines(), pos: 0 }
+    }
+}
+
+public type ShellLinesIter is {
+    lines: List<Text>,
+    pos:   Int,
+};
+
+implement Iterator for ShellLinesIter {
+    type Item = Text;
+
+    fn next(&mut self) -> Maybe<Text> {
+        if self.pos >= self.lines.len() {
+            None
+        } else {
+            let v = self.lines[self.pos].clone();
+            self.pos = self.pos + 1;
+            Some(v)
+        }
+    }
+}
+
+// =============================================================================
+// ShellError — structured failure modes
+// =============================================================================
+//
+// The variants are total: every reachable failure path in the shell layer
+// must surface as one of these. Adding a new variant is a breaking change
+// (callers may have exhaustive `match` on this type) and must be motivated
+// in a spec amendment.
+
+public type ShellError is
+    | NonZeroExit       { command: Text, status: ExitStatus, stderr: Text }
+    | SpawnFailed       { command: Text, reason: Text }
+    | Timeout           { command: Text, after_ms: Int }
+    | PermissionDenied  { command: Text, kind: Text }
+    | ParseError        { command: Text, format: Text, cause: Text }
+    | Cancelled         { command: Text, reason: Text };
+
+implement ShellError {
+    /// Re-fetch the command field regardless of variant.
+    public fn command(&self) -> &Text {
+        match self {
+            NonZeroExit      { command, .. } => command,
+            SpawnFailed      { command, .. } => command,
+            Timeout          { command, .. } => command,
+            PermissionDenied { command, .. } => command,
+            ParseError       { command, .. } => command,
+            Cancelled        { command, .. } => command,
+        }
+    }
+
+    /// Render as a single-line diagnostic suitable for log output.
+    public fn to_string(&self) -> Text {
+        match self {
+            NonZeroExit { command, status, stderr } =>
+                f"command `{command}` exited with {status}\n  stderr: {stderr}",
+            SpawnFailed { command, reason } =>
+                f"failed to spawn `{command}`: {reason}",
+            Timeout { command, after_ms } =>
+                f"command `{command}` timed out after {after_ms}ms",
+            PermissionDenied { command, kind } =>
+                f"permission denied: `{command}` requires `{kind}`",
+            ParseError { command, format, cause } =>
+                f"failed to parse {format} output of `{command}`: {cause}",
+            Cancelled { command, reason } =>
+                f"command `{command}` cancelled: {reason}",
+        }
+    }
+}
+
+implement Display for ShellError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.to_string().as_str())
+    }
+}
+
+implement Debug for ShellError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NonZeroExit      { command, status, stderr } =>
+                f.write_str(f"NonZeroExit {{ command: {command:?}, status: {status:?}, stderr: {stderr:?} }}".as_str()),
+            SpawnFailed      { command, reason } =>
+                f.write_str(f"SpawnFailed {{ command: {command:?}, reason: {reason:?} }}".as_str()),
+            Timeout          { command, after_ms } =>
+                f.write_str(f"Timeout {{ command: {command:?}, after_ms: {after_ms} }}".as_str()),
+            PermissionDenied { command, kind } =>
+                f.write_str(f"PermissionDenied {{ command: {command:?}, kind: {kind:?} }}".as_str()),
+            ParseError       { command, format, cause } =>
+                f.write_str(f"ParseError {{ command: {command:?}, format: {format:?}, cause: {cause:?} }}".as_str()),
+            Cancelled        { command, reason } =>
+                f.write_str(f"Cancelled {{ command: {command:?}, reason: {reason:?} }}".as_str()),
+        }
+    }
+}
+
+implement Clone for ShellError {
+    fn clone(&self) -> ShellError {
+        match self {
+            NonZeroExit      { command, status, stderr } =>
+                NonZeroExit { command: command.clone(), status: *status, stderr: stderr.clone() },
+            SpawnFailed      { command, reason } =>
+                SpawnFailed { command: command.clone(), reason: reason.clone() },
+            Timeout          { command, after_ms } =>
+                Timeout { command: command.clone(), after_ms: *after_ms },
+            PermissionDenied { command, kind } =>
+                PermissionDenied { command: command.clone(), kind: kind.clone() },
+            ParseError       { command, format, cause } =>
+                ParseError { command: command.clone(), format: format.clone(), cause: cause.clone() },
+            Cancelled        { command, reason } =>
+                Cancelled { command: command.clone(), reason: reason.clone() },
+        }
+    }
+}

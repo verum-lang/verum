@@ -1,0 +1,282 @@
+// =============================================================================
+// shell/verify.vr — Refinement types for shell-script configurations
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, text.regex, shell.{result, escape}
+// =============================================================================
+//
+// Reusable refinement-typed atoms and config bundles. Values that pass the
+// refinement check at construction are guaranteed valid throughout their
+// lifetime — the type system carries the proof. Each constructor parses
+// from `Text` and returns `Result<T, ShellError>`; invalid inputs cannot
+// produce a value.
+//
+// All atoms are `Pure` and `ShellEscape`-implementable.
+//
+// =============================================================================
+
+module core.shell.verify;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone, Eq};
+mount core.text.regex.{Regex};
+mount core.text.format.{Formatter, FormatError};
+mount core.shell.escape.{Escaper, ShellEscape, ShellFlavour};
+mount core.shell.result.{ShellError};
+
+// =============================================================================
+// NonEmpty<T> — list with at least one element
+// =============================================================================
+
+public type NonEmpty<T> is {
+    head: T,
+    rest: List<T>,
+}
+
+implement<T> NonEmpty<T> {
+    public fn new(head: T) -> NonEmpty<T> {
+        NonEmpty { head, rest: [] }
+    }
+
+    public fn from_list(xs: List<T>) -> Result<NonEmpty<T>, ShellError> {
+        if xs.is_empty() {
+            return Err(ShellError.SpawnFailed {
+                command: "<NonEmpty::from_list>".into(),
+                reason:  "list is empty".into(),
+            });
+        }
+        let mut iter = xs.into_iter();
+        let head = iter.next().unwrap();
+        let rest: List<T> = iter.collect();
+        Ok(NonEmpty { head, rest })
+    }
+
+    public fn len(&self) -> Int { 1 + self.rest.len() as Int }
+    public fn first(&self) -> &T { &self.head }
+    public fn into_list(self) -> List<T> {
+        let mut xs: List<T> = [self.head];
+        for x in self.rest.into_iter() { xs.push(x); }
+        xs
+    }
+}
+
+// =============================================================================
+// BoundedText<min, max> — length-constrained text
+// =============================================================================
+//
+// Until full-on dependent types land, the bounds are runtime fields rather
+// than type parameters. The `parse` constructor enforces them.
+
+public type BoundedText is {
+    value: Text,
+    min:   Int,
+    max:   Int,
+}
+
+implement BoundedText {
+    public fn parse(value: Text, min: Int, max: Int) -> Result<BoundedText, ShellError> {
+        let n = value.len() as Int;
+        if n < min || n > max {
+            return Err(ShellError.SpawnFailed {
+                command: "<BoundedText::parse>".into(),
+                reason:  f"length {n} out of [{min}, {max}]",
+            });
+        }
+        Ok(BoundedText { value, min, max })
+    }
+
+    public fn as_text(&self) -> &Text { &self.value }
+}
+
+implement ShellEscape for BoundedText {
+    fn shell_quote(&self, flav: ShellFlavour) -> Text {
+        Escaper.quote_for(&self.value, flav)
+    }
+}
+
+// =============================================================================
+// EnvName / EnvValue — env-variable refinements
+// =============================================================================
+
+public type EnvName is (Text);
+
+implement EnvName {
+    public fn parse(s: Text) -> Result<EnvName, ShellError> {
+        let r = Regex.compile(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
+        if r.is_match(&s) { Ok(EnvName(s)) }
+        else { Err(ShellError.SpawnFailed {
+            command: "<EnvName::parse>".into(),
+            reason:  f"invalid env var name: {s}",
+        }) }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+public type EnvValue is (Text);
+
+implement EnvValue {
+    /// The env value cannot contain a NUL byte (ENV-string limitation in
+    /// most operating systems). Newlines and other control bytes are
+    /// allowed but will be passed through verbatim.
+    public fn parse(s: Text) -> Result<EnvValue, ShellError> {
+        for ch in s.chars() {
+            if ch == '\0' {
+                return Err(ShellError.SpawnFailed {
+                    command: "<EnvValue::parse>".into(),
+                    reason:  "env value contains NUL byte".into(),
+                });
+            }
+        }
+        Ok(EnvValue(s))
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+// =============================================================================
+// SemVer — semantic version
+// =============================================================================
+//
+// Reuses core.base.semver where possible; provides a refinement-typed
+// wrapper specifically for shell-script context (deploy versions, image
+// tags, release artefacts).
+
+public type SemVerRef is (Text);
+
+implement SemVerRef {
+    public fn parse(s: Text) -> Result<SemVerRef, ShellError> {
+        let r = Regex.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?(\+[a-zA-Z0-9.\-]+)?$").unwrap();
+        if r.is_match(&s) { Ok(SemVerRef(s)) }
+        else { Err(ShellError.SpawnFailed {
+            command: "<SemVerRef::parse>".into(),
+            reason:  f"invalid semver: {s}",
+        }) }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+// =============================================================================
+// PortNumber — 1..65535
+// =============================================================================
+
+public type PortNumber is {
+    value: Int,
+}
+
+implement PortNumber {
+    public fn parse(n: Int) -> Result<PortNumber, ShellError> {
+        if n < 1 || n > 65535 {
+            return Err(ShellError.SpawnFailed {
+                command: "<PortNumber::parse>".into(),
+                reason:  f"port {n} out of [1, 65535]",
+            });
+        }
+        Ok(PortNumber { value: n })
+    }
+    public fn as_int(&self) -> Int { self.value }
+}
+
+// =============================================================================
+// HostName — RFC-1123-style hostname
+// =============================================================================
+
+public type HostName is (Text);
+
+implement HostName {
+    public fn parse(s: Text) -> Result<HostName, ShellError> {
+        if s.len() > 253 {
+            return Err(ShellError.SpawnFailed {
+                command: "<HostName::parse>".into(),
+                reason:  f"hostname too long: {s.len()}",
+            });
+        }
+        let r = Regex.compile(r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$").unwrap();
+        if r.is_match(&s) { Ok(HostName(s)) }
+        else { Err(ShellError.SpawnFailed {
+            command: "<HostName::parse>".into(),
+            reason:  f"invalid hostname: {s}",
+        }) }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+// =============================================================================
+// Example bundles — DeployConfig, S3Bucket
+// =============================================================================
+//
+// Reference patterns for shell scripts that take structured configs. Each
+// field is a refinement-typed atom; constructing the struct succeeds only
+// when every field is valid.
+
+public type DeployConfig is {
+    service_name:  KubeName,
+    version:       SemVerRef,
+    namespace:     KubeNamespace,
+    manifest_path: PathBuf,
+    timeout:       PortNumber,  // reused as bounded int 1..65535
+}
+
+mount core.io.path.{PathBuf};
+mount core.shell.dsl.kubectl.{KubeName, KubeNamespace};
+
+implement DeployConfig {
+    /// All-at-once parsing of a free-form input record. Errors carry the
+    /// first violated invariant.
+    public fn parse(
+        service_name: Text,
+        version:      Text,
+        namespace:    Text,
+        manifest:     Text,
+        timeout_sec:  Int,
+    ) -> Result<DeployConfig, ShellError> {
+        let svc = KubeName.parse(service_name)?;
+        let ver = SemVerRef.parse(version)?;
+        let ns  = KubeNamespace.parse(namespace)?;
+        let mp  = PathBuf.from(manifest);
+        let to  = PortNumber.parse(timeout_sec)?;
+        if !mp.to_text().ends_with(".yaml") && !mp.to_text().ends_with(".yml") {
+            return Err(ShellError.SpawnFailed {
+                command: "<DeployConfig::parse>".into(),
+                reason:  "manifest path must end with .yaml or .yml".into(),
+            });
+        }
+        Ok(DeployConfig {
+            service_name:  svc,
+            version:       ver,
+            namespace:     ns,
+            manifest_path: mp,
+            timeout:       to,
+        })
+    }
+}
+
+public type S3Bucket is (Text);
+
+implement S3Bucket {
+    /// AWS S3 bucket-name rules: 3-63 chars, lowercase/digit/dot/dash,
+    /// must start and end with alphanumeric, no consecutive dots, no
+    /// IP-address-like patterns.
+    public fn parse(s: Text) -> Result<S3Bucket, ShellError> {
+        let n = s.len() as Int;
+        if n < 3 || n > 63 {
+            return Err(ShellError.SpawnFailed {
+                command: "<S3Bucket::parse>".into(),
+                reason:  f"length {n} out of [3, 63]",
+            });
+        }
+        let r = Regex.compile(r"^[a-z0-9][a-z0-9.\-]+[a-z0-9]$").unwrap();
+        if !r.is_match(&s) {
+            return Err(ShellError.SpawnFailed {
+                command: "<S3Bucket::parse>".into(),
+                reason:  f"invalid bucket name: {s}",
+            });
+        }
+        if s.contains("..") {
+            return Err(ShellError.SpawnFailed {
+                command: "<S3Bucket::parse>".into(),
+                reason:  "bucket name contains consecutive dots".into(),
+            });
+        }
+        Ok(S3Bucket(s))
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}

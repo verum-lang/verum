@@ -1,0 +1,251 @@
+// =============================================================================
+// shell/text_utils.vr — Pure text utilities (grep / sed / awk in Verum)
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, text.regex, base.iterator
+// =============================================================================
+//
+// In-process replacements for the most common stream-text utilities. All
+// functions are `Pure` — no IO, no allocation beyond the result. Faster
+// than spawning `grep`/`sed`/`awk` (no process startup), portable, and
+// composable with `core.shell.transducer` pipelines.
+//
+// =============================================================================
+
+module core.shell.text_utils;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.text.regex.{Regex, RegexError, Match};
+mount core.shell.transducer.{Transducer, Reducer, mapping, filtering};
+
+// =============================================================================
+// grep — line-oriented pattern filter
+// =============================================================================
+
+/// Return only lines matching the substring `pattern`.
+public fn grep(pattern: &Text, lines: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        if line.contains(pattern) { out.push(line.clone()); }
+    }
+    out
+}
+
+/// Like `grep` but case-insensitive.
+public fn grep_i(pattern: &Text, lines: &List<Text>) -> List<Text> {
+    let needle = pattern.to_lowercase();
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        if line.to_lowercase().contains(&needle) { out.push(line.clone()); }
+    }
+    out
+}
+
+/// Inverted grep: lines NOT matching `pattern`.
+public fn grep_v(pattern: &Text, lines: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        if !line.contains(pattern) { out.push(line.clone()); }
+    }
+    out
+}
+
+/// Return only lines matching the compiled regex.
+public fn grep_re(rx: &Regex, lines: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        if rx.is_match(line) { out.push(line.clone()); }
+    }
+    out
+}
+
+/// For each line, capture the first match of `rx` and its first group.
+/// Returns one entry per matching line.
+public fn grep_capture(rx: &Regex, lines: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        match rx.find(line) {
+            Some(m) => out.push(m.matched_text().into()),
+            None    => {},
+        }
+    }
+    out
+}
+
+// =============================================================================
+// sed — substitution
+// =============================================================================
+
+/// Replace every occurrence of `pattern` with `replacement`.
+public fn sed_replace(text: &Text, pattern: &Text, replacement: &Text) -> Text {
+    text.replace(pattern, replacement)
+}
+
+/// Regex-based substitution. Replaces every match of `rx` with the
+/// `replacement` template (supports `$1`, `$2`, … back-references).
+public fn sed_replace_re(text: &Text, rx: &Regex, replacement: &Text) -> Text {
+    rx.replace_all(text, replacement)
+}
+
+/// Apply substitution to every line independently. Useful when the text is
+/// already split (e.g. from `ShellResult::lines()`).
+public fn sed_each_line(lines: &List<Text>, pattern: &Text, replacement: &Text) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        out.push(line.replace(pattern, replacement));
+    }
+    out
+}
+
+// =============================================================================
+// awk-style: column extraction
+// =============================================================================
+
+/// Split each line by whitespace and return the `n`-th field (0-indexed).
+/// Lines with too few fields produce empty strings.
+public fn awk_field(lines: &List<Text>, n: Int) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        let fields = split_whitespace(line);
+        if (n as Int) < fields.len() as Int {
+            out.push(fields[n as usize].clone());
+        } else {
+            out.push("".into());
+        }
+    }
+    out
+}
+
+/// Split each line by an explicit separator.
+public fn awk_field_sep(lines: &List<Text>, sep: &Text, n: Int) -> List<Text> {
+    let mut out: List<Text> = [];
+    for line in lines.iter() {
+        let fields: List<Text> = line.split(sep).map(|s| s.into()).collect();
+        if (n as Int) < fields.len() as Int {
+            out.push(fields[n as usize].clone());
+        } else {
+            out.push("".into());
+        }
+    }
+    out
+}
+
+fn split_whitespace(s: &Text) -> List<Text> {
+    let mut fields: List<Text> = [];
+    let mut current: Text = "".into();
+    for ch in s.chars() {
+        if ch == ' ' || ch == '\t' {
+            if !current.is_empty() { fields.push(current.clone()); current = "".into(); }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() { fields.push(current); }
+    fields
+}
+
+// =============================================================================
+// sort / uniq
+// =============================================================================
+
+/// Lexicographic sort of lines. Returns a new sorted list.
+public fn sort(lines: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = lines.clone();
+    out.sort_by(|a, b| a.cmp(b));
+    out
+}
+
+/// Remove consecutive duplicates (mirrors POSIX `uniq`).
+public fn uniq(lines: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [];
+    let mut prev: Maybe<Text> = None;
+    for line in lines.iter() {
+        let dup = match &prev {
+            Some(p) => p == line,
+            None    => false,
+        };
+        if !dup { out.push(line.clone()); prev = Some(line.clone()); }
+    }
+    out
+}
+
+/// Sort + uniq in one pass.
+public fn sort_unique(lines: &List<Text>) -> List<Text> {
+    uniq(&sort(lines))
+}
+
+// =============================================================================
+// wc — counts
+// =============================================================================
+
+public type Counts is {
+    lines: Int,
+    words: Int,
+    bytes: Int,
+}
+
+public fn wc(text: &Text) -> Counts {
+    let mut lines = 0;
+    let mut words = 0;
+    let bytes = text.len() as Int;
+    let mut in_word = false;
+    for ch in text.chars() {
+        if ch == '\n' { lines = lines + 1; }
+        if ch == ' ' || ch == '\t' || ch == '\n' {
+            in_word = false;
+        } else if !in_word {
+            in_word = true;
+            words = words + 1;
+        }
+    }
+    Counts { lines, words, bytes }
+}
+
+// =============================================================================
+// Column-aligned output — tabular formatter
+// =============================================================================
+
+/// Render rows as space-padded columns. Auto-computes column widths.
+public fn column_format(rows: &List<List<Text>>) -> Text {
+    if rows.is_empty() { return "".into(); }
+    let cols = rows[0].len();
+    let mut widths: List<Int> = [];
+    for _ in 0..cols { widths.push(0); }
+    for row in rows.iter() {
+        for (i, cell) in row.iter().enumerate() {
+            if i < cols && (cell.len() as Int) > widths[i] {
+                widths[i] = cell.len() as Int;
+            }
+        }
+    }
+    let mut out = Text.with_capacity(rows.len() * 64);
+    for row in rows.iter() {
+        for (i, cell) in row.iter().enumerate() {
+            if i > 0 { out.push_str("  "); }
+            out.push_str(cell);
+            // Pad to width
+            let pad = widths[i] - cell.len() as Int;
+            let mut k = 0;
+            while k < pad { out.push(' '); k = k + 1; }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+// =============================================================================
+// Transducer factories — ergonomic wrappers
+// =============================================================================
+
+/// Create a transducer that emits only lines matching `pattern`.
+public fn t_grep(pattern: Text) -> Transducer<Text, Text> {
+    let p = pattern;
+    filtering(move |line: &Text| line.contains(&p))
+}
+
+/// Create a transducer that applies `sed_replace` to each line.
+public fn t_sed(pattern: Text, replacement: Text) -> Transducer<Text, Text> {
+    let p = pattern;
+    let r = replacement;
+    mapping(move |line: Text| line.replace(&p, &r))
+}

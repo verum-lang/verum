@@ -1,0 +1,156 @@
+// =============================================================================
+// shell/glob.vr — Filesystem glob expansion
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, base.glob, io.path, io.fs, shell.context
+// =============================================================================
+//
+// Recursive directory walk + glob pattern matching, returning typed
+// `PathBuf` results. Reuses the pattern compiler in `core.base.glob` and
+// the directory iterator in `core.io.fs`.
+//
+// Highlights:
+//   * `**` matches any number of intermediate path components
+//   * `*` matches any non-separator sequence within a component
+//   * `?` matches a single non-separator byte
+//   * `[abc]` / `[!abc]` character classes
+//   * Honours the active `ShellContext.cwd` for relative patterns
+//
+// =============================================================================
+
+module core.shell.glob;
+
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.base.glob.{GlobPattern, GlobError, compile as glob_compile};
+mount core.io.path.{Path, PathBuf};
+mount core.io.fs.{
+    metadata as fs_metadata, Metadata,
+    read_dir as fs_read_dir, ReadDir, DirEntry,
+};
+mount core.shell.context.{ShellContext};
+mount core.shell.result.{ShellError};
+
+// =============================================================================
+// glob — collect all matches under a base directory
+// =============================================================================
+
+/// Expand a glob pattern relative to the active `ShellContext.cwd`.
+/// Returns a `List<PathBuf>` in sorted order. Hidden entries (starting
+/// with `.`) are excluded by default — use `glob_with_hidden` to include.
+public fn glob(pattern: &Text)
+    -> Result<List<PathBuf>, ShellError>
+    using [ShellContext]
+{
+    glob_with_hidden(pattern, false)
+}
+
+public fn glob_with_hidden(pattern: &Text, include_hidden: Bool)
+    -> Result<List<PathBuf>, ShellError>
+    using [ShellContext]
+{
+    let ctx = provide ShellContext;
+    let base = match ctx.effective_cwd() {
+        Some(c) => PathBuf.from(c),
+        None    => PathBuf.from("."),
+    };
+    glob_in(&base, pattern, include_hidden)
+}
+
+/// Expand under an explicit base dir.
+public fn glob_in(base: &PathBuf, pattern: &Text, include_hidden: Bool)
+    -> Result<List<PathBuf>, ShellError>
+{
+    let compiled = glob_compile(pattern.as_str()).map_err(|e| ShellError.SpawnFailed {
+        command: f"glob({pattern})",
+        reason:  f"invalid pattern: {e:?}",
+    })?;
+    let mut results: List<PathBuf> = [];
+    walk(base, base, &compiled, include_hidden, &mut results);
+    sort_paths(&mut results);
+    Ok(results)
+}
+
+/// Glob filtered to files only.
+public fn glob_files(pattern: &Text)
+    -> Result<List<PathBuf>, ShellError>
+    using [ShellContext]
+{
+    let all = glob(pattern)?;
+    Ok(filter_paths(all, |p| {
+        match fs_metadata(p.as_path()) { Ok(m) => m.is_file(), Err(_) => false }
+    }))
+}
+
+/// Glob filtered to directories only.
+public fn glob_dirs(pattern: &Text)
+    -> Result<List<PathBuf>, ShellError>
+    using [ShellContext]
+{
+    let all = glob(pattern)?;
+    Ok(filter_paths(all, |p| {
+        match fs_metadata(p.as_path()) { Ok(m) => m.is_dir(), Err(_) => false }
+    }))
+}
+
+// =============================================================================
+// Internals
+// =============================================================================
+
+fn walk(
+    base:           &PathBuf,
+    dir:            &PathBuf,
+    pattern:        &GlobPattern,
+    include_hidden: Bool,
+    out:            &mut List<PathBuf>,
+) {
+    let entries = match fs_read_dir(dir.as_path()) {
+        Ok(e)  => e,
+        Err(_) => return,
+    };
+    for entry in entries {
+        let dent = match entry { Ok(d) => d, Err(_) => continue };
+        let name = dent.file_name();
+        if !include_hidden && name.starts_with(".") { continue; }
+        let full = dent.path();
+        // Compute the path relative to base for matching
+        let rel = relative_to(&full, base).unwrap_or_else(|| full.clone());
+        if pattern.matches_path(rel.to_text().as_str()) {
+            out.push(full.clone());
+        }
+        // Recurse into subdirectories
+        match fs_metadata(full.as_path()) {
+            Ok(m) if m.is_dir() => walk(base, &full, pattern, include_hidden, out),
+            _ => {},
+        }
+    }
+}
+
+/// Best-effort relative path. Returns None if `full` does not start with `base`.
+fn relative_to(full: &PathBuf, base: &PathBuf) -> Maybe<PathBuf> {
+    let f = full.to_text();
+    let b = base.to_text();
+    if f.starts_with(&b) {
+        let mut rest = f.slice(b.len(), f.len()).into();
+        // Strip leading separator
+        while rest.starts_with("/") || rest.starts_with("\\") {
+            rest = rest.slice(1, rest.len()).into();
+        }
+        Some(PathBuf.from(rest))
+    } else {
+        None
+    }
+}
+
+fn filter_paths(xs: List<PathBuf>, pred: fn(&PathBuf) -> Bool) -> List<PathBuf> {
+    let mut out: List<PathBuf> = [];
+    for p in xs.into_iter() {
+        if pred(&p) { out.push(p); }
+    }
+    out
+}
+
+fn sort_paths(xs: &mut List<PathBuf>) {
+    // Lexicographic by stringified path. Stable for cross-platform consistency.
+    xs.sort_by(|a, b| a.to_text().cmp(&b.to_text()));
+}

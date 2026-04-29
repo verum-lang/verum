@@ -1,0 +1,130 @@
+// =============================================================================
+// shell/script.vr — Script-mode helpers (frontmatter, args, exit)
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, base.env, shell.{context, permissions, result}
+// =============================================================================
+//
+// One-stop helpers for `#!/usr/bin/env verum` shell scripts:
+//
+//   * `script_main(body)` — wraps `body` in a default ShellContext and
+//     uniform error handling
+//   * `args()`, `arg(n)` — re-export from base.env
+//   * `exit(code)`, `die(message, code)` — exit with diagnostic
+//   * `bootstrap(source)` — parse frontmatter from the script source and
+//     produce a configured ShellContext (intended for the verum_cli
+//     script-runner; advanced scripts can call this manually)
+//
+// =============================================================================
+
+module core.shell.script;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.env.{
+    args as env_args,
+    arg as env_arg,
+    args_count as env_args_count,
+    exit as env_exit,
+};
+mount core.io.fs.{read_to_string as fs_read_to_string};
+mount core.io.path.{Path};
+mount core.io.stdio.{eprint};
+mount core.shell.context.{ShellContext, PermissionSet};
+mount core.shell.permissions.{parse_frontmatter};
+mount core.shell.result.{ShellError};
+
+// =============================================================================
+// Argument helpers
+// =============================================================================
+
+/// All command-line arguments (after `argv[0]`). Mirrors the shell convention.
+public fn args() -> List<Text> {
+    let raw = env_args();
+    if raw.is_empty() { return []; }
+    let mut out: List<Text> = [];
+    let mut i = 1;
+    while i < raw.len() as Int {
+        out.push(raw[i as usize].clone());
+        i = i + 1;
+    }
+    out
+}
+
+/// Get argument at position `n` (0 = first user-supplied arg).
+public fn arg(n: Int) -> Maybe<Text> {
+    let xs = args();
+    if n >= 0 && (n as Int) < xs.len() as Int {
+        Some(xs[n as usize].clone())
+    } else { None }
+}
+
+/// Number of user-supplied arguments.
+public fn args_count() -> Int {
+    args().len() as Int
+}
+
+// =============================================================================
+// Exit helpers
+// =============================================================================
+
+/// Exit with the given code.
+public fn exit(code: Int) -> ! {
+    env_exit(code)
+}
+
+/// Exit with code 0.
+public fn exit_success() -> ! { env_exit(0) }
+
+/// Exit with code 1 (generic failure).
+public fn exit_failure() -> ! { env_exit(1) }
+
+/// Print `msg` to stderr and exit with `code`.
+public fn die(msg: &Text, code: Int) -> ! {
+    eprint(&f"{msg}\n");
+    env_exit(code)
+}
+
+// =============================================================================
+// Bootstrap — parse frontmatter and construct a ShellContext
+// =============================================================================
+
+/// Parse the script source for `// !@permission(...)` directives and
+/// return a ShellContext configured accordingly. Other context fields
+/// take their defaults.
+public fn bootstrap(source: &Text) -> Result<ShellContext, ShellError> {
+    let perms = parse_frontmatter(source)?;
+    Ok(ShellContext.default().with_permissions(perms))
+}
+
+/// Read `path`, parse frontmatter, return configured context. Used by the
+/// verum CLI when invoking a script.
+public fn bootstrap_from_file(path: &Path) -> Result<ShellContext, ShellError> {
+    let source = fs_read_to_string(path).map_err(|io| ShellError.SpawnFailed {
+        command: f"<bootstrap_from_file {path:?}>",
+        reason:  f"{io:?}",
+    })?;
+    bootstrap(&source)
+}
+
+// =============================================================================
+// script_main — convenience wrapper for top-level script logic
+// =============================================================================
+
+/// Run `body()` with a default `ShellContext` provided. On success,
+/// exits 0; on `Err`, prints to stderr and exits 1.
+///
+/// Intended pattern:
+///
+///     fn main() {
+///         script_main(|| async { Ok(()) }).await;
+///     }
+public async fn script_main<F: async fn() -> Result<(), ShellError>>(body: F) -> ! {
+    provide ShellContext = ShellContext.default();
+    match body().await {
+        Ok(())   => exit_success(),
+        Err(err) => {
+            eprint(&f"error: {err}\n");
+            exit_failure()
+        }
+    }
+}

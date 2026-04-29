@@ -1,0 +1,126 @@
+// =============================================================================
+// shell/signal.vr — Signal-handling sugar for shell scripts
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, sys.signal
+// =============================================================================
+//
+// Thin script-friendly wrappers around `core.sys.signal`. Provides:
+//
+//   * `trap(signal, handler)` — install a handler that fires on the signal
+//   * `with_trap(signal, handler, body)` — scoped: handler installed for
+//     the duration of `body` then restored
+//   * `on_interrupt(handler)` — alias for `trap(Signal.Int, ...)`, the
+//     most common pattern in CLI scripts
+//   * `cleanup_on_exit(handler)` — runs `handler` on SIGINT, SIGTERM, SIGHUP
+//
+// All the heavy lifting (sigaction registration, trampoline) lives in
+// `core.sys.signal`. This module is purely sugar over `on_signal`.
+//
+// =============================================================================
+
+module core.shell.signal;
+
+mount core.{Maybe, Result, Bool};
+mount core.base.protocols.{Drop};
+mount core.sys.signal.{
+    Signal, SignalError,
+    on_signal, reset_signal, ignore_signal, raise_signal,
+};
+
+// =============================================================================
+// trap — install a handler
+// =============================================================================
+
+/// Install `handler` as the receiver for `sig`. Replaces any prior handler.
+public fn trap(sig: Signal, handler: fn()) -> Result<(), SignalError> {
+    on_signal(sig, handler)
+}
+
+/// Convenience: install a handler for SIGINT (Ctrl+C).
+public fn on_interrupt(handler: fn()) -> Result<(), SignalError> {
+    trap(Signal.Int, handler)
+}
+
+/// Convenience: install a handler for SIGTERM (graceful shutdown).
+public fn on_terminate(handler: fn()) -> Result<(), SignalError> {
+    trap(Signal.Term, handler)
+}
+
+/// Run `handler` on the *first* of SIGINT / SIGTERM / SIGHUP.
+public fn cleanup_on_exit(handler: fn()) -> Result<(), SignalError> {
+    on_signal(Signal.Int, handler)?;
+    on_signal(Signal.Term, handler)?;
+    on_signal(Signal.Hup, handler)?;
+    Ok(())
+}
+
+// =============================================================================
+// with_trap — scoped, RAII-style restoration
+// =============================================================================
+
+/// Install `handler` for the duration of `body()`, then reset to default
+/// disposition. Use when a handler should only be active inside a specific
+/// section (e.g. ignore Ctrl+C while atomically writing config).
+public fn with_trap<T>(
+    sig: Signal,
+    handler: fn(),
+    body: fn() -> T,
+) -> T {
+    let _ = on_signal(sig, handler);
+    let result = body();
+    let _ = reset_signal(sig);
+    result
+}
+
+/// `with_trap` for the common SIGINT case. Returns `body()`.
+public fn with_interrupt_trap<T>(handler: fn(), body: fn() -> T) -> T {
+    with_trap(Signal.Int, handler, body)
+}
+
+/// Suspend a signal for the duration of `body()`. Default disposition
+/// (typically termination) is restored afterwards.
+public fn with_signal_ignored<T>(sig: Signal, body: fn() -> T) -> T {
+    let _ = ignore_signal(sig);
+    let result = body();
+    let _ = reset_signal(sig);
+    result
+}
+
+// =============================================================================
+// SignalGuard — RAII handle that restores on Drop
+// =============================================================================
+//
+// Useful when the handler has a non-trivial scope that would be awkward to
+// express via `with_trap`. The guard is `@must_consume` to ensure callers
+// don't forget to release.
+
+@must_consume
+public type SignalGuard is {
+    sig: Signal,
+    released: Bool,
+}
+
+implement SignalGuard {
+    /// Install `handler` and return a guard whose Drop resets the signal.
+    public fn install(sig: Signal, handler: fn()) -> Result<SignalGuard, SignalError> {
+        on_signal(sig, handler)?;
+        Ok(SignalGuard { sig, released: false })
+    }
+
+    public fn release(mut self) {
+        if !self.released {
+            let _ = reset_signal(self.sig);
+            self.released = true;
+        }
+    }
+}
+
+implement Drop for SignalGuard {
+    fn drop(&mut self) {
+        if !self.released {
+            let _ = reset_signal(self.sig);
+            self.released = true;
+        }
+    }
+}

@@ -1,0 +1,225 @@
+// =============================================================================
+// shell/dsl/docker.vr — Typed Docker command DSL
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, text.regex, shell.{exec, escape, result, context}
+// =============================================================================
+
+module core.shell.dsl.docker;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.text.regex.{Regex};
+mount core.io.path.{Path, PathBuf};
+mount core.shell.escape.{Escaper, ShellEscape, ShellFlavour, default_flavour};
+mount core.shell.context.{ShellContext};
+mount core.shell.exec.{sh_check};
+mount core.shell.result.{ShellResult, ShellError};
+
+// =============================================================================
+// Refinement-typed atoms
+// =============================================================================
+
+public type DockerImage is (Text);
+
+implement DockerImage {
+    /// `[registry/]name[:tag][@digest]` — relaxed but rejects unmistakable
+    /// shell-metacharacters.
+    public fn parse(s: Text) -> Result<DockerImage, ShellError> {
+        let r = Regex.compile(r"^[a-z0-9]([a-z0-9._\-/])*(:[a-zA-Z0-9._\-]+)?(@sha256:[a-f0-9]{64})?$").unwrap();
+        if r.is_match(&s) {
+            Ok(DockerImage(s))
+        } else {
+            Err(ShellError.SpawnFailed {
+                command: "<DockerImage::parse>".into(),
+                reason:  f"invalid docker image: {s}",
+            })
+        }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+implement ShellEscape for DockerImage {
+    fn shell_quote(&self, flav: ShellFlavour) -> Text { Escaper.quote_for(&self.0, flav) }
+}
+
+public type DockerTag is (Text);
+
+implement DockerTag {
+    public fn parse(s: Text) -> Result<DockerTag, ShellError> {
+        let r = Regex.compile(r"^[a-zA-Z0-9._\-]{1,128}$").unwrap();
+        if r.is_match(&s) { Ok(DockerTag(s)) }
+        else { Err(ShellError.SpawnFailed {
+            command: "<DockerTag::parse>".into(),
+            reason:  f"invalid docker tag: {s}",
+        }) }
+    }
+    public fn as_text(&self) -> &Text { &self.0 }
+}
+
+public type PortMapping is {
+    host:      Int,
+    container: Int,
+    protocol:  Text,  // "tcp" | "udp"
+}
+
+implement PortMapping {
+    public fn tcp(host: Int, container: Int) -> PortMapping {
+        PortMapping { host, container, protocol: "tcp".into() }
+    }
+    public fn udp(host: Int, container: Int) -> PortMapping {
+        PortMapping { host, container, protocol: "udp".into() }
+    }
+    public fn render(&self) -> Text { f"{self.host}:{self.container}/{self.protocol}" }
+}
+
+public type VolumeMount is {
+    host:      PathBuf,
+    container: PathBuf,
+    readonly:  Bool,
+}
+
+implement VolumeMount {
+    public fn rw(host: PathBuf, container: PathBuf) -> VolumeMount {
+        VolumeMount { host, container, readonly: false }
+    }
+    public fn ro(host: PathBuf, container: PathBuf) -> VolumeMount {
+        VolumeMount { host, container, readonly: true }
+    }
+    public fn render(&self) -> Text {
+        if self.readonly { f"{self.host:?}:{self.container:?}:ro" }
+        else             { f"{self.host:?}:{self.container:?}" }
+    }
+}
+
+// =============================================================================
+// DockerCmd
+// =============================================================================
+
+public type DockerCmd is
+    | Build {
+        context:    PathBuf,
+        tag:        DockerImage,
+        file:       Maybe<PathBuf>,
+        target:     Maybe<Text>,
+        no_cache:   Bool,
+        build_args: List<(Text, Text)>,
+    }
+    | Run {
+        image:      DockerImage,
+        cmd:        List<Text>,
+        env:        List<(Text, Text)>,
+        volumes:    List<VolumeMount>,
+        ports:      List<PortMapping>,
+        rm:         Bool,
+        detach:     Bool,
+        name:       Maybe<Text>,
+    }
+    | Push { image: DockerImage }
+    | Pull { image: DockerImage }
+    | Stop { name: Text, timeout: Maybe<Int> }
+    | Logs { name: Text, follow: Bool, tail: Maybe<Int> };
+
+implement DockerCmd {
+    public fn render(&self) -> Text { self.render_for(default_flavour()) }
+
+    public fn render_for(&self, flav: ShellFlavour) -> Text {
+        match self {
+            Build { context, tag, file, target, no_cache, build_args } =>
+                render_build(context, tag, file, target, *no_cache, build_args, flav),
+            Run { image, cmd, env, volumes, ports, rm, detach, name } =>
+                render_run(image, cmd, env, volumes, ports, *rm, *detach, name, flav),
+            Push { image } => quote_join(&["docker".into(), "push".into(), image.as_text().clone()], flav),
+            Pull { image } => quote_join(&["docker".into(), "pull".into(), image.as_text().clone()], flav),
+            Stop { name, timeout } => {
+                let mut args: List<Text> = ["docker".into(), "stop".into()];
+                if let Some(t) = timeout { args.push("-t".into()); args.push(f"{t}"); }
+                args.push(name.clone());
+                quote_join(&args, flav)
+            }
+            Logs { name, follow, tail } => {
+                let mut args: List<Text> = ["docker".into(), "logs".into()];
+                if *follow { args.push("-f".into()); }
+                if let Some(t) = tail { args.push(f"--tail={t}"); }
+                args.push(name.clone());
+                quote_join(&args, flav)
+            }
+        }
+    }
+}
+
+fn render_build(
+    context: &PathBuf,
+    tag: &DockerImage,
+    file: &Maybe<PathBuf>,
+    target: &Maybe<Text>,
+    no_cache: Bool,
+    build_args: &List<(Text, Text)>,
+    flav: ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["docker".into(), "build".into()];
+    args.push("-t".into()); args.push(tag.as_text().clone());
+    if let Some(f) = file   { args.push("-f".into()); args.push(f.to_text()); }
+    if let Some(t) = target { args.push("--target".into()); args.push(t.clone()); }
+    if no_cache { args.push("--no-cache".into()); }
+    for (k, v) in build_args.iter() {
+        args.push("--build-arg".into());
+        args.push(f"{k}={v}");
+    }
+    args.push(context.to_text());
+    quote_join(&args, flav)
+}
+
+fn render_run(
+    image: &DockerImage,
+    cmd: &List<Text>,
+    env: &List<(Text, Text)>,
+    volumes: &List<VolumeMount>,
+    ports: &List<PortMapping>,
+    rm: Bool,
+    detach: Bool,
+    name: &Maybe<Text>,
+    flav: ShellFlavour,
+) -> Text {
+    let mut args: List<Text> = ["docker".into(), "run".into()];
+    if rm     { args.push("--rm".into()); }
+    if detach { args.push("-d".into()); }
+    if let Some(n) = name { args.push("--name".into()); args.push(n.clone()); }
+    for (k, v) in env.iter() {
+        args.push("-e".into());
+        args.push(f"{k}={v}");
+    }
+    for v in volumes.iter() {
+        args.push("-v".into());
+        args.push(v.render());
+    }
+    for p in ports.iter() {
+        args.push("-p".into());
+        args.push(p.render());
+    }
+    args.push(image.as_text().clone());
+    for c in cmd.iter() { args.push(c.clone()); }
+    quote_join(&args, flav)
+}
+
+fn quote_join(args: &List<Text>, flav: ShellFlavour) -> Text {
+    let mut out = Text.with_capacity(args.len() * 8);
+    let mut first = true;
+    for a in args.iter() {
+        if !first { out.push(' '); }
+        first = false;
+        out.push_str(&Escaper.quote_for(a, flav));
+    }
+    out
+}
+
+// =============================================================================
+// docker() — the runner
+// =============================================================================
+
+public async fn docker(cmd: DockerCmd) -> Result<ShellResult, ShellError>
+    using [ShellContext]
+{
+    let line = cmd.render();
+    sh_check(&line).await
+}

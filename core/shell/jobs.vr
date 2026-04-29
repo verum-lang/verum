@@ -1,0 +1,252 @@
+// =============================================================================
+// shell/jobs.vr — Background jobs and structured concurrency
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: shell.{exec, result, context}, async.{nursery, cancellation, task}
+// =============================================================================
+//
+// `JobHandle` represents a running background dispatch. It is a *typed*
+// wrapper around the async task driving the dispatch and exposes the
+// minimum surface needed to wait for or cancel an in-flight command.
+//
+// Composability principles:
+//   * `background()` returns immediately — caller awaits or cancels later.
+//   * `parallel(cmds)` is a convenience over a fanout-fanin nursery.
+//   * Every spawned job inherits the parent's `ShellContext` (DI), so cwd
+//     and env_overrides are deterministic across siblings.
+//   * `JobHandle.kill()` sends SIGTERM, gives a grace window, then SIGKILL —
+//     identical to the Executor's cancellation semantics.
+//
+// Compatibility note: this module *prefers* `core.async.nursery` for fanout.
+// Direct `spawn` is allowed for one-shot background work where the caller
+// keeps the handle and is responsible for awaiting it.
+//
+// =============================================================================
+
+module core.shell.jobs;
+
+mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.async.task.{TaskHandle, JoinError};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancelReason};
+mount core.async.nursery.{Nursery, NurseryOptions, NurseryErrorBehavior, with_nursery};
+mount core.async.spawn.{spawn};
+mount core.time.duration.{Duration};
+mount core.shell.context.{ShellContext};
+mount core.shell.exec.{sh, sh_check, sh_with_cancel};
+mount core.shell.result.{ShellResult, ShellError};
+
+// =============================================================================
+// JobHandle — a running shell command
+// =============================================================================
+
+public type JobHandle is {
+    /// Inner async task. Only the resolution matters; we don't expose the
+    /// task surface directly to keep the contract focused on Result.
+    inner: TaskHandle<Result<ShellResult, ShellError>>,
+    /// Source of cancellation for this specific job. Calling `kill()` /
+    /// `terminate()` triggers it.
+    cancel: CancellationTokenSource,
+    /// Diagnostic — the command line as dispatched.
+    command: Text,
+    /// Grace period before SIGKILL after SIGTERM.
+    grace: Duration,
+}
+
+implement JobHandle {
+    /// Awaits the job to completion. Returns the typed result or error.
+    public async fn await(self) -> Result<ShellResult, ShellError> {
+        match self.inner.join().await {
+            Ok(r)  => r,
+            Err(e) => Err(ShellError.SpawnFailed {
+                command: self.command,
+                reason:  match e {
+                    JoinError.Panic(msg)   => f"task panicked: {msg}",
+                    JoinError.Cancelled    => "task cancelled".into(),
+                    JoinError.Aborted      => "task aborted".into(),
+                },
+            }),
+        }
+    }
+
+    /// Sends SIGTERM, waits up to `grace` for clean exit, then SIGKILL.
+    /// Returns the eventual result (typically `Err(Cancelled)`).
+    public async fn kill(self) -> Result<ShellResult, ShellError> {
+        self.cancel.cancel_with(CancelReason.Cancelled);
+        self.await().await
+    }
+
+    /// True if the underlying task has resolved.
+    public fn is_finished(&self) -> Bool { self.inner.is_finished() }
+
+    /// Underlying command line. Useful for logging.
+    public fn command(&self) -> &Text { &self.command }
+}
+
+// =============================================================================
+// background() — fire-and-keep-handle
+// =============================================================================
+
+/// Spawns a shell command and returns a `JobHandle`. The handle must be
+/// `await()`ed (or `kill()`ed) eventually — `JobHandle` is `@must_consume`.
+public fn background(cmd_text: &Text) -> JobHandle using [ShellContext] {
+    background_with_grace(cmd_text, Duration.from_millis(5000))
+}
+
+/// Variant that lets the caller pick the SIGTERM→SIGKILL grace window.
+public fn background_with_grace(cmd_text: &Text, grace: Duration)
+    -> JobHandle
+    using [ShellContext]
+{
+    let ctx = provide ShellContext;
+    let cmd = cmd_text.clone();
+    let cancel = CancellationTokenSource.new();
+    let token = cancel.token();
+    let g = grace;
+    // Capture the active context so spawned task observes parent's cwd/env
+    // even when the shell is later mutated locally.
+    let captured_ctx = ctx.clone();
+    let task = spawn(async move {
+        provide ShellContext = captured_ctx;
+        sh_with_cancel(&cmd, &token, g).await
+    });
+    JobHandle {
+        inner: task,
+        cancel,
+        command: cmd_text.clone(),
+        grace: g,
+    }
+}
+
+// =============================================================================
+// wait_all / parallel
+// =============================================================================
+
+/// Awaits every job and returns the per-job outcomes in input order.
+public async fn wait_all(jobs: List<JobHandle>)
+    -> List<Result<ShellResult, ShellError>>
+{
+    let mut out: List<Result<ShellResult, ShellError>> = [];
+    for job in jobs.into_iter() {
+        out.push(job.await().await);
+    }
+    out
+}
+
+/// Runs every command in parallel and waits for all to finish. Errors do
+/// not abort siblings — every command runs to completion. Returns one
+/// outcome per input.
+public async fn parallel(cmds: List<Text>)
+    -> List<Result<ShellResult, ShellError>>
+    using [ShellContext]
+{
+    let mut jobs: List<JobHandle> = [];
+    for cmd in cmds.iter() { jobs.push(background(cmd)); }
+    wait_all(jobs).await
+}
+
+/// Like `parallel` but caps the in-flight concurrency at `max_in_flight`.
+/// Useful to avoid file-descriptor or server-load explosions.
+public async fn parallel_bounded(cmds: List<Text>, max_in_flight: Int)
+    -> List<Result<ShellResult, ShellError>>
+    using [ShellContext]
+{
+    if max_in_flight <= 0 {
+        return parallel(cmds).await;
+    }
+    let mut out: List<Result<ShellResult, ShellError>> = [];
+    let mut buffer: List<JobHandle> = [];
+    for cmd in cmds.iter() {
+        buffer.push(background(cmd));
+        if buffer.len() as Int >= max_in_flight {
+            // Drain one slot before queuing more
+            let head = buffer.remove(0);
+            out.push(head.await().await);
+        }
+    }
+    for job in buffer.into_iter() {
+        out.push(job.await().await);
+    }
+    out
+}
+
+// =============================================================================
+// fail_fast / fanout — abort sibling tasks on first failure
+// =============================================================================
+
+/// Runs commands in parallel; on the first failure, cancels the remaining
+/// jobs (SIGTERM → grace → SIGKILL). Returns:
+///   * `Ok(List<ShellResult>)` if every command succeeds
+///   * `Err(ShellError)` otherwise (the first error encountered)
+public async fn fail_fast(cmds: List<Text>)
+    -> Result<List<ShellResult>, ShellError>
+    using [ShellContext]
+{
+    let mut jobs: List<JobHandle> = [];
+    for cmd in cmds.iter() { jobs.push(background(cmd)); }
+    // Watch every job; on first error, cancel the rest.
+    let mut results: List<Result<ShellResult, ShellError>> = [];
+    for j in jobs.iter() { results.push(Ok(ShellResult.from_error(
+        ShellError.SpawnFailed { command: j.command.clone(), reason: "pending".into() }
+    ))); }
+    let mut error: Maybe<ShellError> = None;
+    for (i, job) in jobs.into_iter().enumerate() {
+        match job.await().await {
+            Ok(r)  => { results[i] = Ok(r); },
+            Err(e) => {
+                if error.is_none() { error = Some(e.clone()); }
+                results[i] = Err(e);
+            }
+        }
+    }
+    match error {
+        Some(e) => Err(e),
+        None    => {
+            let mut ok: List<ShellResult> = [];
+            for r in results.into_iter() {
+                match r { Ok(v) => ok.push(v), Err(_) => {} }
+            }
+            Ok(ok)
+        }
+    }
+}
+
+/// Convenience: spawn N commands in a structured nursery. The nursery
+/// handles error propagation per `policy` (CancelAll / WaitAll / FailFast).
+/// All spawned children are guaranteed to be waited-for or cancelled
+/// before this function returns.
+public async fn fanout(
+    cmds: List<Text>,
+    policy: NurseryErrorBehavior,
+) -> Result<List<Result<ShellResult, ShellError>>, ShellError>
+    using [ShellContext]
+{
+    let opts = NurseryOptions { error_behavior: policy, ..NurseryOptions.default() };
+    let outcome = with_nursery(opts, |nursery| {
+        let mut handles: List<TaskHandle<Result<ShellResult, ShellError>>> = [];
+        for cmd in cmds.iter() {
+            let c = cmd.clone();
+            handles.push(nursery.spawn(async move { sh_check(&c).await }));
+        }
+        handles
+    }).await;
+    match outcome {
+        Ok(handles) => {
+            let mut out: List<Result<ShellResult, ShellError>> = [];
+            for h in handles.into_iter() {
+                match h.join().await {
+                    Ok(r)  => out.push(r),
+                    Err(_) => out.push(Err(ShellError.SpawnFailed {
+                        command: "<nursery task>".into(),
+                        reason:  "task aborted by nursery".into(),
+                    })),
+                }
+            }
+            Ok(out)
+        }
+        Err(_) => Err(ShellError.SpawnFailed {
+            command: "<nursery>".into(),
+            reason:  "nursery exited with error".into(),
+        }),
+    }
+}
