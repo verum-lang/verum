@@ -611,8 +611,6 @@ impl std::fmt::Display for CbgrPassStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::phases::mir_lowering::{BasicBlock, BlockId, LocalId, LocalKind, MirLocal};
-    use verum_ast::span::Span as AstSpan;
 
     #[test]
     fn test_cbgr_pass_creation() {
