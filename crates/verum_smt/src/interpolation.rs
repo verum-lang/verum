@@ -563,16 +563,33 @@ impl InterpolationEngine {
             return Ok(formula.clone());
         }
 
-        // Create bound variables for the existential quantifier
-        // We need to determine the sort of each variable - default to Bool
-        // In a full implementation, we'd track sorts through the translation
-        let bound_vars: List<Bool> = vars
+        // Each free variable in `formula` has a real Z3 sort
+        // (Bool/Int/Real/...). Z3 distinguishes constants by both
+        // name AND sort, so binding `Bool x` here when the formula
+        // contains `Int x` produces an effectively-unquantified
+        // existential — QE then operates on a vacuous quantifier and
+        // returns a trivially-true (or otherwise unsound) result.
+        //
+        // Walk the formula AST once to harvest each variable's actual
+        // sort, then construct each bound variable as a Dynamic of
+        // that sort so the quantifier binds the same Z3 constants
+        // that appear free in the body.
+        let typed_vars = crate::variable_extraction::collect_typed_variables_from_bool(formula);
+        let bound_dynamics: List<z3::ast::Dynamic> = vars
             .iter()
-            .map(|var_name| Bool::new_const(var_name.as_str()))
+            .map(|var_name| match typed_vars.get(var_name) {
+                Some(sort) => z3::ast::Dynamic::fresh_const(var_name.as_str(), sort),
+                // Variable named in `vars` but absent from `formula`'s
+                // free vars. This is normally a caller bug; fall back
+                // to a Bool so the existential is at least
+                // well-formed (QE will discover it doesn't appear in
+                // the body and drop it).
+                None => z3::ast::Dynamic::from_ast(&Bool::new_const(var_name.as_str())),
+            })
             .collect();
 
         let bound_refs: List<&dyn z3::ast::Ast> =
-            bound_vars.iter().map(|v| v as &dyn z3::ast::Ast).collect();
+            bound_dynamics.iter().map(|v| v as &dyn z3::ast::Ast).collect();
 
         // Create existential quantifier: ∃ vars. formula
         let quantified = z3::ast::exists_const(&bound_refs, &[], formula);
