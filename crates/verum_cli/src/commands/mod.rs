@@ -56,6 +56,10 @@ pub mod doc_render;
 /// `@axiom`-bodied declaration per imported theorem, attributed
 /// back to the source via `@framework(<system>, "<source>:<line>")`.
 pub mod foreign_import;
+/// `verum llm-tactic` subcommand — LCF-style fail-closed LLM proof
+/// proposer.  The LLM may propose tactic sequences but the kernel
+/// re-checks every step before committing.
+pub mod llm_tactic;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

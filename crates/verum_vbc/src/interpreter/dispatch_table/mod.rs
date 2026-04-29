@@ -1270,17 +1270,50 @@ pub fn dispatch_loop_table_with_entry_depth(
     state: &mut InterpreterState,
     entry_depth: usize,
 ) -> InterpreterResult<Value> {
+    // Capture wall-clock start when `timeout_ms` is configured.
+    // Sampled every 256 instructions to bound the cost of
+    // `Instant::now()` (~50ns) — matches the existing
+    // cancel-flag cadence. Closes the inert-defense pattern:
+    // prior to wiring, `InterpreterConfig.timeout_ms` was
+    // declared, defaulted, and never read; adversarial bytecode
+    // could spin past the documented budget without the
+    // dispatch loop ever sampling time.
+    let timeout_deadline: Option<std::time::Instant> = if state.config.timeout_ms > 0 {
+        Some(
+            std::time::Instant::now()
+                + std::time::Duration::from_millis(state.config.timeout_ms),
+        )
+    } else {
+        None
+    };
+
     loop {
         state.global_instruction_count += 1;
         // Cooperative cancellation: check external flag every 256 instructions (~2.5μs)
-        if state.global_instruction_count & 0xFF == 0
-            && let Some(ref flag) = state.config.cancel_flag
-                && flag.load(std::sync::atomic::Ordering::Relaxed) {
-                    return Err(InterpreterError::InstructionLimitExceeded {
-                        count: state.global_instruction_count,
-                        limit: 0,
-                    });
-                }
+        if state.global_instruction_count & 0xFF == 0 {
+            if let Some(ref flag) = state.config.cancel_flag
+                && flag.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return Err(InterpreterError::InstructionLimitExceeded {
+                    count: state.global_instruction_count,
+                    limit: 0,
+                });
+            }
+            // Wall-clock timeout: surface as
+            // `InstructionLimitExceeded` with `limit = 0` since
+            // the time-based ceiling has no instruction-count
+            // analogue. The interpreter API uses one fail-closed
+            // error shape for any "abort because budget
+            // exhausted" case — consistent triage in the caller.
+            if let Some(deadline) = timeout_deadline
+                && std::time::Instant::now() >= deadline
+            {
+                return Err(InterpreterError::InstructionLimitExceeded {
+                    count: state.global_instruction_count,
+                    limit: 0,
+                });
+            }
+        }
         if state.global_instruction_count > state.config.max_instructions && state.config.max_instructions > 0 {
             return Err(InterpreterError::InstructionLimitExceeded {
                 count: state.global_instruction_count,

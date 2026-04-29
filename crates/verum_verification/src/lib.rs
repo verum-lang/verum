@@ -111,6 +111,11 @@ pub mod doc_render;
 /// impls (`CoqImporter` / `Lean4Importer` / `MizarImporter` /
 /// `IsabelleImporter`).
 pub mod foreign_import;
+/// LLM-native tactic protocol (#77) — LCF-style fail-closed bridge
+/// between a language-model proof proposer and the trusted kernel.
+/// The LLM may propose tactic sequences but the kernel re-checks
+/// every step; any rejection discards the proposal.
+pub mod llm_tactic;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
