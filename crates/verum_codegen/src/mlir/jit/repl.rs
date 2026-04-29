@@ -246,14 +246,34 @@ impl EvalResult {
     }
 
     /// Format result for display.
+    ///
+    /// Honours `ReplConfig.max_display_size`: the value text is
+    /// truncated to that many *characters* (not bytes — Unicode-
+    /// safe via `chars().take()`) with a "...(truncated, N total
+    /// chars)" trailer when over budget. Closes the inert-
+    /// defense pattern: prior to wiring, a 1 GB tensor or a
+    /// pathologically long stringification could blow up the
+    /// REPL's stdout regardless of what the caller configured.
     pub fn display(&self, config: &ReplConfig) -> String {
         let mut output = String::new();
 
         if !self.is_unit {
-            if config.pretty_print {
-                output.push_str(&format!("{}: {}", self.value, self.type_name));
+            let value_str = self.value.as_str();
+            let total_chars = value_str.chars().count();
+            let display_value: String = if total_chars > config.max_display_size {
+                let truncated: String =
+                    value_str.chars().take(config.max_display_size).collect();
+                format!(
+                    "{}…(truncated, {} total chars)",
+                    truncated, total_chars
+                )
             } else {
-                output.push_str(self.value.as_str());
+                value_str.to_string()
+            };
+            if config.pretty_print {
+                output.push_str(&format!("{}: {}", display_value, self.type_name));
+            } else {
+                output.push_str(&display_value);
             }
         }
 
@@ -872,6 +892,60 @@ mod tests {
         assert!(config.incremental);
         assert!(config.auto_complete);
         assert!(config.max_history > 0);
+    }
+
+    /// Pin: `max_display_size` defaults to 4096 chars and the
+    /// `EvalResult::display` path truncates beyond that. Closes
+    /// the inert-defense pattern around the budget knob.
+    #[test]
+    fn max_display_size_default_is_4096() {
+        let config = ReplConfig::default();
+        assert_eq!(config.max_display_size, 4096);
+    }
+
+    #[test]
+    fn display_does_not_truncate_short_value() {
+        let mut config = ReplConfig::default();
+        config.max_display_size = 100;
+        let result = EvalResult::with_value("hello", "Text");
+        let rendered = result.display(&config);
+        assert!(rendered.contains("hello"));
+        assert!(!rendered.contains("truncated"));
+    }
+
+    #[test]
+    fn display_truncates_long_value() {
+        let mut config = ReplConfig::default();
+        config.max_display_size = 5;
+        // 20-char value, well over the 5-char budget.
+        let long = "abcdefghijklmnopqrst".to_string();
+        let result = EvalResult::with_value(long.as_str(), "Text");
+        let rendered = result.display(&config);
+        assert!(
+            rendered.contains("truncated"),
+            "expected truncation marker, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("20 total chars"),
+            "expected total-chars hint, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn display_truncates_unicode_at_char_boundary() {
+        // Pin: truncation respects char boundaries — emoji and
+        // CJK characters are multi-byte, so naive byte slicing
+        // would panic. The wired path uses `chars().take(N)` so
+        // it's safe.
+        let mut config = ReplConfig::default();
+        config.max_display_size = 3;
+        let mixed = "αβγδε🦀".to_string();
+        let result = EvalResult::with_value(mixed.as_str(), "Text");
+        let rendered = result.display(&config);
+        assert!(rendered.starts_with("αβγ"));
+        assert!(rendered.contains("truncated"));
     }
 
     #[test]
