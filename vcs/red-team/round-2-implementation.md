@@ -469,20 +469,40 @@ status was a placeholder for tracking; the kernel's strict-positivity
 + ordinal-depth gates are the load-bearing termination guarantee
 that the verifier loop respects.
 
-### 6.2 Witnesses with side effects — PARTIAL DEFENSE + guardrail 2026-04-28
+### 6.2 Witnesses with side effects — DEFENSE CONFIRMED 2026-04-29
 
-**Status:** PARTIAL DEFENSE — Verum's computational-properties system
-(separate from contexts) tracks Pure/IO/Async/Fallible/Mutates per
-`crates/verum_types/src/computational_properties.rs`; refinement witnesses
-that emit side effects are visible at the type level via
-`Function::properties: Option<PropertySet>`.
+**Status:** DEFENSE CONFIRMED — surface-level + Rust-level
+purity-algebra invariants both pinned. The original PARTIAL status
+flagged the absence of a programmatic test for the
+`PropertySet::is_pure()` algebra; this closes that gap.
 
-**Guardrail:** `vcs/specs/L1-core/refinement/witness_purity_guard.vr` pins
-the pure-witness chain: 6 @verify(formal) functions returning refinement
-types (Int{>= 0}, Int{>= a && >= b}, Int{it % 2 == 0}), refinement on
-parameter (Int{!= 0}), composition through pure refinement returns. The
-SMT verifier sees only pure bodies, preserving compositional refinement
-reasoning.
+**Surface guardrail:** `vcs/specs/L1-core/refinement/witness_purity_guard.vr`
+pins the pure-witness chain: 6 @verify(formal) functions returning
+refinement types (Int{>= 0}, Int{>= a && >= b}, Int{it % 2 == 0}),
+refinement on parameter (Int{!= 0}), composition through pure
+refinement returns. The SMT verifier sees only pure bodies, preserving
+compositional refinement reasoning.
+
+**Property-algebra guardrail (added 2026-04-29):**
+`crates/verum_types/tests/witness_purity_invariant.rs` — 13 tests
+pin the `PropertySet::is_pure()` contract programmatically:
+
+- Constructor cases: `pure()` is pure; `single({IO/Async/Fallible/Mutates/Divergent})` is not.
+- Algebra cases: `from_properties([Pure, IO])` drops Pure; empty input is Pure.
+- Union cases: `Pure ∪ Pure = Pure`; `Pure ∪ {IO}` demotes to `{IO}`
+  (Pure is auto-removed when other properties are present, the
+  load-bearing rule for refinement-witness purity).
+- Default case: `PropertySet::default()` is pure (matches the spec
+  convention that absence-of-evidence ⇒ Pure).
+- Strict-singleton invariant: `is_pure()` returns true IFF the set
+  is exactly `{Pure}`. A regression that admits IO into the pure
+  predicate would be a soundness hole on the refinement-witness path.
+
+The Rust-level tests pin the algebra so any future refactor of
+`PropertySet` cannot silently break the refinement-witness purity
+contract — the SMT verifier relies on `is_pure()` being a strict
+singleton check to decide which functions are admissible as
+refinement witnesses.
 
 ### 6.3 Refinement in stmt-level code with unreachable — DEFENSE CONFIRMED 2026-04-28
 
@@ -823,7 +843,7 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 5.2 Deep super | **DEFENSE** | guardrail (2026-04-28) |
 | 5.3 Alias shadow | **DEFENSE CONFIRMED** | round-1 §4.3 closure (2026-04-28) |
 | 6.1 Π/Σ recursion | **DEFENSE CONFIRMED** | K-Pos + K-Refine-omega gates (2026-04-28) |
-| 6.2 Side-effect witness | **PARTIAL** | guardrail (2026-04-28) |
+| 6.2 Side-effect witness | **DEFENSE CONFIRMED** | .vr surface guardrail + 13-test PropertySet algebra invariant (2026-04-29) |
 | 6.3 Stmt refinement | **DEFENSE CONFIRMED** | recheck_function walks let-bindings + requires/ensures (2026-04-28) |
 | 7.1 Gen counter race | **DEFENSE CONFIRMED** | 8-thread × 5K stress test (2026-04-28) |
 | 7.2 Hazard reclamation | PARTIAL | concurrent stress |
