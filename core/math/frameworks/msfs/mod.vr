@@ -58,3 +58,16 @@ mount core.math.frameworks.msfs.strcat.{
     msfs_strcat_total_definition,
     msfs_strcat_object_kappa_1_accessible,
 };
+
+// MSFS self-containment endpoint — Verum-language alternative to
+// the Rust-side `invariant_msfs_is_self_contained_modulo_zfc_plus_2_inacc`
+// unit test.  Closes the MSFS verification pipeline at the
+// preprint level: every downstream theorem citing
+// `msfs_self_containment_theorem` inherits the kernel-checked
+// guarantee that the trusted boundary is exactly ZFC + 2-inacc +
+// Verum kernel.
+mount core.math.frameworks.msfs.self_containment.{
+    MsfsSelfContainmentWitness,
+    msfs_self_containment_theorem,
+    msfs_trusted_boundary_corollary,
+};

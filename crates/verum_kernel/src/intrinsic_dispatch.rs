@@ -427,6 +427,23 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             holds: true,
             reason: "mechanisation_roadmap: HTT + AR 1994 enumerations always available".into(),
         }),
+        // -- MSFS self-containment ---------------------------------------
+        // Backed by `mechanisation_roadmap::msfs_self_contained()` —
+        // returns true iff zero AxiomCited + zero Pending in MSFS scope.
+        // This is the dynamically-computed witness that the MSFS paper's
+        // "100% from-first-principles modulo ZFC+2-inacc" claim is true.
+        "kernel_msfs_self_contained" => {
+            let holds = crate::mechanisation_roadmap::msfs_self_contained();
+            let gaps = crate::mechanisation_roadmap::msfs_unmechanised_dependencies();
+            Some(IntrinsicValue::Decision {
+                holds,
+                reason: format!(
+                    "msfs_self_contained = {} (unmechanised gaps: {})",
+                    holds,
+                    gaps.len()
+                ),
+            })
+        }
 
         _ => None,
     }
@@ -462,6 +479,7 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_tactics_industrial",
         "kernel_cross_format_gate",
         "kernel_mechanisation_roadmap",
+        "kernel_msfs_self_contained",
     ]
 }
 
@@ -747,9 +765,18 @@ mod tests {
     // ----- Available intrinsics + missing dispatchers -----
 
     #[test]
+    fn msfs_self_contained_intrinsic_dispatches() {
+        // The dispatcher must reflect the runtime self-containment state.
+        let r = dispatch_intrinsic("kernel_msfs_self_contained", &[]).unwrap();
+        // Currently TRUE (no AxiomCited/Pending in MSFS scope).
+        assert_eq!(r.as_bool(), Some(true),
+            "kernel_msfs_self_contained must return true while MSFS roadmap is closed");
+    }
+
+    #[test]
     fn available_intrinsics_covers_all_bridges() {
         let names = available_intrinsics();
-        assert_eq!(names.len(), 21,
+        assert_eq!(names.len(), 22,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr must have a dispatcher");
         // Check uniqueness.
         let mut seen = std::collections::HashSet::new();
