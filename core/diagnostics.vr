@@ -10,7 +10,7 @@
 // snapshot surfaces:
 //
 // - `core.mem.diagnostics`   — CBGR allocation introspection
-//                                 (HeaderView, header_view_of)
+//                                 (MemHeaderView, header_view_of)
 // - `core.async.diagnostics` — async runtime task introspection
 //                                 (TaskInfo, TaskLifecycleState)
 // - `core.base.panic`        — panic-site identity (PanicInfo, Location)
@@ -24,7 +24,7 @@
 //
 // - No mutation surface.  Every snapshot type is read-only.
 // - No reflection escape that would bypass CBGR or async cancellation.
-//   `HeaderView` summarises identity + capabilities, not raw pointers.
+//   `MemHeaderView` summarises identity + capabilities, not raw pointers.
 //   `TaskInfo` summarises identity + state, not the task's continuation.
 // - Zero overhead when not subscribed.  All re-exports are zero-cost
 //   (the importer pays only for what it actually references); the
@@ -35,7 +35,7 @@
 //
 // The umbrella's load-bearing addition over the layer-local surfaces is
 // `PanicReport` — a heterogeneous bundle of (PanicInfo, Maybe<TaskInfo>,
-// Maybe<HeaderView>, thread_name) that panic hooks construct as they
+// Maybe<MemHeaderView>, thread_name) that panic hooks construct as they
 // gather context from different layers of the runtime.  See `PanicReport`
 // for the format-stable boundary observers code against.
 //
@@ -62,7 +62,7 @@ mount core.{Maybe, Text};
 // =============================================================================
 
 public mount core.mem.diagnostics.{
-    HeaderView, header_view_of,
+    MemHeaderView, header_view_of,
     live_allocations, live_allocation_count,
     CallFrame, current_call_stack,
 };
@@ -141,7 +141,7 @@ public type PanicReport is {
     /// pointer operation (use-after-free, capability violation, etc.)
     /// and the panic site had access to the source `AllocationHeader`.
     /// Empty for non-memory-related panics.
-    header: Maybe<HeaderView>,
+    header: Maybe<MemHeaderView>,
 
     /// Symbolicated call stack at panic time.  Empty list when frame
     /// walking is unavailable (Tier-0 interpreter without VBC debug-
@@ -191,7 +191,7 @@ implement PanicReport {
     /// and the panic site had access to the source AllocationHeader
     /// (e.g. through the failing `try_revoke` / `increment_ref_count`
     /// codepath in `core/mem`).
-    public fn with_header(mut self, header: HeaderView) -> PanicReport {
+    public fn with_header(mut self, header: MemHeaderView) -> PanicReport {
         self.header = Some(header);
         self
     }
