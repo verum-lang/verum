@@ -181,6 +181,38 @@ implement Error for NurseryError {
     }
 }
 
+implement Display for NurseryError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message())
+    }
+}
+
+implement Debug for NurseryError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            NurseryError.Single(e) =>
+                f.write_str(f"NurseryError.Single({e.message()})".as_str()),
+            NurseryError.Multiple(errors) =>
+                f.write_str(f"NurseryError.Multiple(len={errors.len()})".as_str()),
+            NurseryError.Timeout { pending_count, completed_count } =>
+                f.write_str(f"NurseryError.Timeout {{ pending: {pending_count}, completed: {completed_count} }}".as_str()),
+            NurseryError.Cancelled => f.write_str("NurseryError.Cancelled"),
+            NurseryError.Panic(msg) =>
+                f.write_str(f"NurseryError.Panic({msg})".as_str()),
+            NurseryError.TaskLimitExceeded { limit, attempted } =>
+                f.write_str(f"NurseryError.TaskLimitExceeded {{ limit: {limit}, attempted: {attempted} }}".as_str()),
+        }
+    }
+}
+
+// Eq is intentionally NOT defined: NurseryError carries `Heap<Error>`
+// (a trait-object payload) for `Single` / `Multiple`, and the `Error`
+// protocol does not extend Eq.  Comparing two trait-object errors via
+// `message()` text would be an oracle leak masquerading as structural
+// equality.  Use pattern-test (`x is NurseryError.Cancelled`) for
+// taxonomy queries; reach for `.message()` only when text comparison
+// is the explicit contract.
+
 // =============================================================================
 // Task Handle
 // =============================================================================
