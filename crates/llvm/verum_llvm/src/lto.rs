@@ -408,11 +408,37 @@ impl FullLtoCodegen {
         }
     }
 
+    /// Set whether the linker should internalize non-preserved
+    /// symbols.
+    ///
+    /// Internalization is the LTO optimization that converts
+    /// external linkage to internal linkage for symbols that
+    /// aren't part of the public API. This unlocks aggressive
+    /// inlining and dead-code elimination on functions that
+    /// would otherwise be considered linker-visible.
+    ///
+    /// Wraps `lto_codegen_set_should_internalize`.
+    pub fn set_internalize(&self, internalize: bool) {
+        unsafe {
+            lto_codegen_set_should_internalize(
+                self.codegen,
+                if internalize { 1 } else { 0 },
+            );
+        }
+    }
+
     /// Apply configuration
     pub fn apply_config(&self, config: &LtoConfig) {
         self.set_cpu(&config.cpu);
         self.set_debug_model(config.debug_info);
         self.set_pic_model(config.pic);
+        // Wire `internalize` — the C API exists for FullLTO and
+        // is the canonical knob for "make all non-preserved
+        // symbols internal so the inliner can eat them". Pre-fix
+        // the field landed on LtoConfig but no code path consulted
+        // it, so the LLVM default (typically true for whole-program
+        // LTO) was always used regardless of the manifest.
+        self.set_internalize(config.internalize);
     }
 
     /// Add must-preserve symbol
@@ -550,5 +576,30 @@ mod tests {
 
         assert_eq!(cache.pruning_interval, 3600);
         assert_eq!(cache.max_size_percentage, 50);
+    }
+
+    #[test]
+    fn lto_config_internalize_default_is_true() {
+        // Pin: the documented default keeps internalization on
+        // — full whole-program LTO with internal-linkage
+        // promotion is the canonical aggressive-optimization
+        // setup. Embedders that need to preserve external
+        // linkage opt out via `internalize: false`.
+        let cfg = LtoConfig::new(LtoMode::Full);
+        assert!(
+            cfg.internalize,
+            "default internalize must stay true for full whole-program LTO",
+        );
+    }
+
+    #[test]
+    fn lto_config_internalize_round_trips() {
+        // Pin: the field is mutable on the public surface so
+        // embedders can flip it without going through builders.
+        // Round-trip the value to confirm assignment works.
+        let mut cfg = LtoConfig::new(LtoMode::Full);
+        assert!(cfg.internalize);
+        cfg.internalize = false;
+        assert!(!cfg.internalize);
     }
 }
