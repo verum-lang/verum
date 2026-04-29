@@ -531,12 +531,42 @@ impl PatternGenerator {
             }
         }
 
+        // Honour `enable_multi_patterns`: when enabled and the
+        // generated set has at least 2 simple patterns, attempt
+        // to fold them into a single multi-pattern so Z3
+        // instantiates only when ALL terms appear together. This
+        // is more selective than independent patterns and reduces
+        // matching work for quantifiers with multiple triggers.
+        // Closes the inert-defense pattern: prior to wiring, the
+        // documented `enable_multi_patterns` toggle had no effect
+        // on this entry point — multi-patterns were neither
+        // generated nor opted out.
+        if self.config.enable_multi_patterns && patterns.len() >= 2 {
+            let bound_var_names: Vec<Text> = bound_vars
+                .iter()
+                .map(|(name, _)| Text::from(*name))
+                .collect();
+            let apps = extract_function_applications_detailed(body, &bound_var_names);
+            if apps.len() >= 2
+                && let Maybe::Some(multi) = try_create_multi_pattern(&apps)
+            {
+                patterns.push(multi);
+            }
+        }
+
         // Limit to max patterns
         if patterns.len() > self.config.max_patterns_per_quantifier {
             patterns.truncate(self.config.max_patterns_per_quantifier);
         }
 
-        self.stats.record_pattern_generation(patterns.len());
+        // Honour `track_effectiveness`: when disabled, skip the
+        // statistics-recording call so callers running in
+        // hot-path / latency-sensitive contexts don't pay the
+        // atomic-counter cost. Default `true` matches the prior
+        // behaviour. Closes the inert-defense pattern.
+        if self.config.track_effectiveness {
+            self.stats.record_pattern_generation(patterns.len());
+        }
         patterns
     }
 
