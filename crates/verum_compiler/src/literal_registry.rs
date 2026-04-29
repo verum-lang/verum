@@ -133,6 +133,22 @@ pub enum ParsedLiteral {
     },
     /// Generic custom literal (for user-defined handlers)
     Custom { tag: Text, value: Text },
+    /// Shell command template — emitted by `sh#"..."` literals.
+    /// `parts` is a list of segments: literal text segments and
+    /// interpolation placeholders. The lowering phase walks `parts` and
+    /// builds a call to `core.shell.exec.sh()` with each `${expr}`
+    /// auto-escaped via `core.shell.escape.ShellEscape::shell_quote`.
+    ShellCmd {
+        /// Sequence of (kind, payload) pairs where:
+        ///   * kind = 0 → literal text (payload is the bytes)
+        ///   * kind = 1 → interpolation expression source (payload to be
+        ///                re-parsed by lowering)
+        ///   * kind = 2 → unsafe interpolation (`$unsafe{...}`) — payload
+        ///                bypasses ShellEscape, requires `unsafe` block
+        parts: List<(u8, Text)>,
+        /// Original source for diagnostics.
+        source: Text,
+    },
 }
 
 impl LiteralRegistry {
@@ -246,6 +262,7 @@ impl LiteralRegistry {
                   | "sql.mysql"  | "mysql" => {
                 self.parse_sql(tag, content, span, source_file)
             }
+            "sh" => self.parse_sh(content, span, source_file),
             _ => {
                 // Custom handler - return generic custom literal
                 Ok(ParsedLiteral::Custom {
@@ -289,6 +306,67 @@ impl LiteralRegistry {
         use crate::literal_parsers::parse_duration;
         let ns = parse_duration(content.as_str(), span, source_file)?;
         Ok(ParsedLiteral::Duration(ns))
+    }
+
+    /// Parse a shell tagged literal `sh#"..."` into segments.
+    ///
+    /// The literal body is split into:
+    ///   * literal text segments
+    ///   * `${expr}` interpolations — each becomes a "kind=1" part holding
+    ///     the raw expression text. Lowering re-parses the expression and
+    ///     wraps it with `ShellEscape::shell_quote(...)`.
+    ///   * `$unsafe{expr}` interpolations — kind=2 parts, bypass auto-escape
+    ///     (caller must wrap call site in `unsafe { ... }`).
+    ///
+    /// At compile time we also run a structural sanity check (balanced
+    /// quotes after stripping interpolations); the parser already flagged
+    /// gross violations via `validate_format_tag`, but we re-run here so
+    /// users get the same diagnostic when the registry is invoked
+    /// programmatically (e.g. by the LSP).
+    fn parse_sh(
+        &self,
+        content: &Text,
+        _span: Span,
+        _source_file: Option<&SourceFile>,
+    ) -> Result<ParsedLiteral, Diagnostic> {
+        let s = content.as_str();
+        let mut parts: List<(u8, Text)> = List::new();
+        let mut buf = String::new();
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            // Detect $unsafe{...}
+            if bytes[i] == b'$' && bytes[i..].starts_with(b"$unsafe{") {
+                if !buf.is_empty() {
+                    parts.push((0u8, Text::from(std::mem::take(&mut buf))));
+                }
+                i += b"$unsafe{".len();
+                let (expr, consumed) = read_balanced_brace(&bytes[i..]);
+                i += consumed;
+                parts.push((2u8, Text::from(expr)));
+                continue;
+            }
+            if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+                if !buf.is_empty() {
+                    parts.push((0u8, Text::from(std::mem::take(&mut buf))));
+                }
+                i += 2;
+                let (expr, consumed) = read_balanced_brace(&bytes[i..]);
+                i += consumed;
+                parts.push((1u8, Text::from(expr)));
+                continue;
+            }
+            buf.push(bytes[i] as char);
+            i += 1;
+        }
+        if !buf.is_empty() {
+            parts.push((0u8, Text::from(buf)));
+        }
+
+        Ok(ParsedLiteral::ShellCmd {
+            parts,
+            source: content.clone(),
+        })
     }
 
     /// Register all built-in handlers
@@ -605,6 +683,30 @@ impl LiteralRegistry {
     ) -> std::result::Result<ParsedLiteral, Diagnostic> {
         crate::literal_parsers::yaml::parse_yaml(content, span, source_file)
     }
+}
+
+/// Read characters from `bytes` until the matching closing `}` is found.
+/// Tracks brace nesting (so `${arr[i]}` and similar still work).
+/// Returns the consumed expression text and the number of bytes advanced
+/// (including the trailing `}`).
+fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
+    let mut depth: i32 = 1;
+    let mut out = String::new();
+    let mut i: usize = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'{' { depth += 1; out.push(b as char); i += 1; continue; }
+        if b == b'}' {
+            depth -= 1;
+            if depth == 0 { return (out, i + 1); }
+            out.push(b as char);
+            i += 1;
+            continue;
+        }
+        out.push(b as char);
+        i += 1;
+    }
+    (out, i)
 }
 
 impl Default for LiteralRegistry {

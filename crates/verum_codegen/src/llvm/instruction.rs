@@ -6009,10 +6009,15 @@ let func_name = vbc_mod
 // process.vr code calls. The high-level Result wrapping happens
 // in Verum, not here.
 if func_name == "__process_spawn_raw"
+    || func_name == "__process_spawn_full_raw"
     || func_name == "__process_exec_raw"
     || func_name == "__process_wait_raw"
+    || func_name == "__process_kill_raw"
     || func_name == "__fd_read_all_raw"
+    || func_name == "__fd_read_chunk_raw"
+    || func_name == "__fd_write_all_raw"
     || func_name == "__fd_close_raw"
+    || func_name == "__fd_close_raw_buf"
     || func_name == "__ptr_read_i64"
     || func_name == "__ptr_free"
 {
