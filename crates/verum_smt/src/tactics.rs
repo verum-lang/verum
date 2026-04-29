@@ -152,6 +152,20 @@ pub enum TacticCombinator {
     /// left-folded `OrElse` chain (which the simplifier then
     /// right-associates per `OrelseAssociative`).
     FirstOf(List<TacticCombinator>),
+
+    /// Total-discharge gate: run `t`; if any goal remains open
+    /// after `t`, fail (return empty + stats.succeeded=false).
+    /// Catalogue law `solve-of-skip-fails-when-open` rewrites
+    /// `Solve(skip) ↪ fail` unconditionally (skip never closes any
+    /// goal).
+    Solve(Box<TacticCombinator>),
+
+    /// Apply `t` to every open goal.  At the per-goal dispatcher
+    /// level the operational semantics is identity (single-goal in,
+    /// list-of-goals out — same as `t`).  The catalogue law
+    /// `all-goals-of-skip-is-skip` lands at the simplifier level:
+    /// `AllGoals(skip) ↪ skip`.
+    AllGoals(Box<TacticCombinator>),
 }
 
 /// Probe kinds for conditional tactics
@@ -526,6 +540,25 @@ impl TacticExecutor {
                 }
                 List::new()
             }
+            TacticCombinator::Solve(inner) => {
+                // Total-discharge gate.  Run `inner`; if the result
+                // is empty (proof complete), succeed.  Otherwise
+                // mark stats.succeeded=false and return empty.
+                let goals = self.apply_combinator(goal, inner);
+                if goals.is_empty() {
+                    goals
+                } else {
+                    self.stats.succeeded = false;
+                    List::new()
+                }
+            }
+            TacticCombinator::AllGoals(inner) => {
+                // At the per-goal dispatcher level this is just
+                // `inner` — the list-of-goals fan-out is the
+                // dispatcher's pre-existing semantics (AndThen
+                // already iterates over the previous step's result).
+                self.apply_combinator(goal, inner)
+            }
         }
     }
 
@@ -761,6 +794,21 @@ impl TacticExecutor {
                 }
                 // All branches failed (or timeout exhausted) — fail
                 List::new()
+            }
+            TacticCombinator::Solve(inner) => {
+                // Total-discharge gate (timeout-aware).
+                let goals = self.apply_combinator_with_timeout_tracking(
+                    goal, inner, timeout, start,
+                );
+                if goals.is_empty() {
+                    goals
+                } else {
+                    self.stats.succeeded = false;
+                    List::new()
+                }
+            }
+            TacticCombinator::AllGoals(inner) => {
+                self.apply_combinator_with_timeout_tracking(goal, inner, timeout, start)
             }
         }
     }
@@ -1080,6 +1128,18 @@ impl TacticExecutor {
                     }
                 }
                 List::new()
+            }
+            TacticCombinator::Solve(inner) => {
+                let goals = self.apply_combinator_with_params(goal, inner, params);
+                if goals.is_empty() {
+                    goals
+                } else {
+                    self.stats.succeeded = false;
+                    List::new()
+                }
+            }
+            TacticCombinator::AllGoals(inner) => {
+                self.apply_combinator_with_params(goal, inner, params)
             }
         }
     }
