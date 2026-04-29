@@ -553,3 +553,39 @@ public fn coherence_quality(result: &CoherenceResult) -> Float {
         },
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug for CoherenceResult
+// =============================================================================
+//
+// Eq is intentionally NOT defined: CoherenceResult.Obstruction carries a
+// `List<CoherenceViolation>` whose own Eq impl is non-trivial (deep
+// structural comparison would risk false negatives on order-permutation
+// across runs).  Callers comparing results in regression tests should
+// destructure to inspect the bucket + numeric fields.
+
+implement Display for CoherenceResult {
+    /// Renders a single-line summary suitable for audit-log lines:
+    ///   `Coherent { global_quality }`  → `coherent (q=<global>)`
+    ///   `Obstruction { violations, severity }` →
+    ///       `obstructed (severity=<s>, <N> violations)`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CoherenceResult.Coherent { global_quality } =>
+                f.write_str(f"coherent (q={global_quality})".as_str()),
+            CoherenceResult.Obstruction { violations, severity } =>
+                f.write_str(f"obstructed (severity={severity}, {violations.len()} violations)".as_str()),
+        }
+    }
+}
+
+implement Debug for CoherenceResult {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CoherenceResult.Coherent { global_quality } =>
+                f.write_str(f"Coherent {{ global_quality: {global_quality} }}".as_str()),
+            CoherenceResult.Obstruction { violations, severity } =>
+                f.write_str(f"Obstruction {{ severity: {severity}, violations: {violations.len()} }}".as_str()),
+        }
+    }
+}
