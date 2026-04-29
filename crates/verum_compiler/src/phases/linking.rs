@@ -1468,6 +1468,48 @@ impl FinalLinker {
 
         if self.config.strip {
             cmd.arg("-s");
+        } else if self.config.strip_debug_only {
+            // Strip debug symbols only — keeps function names for
+            // backtraces while shedding the bulk of debug info.
+            // Pre-fix `strip_debug_only` was a config field with no
+            // readers; wiring honours the verum.toml `[link]
+            // strip_debug_only = true` knob that documentation
+            // already advertised.
+            cmd.arg("-Wl,--strip-debug");
+        }
+
+        if self.config.debug_info {
+            // `-g` retains DWARF / Mach-O debug sections through
+            // linking so a debugger can map back to source.  Skipped
+            // when `strip` already discards everything.
+            cmd.arg("-g");
+        }
+
+        if self.config.static_link {
+            // Static linking — no runtime dependencies on shared
+            // libraries.  Pre-fix this flag was inert; macOS users
+            // get a friendly diagnostic from `cc` if they request
+            // `-static` (Apple actively rejects fully-static linking
+            // against libSystem).
+            cmd.arg("-static");
+        }
+
+        // `target_triple` overrides the host target.  When unset
+        // (the default), the system `cc` picks its native triple.
+        if let Some(ref triple) = self.config.target_triple {
+            cmd.arg(format!("--target={}", triple.as_str()));
+        }
+
+        // `entry_point` overrides the default `main` symbol.  Only
+        // honoured when `no_libc_config` is None, because no-libc
+        // mode owns its own entry-point handling above (see line
+        // ~1404).
+        if self.config.no_libc_config.is_none() {
+            if let Some(ref entry) = self.config.entry_point {
+                if entry.as_str() != "main" && !entry.is_empty() {
+                    cmd.arg("-e").arg(entry.as_str());
+                }
+            }
         }
 
         // Additional user flags
