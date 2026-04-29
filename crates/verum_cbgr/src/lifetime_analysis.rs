@@ -434,6 +434,13 @@ pub struct LifetimeAnalysisResult {
     pub regions: Map<RegionId, Region>,
     /// Analysis statistics.
     pub stats: LifetimeStats,
+    /// Mirror of `LifetimeAnalysisConfig.detailed_diagnostics`.
+    /// Diagnostic builders consult this to decide whether to
+    /// attach span / region detail to the rendered violation
+    /// (verbose mode) or just emit a one-line summary (compact
+    /// mode). Surfaced on the result rather than threading the
+    /// config through every diagnostic helper.
+    pub detailed_diagnostics: bool,
 }
 
 impl LifetimeAnalysisResult {
@@ -447,6 +454,7 @@ impl LifetimeAnalysisResult {
             violations: List::new(),
             regions: Map::new(),
             stats: LifetimeStats::default(),
+            detailed_diagnostics: true,
         }
     }
 
@@ -461,6 +469,14 @@ impl LifetimeAnalysisResult {
     pub fn get_lifetime(&self, ref_id: RefId) -> Option<&Lifetime> {
         self.ref_lifetimes.get(&ref_id)
             .and_then(|lid| self.lifetimes.get(lid))
+    }
+
+    /// Whether diagnostics rendered from this result should
+    /// include the verbose span / region detail. Mirrors the
+    /// configured `LifetimeAnalysisConfig.detailed_diagnostics`.
+    #[must_use]
+    pub fn detailed_diagnostics(&self) -> bool {
+        self.detailed_diagnostics
     }
 }
 
@@ -564,12 +580,40 @@ impl LifetimeAnalyzer {
     }
 
     /// Perform lifetime analysis.
+    ///
+    /// Honours every config gate:
+    ///
+    /// * `infer_lifetimes` (default `true`) — gates Phase 1
+    ///   (create lifetimes for every reference). Disabling it
+    ///   skips Phase 1 entirely; downstream phases see an empty
+    ///   ref-lifetime map and degenerate to no-ops. Used by
+    ///   embedders that want to drive lifetime IDs themselves
+    ///   (e.g. import them from an upstream IR).
+    /// * `check_outlives` (default `true`) — gates Phase 4
+    ///   (constraint solving). Disabling it returns the empty
+    ///   violation list; the constraint vector is still surfaced
+    ///   in the result so callers can run their own analysis.
+    /// * `max_iterations` — already honoured by `compute_liveness`
+    ///   (line 635). Documented here for completeness.
+    /// * `detailed_diagnostics` — flows into the
+    ///   `LifetimeAnalysisResult` so the diagnostics builder can
+    ///   decide whether to attach span/region detail or just emit
+    ///   a one-line summary; consumers query the field via the
+    ///   public `detailed_diagnostics()` accessor.
+    ///
+    /// Before this wire-up three of the four gates were inert —
+    /// the fields existed and were configurable on `with_config`
+    /// but `analyze` ignored them.
     #[must_use]
     pub fn analyze(mut self) -> LifetimeAnalysisResult {
         let start = std::time::Instant::now();
+        let infer = self.config.infer_lifetimes;
+        let outlives = self.config.check_outlives;
 
         // Phase 1: Create lifetimes for all references
-        self.create_lifetimes();
+        if infer {
+            self.create_lifetimes();
+        }
 
         // Phase 2: Compute liveness for each lifetime
         self.compute_liveness();
@@ -578,14 +622,18 @@ impl LifetimeAnalyzer {
         self.generate_constraints();
 
         // Phase 4: Solve constraints
-        let violations = self.solve_constraints();
+        let violations = if outlives {
+            self.solve_constraints()
+        } else {
+            List::new()
+        };
 
         // Build statistics
         let stats = LifetimeStats {
             total_refs: self.ref_lifetimes.len(),
             lifetimes_created: self.lifetimes.len(),
             constraints_generated: self.constraints.len(),
-            constraints_solved: self.constraints.len(),
+            constraints_solved: if outlives { self.constraints.len() } else { 0 },
             violations_found: violations.len(),
             analysis_time_us: start.elapsed().as_micros() as u64,
         };
@@ -597,6 +645,7 @@ impl LifetimeAnalyzer {
             violations,
             regions: self.regions,
             stats,
+            detailed_diagnostics: self.config.detailed_diagnostics,
         }
     }
 
@@ -1078,6 +1127,63 @@ mod tests {
         let result = analyzer.analyze();
 
         assert!(!result.has_violations());
+    }
+
+    #[test]
+    fn infer_lifetimes_false_skips_phase_1() {
+        // Pin: `infer_lifetimes = false` skips Phase 1 (lifetime
+        // creation per ref). Without the gate the analyzer would
+        // populate `ref_lifetimes` regardless. With the gate the
+        // map stays empty.
+        let cfg = create_test_cfg();
+        let analyzer = LifetimeAnalyzer::new(cfg).with_config(LifetimeAnalysisConfig {
+            infer_lifetimes: false,
+            ..Default::default()
+        });
+        let result = analyzer.analyze();
+        assert_eq!(
+            result.stats.total_refs, 0,
+            "infer_lifetimes=false must produce zero ref-lifetime entries"
+        );
+    }
+
+    #[test]
+    fn check_outlives_false_returns_empty_violation_list() {
+        // Pin: `check_outlives = false` skips Phase 4 (constraint
+        // solving). The constraint vector is still built (callers
+        // that want to drive their own solver consume it), but
+        // `violations` stays empty regardless of what the
+        // constraints would have shown.
+        let cfg = create_test_cfg();
+        let analyzer = LifetimeAnalyzer::new(cfg).with_config(LifetimeAnalysisConfig {
+            check_outlives: false,
+            ..Default::default()
+        });
+        let result = analyzer.analyze();
+        assert!(
+            result.violations.is_empty(),
+            "check_outlives=false must produce zero violations"
+        );
+        assert_eq!(
+            result.stats.constraints_solved, 0,
+            "check_outlives=false must report zero constraints_solved"
+        );
+    }
+
+    #[test]
+    fn detailed_diagnostics_flows_to_result() {
+        // Pin: `detailed_diagnostics` reaches the result via the
+        // public accessor so diagnostic builders can consult it
+        // without re-reading the analyzer's config.
+        for verbose in [true, false] {
+            let cfg = create_test_cfg();
+            let analyzer = LifetimeAnalyzer::new(cfg).with_config(LifetimeAnalysisConfig {
+                detailed_diagnostics: verbose,
+                ..Default::default()
+            });
+            let result = analyzer.analyze();
+            assert_eq!(result.detailed_diagnostics(), verbose);
+        }
     }
 
     #[test]
