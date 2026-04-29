@@ -1302,25 +1302,76 @@ impl RefinementValidator {
         result: ValidationResult,
         elapsed: Duration,
     ) -> ValidateRefinementResult {
-        match result {
-            ValidationResult::Valid => ValidateRefinementResult {
-                valid: true,
-                diagnostics: List::new(),
-                performance_ms: elapsed.as_millis() as u64,
-            },
+        // Surface a cost-warning diagnostic when the elapsed
+        // wall-clock crosses the configured slow threshold AND
+        // `verification_show_cost_warnings` is on. Closes the
+        // inert-defense pattern around the cost-warning gate:
+        // the validator owned `should_emit_cost_warning` but no
+        // path consumed it, so the documented LSP knob had no
+        // effect on response shape.
+        let cost_warning: Option<RefinementDiagnostic> =
+            if self.should_emit_cost_warning(elapsed) {
+                Some(self.build_cost_warning_diagnostic(elapsed))
+            } else {
+                None
+            };
+
+        let mut diagnostics = match &result {
+            ValidationResult::Valid => List::new(),
             ValidationResult::Invalid { counterexample } => {
-                let diagnostic = self.build_diagnostic(counterexample, elapsed);
-                ValidateRefinementResult {
-                    valid: false,
-                    diagnostics: List::from(vec![diagnostic]),
-                    performance_ms: elapsed.as_millis() as u64,
-                }
+                List::from(vec![
+                    self.build_diagnostic(counterexample.clone(), elapsed)
+                ])
             }
-            ValidationResult::Unknown => ValidateRefinementResult {
-                valid: true,
-                diagnostics: List::new(),
-                performance_ms: elapsed.as_millis() as u64,
+            ValidationResult::Unknown => List::new(),
+        };
+
+        if let Some(warn) = cost_warning {
+            // Prepend so the cost warning is visible above the
+            // primary diagnostic in clients that display the
+            // first item prominently.
+            let mut with_warn = List::from(vec![warn]);
+            with_warn.extend(diagnostics);
+            diagnostics = with_warn;
+        }
+
+        let valid = !matches!(&result, ValidationResult::Invalid { .. });
+        ValidateRefinementResult {
+            valid,
+            diagnostics,
+            performance_ms: elapsed.as_millis() as u64,
+        }
+    }
+
+    /// Construct a synthetic warning-severity diagnostic that
+    /// surfaces a slow-verification event to the LSP client.
+    /// The message names the configured threshold so users can
+    /// identify which knob to tune.
+    fn build_cost_warning_diagnostic(
+        &self,
+        elapsed: Duration,
+    ) -> RefinementDiagnostic {
+        let threshold = self.slow_threshold();
+        RefinementDiagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 0 },
             },
+            severity: DiagnosticSeverity::WARNING,
+            code: Some("W0701".to_string()),
+            source: "verum".to_string(),
+            message: format!(
+                "Refinement validation took {} ms (slower than \
+                 the configured `verum.lsp.verificationSlowThreshold` of {} ms). \
+                 Consider widening the threshold or simplifying the predicate.",
+                elapsed.as_millis(),
+                threshold.as_millis()
+            ),
+            counterexample: Maybe::None,
+            quick_fixes: List::new(),
+            related_information: List::new(),
+            validation_time_ms: elapsed.as_millis() as u64,
+            smt_solver: SmtSolver::Z3,
         }
     }
 
