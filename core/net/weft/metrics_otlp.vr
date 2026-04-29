@@ -71,7 +71,7 @@ mount core.async.task;
 mount core.async.timer;
 mount core.async.cancellation.{CancellationToken};
 mount core.sync.atomic.{AtomicBool, MemoryOrdering};
-mount core.net.weft.metrics.{Registry, WeftCounter, WeftHistogram};
+mount core.net.weft.metrics.{WeftMetricsRegistry, WeftCounter, WeftHistogram};
 
 // =============================================================================
 // OtlpExporterConfig
@@ -149,7 +149,7 @@ implement OtlpExporterConfig {
 
 public type OtlpExporter is {
     cfg:        OtlpExporterConfig,
-    registry:   Shared<Registry>,
+    registry:   Shared<WeftMetricsRegistry>,
     cancel:     Shared<AtomicBool>,
     /// Strict-monotonic counter of attempted pushes — observability
     /// of the exporter itself.
@@ -161,7 +161,7 @@ public type OtlpExporter is {
 };
 
 implement OtlpExporter {
-    public fn new(cfg: OtlpExporterConfig, registry: Shared<Registry>) -> OtlpExporter {
+    public fn new(cfg: OtlpExporterConfig, registry: Shared<WeftMetricsRegistry>) -> OtlpExporter {
         OtlpExporter {
             cfg:        cfg,
             registry:   registry,
