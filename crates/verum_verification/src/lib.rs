@@ -116,6 +116,11 @@ pub mod foreign_import;
 /// The LLM may propose tactic sequences but the kernel re-checks
 /// every step; any rejection discards the proposal.
 pub mod llm_tactic;
+/// Live proof REPL (#75) — stepwise tactic feedback + proof-tree
+/// visualisation.  Single trait boundary
+/// [`proof_repl::ReplSession`] + reference V0 impl.  Consumed by
+/// CLI batch mode + IDE / TUI integrations.
+pub mod proof_repl;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
