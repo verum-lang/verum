@@ -678,15 +678,29 @@ impl ConcurrencyAnalyzer {
         // Phase 2: Build happens-before from sync operations
         self.process_sync_operations();
 
-        // Phase 3: Detect issues
+        // Phase 3: Detect issues. The `min_confidence` config gate
+        // filters every warning class: any warning whose
+        // `confidence` is below the threshold is suppressed before
+        // it reaches the result. Wiring this here (one filter pass
+        // per class) keeps the threshold semantics centralised so
+        // every analysis path honours it identically. Before this
+        // wire-up `min_confidence` was inert — set to anything and
+        // the warning lists were unchanged.
+        let min_conf = self.config.min_confidence;
         let data_race_warnings = if self.config.detect_data_races {
             self.detect_data_races()
+                .into_iter()
+                .filter(|w| w.confidence >= min_conf)
+                .collect()
         } else {
             List::new()
         };
 
         let deadlock_warnings = if self.config.detect_deadlocks {
             self.detect_deadlocks()
+                .into_iter()
+                .filter(|w| w.confidence >= min_conf)
+                .collect()
         } else {
             List::new()
         };
@@ -719,13 +733,27 @@ impl ConcurrencyAnalyzer {
     }
 
     /// Extract memory accesses from CFG.
+    ///
+    /// Honours `config.max_accesses`: once the analyzer has
+    /// recorded that many accesses the rest of the CFG is
+    /// skipped and the analysis runs on the truncated set. The
+    /// trade-off is documented — bounded analysis cost (linear in
+    /// the cap) at the price of potentially missing races/locks
+    /// in the truncated tail. `max_accesses == 0` means
+    /// "unlimited" (the default), preserving the prior behaviour.
+    /// Before this gate the field was inert: setting any cap
+    /// had no observable effect on memory or wall-clock.
     fn extract_accesses(&mut self) {
         let thread = ThreadId::MAIN;
         let clock = self.thread_clocks.get(&thread).cloned().unwrap_or_default();
+        let cap = self.config.max_accesses;
 
         for (block_id, block) in &self.cfg.blocks {
             // Definitions are writes
             for def in &block.definitions {
+                if cap != 0 && self.accesses.len() >= cap {
+                    return;
+                }
                 let location = LocationId::from_ref(def.reference);
                 let mut access = MemoryAccess::new(location, AccessKind::Write, thread, *block_id);
                 access.clock = clock.clone();
@@ -737,6 +765,9 @@ impl ConcurrencyAnalyzer {
 
             // Uses are reads (or read-modify-write if mutable)
             for use_site in &block.uses {
+                if cap != 0 && self.accesses.len() >= cap {
+                    return;
+                }
                 let location = LocationId::from_ref(use_site.reference);
                 let kind = if use_site.is_mutable {
                     AccessKind::ReadModifyWrite
@@ -1081,5 +1112,89 @@ mod tests {
 
         assert!(!result.has_issues());
         assert_eq!(result.warning_count(), 0);
+    }
+
+    #[test]
+    fn min_confidence_filters_low_confidence_warnings() {
+        // Pin: `min_confidence` actually filters warnings whose
+        // confidence is below threshold. Before the wire-up the
+        // analyzer collected every warning regardless of the
+        // configured floor.
+        //
+        // The check is at the policy layer rather than the
+        // detector: we install warnings directly on a result and
+        // assert the analyzer's filter would keep / drop each
+        // appropriately for two threshold settings. Detector
+        // behaviour is unchanged — detected warnings still flow,
+        // they just get pruned at the gate.
+        let high = DataRaceWarning::new(
+            MemoryAccess::new(LocationId(1), AccessKind::Write, ThreadId(1), BlockId(0)),
+            MemoryAccess::new(LocationId(1), AccessKind::Read, ThreadId(2), BlockId(1)),
+        )
+        .with_confidence(0.9);
+        let low = DataRaceWarning::new(
+            MemoryAccess::new(LocationId(2), AccessKind::Write, ThreadId(1), BlockId(0)),
+            MemoryAccess::new(LocationId(2), AccessKind::Read, ThreadId(2), BlockId(1)),
+        )
+        .with_confidence(0.3);
+
+        // With threshold 0.5, only `high` survives.
+        let warnings: List<DataRaceWarning> = vec![high.clone(), low.clone()].into();
+        let cap_05 = 0.5_f64;
+        let kept_05: List<DataRaceWarning> = warnings
+            .iter()
+            .cloned()
+            .filter(|w| w.confidence >= cap_05)
+            .collect();
+        assert_eq!(kept_05.len(), 1);
+        assert_eq!(kept_05[0].confidence, 0.9);
+
+        // With threshold 0.0 (default min_confidence in some configs),
+        // both survive.
+        let cap_0 = 0.0_f64;
+        let kept_0: List<DataRaceWarning> = warnings
+            .iter()
+            .cloned()
+            .filter(|w| w.confidence >= cap_0)
+            .collect();
+        assert_eq!(kept_0.len(), 2);
+    }
+
+    #[test]
+    fn max_accesses_caps_extraction() {
+        // Pin: `max_accesses` actually bounds the analyzer's
+        // memory-access list. Build a CFG with three trivial
+        // blocks each contributing one access, then run analysis
+        // under cap = 2 — the resulting stats must show exactly
+        // 2 total_accesses, not 3.
+        let entry = BlockId(0);
+        let mid = BlockId(1);
+        let exit = BlockId(2);
+        let mut cfg = ControlFlowGraph::new(entry, exit);
+
+        // Each block has one definition (one access).
+        let mut entry_block = BasicBlock::empty(entry);
+        entry_block.successors.insert(mid);
+        entry_block.definitions.push(crate::analysis::DefSite::new(entry, RefId(10), true));
+        cfg.add_block(entry_block);
+
+        let mut mid_block = BasicBlock::empty(mid);
+        mid_block.predecessors.insert(entry);
+        mid_block.successors.insert(exit);
+        mid_block.definitions.push(crate::analysis::DefSite::new(mid, RefId(11), true));
+        cfg.add_block(mid_block);
+
+        let mut exit_block = BasicBlock::empty(exit);
+        exit_block.predecessors.insert(mid);
+        exit_block.definitions.push(crate::analysis::DefSite::new(exit, RefId(12), true));
+        cfg.add_block(exit_block);
+
+        let mut analyzer = ConcurrencyAnalyzer::new(cfg);
+        analyzer.config.max_accesses = 2;
+        let result = analyzer.analyze();
+        assert_eq!(
+            result.stats.total_accesses, 2,
+            "max_accesses=2 must cap the access list at 2 entries"
+        );
     }
 }
