@@ -3,7 +3,6 @@
 
 use crate::error::{CliError, Result};
 use std::path::PathBuf;
-use verum_common::Text;
 use verum_verification::cert_replay::{
     cross_check, engine_for, CertFormat, CertReplayEngine, KernelOnlyReplayEngine,
     MockReplayEngine, ReplayBackend, ReplayVerdict, SmtCertificate,
@@ -486,6 +485,7 @@ pub fn run_backends(output: &str) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Write;
+    use verum_common::Text;
 
     fn write_temp_cert(c: &SmtCertificate) -> tempfile::NamedTempFile {
         let mut f = tempfile::NamedTempFile::new().unwrap();
