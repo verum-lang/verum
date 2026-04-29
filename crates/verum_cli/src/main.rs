@@ -835,6 +835,20 @@ enum Commands {
         diff: Option<Text>,
         #[clap(long)]
         function: Option<Text>,
+        /// Route every `@verify(strategy)` obligation through the
+        /// typed 13-strategy ladder dispatcher
+        /// (`verum_verification::ladder_dispatch::DefaultLadderDispatcher`)
+        /// and emit the per-theorem verdict (Closed / Open /
+        /// DispatchPending / Timeout) plus a totals summary. Exits
+        /// non-zero on any Open / Timeout verdict (real verification
+        /// failure); DispatchPending is advisory because the V0 ladder
+        /// only implements the 2 coarsest strategies. Use
+        /// `--ladder-format=json` for CI / IDE consumption.
+        #[clap(long)]
+        ladder: bool,
+        /// Output format for `--ladder`: `plain` (default) or `json`.
+        #[clap(long, value_name = "FORMAT", default_value = "plain")]
+        ladder_format: Text,
     },
 
     /// Static analysis
@@ -2305,7 +2319,18 @@ fn run_command(cli: Cli) -> Result<()> {
             dump_smt,
             check_smt_formula,
             solver_protocol,
+            ladder,
+            ladder_format,
         } => {
+            // --ladder short-circuits the standard verify pipeline:
+            // route every @verify(strategy) annotation through the
+            // typed dispatcher and emit per-theorem verdicts. Honest
+            // integration of #71's LadderDispatcher trait surface.
+            if ladder {
+                return commands::verify_ladder::run_verify_ladder(
+                    ladder_format.as_str(),
+                );
+            }
             // --lsp-mode implies no human output; set an env var
             // the downstream report-renderer reads to switch from
             // human-readable prose to LSP-JSON. Environment is the
