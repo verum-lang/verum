@@ -1058,6 +1058,74 @@ mod tests {
         );
     }
 
+    /// Archive index entry claims `data_size = u64::MAX`.  Per-fix
+    /// the deserializer would `vec![0u8; u64::MAX as usize]` —
+    /// either OOM or abort.  Post-fix the size is rejected before
+    /// the allocation.
+    #[test]
+    fn test_read_archive_rejects_huge_data_size() {
+        let mut payload = Vec::new();
+        // Header — module_count = 1
+        payload.extend_from_slice(&ARCHIVE_MAGIC);
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        let header_end = (4 + 2 + 2 + 4 + 4 + 8 + 8) as u64;
+        payload.extend_from_slice(&header_end.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        // Index entry: name_len, data_offset, data_size,
+        // content_hash — the data_size check fires AFTER
+        // content_hash is read, so the payload must include all
+        // three to reach the size gate.
+        payload.extend_from_slice(&0u32.to_le_bytes()); // name_len = 0
+        payload.extend_from_slice(&0u64.to_le_bytes()); // data_offset
+        payload.extend_from_slice(&u64::MAX.to_le_bytes()); // data_size — adversarial
+        payload.extend_from_slice(&0u64.to_le_bytes()); // content_hash
+
+        let cursor = io::Cursor::new(payload);
+        let result = read_archive(cursor);
+        assert!(result.is_err(), "u64::MAX data_size must be rejected");
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("data_size"),
+            "error must identify data_size, got: {}",
+            msg,
+        );
+    }
+
+    /// Archive index entry claims `dep_count = u32::MAX`.  Same
+    /// memory-amp class — would `Vec::with_capacity(u32::MAX)` for
+    /// the dependencies vector before reading any dep entries.
+    #[test]
+    fn test_read_archive_rejects_huge_dep_count() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&ARCHIVE_MAGIC);
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        let header_end = (4 + 2 + 2 + 4 + 4 + 8 + 8) as u64;
+        payload.extend_from_slice(&header_end.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        // Index entry
+        payload.extend_from_slice(&0u32.to_le_bytes()); // name_len = 0
+        payload.extend_from_slice(&0u64.to_le_bytes()); // data_offset
+        payload.extend_from_slice(&0u64.to_le_bytes()); // data_size — small
+        payload.extend_from_slice(&0u64.to_le_bytes()); // content_hash
+        payload.extend_from_slice(&u32::MAX.to_le_bytes()); // dep_count — adversarial
+
+        let cursor = io::Cursor::new(payload);
+        let result = read_archive(cursor);
+        assert!(result.is_err(), "u32::MAX dep_count must be rejected");
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("dep_count"),
+            "error must identify dep_count, got: {}",
+            msg,
+        );
+    }
+
     #[test]
     fn test_archive_builder_stdlib() {
         let builder = ArchiveBuilder::stdlib();
