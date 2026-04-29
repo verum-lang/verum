@@ -106,6 +106,20 @@ implement Display for RuntimeInitError {
     }
 }
 
+implement Eq for RuntimeInitError {
+    fn eq(&self, other: &RuntimeInitError) -> Bool {
+        match (self, other) {
+            (TlsInitFailed,         TlsInitFailed)         => true,
+            (AllocatorInitFailed(a),AllocatorInitFailed(b))=> a == b,
+            (IoDriverInitFailed(a), IoDriverInitFailed(b)) => a == b,
+            (ExecutorInitFailed(a), ExecutorInitFailed(b)) => a == b,
+            (PlatformNotSupported,  PlatformNotSupported)  => true,
+            (AlreadyInitialized,    AlreadyInitialized)    => true,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // RuntimeConfig Protocol
 // =============================================================================
