@@ -2163,6 +2163,43 @@ impl InterpreterState {
         let mut modules = HashMap::new();
         modules.insert(module.name.clone(), Arc::clone(&module));
 
+        // Surface inert runtime config fields. The five fields
+        // listed below land on InterpreterConfig from the
+        // [runtime] section of `verum.toml` and feed a future
+        // async-runtime / heap-policy / trace plumbing layer that
+        // doesn't exist yet — the single-threaded VBC interpreter
+        // currently dispatches everything via the same TaskQueue
+        // regardless of `async_scheduler`, ignores
+        // `async_worker_threads` (no multi-worker scheduler),
+        // `task_stack_size` (no per-task OS-stack allocation),
+        // `heap_policy` (Heap::with_threshold takes a single
+        // capacity), and `trace_enabled` (no instrumentation
+        // hook). Closes the inert-defense pattern by routing the
+        // requested values through tracing so embedders see the
+        // discrepancy in logs rather than silently believing
+        // their `[runtime] async_scheduler = "multi_threaded"`
+        // setting was honoured.
+        if config.async_scheduler != "work_stealing"
+            || config.async_worker_threads != 0
+            || config.task_stack_size != 0
+            || config.heap_policy != "adaptive"
+            || config.trace_enabled
+        {
+            tracing::debug!(
+                "InterpreterConfig runtime surface: async_scheduler={:?}, \
+                 async_worker_threads={}, task_stack_size={}, heap_policy={:?}, \
+                 trace_enabled={} (these fields land on the config but the \
+                 current single-threaded VBC interpreter does not yet \
+                 differentiate behaviour based on them — they're forward-\
+                 looking infra hooks)",
+                config.async_scheduler,
+                config.async_worker_threads,
+                config.task_stack_size,
+                config.heap_policy,
+                config.trace_enabled,
+            );
+        }
+
         Self {
             module,
             modules,
