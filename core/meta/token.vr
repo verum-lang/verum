@@ -792,3 +792,15 @@ implement Display for LexError {
         f.write_str(f"{self.message} at {self.span:?}")
     }
 }
+
+implement Debug for LexError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"LexError {{ message: {self.message}, span: {self.span:?} }}".as_str())
+    }
+}
+
+implement Eq for LexError {
+    fn eq(&self, other: &LexError) -> Bool {
+        self.message == other.message
+    }
+}
