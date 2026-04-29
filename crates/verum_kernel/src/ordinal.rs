@@ -108,13 +108,16 @@ impl Ordinal {
             Ordinal::OmegaSquaredPlus(inner) => {
                 Ordinal::OmegaSquaredPlus(Box::new(inner.succ()))
             }
-            Ordinal::OmegaPow(e) => {
+            Ordinal::OmegaPow(_e) => {
                 // ω^e has successor ω^e + 1 — represented as Sup with
-                // the +1 step.
+                // the +1 step. Underscore-prefixed because the
+                // exponent isn't read directly — `self.clone()`
+                // already captures the full ω^e shape.
                 Ordinal::Sup(vec![self.clone(), Ordinal::Finite(1)])
             }
-            Ordinal::Kappa(n) => {
+            Ordinal::Kappa(_n) => {
                 // κ_n + 1 is still beyond Cantor-normal-form; encode as Sup.
+                // Underscore-prefixed for the same reason as OmegaPow above.
                 Ordinal::Sup(vec![self.clone(), Ordinal::Finite(1)])
             }
             Ordinal::Sup(parts) => {
@@ -167,7 +170,7 @@ impl Ordinal {
             (Omega, OmegaPow(_)) => true,
             (Omega, Kappa(_)) => true,
 
-            (OmegaPlus(a), Omega) => false,
+            (OmegaPlus(_a), Omega) => false,
             (OmegaPlus(a), OmegaPlus(b)) => a < b,
             (OmegaPlus(_), OmegaTimes(k)) => *k >= 2,
             (OmegaPlus(_), OmegaTimesPlus { k, n: _ }) => *k >= 2,
@@ -176,7 +179,7 @@ impl Ordinal {
             (OmegaPlus(_), OmegaPow(_)) => true,
             (OmegaPlus(_), Kappa(_)) => true,
 
-            (OmegaTimes(a), Omega) => false,
+            (OmegaTimes(_a), Omega) => false,
             (OmegaTimes(a), OmegaPlus(_)) => *a < 2,
             (OmegaTimes(a), OmegaTimes(b)) => a < b,
             (OmegaTimes(a), OmegaTimesPlus { k, n: _ }) => a <= k,
@@ -202,7 +205,7 @@ impl Ordinal {
             (OmegaSquared, Kappa(_)) => true,
             (OmegaSquared, _) => false,
 
-            (OmegaSquaredPlus(a), OmegaSquared) => false,
+            (OmegaSquaredPlus(_a), OmegaSquared) => false,
             (OmegaSquaredPlus(a), OmegaSquaredPlus(b)) => a.lt(b),
             (OmegaSquaredPlus(_), OmegaPow(e)) => *e >= 3,
             (OmegaSquaredPlus(_), Kappa(_)) => true,

@@ -57,7 +57,7 @@ use serde::{Deserialize, Serialize};
 use verum_common::Text;
 
 use crate::grothendieck::{
-    GrothendieckConstruction, SIndexedDiagram, build_grothendieck, preserves_accessibility,
+    GrothendieckConstruction, SIndexedDiagram, build_grothendieck,
 };
 use crate::infinity_category::InfinityCategory;
 use crate::ordinal::Ordinal;
@@ -210,6 +210,7 @@ pub fn fibration_is_unstraightened(p: &CartesianFibration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::grothendieck::preserves_accessibility;
 
     fn sample_base() -> InfinityCategory {
         InfinityCategory::at_canonical_universe("C", Ordinal::Finite(1))
