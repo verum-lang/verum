@@ -6,7 +6,7 @@
 // @expect: pass
 
 mount core.net.quic.address_token.{
-    AddressTokenKey, TokenKind, TokenPlaintext, TokenError,
+    AddressTokenKey, QuicTokenKind, TokenPlaintext, TokenError,
     QuicTokenVerifyOptions,
     issue, verify, ip_bytes_from,
 };
@@ -24,7 +24,7 @@ fn exercise_retry_token() -> Result<(), TokenError> {
     while i < 8 { dcid_vec.push(orig_dcid[i]); i = i + 1; }
 
     let plain = TokenPlaintext {
-        kind:         TokenKind.Retry,
+        kind:         QuicTokenKind.Retry,
         issued_unix:  1_700_000_000_u64,
         client_ip:    client_ip_bytes.clone(),
         orig_dcid:    dcid_vec,
@@ -35,7 +35,7 @@ fn exercise_retry_token() -> Result<(), TokenError> {
     let opts = QuicTokenVerifyOptions {
         max_age_sec:        30_u64,          // Retry tokens are short-lived
         expected_client_ip: Some(client_ip_bytes),
-        required_kind:      Some(TokenKind.Retry),
+        required_kind:      Some(QuicTokenKind.Retry),
     };
     let _decoded = verify(&key, wire.as_slice(), 1_700_000_010_u64, &opts)?;
     Ok(())
@@ -46,7 +46,7 @@ fn exercise_new_token() -> Result<(), TokenError> {
     let client_ip = ip_bytes_from(&IpAddr.V4(Ipv4Addr.new(10_u8, 0_u8, 0_u8, 1_u8)));
 
     let plain = TokenPlaintext {
-        kind:         TokenKind.NewToken,
+        kind:         QuicTokenKind.NewToken,
         issued_unix:  1_700_000_000_u64,
         client_ip:    client_ip.clone(),
         orig_dcid:    [],

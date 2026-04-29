@@ -25,7 +25,7 @@ fn check_phase_transitions() -> Result<(), core.net.quic.error.QuicError> {
     let scid = ConnectionId.empty();
     let params = TransportParams.defaults();
 
-    let conn_initial = QuicConnection.client_new(
+    let conn_initial = QuicConnectionSm.client_new(
         dcid, scid, params,
         make_initial_keys(),
         make_initial_keys(),

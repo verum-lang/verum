@@ -8,7 +8,7 @@
 // HTTP/1.1 wire-parser shape + API surface.
 
 mount core.net.http_parser.{
-    HttpParser, HeaderView, ParseProgress, ParseError,
+    HttpParser, HeaderView, ParseProgress, HttpParseError,
     ChunkedDecoder, ChunkProgress,
 };
 mount core.net.http.{Method, StatusCode, Version};
@@ -75,23 +75,23 @@ fn typecheck_streaming_shape(parser: &mut HttpParser, chunks: &List<List<Byte>>)
     false
 }
 
-// ParseError variants — spot check the public API surface.
-fn typecheck_parse_error_variants() -> List<ParseError> {
-    let mut errs: List<ParseError> = List.new();
-    errs.push(ParseError.InvalidMethod("FOO".into()));
-    errs.push(ParseError.InvalidVersion("HTTP/9".into()));
-    errs.push(ParseError.InvalidStatusCode(0));
-    errs.push(ParseError.InvalidHeaderName("bad".into()));
-    errs.push(ParseError.InvalidHeaderValue("bad".into()));
-    errs.push(ParseError.HeaderTooLong { limit: 16384 });
-    errs.push(ParseError.TooManyHeaders { limit: 128 });
-    errs.push(ParseError.RequestLineTooLong { limit: 8192 });
-    errs.push(ParseError.BadRequestLine("bad".into()));
-    errs.push(ParseError.InvalidChunkSize("xx".into()));
-    errs.push(ParseError.InvalidTrailer("t".into()));
-    errs.push(ParseError.InvalidContentLength("-1".into()));
-    errs.push(ParseError.ConflictingContentLength);
-    errs.push(ParseError.IncompleteFrame);
+// HttpParseError variants — spot check the public API surface.
+fn typecheck_parse_error_variants() -> List<HttpParseError> {
+    let mut errs: List<HttpParseError> = List.new();
+    errs.push(HttpParseError.InvalidMethod("FOO".into()));
+    errs.push(HttpParseError.InvalidVersion("HTTP/9".into()));
+    errs.push(HttpParseError.InvalidStatusCode(0));
+    errs.push(HttpParseError.InvalidHeaderName("bad".into()));
+    errs.push(HttpParseError.InvalidHeaderValue("bad".into()));
+    errs.push(HttpParseError.HeaderTooLong { limit: 16384 });
+    errs.push(HttpParseError.TooManyHeaders { limit: 128 });
+    errs.push(HttpParseError.RequestLineTooLong { limit: 8192 });
+    errs.push(HttpParseError.BadRequestLine("bad".into()));
+    errs.push(HttpParseError.InvalidChunkSize("xx".into()));
+    errs.push(HttpParseError.InvalidTrailer("t".into()));
+    errs.push(HttpParseError.InvalidContentLength("-1".into()));
+    errs.push(HttpParseError.ConflictingContentLength);
+    errs.push(HttpParseError.IncompleteFrame);
     errs
 }
 

@@ -12,7 +12,7 @@ mount core.net.quic.connection_sm.handshake_driver.{
 mount core.net.quic.connection_sm.dispatch.{CryptoChunk};
 mount core.net.quic.recovery.{PnSpaceKind};
 
-mount core.net.tls13.handshake.client_sm.{ClientSm, ClientConfig};
+mount core.net.tls13.handshake.client_sm.{ClientSm, Tls13ClientConfig};
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.named_group.{NamedGroup};
 mount core.net.tls13.sig_scheme.{SignatureScheme};
@@ -28,7 +28,7 @@ fn check_crypto_stream_reassembly() {
 }
 
 fn check_driver_construction() {
-    let config = ClientConfig {
+    let config = Tls13ClientConfig {
         server_name: "example.com",
         alpn:        [],
         trust:       TrustStore.empty(),
