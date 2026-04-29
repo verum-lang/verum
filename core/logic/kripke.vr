@@ -421,3 +421,175 @@ fn has_edge(f: KripkeFrame, a: World, b: World) -> Bool {
 public fn is_s5(f: KripkeFrame) -> Bool {
     is_reflexive(f.clone()) && is_transitive(f.clone()) && is_symmetric(f)
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for World / ModalForm
+// =============================================================================
+
+implement Eq for World {
+    fn eq(&self, other: &World) -> Bool {
+        self.id == other.id
+    }
+}
+
+implement Hash for World {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.id.hash(hasher);
+    }
+}
+
+implement Clone for World {
+    fn clone(&self) -> World {
+        World { id: self.id.clone() }
+    }
+}
+
+implement Display for World {
+    /// Renders as the bare id — worlds in Kripke-frame diagnostics
+    /// flow through prose as their identifiers.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.id.as_str())
+    }
+}
+
+implement Debug for World {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"World({self.id})".as_str())
+    }
+}
+
+implement Eq for ModalForm {
+    /// Structural (syntactic) equality on modal formulas.  `□¬¬p`
+    /// and `□p` compare unequal even though they are
+    /// classically-equivalent under double-negation elimination —
+    /// callers needing semantic equality should normalise first.
+    fn eq(&self, other: &ModalForm) -> Bool {
+        match (self, other) {
+            (ModalForm.True,  ModalForm.True)  => true,
+            (ModalForm.False, ModalForm.False) => true,
+            (ModalForm.Atom { name: a },
+             ModalForm.Atom { name: b }) => a == b,
+            (ModalForm.Not { inner: ia },
+             ModalForm.Not { inner: ib }) =>
+                **ia == **ib,
+            (ModalForm.And { left: la, right: ra },
+             ModalForm.And { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (ModalForm.Or { left: la, right: ra },
+             ModalForm.Or { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (ModalForm.Implies { left: la, right: ra },
+             ModalForm.Implies { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (ModalForm.Box { inner: ia },
+             ModalForm.Box { inner: ib }) =>
+                **ia == **ib,
+            (ModalForm.Diamond { inner: ia },
+             ModalForm.Diamond { inner: ib }) =>
+                **ia == **ib,
+            _ => false,
+        }
+    }
+}
+
+implement Display for ModalForm {
+    /// Renders a modal formula in standard logic notation:
+    ///   `True`        → `⊤`
+    ///   `False`       → `⊥`
+    ///   `Atom { p }`  → `p`
+    ///   `Not { φ }`   → `¬φ`
+    ///   `And { φ, ψ }`     → `(φ ∧ ψ)`
+    ///   `Or { φ, ψ }`      → `(φ ∨ ψ)`
+    ///   `Implies { φ, ψ }` → `(φ → ψ)`
+    ///   `Box { φ }`        → `□φ`
+    ///   `Diamond { φ }`    → `◇φ`
+    /// Parens around binary connectives preserve precedence
+    /// across nested rendering.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ModalForm.True       => f.write_str("⊤"),
+            ModalForm.False      => f.write_str("⊥"),
+            ModalForm.Atom { name } => f.write_str(name.as_str()),
+            ModalForm.Not { inner } => {
+                f.write_str("¬")?;
+                (**inner).fmt(f)
+            },
+            ModalForm.And { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" ∧ ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Or { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" ∨ ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Implies { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" → ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Box { inner } => {
+                f.write_str("□")?;
+                (**inner).fmt(f)
+            },
+            ModalForm.Diamond { inner } => {
+                f.write_str("◇")?;
+                (**inner).fmt(f)
+            },
+        }
+    }
+}
+
+implement Debug for ModalForm {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ModalForm.True  => f.write_str("True"),
+            ModalForm.False => f.write_str("False"),
+            ModalForm.Atom { name } =>
+                f.write_str(f"Atom({name})".as_str()),
+            ModalForm.Not { inner } => {
+                f.write_str("Not(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            ModalForm.And { left, right } => {
+                f.write_str("And(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Or { left, right } => {
+                f.write_str("Or(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Implies { left, right } => {
+                f.write_str("Implies(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Box { inner } => {
+                f.write_str("Box(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            ModalForm.Diamond { inner } => {
+                f.write_str("Diamond(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
