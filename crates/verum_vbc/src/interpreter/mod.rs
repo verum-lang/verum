@@ -210,6 +210,41 @@ impl Interpreter {
         })
     }
 
+    /// Creates a new interpreter with a custom `InterpreterConfig`.
+    ///
+    /// Closes the architectural gap that left `[runtime]` manifest
+    /// settings (`cbgr_mode`, `async_scheduler`, `task_stack_size`,
+    /// `heap_policy`, etc.) unable to reach the interpreter through
+    /// the public Interpreter API. Pre-fix `try_new` always
+    /// constructed `InterpreterState::new(module)` with default
+    /// config; this builder accepts an externally-prepared config so
+    /// embedders threading verum.toml `[runtime]` values can route
+    /// them through.
+    ///
+    /// Same V-LLSI interpretability check as `try_new` — Systems /
+    /// embedded profile modules surface as `ModuleNotInterpretable`.
+    pub fn try_new_with_config(
+        module: Arc<VbcModule>,
+        config: InterpreterConfig,
+    ) -> InterpreterResult<Self> {
+        if !module.header.flags.is_interpretable() {
+            return Err(InterpreterError::ModuleNotInterpretable {
+                module_name: module.name.clone(),
+                reason: if module.header.flags.is_systems_profile() {
+                    "Systems profile code is AOT-only"
+                } else if module.header.flags.is_embedded() {
+                    "Embedded target code is AOT-only"
+                } else {
+                    "Module marked as not interpretable"
+                },
+            });
+        }
+
+        Ok(Self {
+            state: InterpreterState::with_config(module, config),
+        })
+    }
+
     /// Creates a new interpreter for the given module **after** running
     /// the per-instruction bytecode validator.
     ///
