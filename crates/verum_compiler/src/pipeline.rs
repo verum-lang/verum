@@ -7726,41 +7726,33 @@ impl<'s> CompilationPipeline<'s> {
             debug!("Verifying {} '{}' ({} requires, {} ensures)",
                 kind_name, thm.name.name, thm.requires.len(), thm.ensures.len());
 
-            // Closure-cache fast path (#79 / #88).  Compute fingerprint
-            // and probe the cache before invoking the SMT engine.
-            // On hit we serve the cached verdict; on miss we run the
-            // engine and persist the new verdict.  No-op when
+            // Closure-cache fast path (#79 / #88 / #89).  Compute
+            // fingerprint and probe the cache before invoking the SMT
+            // engine.  On hit we serve the cached verdict; on miss we
+            // run the engine and persist the new verdict.  No-op when
             // closure_cache is None.
+            //
+            // Payloads use the canonical sorted-keys JSON encoding
+            // from `verum_verification::canonical_repr` — this is
+            // stable across rustc upgrades, unlike `format!("{:?}",
+            // ...)`.  See the schema-stability contract documented
+            // on the `CanonicalRepr` trait.
             let cache_outcome = closure_cache.as_ref().map(|store| {
+                use verum_verification::canonical_repr::{
+                    theorem_body_bytes, theorem_citations, theorem_signature_bytes,
+                };
                 use verum_verification::closure_cache::{
                     cached_check, CachedVerdict, ClosureFingerprint,
                 };
-                // Signature payload: name + requires + ensures +
-                // proposition rendering.  Stable across runs so long
-                // as the AST `Debug` projection is stable.
-                let signature_payload = format!(
-                    "{}|requires={:?}|ensures={:?}|prop={:?}",
-                    thm.name.name.as_str(),
-                    thm.requires,
-                    thm.ensures,
-                    thm.proposition,
-                );
-                // Body payload: proof body rendering.
-                let body_payload = format!("{:?}", thm.proof);
-                // Citations: every @framework("name", "citation") on
-                // this declaration.  Sorted+deduped inside `compute`.
-                let mut citations: Vec<String> = Vec::new();
-                for a in &thm.attributes {
-                    if a.is_named("framework") {
-                        citations.push(format!("{:?}", a));
-                    }
-                }
+                let signature_payload = theorem_signature_bytes(thm);
+                let body_payload = theorem_body_bytes(thm);
+                let citations: Vec<String> = theorem_citations(thm);
                 let cite_refs: Vec<&str> =
                     citations.iter().map(String::as_str).collect();
                 let fp = ClosureFingerprint::compute(
                     verum_verification::closure_cache::KERNEL_VERSION,
-                    signature_payload.as_bytes(),
-                    body_payload.as_bytes(),
+                    &signature_payload,
+                    &body_payload,
                     &cite_refs,
                 );
 
@@ -13141,10 +13133,18 @@ impl<'s> CompilationPipeline<'s> {
 
         let llvm_ctx = verum_codegen::llvm::verum_llvm::context::Context::create();
 
+        // Forward `CompilerOptions.enable_cbgr_elimination` to the
+        // LLVM lowering config. Closes the inert-defense pattern:
+        // prior to wiring, the documented `enable_cbgr_elimination`
+        // session knob (default `true`) had no effect on AOT-side
+        // CBGR check elimination. The corresponding LoweringConfig
+        // field DID gate the actual codegen behaviour, but the
+        // session-level option never reached it.
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage)
+            .with_cbgr_elimination(self.session.options().enable_cbgr_elimination)
             .with_permission_policy(self.session.aot_permission_policy());
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
