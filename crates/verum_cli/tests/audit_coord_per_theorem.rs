@@ -125,7 +125,12 @@ public fn main() {}
 }
 
 #[test]
-fn coord_audit_json_format_emits_schema_v1() {
+fn coord_audit_json_format_emits_schema_v2() {
+    // Schema v2 added the `per_theorem` array (per-theorem coordinate
+    // record alongside the `frameworks` summary).  Both keys are part
+    // of the contract; an emitter that only ships `frameworks` is on
+    // schema v1.  Keep the test pinning both keys present so any future
+    // schema change has to choose: bump the version OR keep both keys.
     let (_temp, dir) = create_project(
         "coord_json",
         r#"@framework(lurie_htt, "HTT 6.2.2.7")
@@ -137,8 +142,9 @@ public fn main() {}
     let out = run_verum(&["audit", "--coord", "--format", "json"], &dir);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("\"schema_version\": 1"), "JSON: {}", stdout);
+    assert!(stdout.contains("\"schema_version\": 2"), "JSON: {}", stdout);
     assert!(stdout.contains("\"frameworks\""), "JSON: {}", stdout);
+    assert!(stdout.contains("\"per_theorem\""), "JSON: {}", stdout);
 }
 
 #[test]
