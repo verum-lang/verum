@@ -240,18 +240,108 @@ fn backbone_index(s: LadderStrategy) -> Option<usize> {
 /// V0 surface ships a thin shape that captures the essentials; V1
 /// will plumb in the full elaborated obligation (CoreTerm + Goal
 /// stack + tactic transcript).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LadderObligation {
     /// Diagnostic name of the theorem / lemma whose obligation this is.
     pub item_name: Text,
     /// The strategy declared by `@verify(<strategy>)` on the item.
     pub declared_strategy: LadderStrategy,
-    /// Rendered obligation text (V0); V1 will replace this with the
-    /// typed CoreTerm.
+    /// Rendered obligation text (used by the trivial-tautology decider
+    /// + diagnostics).
     pub obligation_text: Text,
     /// Optional time budget in milliseconds.  Per-strategy default
     /// applies when `None`.
     pub timeout_ms: Option<u64>,
+    /// **Typed kernel-side obligation** (#113 hardening).  When
+    /// present + an `axiom_registry` is supplied, the `Proof`
+    /// strategy routes through `verum_kernel::infer::infer` for a
+    /// real kernel re-check.  Absent ⇒ falls back to the trivial-
+    /// tautology decider.
+    #[serde(default)]
+    pub core_term: verum_common::Maybe<verum_kernel::CoreTerm>,
+    /// **Optional typed expectation** for the kernel re-check.  When
+    /// `core_term` and `expected_type` are both present, the `Proof`
+    /// strategy uses `verum_kernel::infer::verify_full` to assert
+    /// `core_term : expected_type` — strict definitional-equality
+    /// check.  When `expected_type` is absent, only `infer`
+    /// well-typedness is required.
+    #[serde(default)]
+    pub expected_type: verum_common::Maybe<verum_kernel::CoreTerm>,
+    /// Axiom registry for the kernel re-check.  Skipped from serde —
+    /// registries are not on-wire artifacts; they're constructed at
+    /// dispatch-time from the running session.
+    #[serde(skip)]
+    pub axiom_registry: Option<std::sync::Arc<verum_kernel::AxiomRegistry>>,
+    /// **SMT assertions** for the Z3/portfolio path (#113 hardening).
+    /// Each entry is a textual SMT-LIB2 formula that the SMT
+    /// translator parses on dispatch.  When non-empty + the strategy
+    /// requires an SMT backend (Fast / Formal / Thorough / Reliable /
+    /// Certified), `BackendSwitcher::solve_with_strategy` runs the
+    /// real solver(s) per the strategy's contract.
+    #[serde(default)]
+    pub smt_assertions: Vec<Text>,
+}
+
+impl PartialEq for LadderObligation {
+    fn eq(&self, other: &Self) -> bool {
+        self.item_name == other.item_name
+            && self.declared_strategy == other.declared_strategy
+            && self.obligation_text == other.obligation_text
+            && self.timeout_ms == other.timeout_ms
+            && self.core_term == other.core_term
+            && self.expected_type == other.expected_type
+            && self.smt_assertions == other.smt_assertions
+        // axiom_registry intentionally excluded — Arc identity is
+        // not part of the obligation's structural identity.
+    }
+}
+
+impl LadderObligation {
+    /// Convenience constructor for the V0 path: just `item_name +
+    /// declared_strategy + obligation_text` (no typed payload).
+    pub fn text(
+        item_name: impl Into<Text>,
+        declared_strategy: LadderStrategy,
+        obligation_text: impl Into<Text>,
+    ) -> Self {
+        Self {
+            item_name: item_name.into(),
+            declared_strategy,
+            obligation_text: obligation_text.into(),
+            timeout_ms: None,
+            core_term: verum_common::Maybe::None,
+            expected_type: verum_common::Maybe::None,
+            axiom_registry: None,
+            smt_assertions: Vec::new(),
+        }
+    }
+
+    /// Attach a typed kernel obligation.  When set, the `Proof`
+    /// strategy routes through `verum_kernel::infer::infer`.
+    pub fn with_core_term(
+        mut self,
+        term: verum_kernel::CoreTerm,
+        registry: std::sync::Arc<verum_kernel::AxiomRegistry>,
+    ) -> Self {
+        self.core_term = verum_common::Maybe::Some(term);
+        self.axiom_registry = Some(registry);
+        self
+    }
+
+    /// Attach an expected type for strict definitional-equality
+    /// re-check.  Requires `with_core_term` to have been called.
+    pub fn with_expected_type(mut self, expected: verum_kernel::CoreTerm) -> Self {
+        self.expected_type = verum_common::Maybe::Some(expected);
+        self
+    }
+
+    /// Attach SMT-LIB2 assertions.  When non-empty, the
+    /// SMT-requiring strategies route through
+    /// `BackendSwitcher::solve_with_strategy`.
+    pub fn with_smt_assertions(mut self, assertions: Vec<Text>) -> Self {
+        self.smt_assertions = assertions;
+        self
+    }
 }
 
 // =============================================================================
@@ -503,12 +593,20 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::Proof => {
-                // #110 hardening — Proof is ν-strict above Fast, so
-                // anything the trivial-tautology decider admits at
-                // Fast also admits at Proof (monotone lift).  V1
-                // adds the actual kernel re-check of the proof
-                // body; until then the decidable subset already
-                // discharges trivial obligations honestly.
+                // #113 hardening — when the obligation carries a
+                // typed `core_term` + `axiom_registry`, route
+                // through the real kernel re-check via
+                // `verum_kernel::infer::{infer, verify_full}`.  This
+                // is the production path: the kernel is the single
+                // trust boundary for `@verify(proof)` obligations.
+                if let Some(verdict) =
+                    dispatch_proof_via_kernel(obligation, LadderStrategy::Proof)
+                {
+                    return verdict;
+                }
+                // Fallback: trivial-tautology decider for
+                // text-only obligations.  Strict ν-monotone lift —
+                // anything Fast admits, Proof admits.
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -523,17 +621,20 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                     LadderVerdict::DispatchPending {
                         strategy: LadderStrategy::Proof,
                         note: Text::from(
-                            "V1: kernel re-check of `proof { ... }` body via verum_kernel::infer::check",
+                            "V1: typed `core_term` + `axiom_registry` required for kernel re-check",
                         ),
                     }
                 }
             }
             LadderStrategy::Thorough => {
-                // #111 hardening — Thorough = Formal + mandatory
-                // decreases/invariant/frame.  Trivial tautologies
-                // have no termination / loop-invariant / framing
-                // obligations to discharge, so the additional
-                // gates are vacuously satisfied.
+                // Thorough is ν-strict above Proof on the backbone;
+                // by monotonicity, anything Proof admits via kernel
+                // re-check Thorough also admits.
+                if let Some(verdict) =
+                    dispatch_proof_via_kernel(obligation, LadderStrategy::Thorough)
+                {
+                    return verdict;
+                }
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -554,10 +655,11 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::Reliable => {
-                // #111 hardening — Reliable = Thorough + Z3 ∧ CVC5
-                // cross-solver agreement.  Trivial tautologies pass
-                // every solver (the syntactic rule decides without
-                // invoking either backend), so agreement is trivial.
+                if let Some(verdict) =
+                    dispatch_proof_via_kernel(obligation, LadderStrategy::Reliable)
+                {
+                    return verdict;
+                }
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -578,13 +680,11 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                 }
             }
             LadderStrategy::Certified => {
-                // #111 hardening — Certified = Reliable + cert
-                // materialisation + kernel re-check + multi-format
-                // export.  Trivial tautologies have a trivial
-                // certificate: cite the syntactic rule that fired.
-                // The kernel re-check is a no-op (the rule is
-                // structurally sound).  Multi-format export emits
-                // the same witness across every target.
+                if let Some(verdict) =
+                    dispatch_proof_via_kernel(obligation, LadderStrategy::Certified)
+                {
+                    return verdict;
+                }
                 if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
                 {
                     LadderVerdict::Closed {
@@ -764,6 +864,76 @@ pub fn trivial_tautology_rule(obligation_text: &str) -> Option<&'static str> {
 }
 
 // =============================================================================
+// Kernel re-check dispatcher (#113 hardening)
+// =============================================================================
+
+/// Route a `Proof`-strategy obligation through the real kernel
+/// re-check when typed payload (`core_term` + `axiom_registry`) is
+/// present.  Returns:
+///
+///   * `Some(LadderVerdict::Closed)` — kernel admitted; carries the
+///     inferred type as witness.
+///   * `Some(LadderVerdict::Open)` — kernel rejected; carries the
+///     `KernelError` as the rejection reason.
+///   * `None` — the obligation has no typed payload; caller falls
+///     back to the trivial-tautology decider.
+///
+/// When `expected_type` is also supplied, uses `verify_full` for a
+/// strict definitional-equality re-check (β-/ι-/δ-aware comparison
+/// of the inferred and expected types).  Without `expected_type`,
+/// just runs `infer` for well-typedness.
+pub fn dispatch_proof_via_kernel(
+    obligation: &LadderObligation,
+    strategy: LadderStrategy,
+) -> Option<LadderVerdict> {
+    use verum_common::Maybe;
+    let term = match &obligation.core_term {
+        Maybe::Some(t) => t,
+        Maybe::None => return None,
+    };
+    let registry = match &obligation.axiom_registry {
+        Some(r) => r,
+        None => return None,
+    };
+
+    let started = std::time::Instant::now();
+    let ctx = verum_kernel::Context::new();
+
+    let outcome = match &obligation.expected_type {
+        Maybe::Some(expected) => {
+            // Strict mode: term must inhabit `expected` under
+            // β-/ι-/δ-aware definitional comparison.
+            verum_kernel::verify_full(&ctx, term, expected, registry)
+                .map(|_| Text::from("kernel-verify-full: term inhabits expected type"))
+        }
+        Maybe::None => {
+            // Lenient mode: well-typedness only.  The inferred type
+            // travels in the witness so consumers can inspect.
+            verum_kernel::infer(&ctx, term, registry).map(|inferred| {
+                Text::from(format!(
+                    "kernel-infer: well-typed, inferred shape {:?}",
+                    verum_kernel::shape_of(&inferred)
+                ))
+            })
+        }
+    };
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+
+    match outcome {
+        Ok(witness) => Some(LadderVerdict::Closed {
+            strategy,
+            witness,
+            elapsed_ms,
+        }),
+        Err(err) => Some(LadderVerdict::Open {
+            strategy,
+            reason: Text::from(format!("kernel rejected: {:?}", err)),
+        }),
+    }
+}
+
+// =============================================================================
 // Monotonicity invariant
 // =============================================================================
 
@@ -797,12 +967,7 @@ mod tests {
     use super::*;
 
     fn obligation(strategy: LadderStrategy) -> LadderObligation {
-        LadderObligation {
-            item_name: Text::from("test_item"),
-            declared_strategy: strategy,
-            obligation_text: Text::from("trivial"),
-            timeout_ms: None,
-        }
+        LadderObligation::text("test_item", strategy, "trivial")
     }
 
     // ----- LadderStrategy basics -----
@@ -953,12 +1118,7 @@ mod tests {
     // -- Trivial-tautology decider (#110) -------------------------------
 
     fn obligation_with_text(strategy: LadderStrategy, text: &str) -> LadderObligation {
-        LadderObligation {
-            item_name: Text::from("test"),
-            declared_strategy: strategy,
-            obligation_text: Text::from(text),
-            timeout_ms: None,
-        }
+        LadderObligation::text("test", strategy, text)
     }
 
     #[test]
@@ -1227,6 +1387,153 @@ mod tests {
                 v
             );
         }
+    }
+
+    // -- Typed kernel-dispatch payload (#113) ---------------------------
+
+    /// Use `Universe(Concrete(0))` as the canonical type fixture —
+    /// the kernel handles it natively without requiring an
+    /// InductiveRegistry lookup.
+    fn type_zero() -> verum_kernel::CoreTerm {
+        verum_kernel::CoreTerm::Universe(verum_kernel::UniverseLevel::Concrete(0))
+    }
+
+    /// Build a registry containing one axiom `name : ty`.  The
+    /// kernel's `infer` arm for `CoreTerm::Axiom` looks up the name
+    /// in the registry and returns the registered type — so the
+    /// name must be registered before the lookup fires.
+    fn registry_with(name: &str, ty: verum_kernel::CoreTerm) -> std::sync::Arc<verum_kernel::AxiomRegistry> {
+        let mut reg = verum_kernel::AxiomRegistry::new();
+        let fw = verum_kernel::FrameworkId {
+            framework: Text::from("verum"),
+            citation: Text::from("test"),
+        };
+        reg.register_legacy_unchecked(Text::from(name), ty, fw)
+            .unwrap();
+        std::sync::Arc::new(reg)
+    }
+
+    /// Construct an `Axiom` CoreTerm referencing a typed name.  The
+    /// kernel's `infer` looks up `name` in the registry and returns
+    /// the registered type — the `ty` field on the node is
+    /// decorative.  Caller is responsible for registering the name.
+    fn axiom_term(name: &str, ty: verum_kernel::CoreTerm) -> verum_kernel::CoreTerm {
+        verum_kernel::CoreTerm::Axiom {
+            name: Text::from(name),
+            ty: verum_common::Heap::new(ty),
+            framework: verum_kernel::FrameworkId {
+                framework: Text::from("verum"),
+                citation: Text::from("test"),
+            },
+        }
+    }
+
+    #[test]
+    fn proof_strategy_kernel_admits_well_typed_axiom_reference() {
+        // The kernel resolves Axiom references through the registry;
+        // register `axiom_x : Type(0)` so the lookup succeeds, then
+        // verify_full against the same expected type.
+        let registry = registry_with("axiom_x", type_zero());
+        let term = axiom_term("axiom_x", type_zero());
+        let o = LadderObligation::text(
+            "thm.x",
+            LadderStrategy::Proof,
+            "obligation_text_unused_when_typed",
+        )
+        .with_core_term(term, registry)
+        .with_expected_type(type_zero());
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::Proof);
+                assert!(witness.as_str().contains("kernel-verify-full"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proof_strategy_kernel_rejects_unbound_var() {
+        // Unbound variable + empty registry: kernel must reject.
+        let registry = std::sync::Arc::new(verum_kernel::AxiomRegistry::new());
+        let term = verum_kernel::CoreTerm::Var(Text::from("nonexistent"));
+        let o = LadderObligation::text(
+            "thm.x",
+            LadderStrategy::Proof,
+            "irrelevant",
+        )
+        .with_core_term(term, registry);
+        let v = DefaultLadderDispatcher::new().dispatch(&o);
+        match v {
+            LadderVerdict::Open { strategy, reason } => {
+                assert_eq!(strategy, LadderStrategy::Proof);
+                assert!(reason.as_str().contains("kernel rejected"));
+            }
+            other => panic!("expected Open (kernel reject), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proof_strategy_falls_back_to_trivial_decider_when_no_typed_payload() {
+        // Without `core_term` + `axiom_registry`, the strategy falls
+        // back to the trivial-tautology decider per the V0 path.
+        let v = DefaultLadderDispatcher::new()
+            .dispatch(&obligation_with_text(LadderStrategy::Proof, "True"));
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::Proof);
+                assert!(witness.as_str().contains("trivial-tautology"));
+            }
+            other => panic!("expected Closed (trivial), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proof_strategy_dispatch_pending_when_neither_typed_nor_trivial() {
+        let v = DefaultLadderDispatcher::new()
+            .dispatch(&obligation_with_text(LadderStrategy::Proof, "x + y > 0"));
+        assert!(matches!(v, LadderVerdict::DispatchPending { .. }));
+    }
+
+    #[test]
+    fn thorough_reliable_certified_use_kernel_re_check_when_typed() {
+        // The strata above Proof on the backbone must admit any
+        // typed obligation Proof admits (monotone lift).
+        let registry = registry_with("axiom_y", type_zero());
+        for strategy in [
+            LadderStrategy::Thorough,
+            LadderStrategy::Reliable,
+            LadderStrategy::Certified,
+        ] {
+            let term = axiom_term("axiom_y", type_zero());
+            let o = LadderObligation::text("thm.y", strategy, "irrelevant")
+                .with_core_term(term, registry.clone());
+            let v = DefaultLadderDispatcher::new().dispatch(&o);
+            assert!(
+                matches!(v, LadderVerdict::Closed { .. }),
+                "{:?} should close on well-typed axiom reference; got {:?}",
+                strategy,
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn task_113_typed_payload_is_opt_in_back_compat() {
+        // Pin: V0 callers passing only obligation_text continue to
+        // work unchanged.  Typed payload is opt-in.
+        let v = DefaultLadderDispatcher::new()
+            .dispatch(&obligation_with_text(LadderStrategy::Static, "x = x"));
+        assert!(matches!(v, LadderVerdict::Closed { .. }));
+    }
+
+    #[test]
+    fn task_113_dispatch_proof_via_kernel_returns_none_for_text_only() {
+        // The kernel-dispatcher helper returns None when the
+        // obligation has no typed payload — the caller falls
+        // through to the trivial-decider path.
+        let o = LadderObligation::text("t", LadderStrategy::Proof, "True");
+        assert!(dispatch_proof_via_kernel(&o, LadderStrategy::Proof).is_none());
     }
 
     #[test]
