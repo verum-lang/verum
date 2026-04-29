@@ -423,6 +423,13 @@ impl PatternKernelChecker {
     }
 }
 
+/// Public accessor for the canonical-tactic set.  Used by sibling
+/// modules (e.g. `proof_repl`'s GoalRewriter surface-alignment
+/// invariant) to ensure their dispatch surface stays in sync.
+pub fn canonical_tactics() -> &'static [&'static str] {
+    CANONICAL_TACTICS
+}
+
 /// Canonical tactic heads accepted by `parse_step`.  Every entry is
 /// either:
 ///

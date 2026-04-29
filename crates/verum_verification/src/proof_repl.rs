@@ -535,7 +535,16 @@ impl GoalRewriter for DefaultGoalRewriter {
             }
 
             // ----- split / destruct on conjunction -----
-            "split" | "destruct" => rewrite_split_conjunction(stack),
+            // `split` is strict — only fires on top-level
+            // conjunction; non-conjunction goals return NoMatch so
+            // the suggestion engine doesn't misrank.  `destruct` is
+            // broader — also used for case-analysis on a hypothesis;
+            // falls through to Rewritten on non-conjunction goals.
+            "split" => rewrite_split_conjunction(stack),
+            "destruct" => match rewrite_split_conjunction(stack) {
+                GoalRewriteOutcome::NoMatch => GoalRewriteOutcome::Rewritten,
+                other => other,
+            },
 
             // ----- assumption family -----
             "assumption" => rewrite_assumption(stack, parts.next()),
@@ -559,10 +568,50 @@ impl GoalRewriter for DefaultGoalRewriter {
                 }
             }
 
-            // ----- decision procedures -----
-            "auto" | "simp" | "ring" | "nlinarith" | "lia" | "decide" | "congruence"
-            | "eauto" | "smt" | "trivial" | "reflexivity" | "refl" | "assumption."
-            | "tauto" | "omega" => close_focused(stack),
+            // ----- decision procedures + arithmetic deciders -----
+            // (#109) — surface aligned with verum_verification::llm_tactic
+            // CANONICAL_TACTICS so every tactic the kernel-checker
+            // admits also has a matching state-mutation outcome.
+            "auto" | "simp" | "ring" | "nlinarith" | "linarith" | "lia" | "nlia"
+            | "lra" | "nra" | "decide" | "congruence" | "eauto" | "smt" | "trivial"
+            | "reflexivity" | "refl" | "assumption." | "tauto" | "omega"
+            | "field" | "blast" | "norm_num" => close_focused(stack),
+
+            // ----- contradiction family — closes the focused goal -----
+            "contradiction" | "by_contradiction" | "exfalso" => close_focused(stack),
+
+            // ----- constructor / branch selection -----
+            "constructor" => close_focused(stack),
+            "left" => {
+                // Left disjunction-introduction.  We don't track which
+                // branch we're committing to in the typed goal-stack;
+                // best-effort: leave the goal in place (Rewritten),
+                // letting the soundness gate (kernel-checker) decide
+                // admissibility.
+                GoalRewriteOutcome::Rewritten
+            }
+            "right" => GoalRewriteOutcome::Rewritten,
+            "exists" => {
+                // Existential-introduction.  Like left/right, we
+                // don't symbolically substitute the witness — best-
+                // effort Rewritten.
+                GoalRewriteOutcome::Rewritten
+            }
+
+            // ----- equality manipulation — leaves goal open -----
+            // These tactics rewrite the focused proposition under
+            // some hypothesis but don't close the goal.  We mark the
+            // outcome Rewritten so consumers know the typed view
+            // changed; an actual symbolic substitution is V2 work.
+            "unfold" | "fold" | "subst" | "rewrite" | "rw"
+            | "simplify" | "compute" => GoalRewriteOutcome::Rewritten,
+
+            // ----- inductive / case analysis -----
+            // `cases h` / `induction n` would normally produce
+            // multiple sub-goals (one per constructor); the rewriter
+            // doesn't reconstruct constructor arity yet, so we
+            // report Rewritten and let the focused goal stand.
+            "cases" | "case" | "induction" | "revert" => GoalRewriteOutcome::Rewritten,
 
             _ => GoalRewriteOutcome::NoMatch,
         }
@@ -1592,6 +1641,125 @@ mod tests {
         let outcome = r.rewrite(&mut s, "garbage_step");
         assert!(matches!(outcome, GoalRewriteOutcome::NoMatch));
         assert_eq!(s.goals.len(), 1, "NoMatch must not mutate stack");
+    }
+
+    // -- Surface alignment with CANONICAL_TACTICS (#109) ----------------
+
+    #[test]
+    fn rewriter_extended_decision_procedures_close() {
+        // Aligned with verum_verification::llm_tactic::CANONICAL_TACTICS.
+        for tac in [
+            "linarith", "nlia", "lra", "nra", "field", "blast",
+            "norm_num", "tauto", "reflexivity",
+        ] {
+            let mut s = GoalStack::singleton("P");
+            let r = DefaultGoalRewriter::new();
+            let outcome = r.rewrite(&mut s, tac);
+            assert!(
+                matches!(outcome, GoalRewriteOutcome::Closed),
+                "tactic `{}` should close the focused goal",
+                tac
+            );
+            assert!(s.is_complete());
+        }
+    }
+
+    #[test]
+    fn rewriter_contradiction_family_closes() {
+        for tac in ["contradiction", "by_contradiction", "exfalso"] {
+            let mut s = GoalStack::singleton("P");
+            let r = DefaultGoalRewriter::new();
+            let outcome = r.rewrite(&mut s, tac);
+            assert!(
+                matches!(outcome, GoalRewriteOutcome::Closed),
+                "tactic `{}` should close",
+                tac
+            );
+        }
+    }
+
+    #[test]
+    fn rewriter_constructor_closes() {
+        let mut s = GoalStack::singleton("P");
+        let r = DefaultGoalRewriter::new();
+        let outcome = r.rewrite(&mut s, "constructor");
+        assert!(matches!(outcome, GoalRewriteOutcome::Closed));
+    }
+
+    #[test]
+    fn rewriter_left_right_exists_yield_rewritten() {
+        for tac in ["left", "right", "exists witness"] {
+            let mut s = GoalStack::singleton("P \\/ Q");
+            let r = DefaultGoalRewriter::new();
+            let outcome = r.rewrite(&mut s, tac);
+            assert!(
+                matches!(outcome, GoalRewriteOutcome::Rewritten),
+                "tactic `{}` should produce Rewritten",
+                tac
+            );
+            assert_eq!(s.goals.len(), 1, "{} must not close the goal", tac);
+        }
+    }
+
+    #[test]
+    fn rewriter_equality_manipulation_yields_rewritten() {
+        for tac in [
+            "rewrite h", "rw eq", "subst x", "unfold foo",
+            "fold bar", "simplify", "compute",
+        ] {
+            let mut s = GoalStack::singleton("x = y");
+            let r = DefaultGoalRewriter::new();
+            let outcome = r.rewrite(&mut s, tac);
+            assert!(
+                matches!(outcome, GoalRewriteOutcome::Rewritten),
+                "tactic `{}` should produce Rewritten",
+                tac
+            );
+        }
+    }
+
+    #[test]
+    fn rewriter_inductive_family_yields_rewritten() {
+        for tac in ["cases h", "case Some", "induction n", "revert h"] {
+            let mut s = GoalStack::singleton("P n");
+            let r = DefaultGoalRewriter::new();
+            let outcome = r.rewrite(&mut s, tac);
+            assert!(
+                matches!(outcome, GoalRewriteOutcome::Rewritten),
+                "tactic `{}` should produce Rewritten",
+                tac
+            );
+        }
+    }
+
+    #[test]
+    fn task_109_rewriter_recognises_every_canonical_tactic_head() {
+        // Pin: every head in `verum_verification::llm_tactic::CANONICAL_TACTICS`
+        // is recognised by the GoalRewriter (returns something other
+        // than NoMatch on a goal whose textual shape lets the
+        // tactic fire).  Exceptions:
+        //   * `skip` / `fail` — combinator sentinels handled at a
+        //     higher layer (no single-goal semantic).
+        //   * `split` — strict on top-level conjunctions; tested
+        //     with a conjunction goal.
+        let exempt: std::collections::BTreeSet<&str> =
+            ["skip", "fail"].iter().copied().collect();
+        for tac in crate::llm_tactic::canonical_tactics() {
+            if exempt.contains(tac) {
+                continue;
+            }
+            // Use a conjunction goal for split (it's strict);
+            // generic predicate goal for everything else.
+            let goal = if *tac == "split" { "P /\\ Q" } else { "P x" };
+            let mut s = GoalStack::singleton(goal);
+            let r = DefaultGoalRewriter::new();
+            let outcome = r.rewrite(&mut s, tac);
+            assert!(
+                !matches!(outcome, GoalRewriteOutcome::NoMatch),
+                "canonical tactic `{}` returned NoMatch — surface drift",
+                tac
+            );
+        }
     }
 
     #[test]
