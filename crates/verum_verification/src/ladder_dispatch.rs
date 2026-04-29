@@ -2232,7 +2232,6 @@ mod tests {
         }
     }
 
-    #[test]
     // -- Pre-computed kernel re-check outcome (#118) --------------------
 
     #[test]
