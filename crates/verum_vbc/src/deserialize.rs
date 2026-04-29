@@ -192,6 +192,35 @@ const MAX_FUNCTION_TABLE_ENTRIES: u32 = 1 << 20;
 const MAX_CONSTANT_POOL_ENTRIES: u32 = 1 << 20;
 const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
 
+/// Descriptor-level architectural upper bounds.
+///
+/// Within a type / function descriptor, varint-encoded counts
+/// (type params, fields, variants, protocols, methods, params,
+/// contexts, bounds) drive `SmallVec::with_capacity` /
+/// `Vec::with_capacity` allocations that have the same memory-
+/// amplification surface as the table counts above.  Post the
+/// varint-canonicality fix (cf1cff4c) the largest accepted
+/// varint is `u64::MAX`, which casts to `usize::MAX` on 64-bit
+/// platforms — `with_capacity(usize::MAX)` aborts the process
+/// in most Rust allocators.  Bounds below are tight enough that
+/// real-world descriptors stay under them by 1-2 orders of
+/// magnitude while still rejecting adversarial inputs early.
+const MAX_TYPE_PARAMS_PER_DESCRIPTOR: usize = 64;
+const MAX_FIELDS_PER_DESCRIPTOR: usize = 4 * 1024;
+const MAX_VARIANTS_PER_DESCRIPTOR: usize = 4 * 1024;
+const MAX_PROTOCOLS_PER_DESCRIPTOR: usize = 256;
+const MAX_METHODS_PER_PROTOCOL_IMPL: usize = 4 * 1024;
+
+/// Maximum decompressed bytecode size for a single module.
+///
+/// Adversarial bytecode can claim a near-`u32::MAX` decompressed
+/// size in the bytecode-section header; the decompressor would
+/// `Vec::with_capacity` that amount before reading a byte from
+/// the compressed stream.  1 GB is a generous cap — real Verum
+/// modules are kilobytes, the embedded stdlib (every core/*.vr
+/// compiled) is ~14 MB.
+const MAX_DECOMPRESSED_BYTECODE_BYTES: u32 = 1 << 30;   // 1 GB
+
 /// VBC module deserializer.
 struct Deserializer<'a> {
     /// Input data.
@@ -502,7 +531,23 @@ impl<'a> Deserializer<'a> {
     /// - `u32`: Uncompressed size (only present if algorithm != None)
     /// - `bytes`: Compressed or uncompressed bytecode
     fn parse_bytecode(&mut self, section_size: u32) -> VbcResult<Vec<u8>> {
-        let section_end = self.offset + section_size as usize;
+        // The section MUST contain at least the algorithm byte; a
+        // zero-size section is malformed.  Without this check the
+        // `section_size as usize - 1` arithmetic on the None branch
+        // below would underflow on hostile inputs.
+        if section_size == 0 {
+            return Err(VbcError::InvalidHeader {
+                field: "bytecode_size",
+                offset: self.offset,
+            });
+        }
+        let section_end = self.offset
+            .checked_add(section_size as usize)
+            .ok_or_else(|| VbcError::SectionOverflow {
+                section: "bytecode",
+                offset: self.offset as u32,
+                size: section_size,
+            })?;
         if section_end > self.data.len() {
             return Err(VbcError::SectionOverflow {
                 section: "bytecode",
@@ -518,29 +563,49 @@ impl<'a> Deserializer<'a> {
 
         match algorithm {
             CompressionAlgorithm::None => {
-                // No compression - just copy the raw data
-                let data_size = section_size as usize - 1; // minus algorithm byte
-                if self.offset + data_size > self.data.len() {
+                // No compression - just copy the raw data.
+                // section_size > 0 checked above, so the subtraction
+                // is safe.
+                let data_size = (section_size - 1) as usize;
+                let data_end = self.offset
+                    .checked_add(data_size)
+                    .ok_or_else(|| VbcError::eof(self.offset, data_size))?;
+                if data_end > self.data.len() {
                     return Err(VbcError::eof(self.offset, data_size));
                 }
-                let bytecode = self.data[self.offset..self.offset + data_size].to_vec();
-                self.offset += data_size;
+                let bytecode = self.data[self.offset..data_end].to_vec();
+                self.offset = data_end;
                 Ok(bytecode)
             }
             CompressionAlgorithm::Zstd | CompressionAlgorithm::Lz4 => {
                 // Read uncompressed size
                 let uncompressed_size = decode_u32(self.data, &mut self.offset)?;
 
-                // Read compressed data (rest of section)
-                let compressed_size = section_end - self.offset;
-                if self.offset + compressed_size > self.data.len() {
-                    return Err(VbcError::eof(self.offset, compressed_size));
+                // Memory-amplification defense: a hostile compressed
+                // section with `uncompressed_size` near `u32::MAX`
+                // would cause the decompressor to allocate ~4 GB
+                // before reading a byte from the compressed stream.
+                if uncompressed_size > MAX_DECOMPRESSED_BYTECODE_BYTES {
+                    return Err(VbcError::TableTooLarge {
+                        field: "uncompressed_bytecode_size",
+                        count: uncompressed_size,
+                        max: MAX_DECOMPRESSED_BYTECODE_BYTES,
+                    });
                 }
-                let compressed = &self.data[self.offset..self.offset + compressed_size];
-                self.offset += compressed_size;
+
+                // Read compressed data (rest of section).  section_end
+                // is bounded by data.len() above, so this subtraction
+                // is safe and the slice is in-bounds.
+                let compressed_size = section_end - self.offset;
+                let compressed = &self.data[self.offset..section_end];
+                self.offset = section_end;
 
                 // Decompress
                 decompress(compressed, algorithm, uncompressed_size)
+                    .map(|out| {
+                        let _ = compressed_size; // explicitly silence unused
+                        out
+                    })
             }
         }
     }
@@ -558,6 +623,13 @@ impl<'a> Deserializer<'a> {
 
         // Type parameters
         let type_params_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if type_params_count > MAX_TYPE_PARAMS_PER_DESCRIPTOR {
+            return Err(VbcError::TableTooLarge {
+                field: "type_params_count",
+                count: type_params_count.min(u32::MAX as usize) as u32,
+                max: MAX_TYPE_PARAMS_PER_DESCRIPTOR as u32,
+            });
+        }
         let mut type_params = SmallVec::with_capacity(type_params_count);
         for _ in 0..type_params_count {
             type_params.push(self.parse_type_param()?);
@@ -565,6 +637,13 @@ impl<'a> Deserializer<'a> {
 
         // Fields
         let fields_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if fields_count > MAX_FIELDS_PER_DESCRIPTOR {
+            return Err(VbcError::TableTooLarge {
+                field: "fields_count",
+                count: fields_count.min(u32::MAX as usize) as u32,
+                max: MAX_FIELDS_PER_DESCRIPTOR as u32,
+            });
+        }
         let mut fields = SmallVec::with_capacity(fields_count);
         for _ in 0..fields_count {
             fields.push(self.parse_field()?);
@@ -572,6 +651,13 @@ impl<'a> Deserializer<'a> {
 
         // Variants
         let variants_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if variants_count > MAX_VARIANTS_PER_DESCRIPTOR {
+            return Err(VbcError::TableTooLarge {
+                field: "variants_count",
+                count: variants_count.min(u32::MAX as usize) as u32,
+                max: MAX_VARIANTS_PER_DESCRIPTOR as u32,
+            });
+        }
         let mut variants = SmallVec::with_capacity(variants_count);
         for _ in 0..variants_count {
             variants.push(self.parse_variant()?);
@@ -583,10 +669,24 @@ impl<'a> Deserializer<'a> {
 
         // Protocols
         let protocols_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if protocols_count > MAX_PROTOCOLS_PER_DESCRIPTOR {
+            return Err(VbcError::TableTooLarge {
+                field: "protocols_count",
+                count: protocols_count.min(u32::MAX as usize) as u32,
+                max: MAX_PROTOCOLS_PER_DESCRIPTOR as u32,
+            });
+        }
         let mut protocols = SmallVec::with_capacity(protocols_count);
         for _ in 0..protocols_count {
             let protocol = ProtocolId(decode_u32(self.data, &mut self.offset)?);
             let methods_count = decode_varint(self.data, &mut self.offset)? as usize;
+            if methods_count > MAX_METHODS_PER_PROTOCOL_IMPL {
+                return Err(VbcError::TableTooLarge {
+                    field: "methods_count",
+                    count: methods_count.min(u32::MAX as usize) as u32,
+                    max: MAX_METHODS_PER_PROTOCOL_IMPL as u32,
+                });
+            }
             let mut methods = Vec::with_capacity(methods_count);
             for _ in 0..methods_count {
                 methods.push(decode_u32(self.data, &mut self.offset)?);
