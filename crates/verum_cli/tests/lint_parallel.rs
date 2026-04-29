@@ -33,7 +33,7 @@ fn ensure_fixture() {
     std::fs::create_dir_all(&src_dir).expect("create src/");
     std::fs::write(
         dir.join("verum.toml"),
-        "[package]\nname = \"parallel_corpus\"\nversion = \"0.1.0\"\n",
+        "[cog]\nname = \"parallel_corpus\"\nversion = \"0.1.0\"\n",
     )
     .expect("write verum.toml");
     for i in 0..40 {
