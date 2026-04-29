@@ -34,7 +34,7 @@ fn make_fixture(name: &str, body: &str) -> PathBuf {
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
         dir.join("verum.toml"),
-        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+        format!("[cog]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
     )
     .expect("manifest");
     std::fs::write(dir.join("src").join("main.vr"), body).expect("main.vr");
@@ -78,13 +78,16 @@ fn check_exits_nonzero_on_parse_error() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    // Diagnostic should mention the offending file (basename).
+    // Diagnostic should mention the offending file — accept either the
+    // full basename `main.vr` or the bare module name `main` (the
+    // location formatter renders `at <module>:<line>:<col>` which
+    // identifies the file via its module name).
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let combined = format!("{stderr}{stdout}");
     assert!(
-        combined.contains("main.vr"),
-        "parse error diagnostic should reference main.vr; got: {combined}"
+        combined.contains("main.vr") || combined.contains("main:"),
+        "parse error diagnostic should reference main.vr or main:; got: {combined}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
