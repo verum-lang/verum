@@ -1048,6 +1048,30 @@ impl SmtBackendSwitcher {
                     }
                     return self.solve_with_cvc5(assertions);
                 }
+                // Z3 surfaces timeouts as `Unknown` with a reason
+                // string that mentions "timeout" / "canceled" /
+                // "resource limit". Distinguish the two cases so
+                // `on_timeout` and `on_unknown` are independently
+                // meaningful: a caller may want to fall back on
+                // timeouts (because the alternative solver might
+                // have a different complexity profile) but NOT on
+                // genuine unknowns (where both solvers are likely
+                // to give up). Closes the inert-defense pattern
+                // for `on_timeout`.
+                SolveResult::Unknown { reason, .. }
+                    if self.config.fallback.on_timeout
+                        && reason.as_ref().is_some_and(|r| {
+                            let r_lower = r.as_str().to_ascii_lowercase();
+                            r_lower.contains("timeout")
+                                || r_lower.contains("canceled")
+                                || r_lower.contains("resource")
+                        }) =>
+                {
+                    if self.config.verbose {
+                        eprintln!("[AUTO] Z3 timeout, falling back to CVC5");
+                    }
+                    return self.solve_with_cvc5(assertions);
+                }
                 SolveResult::Unknown { .. } if self.config.fallback.on_unknown => {
                     if self.config.verbose {
                         eprintln!("[AUTO] Z3 unknown, falling back to CVC5");
