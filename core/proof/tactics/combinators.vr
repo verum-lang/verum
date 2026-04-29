@@ -92,3 +92,45 @@ tactic focus(index: Int, body: Tactic) {
 // if `t` fails, the proof state is unchanged and `try` still
 // succeeds. Equivalent to `t | skip`.
 tactic try_tactic(body: Tactic) { try { body } }
+
+// Total-discharge guard. Runs `body`; if any goal remains open,
+// FAIL the whole tactic.
+//
+// `solve { t }` is the strongest contract a combinator can
+// declare: it commits to fully closing the focused goal.  Use
+// at the leaf of a proof to surface "I expected this branch to
+// close completely". Catalogue id: `solve` — see `verum tactic
+// explain solve`.
+//
+// Algebraic law: `solve { skip } ≡ fail` whenever goals remain
+// non-empty (the simplifier exploits this to reduce nested
+// `solve { skip ; …; skip }` patterns at canonicalisation time).
+tactic solve(body: Tactic) {
+    body;
+    // Synthetic `no_open_goals` probe — fails when any goal is
+    // still open. The probe is provided by the runtime's proof-
+    // state inspector and is the operational counterpart of
+    // `solve`'s discharge contract.
+    no_open_goals
+}
+
+// Focus on the goal labelled `label`.
+//
+// Lean-style named-goal focus.  Goal labels come from `intro_as`
+// or `case` introductions; `case left => { auto }` is the
+// idiomatic surface form.  Catalogue id: `named_focus`.
+tactic case_focus(label: Text, body: Tactic) {
+    case(label) { body }
+}
+
+// Per-goal split: distribute `branches` across the open goals
+// one-to-one.
+//
+// Surface syntax: `[t1; t2; t3]` after a branching tactic.  Fails
+// if the goal count differs from the branch count — the strict
+// match is intentional: silently dropping a branch when the goal
+// count is less than expected hides logic errors. Catalogue id:
+// `per_goal_split`.
+tactic per_goal_split(branches: List<Tactic>) {
+    split_goals(branches)
+}

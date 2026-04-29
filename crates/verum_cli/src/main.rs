@@ -982,6 +982,21 @@ enum Commands {
         format: String,
     },
 
+    /// Industrial-grade tactic combinator catalogue surface.  Wires
+    /// `verum_verification::tactic_combinator::DefaultTacticCatalog`
+    /// to the CLI so IDE / docs-generator / CI consumers can read
+    /// the canonical 15-combinator catalogue + its algebraic laws
+    /// without depending on the Rust API.
+    ///
+    /// Subcommands:
+    ///   verum tactic list [--category <C>] [--format <F>]
+    ///   verum tactic explain <name> [--format <F>]
+    ///   verum tactic laws [--format <F>]
+    Tactic {
+        #[clap(subcommand)]
+        sub: TacticSub,
+    },
+
     /// With `--framework-axioms`: enumerate the trusted-framework boundary
     /// of the current project — every `@framework(name, "citation")` marker
     /// on an axiom / theorem / lemma is collected, grouped by framework,
@@ -1400,6 +1415,31 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum TacticSub {
+    /// List every combinator in the canonical catalogue with a
+    /// one-line semantics summary.
+    List {
+        #[clap(long, default_value = "plain")]
+        format: String,
+        /// Restrict to a single category (identity / composition /
+        /// control / focus / forward).
+        #[clap(long)]
+        category: Option<String>,
+    },
+    /// Print the full structured doc for a single combinator.
+    Explain {
+        name: String,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// List the canonical algebraic-law inventory.
+    Laws {
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum HooksCommands {
     /// Install `.git/hooks/pre-commit` running `verum lint --since
@@ -2614,6 +2654,15 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             commands::proof_repair::run_proof_repair(&kind, &field, max, &format)
         }
+        Commands::Tactic { sub } => match sub {
+            TacticSub::List { format, category } => {
+                commands::tactic::run_list(&format, category.as_deref())
+            }
+            TacticSub::Explain { name, format } => {
+                commands::tactic::run_explain(&name, &format)
+            }
+            TacticSub::Laws { format } => commands::tactic::run_laws(&format),
+        },
         Commands::Audit {
             details,
             direct_only,

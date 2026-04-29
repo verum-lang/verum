@@ -80,6 +80,13 @@ pub mod ladder_dispatch;
 /// tactic-suggestion trait + reference engine.  Single boundary that
 /// LSP / REPL / CLI consumers all drive through.
 pub mod proof_drafting;
+/// Industrial-grade tactic combinator catalogue — single source of
+/// truth for the 15 canonical combinators (skip / fail / seq /
+/// orelse / repeat / repeat_n / try / solve / first_of / all_goals /
+/// index_focus / named_focus / per_goal_split / have / apply_with)
+/// + their algebraic laws.  Consumed by LSP / docs / `verum tactic`
+/// CLI.
+pub mod tactic_combinator;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;

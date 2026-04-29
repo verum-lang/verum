@@ -34,6 +34,13 @@ pub mod proof_draft;
 /// REPL consumers can request structured repair suggestions for a
 /// typed `ProofFailureKind` without depending on the Rust API.
 pub mod proof_repair;
+/// `verum tactic` subcommand — surfaces
+/// `verum_verification::tactic_combinator::DefaultTacticCatalog` so
+/// IDE / REPL / docs-generator consumers can ask the canonical
+/// combinator catalogue what its 15 entries are, what their
+/// algebraic laws look like, and what a single combinator's full
+/// doc record is.
+pub mod tactic;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

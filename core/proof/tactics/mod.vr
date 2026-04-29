@@ -13,7 +13,11 @@
 // core.proof.tactics.logical      — intro, split, left, right, auto, smt
 // core.proof.tactics.structural   — induction, destruct, case_analysis, cases
 // core.proof.tactics.rewrite      — rewrite, simp, unfold, fold, change
-// core.proof.tactics.combinators  — sequence (;), orelse (|), repeat, first, all_goals
+// core.proof.tactics.combinators  — skip, fail, seq, orelse, repeat, try,
+//                                   solve, first, all_goals, focus, case_focus,
+//                                   per_goal_split
+// core.proof.tactics.forward      — have, apply_with (Lean/SSReflect-style
+//                                   forward chaining)
 // core.proof.tactics.meta         — quote, unquote, goal_intro
 // ```
 //
@@ -40,4 +44,5 @@ mount core.proof.tactics.logical.*;
 mount core.proof.tactics.structural.*;
 mount core.proof.tactics.rewrite.*;
 mount core.proof.tactics.combinators.*;
+mount core.proof.tactics.forward.*;
 mount core.proof.tactics.meta.*;
