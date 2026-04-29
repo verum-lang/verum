@@ -13402,6 +13402,17 @@ impl<'s> CompilationPipeline<'s> {
             linker_config.use_llvm_linker = true;
         }
 
+        // Wire CLI strip / static-link options into linker config.
+        // Pre-fix the `--strip-symbols`, `--strip-debug`, and
+        // `--static-link` CLI flags landed on `CompilerOptions`
+        // but were never propagated to the LinkingConfig that the
+        // linker phase actually consumes — they were silently
+        // dropped between the CLI and the linker. The merge logic
+        // is extracted into a pure helper so it can be unit-tested
+        // without spinning up a full pipeline; mirrors the LTO
+        // precedence at line ~13395 above.
+        apply_cli_link_overrides(self.session.options(), &mut linker_config);
+
         // Add Metal/Foundation frameworks for macOS GPU support (LLD path)
         #[cfg(target_os = "macos")]
         {
@@ -15225,6 +15236,36 @@ impl<'s> CompilationPipeline<'s> {
     }
 }
 
+/// Apply CLI link-related overrides from `CompilerOptions` onto a
+/// `LinkingConfig` produced by the `Verum.toml` loader.
+///
+/// Pure helper extracted from the pipeline so the CLI-override
+/// merge logic can be unit-tested without spinning up a session.
+/// The merge is *additive*: a CLI flag can opt INTO a stricter
+/// stance (strip more, link statically) but cannot turn off a
+/// stance the manifest already enabled. This mirrors the LTO
+/// merge precedence and keeps the manifest authoritative for the
+/// per-project default while letting the CLI tighten further on
+/// a per-invocation basis.
+///
+/// Closes the inert-defense pattern around three CLI options
+/// (`strip_symbols`, `strip_debug`, `static_link`) that landed on
+/// `CompilerOptions` but never reached the linker phase.
+pub(crate) fn apply_cli_link_overrides(
+    options: &crate::options::CompilerOptions,
+    linker_config: &mut LinkingConfig,
+) {
+    if options.strip_symbols {
+        linker_config.strip = true;
+    }
+    if options.strip_debug {
+        linker_config.strip_debug_only = true;
+    }
+    if options.static_link {
+        linker_config.static_link = true;
+    }
+}
+
 // ==================== MACRO EXPANSION ====================
 
 /// Types of macro/meta function arguments
@@ -15638,5 +15679,98 @@ mod resolve_super_path_tests {
             resolve("core.sys.time_ops", "super.super.super.x"),
             "super.super.super.x",
         );
+    }
+}
+
+#[cfg(test)]
+mod cli_link_overrides_tests {
+    use super::apply_cli_link_overrides;
+    use crate::options::CompilerOptions;
+    use crate::phases::linking::LinkingConfig;
+    use std::path::PathBuf;
+
+    fn defaults() -> (CompilerOptions, LinkingConfig) {
+        let opts = CompilerOptions::new(
+            PathBuf::from("/dev/null"),
+            PathBuf::from("/dev/null"),
+        );
+        let cfg = LinkingConfig::default();
+        (opts, cfg)
+    }
+
+    #[test]
+    fn defaults_leave_linker_config_unchanged() {
+        // Pin: zero-CLI defaults must leave LinkingConfig identical
+        // to the manifest-loaded shape. Without this guard, a refactor
+        // could accidentally make the wiring force-on a strip / static
+        // stance the manifest didn't request.
+        let (opts, mut cfg) = defaults();
+        let original_strip = cfg.strip;
+        let original_strip_debug = cfg.strip_debug_only;
+        let original_static = cfg.static_link;
+
+        apply_cli_link_overrides(&opts, &mut cfg);
+
+        assert_eq!(cfg.strip, original_strip);
+        assert_eq!(cfg.strip_debug_only, original_strip_debug);
+        assert_eq!(cfg.static_link, original_static);
+    }
+
+    #[test]
+    fn strip_symbols_cli_flag_reaches_linker_config() {
+        // Pin: --strip-symbols on the CLI flips LinkingConfig.strip,
+        // which is the field the linker phase actually consults.
+        let (opts, mut cfg) = defaults();
+        let opts = opts.with_strip_symbols(true);
+        cfg.strip = false;
+        apply_cli_link_overrides(&opts, &mut cfg);
+        assert!(
+            cfg.strip,
+            "strip_symbols=true CLI must set LinkingConfig.strip = true",
+        );
+    }
+
+    #[test]
+    fn strip_debug_cli_flag_reaches_linker_config() {
+        let (opts, mut cfg) = defaults();
+        let opts = opts.with_strip_debug(true);
+        cfg.strip_debug_only = false;
+        apply_cli_link_overrides(&opts, &mut cfg);
+        assert!(
+            cfg.strip_debug_only,
+            "strip_debug=true CLI must set LinkingConfig.strip_debug_only = true",
+        );
+    }
+
+    #[test]
+    fn static_link_cli_flag_reaches_linker_config() {
+        let (opts, mut cfg) = defaults();
+        let opts = opts.with_static_link(true);
+        cfg.static_link = false;
+        apply_cli_link_overrides(&opts, &mut cfg);
+        assert!(
+            cfg.static_link,
+            "static_link=true CLI must set LinkingConfig.static_link = true",
+        );
+    }
+
+    #[test]
+    fn cli_overrides_are_additive_not_subtractive() {
+        // Pin: CLI flags can opt INTO a stricter stance but cannot
+        // turn off a stance the manifest already enabled. This is
+        // load-bearing — the manifest is the per-project default
+        // and the CLI is per-invocation; allowing the CLI to flip
+        // a stance OFF would let `verum build` accidentally undo a
+        // signed manifest's strip / static-link policy.
+        let (opts, mut cfg) = defaults();
+        // Manifest pre-set strip = true.
+        cfg.strip = true;
+        cfg.static_link = true;
+
+        // CLI does NOT pass --strip-symbols / --static-link.
+        // The pre-existing manifest setting must survive.
+        apply_cli_link_overrides(&opts, &mut cfg);
+        assert!(cfg.strip, "manifest strip stance must survive CLI no-op");
+        assert!(cfg.static_link, "manifest static_link stance must survive CLI no-op");
     }
 }
