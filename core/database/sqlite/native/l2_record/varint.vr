@@ -39,7 +39,7 @@ public fn encode_into(out: &mut List<Byte>, value: Int64) -> Int {
     varint.sqlite_encode_into(out, value)
 }
 
-public fn decode(buf: &[Byte], start: Int) -> Result<(Int64, Int), varint.VarintError> {
+public fn decode(buf: &[Byte], start: Int) -> Result<(Int64, Int), VarintError> {
     varint.sqlite_decode(buf, start)
 }
 

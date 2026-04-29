@@ -27,7 +27,7 @@ module core.net.quic.crypto.retry;
 
 mount core.*;
 mount core.collections.List;
-mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open, AesGcmError};
+mount core.security.aead.aes_gcm.{Aes128Gcm, GcmError};
 
 /// RFC 9001 §5.8 — key for QUIC v1 retry integrity tag.
 public const RETRY_INTEGRITY_KEY_V1: [Byte; 16] = [
@@ -45,45 +45,39 @@ public const RETRY_INTEGRITY_NONCE_V1: [Byte; 12] = [
 /// Retry pseudo-packet: ODCID length + ODCID bytes + the Retry
 /// packet bytes excluding the integrity tag itself (i.e. all but
 /// the last 16 bytes of the wire Retry packet).
-public fn compute_retry_integrity_tag(pseudo: &[Byte]) -> Result<[Byte; 16], AesGcmError> {
-    // AEAD over empty plaintext; the tag is the only output besides
-    // zero-length ciphertext.
-    let mut out: List<Byte> = [];
-    aes128_gcm_seal(
-        &RETRY_INTEGRITY_KEY_V1,
-        &RETRY_INTEGRITY_NONCE_V1,
-        pseudo,
-        &[],          // empty plaintext
-        &mut out,
-    )?;
-    // out = ciphertext (empty) || tag (16). Take the last 16 bytes.
-    if out.len() != 16 {
-        return Err(AesGcmError.InvalidTagLength { len: out.len() });
-    }
+///
+/// AES-128-GCM over empty plaintext: the tag is the only meaningful
+/// output (ciphertext is empty).  `Aes128Gcm::encrypt` is infallible
+/// for well-formed inputs (key + 12-byte iv hold the contract); the
+/// function therefore returns the tag directly without a `Result`.
+public fn compute_retry_integrity_tag(pseudo: &[Byte]) -> [Byte; 16] {
+    let cipher = Aes128Gcm.new(&RETRY_INTEGRITY_KEY_V1);
+    let mut ciphertext: List<Byte> = [];
     let mut tag: [Byte; 16] = [0_u8; 16];
-    let mut i: Int = 0;
-    while i < 16 { tag[i] = out[i]; i = i + 1; }
-    Ok(tag)
+    cipher.encrypt(
+        &RETRY_INTEGRITY_NONCE_V1,
+        pseudo,        // AAD = pseudo-packet
+        &[],           // empty plaintext
+        &mut ciphertext,
+        &mut tag,
+    );
+    tag
 }
 
 /// Verify a Retry packet's integrity tag. `pseudo` is the Retry
 /// pseudo-packet (without the tag); `wire_tag` is the 16 trailing
-/// bytes taken off the wire.
+/// bytes taken off the wire.  Returns true iff the tag matches.
 public fn verify_retry_integrity_tag(pseudo: &[Byte], wire_tag: &[Byte; 16]) -> Bool {
-    // Compose (empty ciphertext || wire_tag) and run open — a passing
-    // open gives us empty plaintext; a failing tag returns error.
-    let mut ciphertext: List<Byte> = [];
-    let mut i: Int = 0;
-    while i < 16 { ciphertext.push(wire_tag[i]); i = i + 1; }
-    let mut out: List<Byte> = [];
-    match aes128_gcm_open(
-        &RETRY_INTEGRITY_KEY_V1,
+    let cipher = Aes128Gcm.new(&RETRY_INTEGRITY_KEY_V1);
+    let mut plaintext: List<Byte> = [];
+    match cipher.decrypt(
         &RETRY_INTEGRITY_NONCE_V1,
-        pseudo,
-        ciphertext.as_slice(),
-        &mut out,
+        pseudo,        // AAD = pseudo-packet
+        &[],           // empty ciphertext
+        wire_tag,
+        &mut plaintext,
     ) {
-        Ok(()) => out.len() == 0,
+        Ok(()) => plaintext.len() == 0,
         Err(_) => false,
     }
 }

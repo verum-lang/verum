@@ -37,7 +37,7 @@ mount sys.linux.syscall.{
     SYS_CLONE, SYS_CLONE3, SYS_FUTEX, SYS_GETTID,
     SYS_MMAP, SYS_MUNMAP, SYS_MPROTECT,
 };
-mount sys.linux.tls.{LinuxThreadControlBlock, create_thread_tls, cleanup_thread_tls};
+mount sys.linux.tls.{ThreadControlBlock, create_thread_tls, cleanup_thread_tls};
 
 // =============================================================================
 // Clone Flags
@@ -129,7 +129,7 @@ public type LinuxThread is {
     tid: Int,
     stack_base: &unsafe Byte,
     stack_size: USize,
-    tls: &unsafe LinuxThreadControlBlock,
+    tls: &unsafe ThreadControlBlock,
     joined: Bool,
 };
 
@@ -321,7 +321,7 @@ fn clone_fallback(
     flags: Int,
     stack: &unsafe Byte,
     parent_tid: &mut Int,
-    tls: &unsafe LinuxThreadControlBlock,
+    tls: &unsafe ThreadControlBlock,
     child_tid: &mut Int,
     entry: LinuxThreadFn,
     arg: &unsafe Byte

@@ -146,7 +146,7 @@ implement Eq for ExitStatus {
 // =============================================================================
 
 /// Captured output from a child process.
-type Output is {
+public type Output is {
     /// Exit status.
     status: ExitStatus,
     /// Captured stdout bytes.
