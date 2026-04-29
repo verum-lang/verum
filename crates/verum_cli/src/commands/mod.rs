@@ -41,6 +41,11 @@ pub mod property;
 pub mod test;
 pub mod vbc_version;
 pub mod verify;
+/// `verum verify --ladder` — wires
+/// `verum_verification::ladder_dispatch::DefaultLadderDispatcher` into
+/// the CLI verify command path so per-theorem `@verify(strategy)`
+/// annotations are routed through the typed ladder dispatcher.
+pub mod verify_ladder;
 pub mod version;
 pub mod watch;
 pub mod workspace;

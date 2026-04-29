@@ -1295,7 +1295,7 @@ fn json_escape(s: &str) -> String {
 }
 
 /// Walk every `.vr` file under `root`, skipping target/ and hidden dirs.
-fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
@@ -1320,7 +1320,7 @@ fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 
 /// Parse a single `.vr` file without running semantic analysis. We only need
 /// the top-level item list + attributes.
-fn parse_file_for_audit(path: &Path) -> std::result::Result<verum_ast::Module, String> {
+pub(crate) fn parse_file_for_audit(path: &Path) -> std::result::Result<verum_ast::Module, String> {
     let mut options = CompilerOptions::default();
     options.input = path.to_path_buf();
     let mut session = Session::new(options);
@@ -1968,7 +1968,7 @@ fn verify_strategy_ordinal(strategy: &str) -> CliOrdinal {
 /// item's attribute lists. Returns `None` if no `@verify(...)` is
 /// declared. Strictness is the same lex ordering used for the
 /// per-theorem ν projection (`verify_strategy_ordinal`).
-fn strictest_verify_strategy(
+pub(crate) fn strictest_verify_strategy(
     item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
     decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
 ) -> Option<Text> {
