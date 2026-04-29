@@ -406,12 +406,9 @@ pub fn detect_dependencies(line: &str, context: &ScriptContext) -> List<usize> {
 /// Check if a line contains an identifier (not as part of another word).
 ///
 /// This performs a more accurate check than a simple substring match.
-/// For example, "x" should match "x + 1" but not "tax".
-///
-/// Walks the line via byte offsets returned by `find`, but resolves
-/// the surrounding "char before / char after" via `chars()` walks
-/// over byte slices — `chars().nth(byte_offset)` would silently
-/// produce wrong results when the line contains multi-byte UTF-8.
+/// For example, "x" should match "x + 1" but not "tax".  Word-boundary
+/// probing uses the UTF-8-safe primitives from `verum_common::text_utf8`
+/// so multi-byte source behaves correctly.
 fn contains_identifier(line: &str, ident: &str) -> bool {
     if ident.is_empty() {
         return false;
@@ -422,25 +419,11 @@ fn contains_identifier(line: &str, ident: &str) -> bool {
         let abs_pos = start + pos;
         let after_pos = abs_pos + ident.len();
 
-        // Char immediately before the match — `chars().next_back()`
-        // on the prefix walks the UTF-8 backwards correctly.
-        let before_ok = abs_pos == 0
-            || line[..abs_pos]
-                .chars()
-                .next_back()
-                .map(|c| !is_ident_char(c))
-                .unwrap_or(true);
-
-        // Char immediately after the match.  `find` always returns a
-        // char-boundary byte offset and the match is a complete `ident`,
-        // so after_pos is also a char boundary; safe to slice and take
-        // the next char.
-        let after_ok = after_pos >= line.len()
-            || line[after_pos..]
-                .chars()
-                .next()
-                .map(|c| !is_ident_char(c))
-                .unwrap_or(true);
+        let not_ident = |c: char| !is_ident_char(c);
+        let before_ok = verum_common::text_utf8::char_before_satisfies(line, abs_pos, not_ident)
+            .unwrap_or(true);
+        let after_ok = verum_common::text_utf8::char_at_satisfies(line, after_pos, not_ident)
+            .unwrap_or(true);
 
         if before_ok && after_ok {
             return true;

@@ -444,60 +444,20 @@ pub fn rename_cross_file(
 
 /// Find the exact range of a word at a position.
 ///
-/// Walks the line as UTF-8 byte offsets — matches both LSP byte-offset
-/// negotiation and the underlying `&str` slice semantics.  The previous
-/// implementation mixed byte offsets and char indices (`character as
-/// usize` is a byte offset, but `line.chars().nth(N)` treats N as a
-/// char index) which silently produced correct results for ASCII-only
-/// code and panicked or returned wrong ranges the moment a multi-byte
-/// char appeared in the line.
+/// Delegates to `verum_common::text_utf8::find_word_bounds` for the
+/// UTF-8-safe walk; the previous implementation mixed byte offsets
+/// and char indices, silently mis-locating words in non-ASCII source
+/// and panicking outright when the cursor landed mid-codepoint.
 fn find_word_range(document: &DocumentState, position: Position, word: &str) -> Option<Range> {
     let line = document.get_line(position.line)?;
-
-    let character = position.character as usize;
-    if character > line.len() {
+    let (start, end) = verum_common::text_utf8::find_word_bounds(
+        line,
+        position.character as usize,
+        is_identifier_char,
+    )?;
+    if &line[start..end] != word {
         return None;
     }
-
-    // Clamp the cursor to the nearest preceding char boundary.
-    // Editors can park a cursor mid-codepoint (LSP UTF-16 column ↔
-    // UTF-8 byte offset rounding), so this is a real failure mode.
-    let mut cursor = character.min(line.len());
-    while cursor > 0 && !line.is_char_boundary(cursor) {
-        cursor -= 1;
-    }
-
-    // Find start of word: walk char_indices() in reverse from the
-    // cursor, advancing `start` past identifier characters.  byte_idx
-    // is always a real UTF-8 byte offset, so the resulting `start` is
-    // safe to slice.
-    let mut start = cursor;
-    for (byte_idx, ch) in line[..cursor].char_indices().rev() {
-        if is_identifier_char(ch) {
-            start = byte_idx;
-        } else {
-            break;
-        }
-    }
-
-    // Find end of word: walk forward from the cursor, advancing `end`
-    // past each identifier char's last byte.
-    let mut end = cursor;
-    for (byte_idx, ch) in line[cursor..].char_indices() {
-        if is_identifier_char(ch) {
-            end = cursor + byte_idx + ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    // Verify the word matches.  Both indices are at char boundaries
-    // by construction, so the slice is always safe.
-    let found_word = &line[start..end];
-    if found_word != word {
-        return None;
-    }
-
     Some(Range {
         start: Position {
             line: position.line,

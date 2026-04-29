@@ -156,6 +156,7 @@ pub mod semantic_types; // Complete semantic types with full API
 pub mod shared; // Thread-safe reference counting (Shared<T>, Weak<T>)
 pub mod span;
 pub mod span_utils;
+pub mod text_utf8; // UTF-8-safe primitives (clamp, prefix, truncate, word-bounds)
 pub mod to_text; // ToText trait for converting to Text
 pub mod type_level; // Unified type-level computation traits
 pub mod unsafe_cell;
