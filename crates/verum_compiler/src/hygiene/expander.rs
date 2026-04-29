@@ -79,6 +79,45 @@ impl ExpansionConfig {
     }
 }
 
+/// A single event in the `debug_bindings` trace.
+///
+/// Emitted by the expander only when `ExpansionConfig.debug_bindings`
+/// is `true`. Lets callers reconstruct the chronological order of
+/// quote-scope entries/exits, binding registrations, references,
+/// splices, and lifts — useful for debugging hygiene violations and
+/// for tooling that wants to render the macro-expansion timeline.
+#[derive(Debug, Clone)]
+pub struct DebugBindingEvent {
+    /// What happened.
+    pub kind: DebugBindingEventKind,
+    /// The identifier or splice/lift name involved (empty for quote
+    /// enter/exit).
+    pub name: Text,
+    /// Source span of the event.
+    pub span: Span,
+    /// Quote nesting depth at the time of the event (post-update for
+    /// `EnterQuote`, pre-update for `ExitQuote`).
+    pub depth: usize,
+}
+
+/// What kind of expander event a `DebugBindingEvent` records.
+#[derive(Debug, Clone)]
+pub enum DebugBindingEventKind {
+    /// `enter_quote` increased nesting depth.
+    EnterQuote,
+    /// `exit_quote` decreased nesting depth.
+    ExitQuote,
+    /// A binding was registered via `process_binding`.
+    Binding(BindingKind),
+    /// An identifier reference was processed via `process_reference`.
+    Reference,
+    /// A splice (`$name`) resolved to a binding.
+    Splice,
+    /// A `lift(expr)` was processed (whether or not an evaluator was
+    /// configured).
+    Lift,
+}
+
 /// Represents a binding captured in a quote
 #[derive(Debug, Clone)]
 pub struct CapturedBinding {
@@ -479,6 +518,12 @@ pub struct QuoteExpander {
     /// using this callback. The callback receives the expression to
     /// evaluate and should return the resulting MetaValue.
     lift_evaluator: Maybe<LiftEvaluator>,
+    /// Recorded debug events.
+    ///
+    /// Populated only when `config.debug_bindings = true`. Stays
+    /// empty (and zero-allocation) under the default configuration so
+    /// production callers pay nothing.
+    debug_log: List<DebugBindingEvent>,
 }
 
 impl std::fmt::Debug for QuoteExpander {
@@ -493,6 +538,7 @@ impl std::fmt::Debug for QuoteExpander {
             .field("violations", &self.violations)
             .field("binding_stack", &self.binding_stack)
             .field("lift_evaluator", &self.lift_evaluator.is_some())
+            .field("debug_log", &self.debug_log)
             .finish()
     }
 }
@@ -510,6 +556,7 @@ impl QuoteExpander {
             violations: HygieneViolations::new(),
             binding_stack: List::new(),
             lift_evaluator: Maybe::None,
+            debug_log: List::new(),
         }
     }
 
@@ -569,6 +616,43 @@ impl QuoteExpander {
         std::mem::take(&mut self.violations)
     }
 
+    /// Borrow the chronological list of recorded debug events.
+    ///
+    /// Only populated when the expander was constructed with
+    /// `ExpansionConfig.debug_bindings = true`. Empty otherwise — the
+    /// flag is the master gate for all event recording, so the per-
+    /// site `if self.config.debug_bindings` checks short-circuit
+    /// before any allocation in the default configuration.
+    pub fn debug_bindings_log(&self) -> &List<DebugBindingEvent> {
+        &self.debug_log
+    }
+
+    /// Take the recorded debug events out, leaving the internal log
+    /// empty. Allows callers (a debugger, an LSP-side macro inspector,
+    /// a test harness) to drain the trace without paying a clone.
+    pub fn take_debug_bindings_log(&mut self) -> List<DebugBindingEvent> {
+        std::mem::take(&mut self.debug_log)
+    }
+
+    /// Internal: append a debug event when (and only when) the
+    /// `debug_bindings` gate is on.
+    fn record_debug_event(
+        &mut self,
+        kind: DebugBindingEventKind,
+        name: Text,
+        span: Span,
+    ) {
+        if !self.config.debug_bindings {
+            return;
+        }
+        self.debug_log.push(DebugBindingEvent {
+            kind,
+            name,
+            span,
+            depth: self.depth,
+        });
+    }
+
     /// Check if there are any violations
     pub fn has_violations(&self) -> bool {
         !self.violations.is_empty()
@@ -609,11 +693,22 @@ impl QuoteExpander {
         // Push new binding frame
         self.binding_stack.push(Map::new());
 
+        self.record_debug_event(
+            DebugBindingEventKind::EnterQuote,
+            Text::from(""),
+            span,
+        );
+
         Ok(call_mark)
     }
 
     /// Exit a quote block
     pub fn exit_quote(&mut self) {
+        self.record_debug_event(
+            DebugBindingEventKind::ExitQuote,
+            Text::from(""),
+            Span::default(),
+        );
         self.depth = self.depth.saturating_sub(1);
         self.context.exit_quote();
         self.quote_scope = Maybe::None;
@@ -663,7 +758,13 @@ impl QuoteExpander {
         }
 
         // Also register in the hygiene context
-        self.context.add_binding(name, binding);
+        self.context.add_binding(name.clone(), binding);
+
+        self.record_debug_event(
+            DebugBindingEventKind::Binding(kind),
+            name,
+            span,
+        );
 
         ident
     }
@@ -673,6 +774,11 @@ impl QuoteExpander {
     /// Verifies that the reference is hygienic.
     pub fn process_reference(&mut self, name: &Text, span: Span) -> HygienicIdent {
         let scopes = self.context.current_scopes();
+        self.record_debug_event(
+            DebugBindingEventKind::Reference,
+            name.clone(),
+            span,
+        );
         HygienicIdent::new(name.clone(), scopes, span)
     }
 
@@ -694,6 +800,12 @@ impl QuoteExpander {
     ///
     /// For `$name` or `${expr}` splices.
     pub fn splice_value(&mut self, name: &Text, span: Span) -> Result<SpliceResult, HygieneViolation> {
+        self.record_debug_event(
+            DebugBindingEventKind::Splice,
+            name.clone(),
+            span,
+        );
+
         // Look up the binding
         let binding = self.lookup_binding(name);
 
@@ -778,6 +890,12 @@ impl QuoteExpander {
         expr: &Expr,
         span: Span,
     ) -> Result<LiftedValue, HygieneViolation> {
+        self.record_debug_event(
+            DebugBindingEventKind::Lift,
+            Text::from(""),
+            span,
+        );
+
         // Verify we're in a quote context
         if !self.in_quote() {
             return Err(HygieneViolation::UnquoteOutsideQuote { span });
@@ -2363,5 +2481,133 @@ mod tests {
         assert_eq!(ConstValue::Unit.type_name().as_str(), "()");
         assert_eq!(ConstValue::Array(List::new()).type_name().as_str(), "Array");
         assert_eq!(ConstValue::Tuple(List::new()).type_name().as_str(), "Tuple");
+    }
+
+    #[test]
+    fn debug_bindings_disabled_records_nothing() {
+        // Pin: with `debug_bindings = false` (the default), the
+        // expander does not allocate or push any debug events even
+        // through a busy quote/binding/splice/lift sequence.
+        let context = HygieneContext::new();
+        let mut expander = QuoteExpander::with_default_config(context);
+
+        expander.enter_quote(0, Span::default()).unwrap();
+        expander.process_binding(
+            Text::from("x"),
+            Span::default(),
+            BindingKind::Variable,
+            false,
+        );
+        expander.process_reference(&Text::from("x"), Span::default());
+        let _ = expander.splice_value(&Text::from("x"), Span::default());
+        let _ = expander.lift_value(&make_test_expr(), Span::default());
+        expander.exit_quote();
+
+        assert!(
+            expander.debug_bindings_log().is_empty(),
+            "default config must not record debug events",
+        );
+    }
+
+    #[test]
+    fn debug_bindings_enabled_records_full_trace() {
+        // Pin: with `debug_bindings = true`, every choke-point logs
+        // an event in chronological order, with names, spans, and
+        // depth captured.
+        let context = HygieneContext::new();
+        let config = ExpansionConfig {
+            debug_bindings: true,
+            ..Default::default()
+        };
+        let mut expander = QuoteExpander::new(context, config);
+
+        expander.enter_quote(0, Span::default()).unwrap();
+        expander.process_binding(
+            Text::from("x"),
+            Span::default(),
+            BindingKind::Variable,
+            false,
+        );
+        expander.process_reference(&Text::from("x"), Span::default());
+        let _ = expander.splice_value(&Text::from("x"), Span::default());
+        let _ = expander.lift_value(&make_test_expr(), Span::default());
+        expander.exit_quote();
+
+        let log = expander.take_debug_bindings_log();
+        let kinds: Vec<&'static str> = log
+            .iter()
+            .map(|e| match e.kind {
+                DebugBindingEventKind::EnterQuote => "enter",
+                DebugBindingEventKind::ExitQuote => "exit",
+                DebugBindingEventKind::Binding(_) => "binding",
+                DebugBindingEventKind::Reference => "reference",
+                DebugBindingEventKind::Splice => "splice",
+                DebugBindingEventKind::Lift => "lift",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec!["enter", "binding", "reference", "splice", "lift", "exit"],
+            "trace must capture every choke point in order",
+        );
+
+        // Depth at EnterQuote/ExitQuote is recorded post-update for
+        // enter and pre-update for exit (both sit at depth=1 on the
+        // boundary — the in-quote events also at depth=1).
+        for event in log.iter() {
+            assert_eq!(event.depth, 1, "every event in this trace is at depth 1");
+        }
+
+        // The taking accessor drains the buffer.
+        assert!(
+            expander.debug_bindings_log().is_empty(),
+            "take_debug_bindings_log must drain",
+        );
+    }
+
+    #[test]
+    fn debug_bindings_records_binding_kind() {
+        // Pin: the BindingKind variant flows into the event so a
+        // tooling consumer can distinguish a `let` from a parameter
+        // from a function/type/macro/pattern/label.
+        let context = HygieneContext::new();
+        let config = ExpansionConfig {
+            debug_bindings: true,
+            ..Default::default()
+        };
+        let mut expander = QuoteExpander::new(context, config);
+
+        expander.enter_quote(0, Span::default()).unwrap();
+        for kind in [
+            BindingKind::Variable,
+            BindingKind::Parameter,
+            BindingKind::Function,
+            BindingKind::Type,
+        ] {
+            expander.process_binding(
+                Text::from("n"),
+                Span::default(),
+                kind,
+                false,
+            );
+        }
+
+        let recorded: Vec<BindingKind> = expander
+            .debug_bindings_log()
+            .iter()
+            .filter_map(|e| match e.kind {
+                DebugBindingEventKind::Binding(k) => Some(k),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![
+                BindingKind::Variable,
+                BindingKind::Parameter,
+                BindingKind::Function,
+                BindingKind::Type,
+            ],
+        );
     }
 }
