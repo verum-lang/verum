@@ -91,7 +91,7 @@ public mount .error.stream_error;
 public mount .frame.FrameHeader;
 public mount .frame.FrameType;
 public mount .frame.FrameFlags;
-public mount .frame.Frame;
+public mount .frame.Http2Frame;
 public mount .frame.FRAME_HEADER_SIZE;
 public mount .frame.MAX_FRAME_SIZE_INITIAL;
 

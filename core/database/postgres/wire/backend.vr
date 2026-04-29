@@ -3,7 +3,7 @@
 // =============================================================================
 // Spec: postgresql.org/docs/16/protocol-message-formats.html
 //
-// Server → client message parsers. Each function takes a `Frame`
+// Server → client message parsers. Each function takes a `PgFrame`
 // (already-decoded length-prefixed bytes) and returns a typed view.
 //
 // Errors propagate through `BackendDecodeError`; a malformed frame at
@@ -485,7 +485,7 @@ public type BackendMessage is
     | BmPortalSuspend
     | BmUnknown { tag: Byte };
 
-/// Dispatch a `Frame` to the right parser. The DataRow path needs the
+/// Dispatch a `PgFrame` to the right parser. The DataRow path needs the
 /// per-column format vector from a preceding RowDescription, which is
 /// caller state — pass it in or use `Vec::new()` to default to text.
 public fn parse_backend(frame: PgFrame, data_row_formats: &List<Int>) -> Result<BackendMessage, BackendDecodeError> {
