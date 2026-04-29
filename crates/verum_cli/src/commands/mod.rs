@@ -64,6 +64,11 @@ pub mod llm_tactic;
 /// for the proof REPL state machine.  Apply tactics, undo / redo,
 /// hint, visualise the proof tree.
 pub mod proof_repl;
+/// `verum benchmark` subcommand — head-to-head comparison surface
+/// (#83).  Runs the configured suite against one or more systems
+/// (Verum / Coq / Lean4 / Isabelle / Agda) and emits a typed
+/// comparison matrix.
+pub mod benchmark;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

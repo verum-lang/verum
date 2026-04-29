@@ -1031,6 +1031,24 @@ enum Commands {
         format: String,
     },
 
+    /// Continuous benchmarking surface (#83) — head-to-head vs
+    /// Coq / Lean4 / Isabelle / Agda.  Emits a typed comparison
+    /// matrix across the seven canonical metrics: kernel LOC,
+    /// compilation speed, memory peak, cross-format export
+    /// coverage, tactic-library coverage, trust diversification,
+    /// and LLM-tactic acceptance rate.
+    ///
+    /// Subcommands:
+    ///   verum benchmark run     --system <S> --suite-name <N> [--theorem T]…
+    ///                           [--format plain|json|markdown|csv]
+    ///   verum benchmark compare [--system S]… --suite-name <N> [--theorem T]…
+    ///                           [--format plain|json|markdown|csv]
+    ///   verum benchmark metrics [--format plain|json|markdown|csv]
+    Benchmark {
+        #[clap(subcommand)]
+        sub: BenchmarkSub,
+    },
+
     /// Live proof REPL — stepwise tactic feedback + proof-tree
     /// visualisation (#75).  Non-interactive batch driver: apply
     /// tactics, navigate with undo / redo, request hints, render
@@ -1526,6 +1544,40 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum BenchmarkSub {
+    /// Run the suite against a single system and emit raw results.
+    Run {
+        #[clap(long)]
+        system: String,
+        #[clap(long, default_value = "default")]
+        suite_name: String,
+        #[clap(long, value_name = "NAME")]
+        theorem: Vec<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// Run the suite against multiple systems and emit a
+    /// comparison matrix.  Without any `--system` flag, runs all
+    /// five canonical systems.
+    Compare {
+        #[clap(long, value_name = "NAME")]
+        system: Vec<String>,
+        #[clap(long, default_value = "default")]
+        suite_name: String,
+        #[clap(long, value_name = "NAME")]
+        theorem: Vec<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// List every supported metric with its `higher_is_better`
+    /// direction.
+    Metrics {
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum ProofReplSub {
     /// Run a batch of REPL commands non-interactively.  Commands
@@ -2948,6 +3000,21 @@ fn run_command(cli: Cli) -> Result<()> {
             out,
             format,
         } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
+        Commands::Benchmark { sub } => match sub {
+            BenchmarkSub::Run {
+                system,
+                suite_name,
+                theorem,
+                format,
+            } => commands::benchmark::run_run(&system, &suite_name, &theorem, &format),
+            BenchmarkSub::Compare {
+                system,
+                suite_name,
+                theorem,
+                format,
+            } => commands::benchmark::run_compare(&system, &suite_name, &theorem, &format),
+            BenchmarkSub::Metrics { format } => commands::benchmark::run_metrics(&format),
+        },
         Commands::ProofRepl { sub } => match sub {
             ProofReplSub::Batch {
                 theorem,
