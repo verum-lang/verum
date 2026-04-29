@@ -101,11 +101,16 @@ pub enum CompilationErrorKind {
 impl std::fmt::Display for CompilationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}: {}", self.kind, self.message)?;
-        // Include first diagnostic message if available (truncated to 100 chars)
+        // Include first diagnostic message if available (truncated to
+        // 100 *characters*, not bytes — naive `&msg[..100]` panics
+        // when byte 100 lands inside a multi-byte UTF-8 char, which
+        // happens whenever a user identifier or string literal in
+        // the diagnostic message is non-ASCII).
         if let Some(first_diag) = self.diagnostics.first() {
             let msg = first_diag.message();
-            if msg.len() > 100 {
-                write!(f, " - {}...", &msg[..100])?;
+            let preview = verum_common::text_utf8::truncate_chars(msg, 100);
+            if preview.len() < msg.len() {
+                write!(f, " - {}...", preview)?;
             } else {
                 write!(f, " - {}", msg)?;
             }

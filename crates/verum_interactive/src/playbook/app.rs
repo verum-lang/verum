@@ -1380,8 +1380,14 @@ impl PlaybookApp {
                     if let Some(output) = &cell.output {
                         let brief = super::ui::format_output_brief(output);
                         if !brief.is_empty() && brief != "()" {
-                            let line = if brief.len() > 80 { format!("// -> {}...\n", &brief[..77]) }
-                                else { format!("// -> {}\n", brief) };
+                            let line = if brief.len() > 80 {
+                                // Char-count truncation; `&brief[..77]` panics on
+                                // any non-ASCII content in the cell's brief output.
+                                let preview = verum_common::text_utf8::truncate_chars(&brief, 77);
+                                format!("// -> {}...\n", preview)
+                            } else {
+                                format!("// -> {}\n", brief)
+                            };
                             script.push_str(&line);
                         }
                     }

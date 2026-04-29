@@ -756,14 +756,22 @@ impl DiffRenderer {
         output.push_str(&self.color_scheme.gutter.wrap(self.glyphs.vertical_line));
         output.push(' ');
 
-        // Before span
-        output.push_str(&line[..span_start]);
+        // Before / after span — clamp both indices DOWN to char
+        // boundaries.  Stale or malformed Span values (e.g., from
+        // a recovery diagnostic on partially-tokenized input) can
+        // land mid-codepoint; naive `&line[..n]` would panic and
+        // kill the entire diagnostic render.  Clamping degrades to
+        // a slightly shorter prefix / longer suffix — strictly
+        // better than the panic.
+        let safe_start = verum_common::text_utf8::clamp_to_char_boundary(line, span_start);
+        let safe_end = verum_common::text_utf8::clamp_to_char_boundary(line, span_end);
+        output.push_str(&line[..safe_start]);
 
         // Replacement (highlighted)
         output.push_str(&self.color_scheme.suggestion_add.wrap(replacement));
 
         // After span
-        output.push_str(&line[span_end..]);
+        output.push_str(&line[safe_end..]);
         output.push('\n');
 
         // Underline the replacement
