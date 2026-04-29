@@ -225,9 +225,20 @@ impl UnsatCoreExtractor {
     fn create_tracked_solver(&self) -> std::result::Result<(Solver, SatResult), Text> {
         let solver = Solver::new();
 
-        // Enable unsat core generation
+        // Enable unsat core generation. Forward the configured
+        // per-extraction timeout to Z3 via the same `Params` value
+        // — `Solver::set_params` replaces the entire param set, so
+        // splitting `unsat_core` and `timeout` into separate calls
+        // would erase the first one. Closes the inert-defense
+        // pattern around `UnsatCoreConfig.timeout_ms`: prior to
+        // wiring, the documented timeout had no effect on Z3 and
+        // hostile / pathological assertion sets could spin
+        // unbounded during minimization.
         let mut params = z3::Params::new();
         params.set_bool("unsat_core", true);
+        if let Maybe::Some(timeout) = self.config.timeout_ms {
+            params.set_u32("timeout", u32::try_from(timeout).unwrap_or(u32::MAX));
+        }
         solver.set_params(&params);
 
         // Add tracked assertions
