@@ -50,6 +50,9 @@ pub struct FieldInfo {
     pub has_default: bool,
     /// The default value expression (if any)
     pub default_value: verum_common::Maybe<Expr>,
+    /// Field-level attributes — surfaced for derives that key off them
+    /// (e.g. @flag / @positional in @derive(ShellRender)).
+    pub attributes: List<verum_ast::Attribute>,
     /// Source span
     pub span: Span,
 }
@@ -64,7 +67,35 @@ impl FieldInfo {
             is_public: field.visibility == Visibility::Public,
             has_default: field.has_default(),
             default_value: field.default_value.clone(),
+            attributes: field.attributes.clone(),
             span: field.span,
+        }
+    }
+
+    /// True iff the field's declared type is `Bool`.
+    pub fn is_bool(&self) -> bool {
+        match &self.ty.kind {
+            verum_ast::ty::TypeKind::Named { path } =>
+                path.last_segment_name() == "Bool",
+            _ => false,
+        }
+    }
+
+    /// True iff the declared type is `List<...>`.
+    pub fn is_list(&self) -> bool {
+        match &self.ty.kind {
+            verum_ast::ty::TypeKind::Named { path } =>
+                path.last_segment_name() == "List",
+            _ => false,
+        }
+    }
+
+    /// True iff the declared type is `Maybe<...>`.
+    pub fn is_maybe(&self) -> bool {
+        match &self.ty.kind {
+            verum_ast::ty::TypeKind::Named { path } =>
+                path.last_segment_name() == "Maybe",
+            _ => false,
         }
     }
 
