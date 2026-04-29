@@ -308,16 +308,99 @@ impl LlmTacticAdapter for EchoLlmAdapter {
 // KernelChecker trait
 // =============================================================================
 
-/// Re-checks one proposed tactic step against the goal.  V0 ships a
-/// pattern-recognising reference; V1 will wire the actual kernel
-/// re-check infrastructure.
+/// Typed rejection reason from a kernel re-check.  Replaces the
+/// stringly-typed Text-only rejection so callers (LLM auditing,
+/// CLI metrics, replay engines) can branch on the failure class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KernelRejectReason {
+    /// Step references a name not in the goal's textual lemma list
+    /// AND not in the kernel's axiom registry.
+    NotInScope { name: Text },
+    /// Name resolves textually but isn't a registered kernel
+    /// axiom.  Production mode rejects these as "unattested" —
+    /// the LLM would otherwise be free to invent lemma names.
+    NotKernelAttested { name: Text },
+    /// The tactic head isn't recognised (neither `apply NAME` nor
+    /// a canonical tactic word).
+    UnknownTactic { head: Text },
+    /// Tactic application is malformed (missing argument,
+    /// unparenthesised, …).
+    MalformedSyntax { detail: Text },
+    /// Catch-all for back-compat with `Result<(), Text>`-shaped
+    /// implementations.
+    Other(Text),
+}
+
+impl KernelRejectReason {
+    /// Render as a single-line diagnostic.  Used by the back-compat
+    /// `check_step` shim that returns `Result<(), Text>`.
+    pub fn render(&self) -> Text {
+        match self {
+            Self::NotInScope { name } => Text::from(format!(
+                "lemma '{}' not in scope (apply target unresolved)",
+                name.as_str()
+            )),
+            Self::NotKernelAttested { name } => Text::from(format!(
+                "lemma '{}' resolves textually but is not a registered kernel axiom — \
+                 production mode requires kernel attestation",
+                name.as_str()
+            )),
+            Self::UnknownTactic { head } => Text::from(format!(
+                "unrecognised tactic shape '{}' — accept only `apply NAME` or canonical tactics",
+                head.as_str()
+            )),
+            Self::MalformedSyntax { detail } => Text::from(format!(
+                "malformed tactic: {}",
+                detail.as_str()
+            )),
+            Self::Other(t) => t.clone(),
+        }
+    }
+
+    /// Stable kebab-case label for telemetry.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::NotInScope { .. } => "not-in-scope",
+            Self::NotKernelAttested { .. } => "not-kernel-attested",
+            Self::UnknownTactic { .. } => "unknown-tactic",
+            Self::MalformedSyntax { .. } => "malformed-syntax",
+            Self::Other(_) => "other",
+        }
+    }
+}
+
+/// Re-checks one proposed tactic step against the goal.
+///
+/// Two implementations ship:
+///
+///   * [`PatternKernelChecker`] — text-shape recogniser; accepts
+///     `apply NAME` when `NAME` is in the goal's textual lemma
+///     list, plus a fixed canonical-tactic head set.  V0 mode.
+///   * [`KernelInferChecker`] — production hardening (#90).
+///     Carries a `verum_kernel::AxiomRegistry`; `apply NAME` MUST
+///     resolve through the registry (kernel-attested), not just
+///     through the LLM's textual context.
+///
+/// Both honour the **fail-closed contract**: if the checker can't
+/// *prove* the step is sound it MUST reject.
 pub trait KernelChecker: std::fmt::Debug + Send + Sync {
-    /// Check that `step` is a well-formed tactic invocation that
-    /// can be applied to `goal`.  Returns Ok on accept.  Returns
-    /// Err with a diagnostic on reject.  The implementation MUST
-    /// fail closed: if it can't *prove* the step is sound, it
-    /// returns Err.
+    /// Primary check.  Returns Ok on accept; Err with a stringly-
+    /// typed diagnostic on reject.  Implementors that produce
+    /// structured rejections should override [`check_step_typed`]
+    /// instead and project the Text via `KernelRejectReason::render`.
     fn check_step(&self, goal: &LlmGoalSummary, step: &str) -> Result<(), Text>;
+
+    /// Typed entry point.  Default impl wraps `check_step`'s Text
+    /// in [`KernelRejectReason::Other`]; impls that want structured
+    /// reasons override this method (and make `check_step` call it
+    /// + `.render()`).
+    fn check_step_typed(
+        &self,
+        goal: &LlmGoalSummary,
+        step: &str,
+    ) -> Result<(), KernelRejectReason> {
+        self.check_step(goal, step).map_err(KernelRejectReason::Other)
+    }
 }
 
 /// V0 reference checker.  Recognises:
@@ -346,41 +429,181 @@ const CANONICAL_TACTICS: &[&str] = &[
     "right", "by_contradiction",
 ];
 
+/// Common parse: project `step` to a typed shape that both
+/// `PatternKernelChecker` and `KernelInferChecker` consume.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParsedStep<'a> {
+    /// Empty / comment line — admit unconditionally.
+    Admitted,
+    /// `apply NAME [...]` — name extracted, fully verified by caller.
+    Apply { name: &'a str },
+    /// Canonical tactic head (`auto`, `simp`, …).
+    Canonical { head: &'a str },
+    /// Anything else; carries the head for diagnostics.
+    Unknown { head: String },
+    /// `apply` with no name argument.
+    ApplyMissingName,
+}
+
+fn parse_step(step: &str) -> ParsedStep<'_> {
+    let s = step.trim().trim_end_matches(';').trim();
+    if s.is_empty() || s.starts_with("//") {
+        return ParsedStep::Admitted;
+    }
+    if let Some(rest) = s.strip_prefix("apply ") {
+        let name = rest.split_whitespace().next().unwrap_or("");
+        let bare = name.trim_end_matches(',');
+        if bare.is_empty() {
+            return ParsedStep::ApplyMissingName;
+        }
+        return ParsedStep::Apply { name: bare };
+    }
+    let head = s
+        .split(|c: char| !c.is_ascii_alphabetic() && c != '_')
+        .next()
+        .unwrap_or("");
+    if CANONICAL_TACTICS.contains(&head) {
+        return ParsedStep::Canonical { head };
+    }
+    ParsedStep::Unknown {
+        head: head.to_string(),
+    }
+}
+
 impl KernelChecker for PatternKernelChecker {
     fn check_step(&self, goal: &LlmGoalSummary, step: &str) -> Result<(), Text> {
-        let s = step.trim().trim_end_matches(';').trim();
-        if s.is_empty() || s.starts_with("//") {
-            return Ok(()); // admitted comment / empty line
-        }
-        // `apply NAME` — name must resolve to an in-scope lemma.
-        if let Some(rest) = s.strip_prefix("apply ") {
-            let name = rest.split_whitespace().next().unwrap_or("");
-            if name.is_empty() {
-                return Err(Text::from("apply with no lemma name"));
+        self.check_step_typed(goal, step).map_err(|r| r.render())
+    }
+
+    fn check_step_typed(
+        &self,
+        goal: &LlmGoalSummary,
+        step: &str,
+    ) -> Result<(), KernelRejectReason> {
+        match parse_step(step) {
+            ParsedStep::Admitted | ParsedStep::Canonical { .. } => Ok(()),
+            ParsedStep::ApplyMissingName => Err(KernelRejectReason::MalformedSyntax {
+                detail: Text::from("`apply` with no lemma name"),
+            }),
+            ParsedStep::Apply { name } => {
+                let resolved = goal
+                    .lemmas_in_scope
+                    .iter()
+                    .any(|(n, _)| n.as_str() == name);
+                if resolved {
+                    Ok(())
+                } else {
+                    Err(KernelRejectReason::NotInScope {
+                        name: Text::from(name),
+                    })
+                }
             }
-            // Strip trailing arg syntax like `with [a, b]`.
-            let bare = name.trim_end_matches(',');
-            let resolved = goal
-                .lemmas_in_scope
-                .iter()
-                .any(|(n, _)| n.as_str() == bare);
-            if !resolved {
-                return Err(Text::from(format!(
-                    "lemma '{}' not in scope (apply target unresolved)",
-                    bare
-                )));
+            ParsedStep::Unknown { head } => Err(KernelRejectReason::UnknownTactic {
+                head: Text::from(head),
+            }),
+        }
+    }
+}
+
+// =============================================================================
+// KernelInferChecker — production: kernel-attested apply-resolution (#90)
+// =============================================================================
+//
+// Pre-this-module `PatternKernelChecker` accepted `apply NAME` as long
+// as `NAME` appeared in the goal's textual `lemmas_in_scope` list —
+// which is whatever the LLM-prompt-builder rendered into the goal
+// view.  An adversarial LLM could exploit that by constructing a
+// goal with a fictitious lemma in scope.
+//
+// Hardening: the production checker carries a
+// `verum_kernel::AxiomRegistry` — the *kernel-side* trust boundary
+// — and resolves `apply NAME` through it.  A name that's only in
+// the textual lemma list but not registered as an axiom or
+// definition is rejected as `NotKernelAttested`.
+//
+// This closes the LCF gate at the layer the `KernelGate` orchestrator
+// asked for: every accepted `apply` step is provably a citation of
+// a registered kernel axiom — solver-side proof reconstruction is
+// no longer in the trust path for citation-resolution.
+
+/// Production kernel re-checker.  Resolves `apply NAME` through a
+/// kernel `AxiomRegistry` (rather than through the LLM's textual
+/// goal context, which is untrusted).
+#[derive(Debug, Clone)]
+pub struct KernelInferChecker {
+    registry: verum_kernel::AxiomRegistry,
+}
+
+impl KernelInferChecker {
+    /// Build a checker carrying the running kernel's
+    /// `AxiomRegistry`.  Callers (CLI, REPL, batch) thread their
+    /// production registry in here.
+    pub fn new(registry: verum_kernel::AxiomRegistry) -> Self {
+        Self { registry }
+    }
+
+    /// Accessor — useful for diagnostics and for the `KernelGate`
+    /// to introspect which axioms a session has admitted.
+    pub fn registry(&self) -> &verum_kernel::AxiomRegistry {
+        &self.registry
+    }
+
+    /// Lookup a lemma name in the kernel registry.  Returns true
+    /// iff a registered axiom or definition matches by name.
+    fn registry_has(&self, name: &str) -> bool {
+        self.registry
+            .all()
+            .iter()
+            .any(|a| a.name.as_str() == name)
+    }
+}
+
+impl KernelChecker for KernelInferChecker {
+    fn check_step(&self, goal: &LlmGoalSummary, step: &str) -> Result<(), Text> {
+        self.check_step_typed(goal, step).map_err(|r| r.render())
+    }
+
+    fn check_step_typed(
+        &self,
+        goal: &LlmGoalSummary,
+        step: &str,
+    ) -> Result<(), KernelRejectReason> {
+        match parse_step(step) {
+            ParsedStep::Admitted | ParsedStep::Canonical { .. } => Ok(()),
+            ParsedStep::ApplyMissingName => Err(KernelRejectReason::MalformedSyntax {
+                detail: Text::from("`apply` with no lemma name"),
+            }),
+            ParsedStep::Apply { name } => {
+                // Kernel-side resolution: the registry is the
+                // authoritative trust boundary for citation
+                // attestation.  The textual `lemmas_in_scope` view
+                // is *advisory* — useful for diagnostics, never
+                // sufficient on its own.
+                if self.registry_has(name) {
+                    return Ok(());
+                }
+                // Distinguish the two failure modes so callers can
+                // tell "the LLM cited an inscrutable name" from
+                // "the LLM cited a name the LLM was told about but
+                // the kernel hasn't registered".
+                let in_textual_scope = goal
+                    .lemmas_in_scope
+                    .iter()
+                    .any(|(n, _)| n.as_str() == name);
+                if in_textual_scope {
+                    Err(KernelRejectReason::NotKernelAttested {
+                        name: Text::from(name),
+                    })
+                } else {
+                    Err(KernelRejectReason::NotInScope {
+                        name: Text::from(name),
+                    })
+                }
             }
-            return Ok(());
+            ParsedStep::Unknown { head } => Err(KernelRejectReason::UnknownTactic {
+                head: Text::from(head),
+            }),
         }
-        // Canonical tactic with optional argument(s).
-        let head = s.split(|c: char| !c.is_ascii_alphabetic() && c != '_').next().unwrap_or("");
-        if CANONICAL_TACTICS.contains(&head) {
-            return Ok(());
-        }
-        Err(Text::from(format!(
-            "unrecognised tactic shape '{}' — V0 checker accepts only `apply NAME` or canonical tactics",
-            s
-        )))
     }
 }
 
@@ -932,5 +1155,205 @@ mod tests {
             let s = serde_json::to_string(e).unwrap();
             assert!(s.contains("local/llama-3-8b-q4"));
         }
+    }
+
+    // =========================================================================
+    // KernelRejectReason / KernelInferChecker (#90 hardening)
+    // =========================================================================
+
+    use verum_kernel::{AxiomRegistry, CoreTerm, FrameworkId};
+
+    fn registry_with(names: &[&str]) -> AxiomRegistry {
+        let mut reg = AxiomRegistry::new();
+        for n in names {
+            // Test fixture: the kernel-attestation contract is
+            // *name resolution*, not subsingleton enforcement —
+            // use the legacy unchecked entry point so we can
+            // register names with arbitrary placeholder types.
+            let ty = CoreTerm::Var(verum_common::Text::from("Bool"));
+            let fw = FrameworkId {
+                framework: verum_common::Text::from("verum"),
+                citation: verum_common::Text::from("test-fixture"),
+            };
+            reg.register_legacy_unchecked(verum_common::Text::from(*n), ty, fw)
+                .unwrap();
+        }
+        reg
+    }
+
+    #[test]
+    fn reject_reason_labels_are_stable() {
+        assert_eq!(
+            KernelRejectReason::NotInScope {
+                name: Text::from("x")
+            }
+            .label(),
+            "not-in-scope"
+        );
+        assert_eq!(
+            KernelRejectReason::NotKernelAttested {
+                name: Text::from("x")
+            }
+            .label(),
+            "not-kernel-attested"
+        );
+        assert_eq!(
+            KernelRejectReason::UnknownTactic {
+                head: Text::from("x")
+            }
+            .label(),
+            "unknown-tactic"
+        );
+        assert_eq!(
+            KernelRejectReason::MalformedSyntax {
+                detail: Text::from("x")
+            }
+            .label(),
+            "malformed-syntax"
+        );
+        assert_eq!(
+            KernelRejectReason::Other(Text::from("x")).label(),
+            "other"
+        );
+    }
+
+    #[test]
+    fn reject_reason_render_is_human_readable() {
+        let r = KernelRejectReason::NotInScope {
+            name: Text::from("foo_lemma"),
+        };
+        let s = r.render();
+        assert!(s.as_str().contains("foo_lemma"));
+        assert!(s.as_str().contains("not in scope"));
+    }
+
+    #[test]
+    fn pattern_checker_typed_reasons_round_trip_through_render() {
+        let g = LlmGoalSummary::new("thm", "P");
+        let c = PatternKernelChecker::new();
+        // Out-of-scope apply ⇒ typed NotInScope.
+        match c.check_step_typed(&g, "apply nope") {
+            Err(KernelRejectReason::NotInScope { name }) => {
+                assert_eq!(name.as_str(), "nope");
+            }
+            other => panic!("expected NotInScope, got {:?}", other),
+        }
+        // Unknown head ⇒ typed UnknownTactic.
+        match c.check_step_typed(&g, "blortify x") {
+            Err(KernelRejectReason::UnknownTactic { head }) => {
+                assert_eq!(head.as_str(), "blortify");
+            }
+            other => panic!("expected UnknownTactic, got {:?}", other),
+        }
+        // `apply` followed by an empty argument list ⇒
+        // MalformedSyntax (the prefix `"apply "` is matched, then
+        // the remaining tokens are empty).  Use a comma-only suffix
+        // to drive the empty-name path through `strip_prefix`.
+        match c.check_step_typed(&g, "apply ,") {
+            Err(KernelRejectReason::MalformedSyntax { .. }) => {}
+            other => panic!("expected MalformedSyntax, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn kernel_infer_checker_resolves_through_kernel_registry() {
+        let reg = registry_with(&["foo_lemma"]);
+        let c = KernelInferChecker::new(reg);
+        // The goal's textual lemma list does NOT contain `foo_lemma`
+        // — the checker MUST still accept because the kernel-side
+        // registry attests the name.  This is the production
+        // contract: registry, not LLM-prompt-text, is authoritative.
+        let g = LlmGoalSummary::new("thm", "P");
+        c.check_step(&g, "apply foo_lemma").unwrap();
+    }
+
+    #[test]
+    fn kernel_infer_checker_rejects_textual_only_lemma_as_unattested() {
+        // Empty kernel registry; goal claims `foo_lemma` is in scope.
+        // Production checker rejects this as `NotKernelAttested` —
+        // an adversarial LLM can't bypass the trust boundary just by
+        // forging a prompt context.
+        let reg = AxiomRegistry::new();
+        let c = KernelInferChecker::new(reg);
+        let mut g = LlmGoalSummary::new("thm", "P");
+        g.lemmas_in_scope = vec![(
+            Text::from("foo_lemma"),
+            Text::from("P"),
+        )];
+        match c.check_step_typed(&g, "apply foo_lemma") {
+            Err(KernelRejectReason::NotKernelAttested { name }) => {
+                assert_eq!(name.as_str(), "foo_lemma");
+            }
+            other => panic!("expected NotKernelAttested, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn kernel_infer_checker_distinguishes_in_scope_from_unattested() {
+        // Three states:
+        //   1. In registry             ⇒ Ok
+        //   2. In textual scope only   ⇒ NotKernelAttested
+        //   3. Nowhere                 ⇒ NotInScope
+        let reg = registry_with(&["registered"]);
+        let c = KernelInferChecker::new(reg);
+        let mut g = LlmGoalSummary::new("thm", "P");
+        g.lemmas_in_scope = vec![
+            (Text::from("textual_only"), Text::from("Q")),
+        ];
+
+        c.check_step(&g, "apply registered").unwrap();
+
+        match c.check_step_typed(&g, "apply textual_only") {
+            Err(KernelRejectReason::NotKernelAttested { .. }) => {}
+            other => panic!("expected NotKernelAttested, got {:?}", other),
+        }
+
+        match c.check_step_typed(&g, "apply random_name") {
+            Err(KernelRejectReason::NotInScope { .. }) => {}
+            other => panic!("expected NotInScope, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn kernel_infer_checker_admits_canonical_tactics() {
+        let c = KernelInferChecker::new(AxiomRegistry::new());
+        let g = LlmGoalSummary::new("thm", "P");
+        for t in ["intro", "auto", "simp", "trivial", "smt"] {
+            c.check_step(&g, t).unwrap();
+        }
+    }
+
+    #[test]
+    fn kernel_infer_checker_admits_comments_and_blank_lines() {
+        let c = KernelInferChecker::new(AxiomRegistry::new());
+        let g = LlmGoalSummary::new("thm", "P");
+        c.check_step(&g, "").unwrap();
+        c.check_step(&g, "   ").unwrap();
+        c.check_step(&g, "// note about the next step").unwrap();
+    }
+
+    #[test]
+    fn task_90_kernel_attestation_replaces_textual_resolution() {
+        // Pin the #90 hardening contract:
+        //
+        // The production checker is built on a kernel-side
+        // `AxiomRegistry`; an `apply NAME` step succeeds only when
+        // `NAME` is registered.  The textual `lemmas_in_scope`
+        // view (which the LLM's prompt builder controls) is no
+        // longer the trust boundary for citation resolution.
+        let trusted = registry_with(&["legit_axiom"]);
+        let c = KernelInferChecker::new(trusted);
+
+        // Goal claims a different name is in scope; the LLM
+        // attempts to apply it.  Production mode rejects.
+        let mut g = LlmGoalSummary::new("thm", "P");
+        g.lemmas_in_scope = vec![(
+            Text::from("forged_axiom"),
+            Text::from("anything"),
+        )];
+        assert!(c.check_step(&g, "apply forged_axiom").is_err());
+
+        // Same goal, applied through the trusted name: accept.
+        assert!(c.check_step(&g, "apply legit_axiom").is_ok());
     }
 }
