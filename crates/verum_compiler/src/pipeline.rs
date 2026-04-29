@@ -1583,6 +1583,30 @@ impl<'s> CompilationPipeline<'s> {
         let start = std::time::Instant::now();
         let mut module_times = std::collections::HashMap::new();
 
+        // Surface inert CoreConfig.parallel field. The field
+        // defaults to `true` and is documented as "Parallel
+        // compilation", but the compile_core path is mostly
+        // sequential for stdlib registration-ordering reasons —
+        // the cross-module type-name registration and impl-block
+        // attachment passes need a deterministic order that the
+        // current rayon-free path provides. The lazy-load path
+        // (run_full_compilation, line ~3777) does use
+        // par_iter for I/O-only work; that path has its own
+        // parallelism without consulting CoreConfig.
+        //
+        // Closes the inert-defense pattern by routing the
+        // requested value through tracing so embedders see when
+        // their `parallel = false` setting was observed (and
+        // silently no-op'd because the path is already sequential).
+        tracing::debug!(
+            "compile_core: parallel={}, optimization_level={}, debug_info={}, source_maps={} \
+             — parallel field is forward-looking; this path is sequential",
+            config.parallel,
+            config.optimization_level,
+            config.debug_info,
+            config.source_maps,
+        );
+
         // ====================================================================
         // STEP 1: Discover modules
         // ====================================================================
