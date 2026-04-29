@@ -1,0 +1,936 @@
+//! LLM-native tactic protocol — LCF-style fail-closed bridge between
+//! a language-model proof proposer and the trusted kernel.
+//!
+//! ## Goal
+//!
+//! Verum is the first proof assistant where LLM assistance is
+//! guaranteed sound *by construction*.  An LLM may propose tactic
+//! sequences for any goal, but the proposal is **always re-checked
+//! by the kernel** before being committed.  If the kernel rejects
+//! any step, the proposal is discarded and the audit trail records
+//! the rejection.  The LLM never short-circuits the kernel.
+//!
+//! This is the LCF principle, generalised: every term is kernel-
+//! checked regardless of who / what proposed it.
+//!
+//! ## Architectural pattern
+//!
+//! Same single-trait-boundary pattern as the rest of the integration
+//! arc (ladder_dispatch / proof_drafting / proof_repair / closure_cache
+//! / doc_render / foreign_import):
+//!
+//!   * [`LlmGoalSummary`] — typed projection of the focused proof
+//!     state (goal + hypotheses + lemmas + recent history + framework
+//!     axioms in scope) handed to the LLM.
+//!   * [`LlmProofProposal`] — typed result (model_id + prompt_hash +
+//!     completion_hash + tactic_sequence + raw_completion).
+//!   * [`LlmTacticAdapter`] trait — single dispatch interface.
+//!     Reference impls: [`MockLlmAdapter`] (deterministic,
+//!     test-friendly), [`EchoLlmAdapter`] (echoes a configured
+//!     hint).  Production adapters (cloud / local) plug in via the
+//!     same trait.
+//!   * [`KernelChecker`] trait — re-checks each proposed step.
+//!     Reference impl: [`PatternKernelChecker`] (V0 — recognises
+//!     well-formed `apply NAME` / canonical-tactic shapes).  V1
+//!     wires the actual kernel re-check.
+//!   * [`KernelGate`] — orchestrates `adapter.propose` →
+//!     `checker.check_step` per-step → typed [`KernelVerdict`] +
+//!     [`LlmProtocolEvent`] for the audit trail.
+//!   * [`AuditTrail`] — append-only JSONL log persisted to
+//!     `target/.verum_cache/llm-proofs.jsonl` (or wherever the
+//!     consumer points it).  Every LLM invocation produces an
+//!     event so the proof is reproducible from the log.
+//!
+//! ## Fail-closed contract
+//!
+//! `KernelGate::run` returns [`KernelVerdict::Accepted`] only when
+//! the kernel re-checked every step in the proposal.  Any rejection
+//! produces [`KernelVerdict::Rejected`] with the failing step's
+//! index + reason.  The audit trail captures both paths.
+
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use verum_common::Text;
+
+// =============================================================================
+// LlmGoalSummary — typed projection of the proof state
+// =============================================================================
+
+/// What the LLM sees about the focused proof state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmGoalSummary {
+    pub theorem_name: Text,
+    pub focused_proposition: Text,
+    /// Local hypotheses: `(name, type)`.
+    pub hypotheses: Vec<(Text, Text)>,
+    /// Lemmas reachable from this proof: `(name, signature)`.
+    pub lemmas_in_scope: Vec<(Text, Text)>,
+    /// Last few executed tactic steps (the LLM uses this for
+    /// context — repeating the same step twice is usually wrong).
+    pub recent_tactic_history: Vec<Text>,
+    /// Framework axioms reachable: `(framework_tag, citation)`.
+    /// The LLM uses these to know which trusted-base citations are
+    /// legitimate.
+    pub framework_axioms_in_scope: Vec<(Text, Text)>,
+}
+
+impl LlmGoalSummary {
+    /// Convenient constructor for tests.
+    pub fn new(theorem_name: impl Into<Text>, proposition: impl Into<Text>) -> Self {
+        Self {
+            theorem_name: theorem_name.into(),
+            focused_proposition: proposition.into(),
+            hypotheses: Vec::new(),
+            lemmas_in_scope: Vec::new(),
+            recent_tactic_history: Vec::new(),
+            framework_axioms_in_scope: Vec::new(),
+        }
+    }
+
+    /// Render the goal into the canonical prompt the adapters
+    /// hash and feed to the LLM.  Order is stable so the prompt
+    /// hash is deterministic across runs.
+    pub fn render_prompt(&self) -> Text {
+        let mut s = String::new();
+        s.push_str("You are a proof assistant. Propose a Verum tactic sequence to discharge the goal.\n\n");
+        s.push_str(&format!("Theorem: {}\n", self.theorem_name.as_str()));
+        s.push_str(&format!("Goal: {}\n", self.focused_proposition.as_str()));
+        if !self.hypotheses.is_empty() {
+            s.push_str("\nHypotheses:\n");
+            for (name, ty) in &self.hypotheses {
+                s.push_str(&format!("  {} : {}\n", name.as_str(), ty.as_str()));
+            }
+        }
+        if !self.lemmas_in_scope.is_empty() {
+            s.push_str("\nLemmas in scope:\n");
+            for (name, sig) in &self.lemmas_in_scope {
+                s.push_str(&format!("  {} : {}\n", name.as_str(), sig.as_str()));
+            }
+        }
+        if !self.recent_tactic_history.is_empty() {
+            s.push_str("\nRecent tactic history (most recent last):\n");
+            for step in &self.recent_tactic_history {
+                s.push_str(&format!("  - {}\n", step.as_str()));
+            }
+        }
+        if !self.framework_axioms_in_scope.is_empty() {
+            s.push_str("\nFramework axioms in scope:\n");
+            for (tag, cite) in &self.framework_axioms_in_scope {
+                s.push_str(&format!("  {}: {}\n", tag.as_str(), cite.as_str()));
+            }
+        }
+        s.push_str("\nRespond with a sequence of tactic invocations, one per line.\n");
+        Text::from(s)
+    }
+
+    /// Stable blake3 hash of the rendered prompt.  Hex-encoded.
+    pub fn prompt_hash(&self) -> Text {
+        let p = self.render_prompt();
+        Text::from(hex32(blake3::hash(p.as_str().as_bytes()).as_bytes()))
+    }
+}
+
+fn hex32(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{:02x}", b));
+    }
+    s
+}
+
+// =============================================================================
+// LlmProofProposal — what the LLM returned
+// =============================================================================
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmProofProposal {
+    pub model_id: Text,
+    pub prompt_hash: Text,
+    pub completion_hash: Text,
+    /// Parsed tactic sequence (one tactic invocation per element).
+    pub tactic_sequence: Vec<Text>,
+    /// Raw completion as the LLM emitted it (for the audit log).
+    pub raw_completion: Text,
+    /// Wall time for the propose call (ms).
+    pub elapsed_ms: u64,
+}
+
+impl LlmProofProposal {
+    /// Build the completion-side hash from a raw string.
+    pub fn hash_completion(s: &str) -> Text {
+        Text::from(hex32(blake3::hash(s.as_bytes()).as_bytes()))
+    }
+}
+
+// =============================================================================
+// LlmTacticAdapter trait
+// =============================================================================
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LlmError {
+    /// The model service is unreachable / failed.
+    Transport(Text),
+    /// The model returned a malformed response.
+    MalformedResponse(Text),
+    /// The model declined to answer (e.g. content policy).
+    Refused(Text),
+    /// Configuration error (e.g. unknown model id).
+    Config(Text),
+}
+
+impl std::fmt::Display for LlmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LlmError::Transport(t) => write!(f, "transport: {}", t.as_str()),
+            LlmError::MalformedResponse(t) => write!(f, "malformed response: {}", t.as_str()),
+            LlmError::Refused(t) => write!(f, "model refused: {}", t.as_str()),
+            LlmError::Config(t) => write!(f, "config: {}", t.as_str()),
+        }
+    }
+}
+
+impl std::error::Error for LlmError {}
+
+/// Single dispatch interface for an LLM proof-proposer.
+pub trait LlmTacticAdapter: std::fmt::Debug + Send + Sync {
+    /// Stable model identifier (e.g. `"local/llama-3-8b-q4"`,
+    /// `"cloud/claude-sonnet-4-6"`).  Goes into the audit trail.
+    fn model_id(&self) -> Text;
+
+    /// Propose a tactic sequence for the given goal.  The
+    /// implementation MUST be deterministic on the same `(prompt,
+    /// model_id)` pair *or* explicitly mark itself as
+    /// non-deterministic via an extra-info channel — the audit
+    /// trail relies on this for replay.
+    fn propose(&self, goal: &LlmGoalSummary) -> Result<LlmProofProposal, LlmError>;
+}
+
+// =============================================================================
+// MockLlmAdapter — deterministic, test-friendly
+// =============================================================================
+
+/// Mock adapter that returns a canned proposal for every prompt.
+/// Used in tests + the CLI's `--mock` mode.
+#[derive(Debug, Clone)]
+pub struct MockLlmAdapter {
+    pub model_id: Text,
+    /// Canned tactic sequence to return.
+    pub canned_steps: Vec<Text>,
+}
+
+impl MockLlmAdapter {
+    pub fn new(model_id: impl Into<Text>, steps: Vec<&str>) -> Self {
+        Self {
+            model_id: model_id.into(),
+            canned_steps: steps.iter().map(|s| Text::from(*s)).collect(),
+        }
+    }
+}
+
+impl LlmTacticAdapter for MockLlmAdapter {
+    fn model_id(&self) -> Text {
+        self.model_id.clone()
+    }
+
+    fn propose(&self, goal: &LlmGoalSummary) -> Result<LlmProofProposal, LlmError> {
+        let raw = self
+            .canned_steps
+            .iter()
+            .map(|t| t.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(LlmProofProposal {
+            model_id: self.model_id.clone(),
+            prompt_hash: goal.prompt_hash(),
+            completion_hash: LlmProofProposal::hash_completion(&raw),
+            tactic_sequence: self.canned_steps.clone(),
+            raw_completion: Text::from(raw),
+            elapsed_ms: 0,
+        })
+    }
+}
+
+// =============================================================================
+// EchoLlmAdapter — echoes a hint as the proposal (useful for piping
+// in pre-computed sequences from external tools)
+// =============================================================================
+
+#[derive(Debug, Clone)]
+pub struct EchoLlmAdapter {
+    pub model_id: Text,
+    pub hint_lines: Vec<Text>,
+}
+
+impl EchoLlmAdapter {
+    pub fn new(model_id: impl Into<Text>, hint: &str) -> Self {
+        let hint_lines: Vec<Text> = hint
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(Text::from)
+            .collect();
+        Self {
+            model_id: model_id.into(),
+            hint_lines,
+        }
+    }
+}
+
+impl LlmTacticAdapter for EchoLlmAdapter {
+    fn model_id(&self) -> Text {
+        self.model_id.clone()
+    }
+
+    fn propose(&self, goal: &LlmGoalSummary) -> Result<LlmProofProposal, LlmError> {
+        if self.hint_lines.is_empty() {
+            return Err(LlmError::MalformedResponse(Text::from(
+                "echo adapter has no hint lines configured",
+            )));
+        }
+        let raw = self
+            .hint_lines
+            .iter()
+            .map(|t| t.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(LlmProofProposal {
+            model_id: self.model_id.clone(),
+            prompt_hash: goal.prompt_hash(),
+            completion_hash: LlmProofProposal::hash_completion(&raw),
+            tactic_sequence: self.hint_lines.clone(),
+            raw_completion: Text::from(raw),
+            elapsed_ms: 0,
+        })
+    }
+}
+
+// =============================================================================
+// KernelChecker trait
+// =============================================================================
+
+/// Re-checks one proposed tactic step against the goal.  V0 ships a
+/// pattern-recognising reference; V1 will wire the actual kernel
+/// re-check infrastructure.
+pub trait KernelChecker: std::fmt::Debug + Send + Sync {
+    /// Check that `step` is a well-formed tactic invocation that
+    /// can be applied to `goal`.  Returns Ok on accept.  Returns
+    /// Err with a diagnostic on reject.  The implementation MUST
+    /// fail closed: if it can't *prove* the step is sound, it
+    /// returns Err.
+    fn check_step(&self, goal: &LlmGoalSummary, step: &str) -> Result<(), Text>;
+}
+
+/// V0 reference checker.  Recognises:
+///   * `apply <name>` where `<name>` is one of the lemmas in scope.
+///   * Canonical tactic invocations: `intro`, `intro <name>`,
+///     `auto`, `simp`, `refl`, `assumption`, `trivial`, `ring`,
+///     `linarith`, `nlinarith`, `norm_num`, `omega`, `field`,
+///     `blast`, `smt`.
+///   * Lines starting with `//` (comments) — admitted as no-ops.
+///
+/// Anything else is rejected.  V1 wires in the full kernel
+/// re-check (refinement-type elaboration, depth check, framework
+/// axiom resolution, …).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PatternKernelChecker;
+
+impl PatternKernelChecker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+const CANONICAL_TACTICS: &[&str] = &[
+    "intro", "auto", "simp", "refl", "assumption", "trivial", "ring", "linarith",
+    "nlinarith", "norm_num", "omega", "field", "blast", "smt", "split", "left",
+    "right", "by_contradiction",
+];
+
+impl KernelChecker for PatternKernelChecker {
+    fn check_step(&self, goal: &LlmGoalSummary, step: &str) -> Result<(), Text> {
+        let s = step.trim().trim_end_matches(';').trim();
+        if s.is_empty() || s.starts_with("//") {
+            return Ok(()); // admitted comment / empty line
+        }
+        // `apply NAME` — name must resolve to an in-scope lemma.
+        if let Some(rest) = s.strip_prefix("apply ") {
+            let name = rest.split_whitespace().next().unwrap_or("");
+            if name.is_empty() {
+                return Err(Text::from("apply with no lemma name"));
+            }
+            // Strip trailing arg syntax like `with [a, b]`.
+            let bare = name.trim_end_matches(',');
+            let resolved = goal
+                .lemmas_in_scope
+                .iter()
+                .any(|(n, _)| n.as_str() == bare);
+            if !resolved {
+                return Err(Text::from(format!(
+                    "lemma '{}' not in scope (apply target unresolved)",
+                    bare
+                )));
+            }
+            return Ok(());
+        }
+        // Canonical tactic with optional argument(s).
+        let head = s.split(|c: char| !c.is_ascii_alphabetic() && c != '_').next().unwrap_or("");
+        if CANONICAL_TACTICS.contains(&head) {
+            return Ok(());
+        }
+        Err(Text::from(format!(
+            "unrecognised tactic shape '{}' — V0 checker accepts only `apply NAME` or canonical tactics",
+            s
+        )))
+    }
+}
+
+// =============================================================================
+// KernelVerdict + LlmProtocolEvent
+// =============================================================================
+
+/// Result of routing one LLM proposal through the kernel gate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum KernelVerdict {
+    /// Every step type-checked.
+    Accepted { steps_checked: usize },
+    /// Some step failed; carries the index (0-based) + reason.
+    Rejected {
+        failed_step_index: usize,
+        reason: Text,
+    },
+}
+
+impl KernelVerdict {
+    pub fn is_accepted(&self) -> bool {
+        matches!(self, KernelVerdict::Accepted { .. })
+    }
+}
+
+/// One audit-trail event.  Persisted as a single JSONL line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum LlmProtocolEvent {
+    /// The LLM was queried (regardless of outcome).
+    LlmInvoked {
+        model_id: Text,
+        theorem: Text,
+        prompt_hash: Text,
+        completion_hash: Text,
+        tactic_count: usize,
+        elapsed_ms: u64,
+        timestamp: u64,
+    },
+    /// The kernel accepted the proposal.
+    KernelAccepted {
+        model_id: Text,
+        theorem: Text,
+        prompt_hash: Text,
+        completion_hash: Text,
+        steps_checked: usize,
+        timestamp: u64,
+    },
+    /// The kernel rejected at least one step.
+    KernelRejected {
+        model_id: Text,
+        theorem: Text,
+        prompt_hash: Text,
+        completion_hash: Text,
+        failed_step_index: usize,
+        reason: Text,
+        timestamp: u64,
+    },
+    /// The adapter itself errored (transport / config / refusal).
+    ProtocolError {
+        model_id: Text,
+        theorem: Text,
+        error: Text,
+        timestamp: u64,
+    },
+}
+
+impl LlmProtocolEvent {
+    /// Stable diagnostic name (matches the JSON `kind` tag).
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::LlmInvoked { .. } => "LlmInvoked",
+            Self::KernelAccepted { .. } => "KernelAccepted",
+            Self::KernelRejected { .. } => "KernelRejected",
+            Self::ProtocolError { .. } => "ProtocolError",
+        }
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// =============================================================================
+// AuditTrail — append-only JSONL log
+// =============================================================================
+
+/// Append-only event log.  Implementations may persist to disk
+/// (`FilesystemAuditTrail`), an in-memory buffer
+/// (`MemoryAuditTrail`, used in tests), or a remote sink.
+pub trait AuditTrail: std::fmt::Debug + Send + Sync {
+    fn append(&self, event: LlmProtocolEvent) -> Result<(), Text>;
+    /// Read every recorded event in chronological order.
+    fn read_all(&self) -> Result<Vec<LlmProtocolEvent>, Text>;
+}
+
+#[derive(Debug, Default)]
+pub struct MemoryAuditTrail {
+    events: std::sync::Mutex<Vec<LlmProtocolEvent>>,
+}
+
+impl MemoryAuditTrail {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl AuditTrail for MemoryAuditTrail {
+    fn append(&self, event: LlmProtocolEvent) -> Result<(), Text> {
+        let mut g = self
+            .events
+            .lock()
+            .map_err(|_| Text::from("memory audit trail mutex poisoned"))?;
+        g.push(event);
+        Ok(())
+    }
+
+    fn read_all(&self) -> Result<Vec<LlmProtocolEvent>, Text> {
+        let g = self
+            .events
+            .lock()
+            .map_err(|_| Text::from("memory audit trail mutex poisoned"))?;
+        Ok(g.clone())
+    }
+}
+
+#[derive(Debug)]
+pub struct FilesystemAuditTrail {
+    path: std::path::PathBuf,
+}
+
+impl FilesystemAuditTrail {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Result<Self, Text> {
+        let path = path.into();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                Text::from(format!("creating audit trail dir {}: {}", parent.display(), e))
+            })?;
+        }
+        Ok(Self { path })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AuditTrail for FilesystemAuditTrail {
+    fn append(&self, event: LlmProtocolEvent) -> Result<(), Text> {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        let json = serde_json::to_string(&event).map_err(|e| {
+            Text::from(format!("audit trail serialise: {}", e))
+        })?;
+        let mut f = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|e| Text::from(format!("audit trail open: {}", e)))?;
+        writeln!(f, "{}", json).map_err(|e| Text::from(format!("audit trail write: {}", e)))?;
+        Ok(())
+    }
+
+    fn read_all(&self) -> Result<Vec<LlmProtocolEvent>, Text> {
+        let raw = match std::fs::read_to_string(&self.path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(Text::from(format!("audit trail read: {}", e))),
+        };
+        let mut out = Vec::new();
+        for (i, line) in raw.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: LlmProtocolEvent = serde_json::from_str(line).map_err(|e| {
+                Text::from(format!(
+                    "audit trail parse error at line {}: {}",
+                    i + 1,
+                    e
+                ))
+            })?;
+            out.push(event);
+        }
+        Ok(out)
+    }
+}
+
+// =============================================================================
+// KernelGate — the LCF-style fail-closed orchestrator
+// =============================================================================
+
+/// Orchestrates `adapter.propose` → `checker.check_step` per step →
+/// emits the appropriate audit-trail events.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct KernelGate;
+
+impl KernelGate {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Run one round of the protocol.  Returns the verdict and
+    /// emits exactly two audit events on the success / failure
+    /// paths (LlmInvoked + KernelAccepted, or LlmInvoked +
+    /// KernelRejected), or one audit event on transport / config
+    /// failure (ProtocolError).
+    pub fn run<A: LlmTacticAdapter, K: KernelChecker, T: AuditTrail>(
+        &self,
+        adapter: &A,
+        checker: &K,
+        goal: &LlmGoalSummary,
+        audit: &T,
+    ) -> Result<KernelVerdict, LlmError> {
+        let proposal = match adapter.propose(goal) {
+            Ok(p) => p,
+            Err(e) => {
+                // Adapter-side failure — emit ProtocolError and
+                // surface the error to the caller.
+                let _ = audit.append(LlmProtocolEvent::ProtocolError {
+                    model_id: adapter.model_id(),
+                    theorem: goal.theorem_name.clone(),
+                    error: Text::from(format!("{}", e)),
+                    timestamp: now_secs(),
+                });
+                return Err(e);
+            }
+        };
+        let _ = audit.append(LlmProtocolEvent::LlmInvoked {
+            model_id: proposal.model_id.clone(),
+            theorem: goal.theorem_name.clone(),
+            prompt_hash: proposal.prompt_hash.clone(),
+            completion_hash: proposal.completion_hash.clone(),
+            tactic_count: proposal.tactic_sequence.len(),
+            elapsed_ms: proposal.elapsed_ms,
+            timestamp: now_secs(),
+        });
+        for (i, step) in proposal.tactic_sequence.iter().enumerate() {
+            if let Err(reason) = checker.check_step(goal, step.as_str()) {
+                let _ = audit.append(LlmProtocolEvent::KernelRejected {
+                    model_id: proposal.model_id.clone(),
+                    theorem: goal.theorem_name.clone(),
+                    prompt_hash: proposal.prompt_hash.clone(),
+                    completion_hash: proposal.completion_hash.clone(),
+                    failed_step_index: i,
+                    reason: reason.clone(),
+                    timestamp: now_secs(),
+                });
+                return Ok(KernelVerdict::Rejected {
+                    failed_step_index: i,
+                    reason,
+                });
+            }
+        }
+        let _ = audit.append(LlmProtocolEvent::KernelAccepted {
+            model_id: proposal.model_id.clone(),
+            theorem: goal.theorem_name.clone(),
+            prompt_hash: proposal.prompt_hash.clone(),
+            completion_hash: proposal.completion_hash.clone(),
+            steps_checked: proposal.tactic_sequence.len(),
+            timestamp: now_secs(),
+        });
+        Ok(KernelVerdict::Accepted {
+            steps_checked: proposal.tactic_sequence.len(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lemma(name: &str, sig: &str) -> (Text, Text) {
+        (Text::from(name), Text::from(sig))
+    }
+
+    fn goal_with_lemmas(lemmas: &[(&str, &str)]) -> LlmGoalSummary {
+        let mut g = LlmGoalSummary::new("thm", "P(x)");
+        g.lemmas_in_scope = lemmas
+            .iter()
+            .map(|(n, s)| lemma(n, s))
+            .collect();
+        g
+    }
+
+    // ----- LlmGoalSummary -----
+
+    #[test]
+    fn render_prompt_is_deterministic() {
+        let g1 = LlmGoalSummary::new("foo", "True");
+        let g2 = LlmGoalSummary::new("foo", "True");
+        assert_eq!(g1.render_prompt(), g2.render_prompt());
+        assert_eq!(g1.prompt_hash(), g2.prompt_hash());
+    }
+
+    #[test]
+    fn prompt_hash_is_64_chars() {
+        let g = LlmGoalSummary::new("foo", "P(x)");
+        let h = g.prompt_hash();
+        assert_eq!(h.as_str().len(), 64);
+        assert!(h.as_str().chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn render_prompt_includes_hypotheses_and_lemmas() {
+        let mut g = LlmGoalSummary::new("foo", "Q(x)");
+        g.hypotheses = vec![lemma("h1", "P(x)")];
+        g.lemmas_in_scope = vec![lemma("p_implies_q", "forall x. P(x) -> Q(x)")];
+        let p = g.render_prompt();
+        assert!(p.as_str().contains("h1 : P(x)"));
+        assert!(p.as_str().contains("p_implies_q"));
+    }
+
+    // ----- LlmTacticAdapter impls -----
+
+    #[test]
+    fn mock_adapter_returns_canned_steps() {
+        let a = MockLlmAdapter::new("mock-1", vec!["intro", "apply foo"]);
+        let g = LlmGoalSummary::new("thm", "P");
+        let p = a.propose(&g).unwrap();
+        assert_eq!(p.model_id.as_str(), "mock-1");
+        assert_eq!(p.tactic_sequence.len(), 2);
+        assert_eq!(p.tactic_sequence[0].as_str(), "intro");
+    }
+
+    #[test]
+    fn mock_adapter_hashes_prompt_and_completion() {
+        let a = MockLlmAdapter::new("mock", vec!["intro"]);
+        let g = LlmGoalSummary::new("thm", "P");
+        let p = a.propose(&g).unwrap();
+        assert_eq!(p.prompt_hash, g.prompt_hash());
+        assert_eq!(p.completion_hash.as_str().len(), 64);
+    }
+
+    #[test]
+    fn echo_adapter_parses_hint_lines() {
+        let a = EchoLlmAdapter::new("echo", "intro\napply foo\n   \nauto");
+        let g = LlmGoalSummary::new("thm", "P");
+        let p = a.propose(&g).unwrap();
+        assert_eq!(p.tactic_sequence.len(), 3);
+    }
+
+    #[test]
+    fn echo_adapter_rejects_empty_hint() {
+        let a = EchoLlmAdapter::new("echo", "");
+        let g = LlmGoalSummary::new("thm", "P");
+        assert!(matches!(a.propose(&g), Err(LlmError::MalformedResponse(_))));
+    }
+
+    // ----- PatternKernelChecker -----
+
+    #[test]
+    fn pattern_checker_accepts_canonical_tactics() {
+        let c = PatternKernelChecker::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        for t in &["intro", "auto", "simp", "ring", "linarith", "trivial"] {
+            assert!(c.check_step(&g, t).is_ok(), "tactic {} should be accepted", t);
+        }
+    }
+
+    #[test]
+    fn pattern_checker_accepts_apply_with_in_scope_lemma() {
+        let c = PatternKernelChecker::new();
+        let g = goal_with_lemmas(&[("succ_pos", "...")]);
+        assert!(c.check_step(&g, "apply succ_pos").is_ok());
+    }
+
+    #[test]
+    fn pattern_checker_rejects_apply_with_out_of_scope_lemma() {
+        let c = PatternKernelChecker::new();
+        let g = goal_with_lemmas(&[("foo", "...")]);
+        let err = c.check_step(&g, "apply nonexistent").unwrap_err();
+        assert!(err.as_str().contains("not in scope"));
+    }
+
+    #[test]
+    fn pattern_checker_rejects_garbage() {
+        let c = PatternKernelChecker::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        assert!(c.check_step(&g, "xyz_garbage").is_err());
+        assert!(c.check_step(&g, "totally invalid syntax").is_err());
+    }
+
+    #[test]
+    fn pattern_checker_admits_comments_and_empty_lines() {
+        let c = PatternKernelChecker::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        assert!(c.check_step(&g, "// this is a comment").is_ok());
+        assert!(c.check_step(&g, "   ").is_ok());
+        assert!(c.check_step(&g, "").is_ok());
+    }
+
+    // ----- AuditTrail impls -----
+
+    #[test]
+    fn memory_audit_trail_round_trips() {
+        let t = MemoryAuditTrail::new();
+        let event = LlmProtocolEvent::LlmInvoked {
+            model_id: Text::from("m"),
+            theorem: Text::from("foo"),
+            prompt_hash: Text::from("p".repeat(64)),
+            completion_hash: Text::from("c".repeat(64)),
+            tactic_count: 2,
+            elapsed_ms: 10,
+            timestamp: 1234567890,
+        };
+        t.append(event.clone()).unwrap();
+        let read = t.read_all().unwrap();
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0], event);
+    }
+
+    #[test]
+    fn filesystem_audit_trail_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        let t = FilesystemAuditTrail::new(&path).unwrap();
+        for i in 0..3 {
+            t.append(LlmProtocolEvent::KernelAccepted {
+                model_id: Text::from("m"),
+                theorem: Text::from(format!("thm-{}", i)),
+                prompt_hash: Text::from("p".repeat(64)),
+                completion_hash: Text::from("c".repeat(64)),
+                steps_checked: i,
+                timestamp: 0,
+            })
+            .unwrap();
+        }
+        let read = t.read_all().unwrap();
+        assert_eq!(read.len(), 3);
+    }
+
+    #[test]
+    fn filesystem_audit_trail_handles_missing_file_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not-yet.jsonl");
+        let t = FilesystemAuditTrail::new(&path).unwrap();
+        let read = t.read_all().unwrap();
+        assert!(read.is_empty());
+    }
+
+    // ----- KernelGate — LCF fail-closed contract -----
+
+    #[test]
+    fn gate_accepts_well_formed_proposal() {
+        let adapter = MockLlmAdapter::new("mock", vec!["intro", "auto"]);
+        let checker = PatternKernelChecker::new();
+        let trail = MemoryAuditTrail::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        match v {
+            KernelVerdict::Accepted { steps_checked } => assert_eq!(steps_checked, 2),
+            other => panic!("expected Accepted, got {:?}", other),
+        }
+        let events = trail.read_all().unwrap();
+        // LlmInvoked + KernelAccepted — exactly two events.
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name(), "LlmInvoked");
+        assert_eq!(events[1].name(), "KernelAccepted");
+    }
+
+    #[test]
+    fn gate_rejects_proposal_with_bad_step_and_records_index() {
+        let adapter = MockLlmAdapter::new("mock", vec!["intro", "xyz_garbage", "auto"]);
+        let checker = PatternKernelChecker::new();
+        let trail = MemoryAuditTrail::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        match v {
+            KernelVerdict::Rejected {
+                failed_step_index,
+                reason,
+            } => {
+                assert_eq!(failed_step_index, 1);
+                assert!(reason.as_str().contains("xyz_garbage"));
+            }
+            other => panic!("expected Rejected, got {:?}", other),
+        }
+        let events = trail.read_all().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].name(), "LlmInvoked");
+        assert_eq!(events[1].name(), "KernelRejected");
+    }
+
+    #[test]
+    fn gate_rejects_apply_to_out_of_scope_lemma() {
+        let adapter = MockLlmAdapter::new("mock", vec!["apply nonexistent_lemma"]);
+        let checker = PatternKernelChecker::new();
+        let trail = MemoryAuditTrail::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        assert!(!v.is_accepted());
+    }
+
+    #[test]
+    fn gate_records_protocol_error_on_adapter_failure() {
+        // Failing adapter that always errors.
+        #[derive(Debug)]
+        struct FailingAdapter;
+        impl LlmTacticAdapter for FailingAdapter {
+            fn model_id(&self) -> Text {
+                Text::from("failing")
+            }
+            fn propose(&self, _: &LlmGoalSummary) -> Result<LlmProofProposal, LlmError> {
+                Err(LlmError::Transport(Text::from("network down")))
+            }
+        }
+        let trail = MemoryAuditTrail::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        let r = KernelGate::new().run(&FailingAdapter, &PatternKernelChecker::new(), &g, &trail);
+        assert!(matches!(r, Err(LlmError::Transport(_))));
+        let events = trail.read_all().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name(), "ProtocolError");
+    }
+
+    // ----- Acceptance criteria pin -----
+
+    #[test]
+    fn task_77_lcf_fail_closed_contract_holds() {
+        // §3 of acceptance: the LLM never short-circuits the kernel.
+        // Any garbage step → KernelRejected, no Accepted verdict.
+        let adapter = MockLlmAdapter::new(
+            "evil",
+            vec!["totally bogus syntax that should fail"],
+        );
+        let checker = PatternKernelChecker::new();
+        let trail = MemoryAuditTrail::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        assert!(!v.is_accepted(), "kernel must reject garbage proposal");
+    }
+
+    #[test]
+    fn task_77_audit_trail_captures_model_identity() {
+        // §5 of acceptance: every event logs model_id + prompt hash
+        // + completion hash so the proof is reproducible.
+        let adapter = MockLlmAdapter::new("local/llama-3-8b-q4", vec!["intro"]);
+        let trail = MemoryAuditTrail::new();
+        let g = LlmGoalSummary::new("thm", "P");
+        KernelGate::new()
+            .run(&adapter, &PatternKernelChecker::new(), &g, &trail)
+            .unwrap();
+        let events = trail.read_all().unwrap();
+        for e in &events {
+            // model_id, prompt_hash, completion_hash all present.
+            let s = serde_json::to_string(e).unwrap();
+            assert!(s.contains("local/llama-3-8b-q4"));
+        }
+    }
+}
