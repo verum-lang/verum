@@ -406,13 +406,13 @@ implement WeftSimulator {
 /// Phase-6 invariant catalogue — property tests reference these by
 /// name so the DST CI farm can aggregate failure rates per property.
 /// Adding a new invariant here is how you "register" it.
-public const PROPERTY_NO_TASK_LEAK: &'static Text = "no_task_leak";
-public const PROPERTY_NO_MESSAGE_LOSS: &'static Text = "no_message_loss";
-public const PROPERTY_GRACEFUL_SHUTDOWN_ZERO_DROP: &'static Text =
+public const PROPERTY_NO_TASK_LEAK: Text = "no_task_leak";
+public const PROPERTY_NO_MESSAGE_LOSS: Text = "no_message_loss";
+public const PROPERTY_GRACEFUL_SHUTDOWN_ZERO_DROP: Text =
     "graceful_shutdown_zero_drop";
-public const PROPERTY_SUPERVISOR_EVENTUALLY_RECOVERS: &'static Text =
+public const PROPERTY_SUPERVISOR_EVENTUALLY_RECOVERS: Text =
     "supervisor_eventually_recovers";
-public const PROPERTY_BACKPRESSURE_NEVER_OOM: &'static Text =
+public const PROPERTY_BACKPRESSURE_NEVER_OOM: Text =
     "backpressure_never_OOM";
-public const PROPERTY_CANCEL_REACHES_ALL_CHILDREN: &'static Text =
+public const PROPERTY_CANCEL_REACHES_ALL_CHILDREN: Text =
     "cancel_signal_reaches_all_children_within_grace";

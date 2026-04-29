@@ -9,11 +9,11 @@
 
 mount core.net.http.{Response, StatusCode};
 mount core.net.weft.error.{
-    IntoResponse, WeftError, ErrorCategory, ExtractRejection,
+    IntoResponse, WeftError, WeftErrorCategory, ExtractRejection,
 };
 
 // Every WeftError variant has a category + status + public message.
-fn typecheck_error_api(e: WeftError) -> (ErrorCategory, StatusCode, Text) {
+fn typecheck_error_api(e: WeftError) -> (WeftErrorCategory, StatusCode, Text) {
     (e.category(), e.status(), e.public_message())
 }
 
@@ -33,11 +33,11 @@ fn typecheck_extract_rejection(r: ExtractRejection) -> (StatusCode, Response) {
 
 // Retryability classification.
 fn typecheck_retryable() -> (Bool, Bool, Bool, Bool, Bool) {
-    (ErrorCategory.Transient.is_retryable(),
-     ErrorCategory.Upstream.is_retryable(),
-     ErrorCategory.Permanent.is_retryable(),
-     ErrorCategory.Security.is_retryable(),
-     ErrorCategory.Client.is_retryable())
+    (WeftErrorCategory.ErrTransient.is_retryable(),
+     WeftErrorCategory.ErrUpstream.is_retryable(),
+     WeftErrorCategory.ErrPermanent.is_retryable(),
+     WeftErrorCategory.ErrSecurity.is_retryable(),
+     WeftErrorCategory.ErrClient.is_retryable())
 }
 
 fn main() {

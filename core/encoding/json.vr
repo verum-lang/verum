@@ -48,8 +48,10 @@ public type JsonValue is
     | JsonArray(List<JsonValue>)
     | JsonObject(Map<Text, JsonValue>);
 
-// Backwards-compatible alias for users who prefer the short name.
-public type Json is JsonValue;
+// Note: prior `pub type Json is JsonValue` alias removed —
+// the user-facing name `Json` is reserved for the framework extractor
+// `core.net.weft.json_extractor.Json<T>` per net-framework spec §5.3.
+// Encoding-layer code uses the canonical `JsonValue`.
 
 // Error position and cause.
 public type JsonError is {

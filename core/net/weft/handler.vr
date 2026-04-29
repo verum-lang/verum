@@ -300,13 +300,7 @@ implement FromRequest for BodyText {
     }
 }
 
-/// JSON extractor placeholder. Actual deserialization binds in phase 2.
-public type WeftHandlerJson<T> is { inner: T };
-
-implement<T> WeftHandlerJson<T> {
-    public fn into_inner(self) -> T { self.inner }
-    public fn as_ref(&self) -> &T { &self.inner }
-}
+// JSON body extractor: see `core.net.weft.json_extractor.Json<T>`.
 
 /// Adapter letting ad-hoc closures satisfy the Handler protocol.
 public type ClosureHandler<F> is { f: F };
