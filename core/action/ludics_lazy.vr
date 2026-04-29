@@ -253,3 +253,82 @@ public theorem productivity_gate_necessary(d: LazyDesign) -> Bool
         true
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for CutElimVerdict / OrthogonalityVerdict
+// =============================================================================
+
+implement Eq for CutElimVerdict {
+    fn eq(&self, other: &CutElimVerdict) -> Bool {
+        match (self, other) {
+            (CutElimVerdict.Normalised { steps_taken: a },
+             CutElimVerdict.Normalised { steps_taken: b }) => a == b,
+            (CutElimVerdict.DepthExceeded, CutElimVerdict.DepthExceeded) => true,
+            (CutElimVerdict.NotBisimilar,  CutElimVerdict.NotBisimilar)  => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CutElimVerdict {
+    /// Renders the verdict for diagnostic surfaces:
+    ///   `Normalised { steps_taken }`  → `normalised after <N> steps`
+    ///   `DepthExceeded`               → `depth-exceeded`
+    ///   `NotBisimilar`                → `not-bisimilar`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CutElimVerdict.Normalised { steps_taken } =>
+                f.write_str(f"normalised after {steps_taken} steps".as_str()),
+            CutElimVerdict.DepthExceeded =>
+                f.write_str("depth-exceeded"),
+            CutElimVerdict.NotBisimilar =>
+                f.write_str("not-bisimilar"),
+        }
+    }
+}
+
+implement Debug for CutElimVerdict {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CutElimVerdict.Normalised { steps_taken } =>
+                f.write_str(f"Normalised({steps_taken})".as_str()),
+            CutElimVerdict.DepthExceeded =>
+                f.write_str("DepthExceeded"),
+            CutElimVerdict.NotBisimilar =>
+                f.write_str("NotBisimilar"),
+        }
+    }
+}
+
+implement Eq for OrthogonalityVerdict {
+    fn eq(&self, other: &OrthogonalityVerdict) -> Bool {
+        match (self, other) {
+            (OrthogonalityVerdict.Orthogonal,         OrthogonalityVerdict.Orthogonal)         => true,
+            (OrthogonalityVerdict.NonOrthogonal,      OrthogonalityVerdict.NonOrthogonal)      => true,
+            (OrthogonalityVerdict.DepthBoundReached,  OrthogonalityVerdict.DepthBoundReached)  => true,
+            _ => false,
+        }
+    }
+}
+
+implement Copy for OrthogonalityVerdict {}
+
+implement Display for OrthogonalityVerdict {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OrthogonalityVerdict.Orthogonal         => f.write_str("orthogonal"),
+            OrthogonalityVerdict.NonOrthogonal      => f.write_str("non-orthogonal"),
+            OrthogonalityVerdict.DepthBoundReached  => f.write_str("depth-bound-reached"),
+        }
+    }
+}
+
+implement Debug for OrthogonalityVerdict {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            OrthogonalityVerdict.Orthogonal         => f.write_str("Orthogonal"),
+            OrthogonalityVerdict.NonOrthogonal      => f.write_str("NonOrthogonal"),
+            OrthogonalityVerdict.DepthBoundReached  => f.write_str("DepthBoundReached"),
+        }
+    }
+}
