@@ -1217,7 +1217,17 @@ impl SemanticQueryCache {
             return result;
         }
 
-        // Fall back to persistent storage
+        // Fall back to persistent storage when cross-project
+        // sharing is enabled. Closes the inert-defense pattern
+        // around `enable_cross_project`: prior to wiring, the
+        // documented opt-out had no effect — the persistent
+        // store was always consulted as a fallback. Callers that
+        // want strict per-project caching (e.g. CI runs that
+        // shouldn't be influenced by neighbouring builds) now
+        // get the documented behaviour.
+        if !self.config.enable_cross_project {
+            return Maybe::None;
+        }
         if let Some(store) = &self.persistent_store {
             if let Ok(Some(info)) = store.load_type(name) {
                 // Promote to memory cache
@@ -1254,7 +1264,17 @@ impl SemanticQueryCache {
             return result;
         }
 
-        // Fall back to persistent storage
+        // Fall back to persistent storage when cross-project
+        // sharing is enabled. Closes the inert-defense pattern
+        // around `enable_cross_project`: prior to wiring, the
+        // documented opt-out had no effect — the persistent
+        // store was always consulted as a fallback. Callers that
+        // want strict per-project caching (e.g. CI runs that
+        // shouldn't be influenced by neighbouring builds) now
+        // get the documented behaviour.
+        if !self.config.enable_cross_project {
+            return Maybe::None;
+        }
         if let Some(store) = &self.persistent_store {
             if let Ok(Some(info)) = store.load_function(name) {
                 // Promote to memory cache
@@ -1289,7 +1309,17 @@ impl SemanticQueryCache {
             return result;
         }
 
-        // Fall back to persistent storage
+        // Fall back to persistent storage when cross-project
+        // sharing is enabled. Closes the inert-defense pattern
+        // around `enable_cross_project`: prior to wiring, the
+        // documented opt-out had no effect — the persistent
+        // store was always consulted as a fallback. Callers that
+        // want strict per-project caching (e.g. CI runs that
+        // shouldn't be influenced by neighbouring builds) now
+        // get the documented behaviour.
+        if !self.config.enable_cross_project {
+            return Maybe::None;
+        }
         if let Some(store) = &self.persistent_store {
             if let Ok(Some(result)) = store.load_verification(key) {
                 // Promote to memory cache
