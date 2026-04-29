@@ -469,12 +469,34 @@ public axiom kernel_cross_format_gate() -> Bool
 ///
 /// HTT (Lurie 2009) + AR 1994 chapter-by-chapter mechanisation
 /// status enumeration with `MechanisationStatus::{Mechanised,
-/// Partial, AxiomCited, Pending}` per section.
+/// Partial, AxiomCited, Pending, OutOfScopeForMsfs}` per section.
 ///
 /// Kernel discharge:
 /// `verum_kernel::mechanisation_roadmap::{htt_roadmap,
 /// adamek_rosicky_roadmap, CoverageReport::compute}`.
 @framework(verum, "Bridge — kernel mechanisation_roadmap (HTT + AR 1994 coverage)")
 public axiom kernel_mechanisation_roadmap() -> Bool
+    requires true
+    ensures  true;
+
+// =============================================================================
+// MSFS self-containment bridge (M-FINALIZATION 2026-04-29)
+// =============================================================================
+
+/// **Bridge: MSFS self-containment witness.**
+///
+/// Returns `true` iff MSFS is fully self-contained modulo
+/// ZFC + 2 inaccessibles — i.e. every HTT and Adámek-Rosický
+/// dependency cited by an MSFS proof body is mechanised, partial,
+/// or marked `OutOfScopeForMsfs` (NOT cited by any MSFS proof).
+///
+/// Kernel discharge:
+/// `verum_kernel::mechanisation_roadmap::msfs_self_contained()`
+/// computes the predicate from the live roadmap data; this bridge
+/// surfaces it through the kernel intrinsic dispatcher
+/// (`kernel_msfs_self_contained`) so a Verum-language @theorem can
+/// `apply` it.
+@framework(msfs, "Bridge — kernel msfs_self_contained (modulo ZFC + 2-inacc)")
+public axiom kernel_msfs_self_contained() -> Bool
     requires true
     ensures  true;
