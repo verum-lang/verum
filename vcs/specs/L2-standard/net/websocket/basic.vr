@@ -8,7 +8,7 @@
 // RFC 6455 WebSocket API surface.
 
 mount core.net.websocket.{
-    WsOpcode, CloseCode, Frame,
+    WsOpcode, CloseCode, WsFrame,
     encode, decode, WebSocketDecodeResult, WebSocketDecodeError,
     accept_key, validate_server_handshake,
     WEBSOCKET_MAGIC,
@@ -29,25 +29,25 @@ fn typecheck_close_code() -> (CloseCode, UInt16) {
     (c, c.code())
 }
 
-// Frame builders.
-fn typecheck_frames() -> (Frame, Frame, Frame, Frame, Frame) {
+// WsFrame builders.
+fn typecheck_frames() -> (WsFrame, WsFrame, WsFrame, WsFrame, WsFrame) {
     let data: List<Byte> = List.new();
-    let text = Frame.text(data.clone());
-    let bin = Frame.binary(data.clone());
-    let ping = Frame.ping(data.clone());
-    let pong = Frame.pong(data.clone());
-    let close = Frame.close(CloseCode.new(CloseCode.GOING_AWAY), &"bye".into());
+    let text = WsFrame.text(data.clone());
+    let bin = WsFrame.binary(data.clone());
+    let ping = WsFrame.ping(data.clone());
+    let pong = WsFrame.pong(data.clone());
+    let close = WsFrame.close(CloseCode.new(CloseCode.GOING_AWAY), &"bye".into());
     (text, bin, ping, pong, close)
 }
 
 // Encode — server side (unmasked) + client side (masked).
-fn typecheck_encode_server(frame: &Frame) -> List<Byte> {
+fn typecheck_encode_server(frame: &WsFrame) -> List<Byte> {
     let mut out = List.new();
     encode(frame, None, &mut out);
     out
 }
 
-fn typecheck_encode_client(frame: &Frame) -> List<Byte> {
+fn typecheck_encode_client(frame: &WsFrame) -> List<Byte> {
     let mut out = List.new();
     let key: [UInt8; 4] = [0x12, 0x34, 0x56, 0x78];
     encode(frame, Some(key), &mut out);

@@ -24,10 +24,10 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.h3.qpack.encoder.{encode_field_section};
-mount core.net.h3.qpack.decoder.{HeaderField, decode_field_section};
+mount core.net.h3.qpack.decoder.{QpackHeaderField, decode_field_section};
 
 fn empty_field_section_is_just_prefix() {
-    let headers: List<HeaderField> = [];
+    let headers: List<QpackHeaderField> = [];
     let out = encode_field_section(&headers);
     // RIC=0 (1 byte) + Delta Base sign 0 + value 0 (1 byte) = 2 bytes.
     assert(out.len() == 2);
@@ -36,7 +36,7 @@ fn empty_field_section_is_just_prefix() {
 }
 
 fn single_method_get_uses_static_index_17() {
-    let h = HeaderField { name: f":method", value: f"GET" };
+    let h = QpackHeaderField { name: f":method", value: f"GET" };
     let out = encode_field_section(&[h]);
     // Prefix 0x00 0x00 || Indexed Field Line static idx 17 = 0xD1.
     assert(out.len() == 3);
@@ -46,14 +46,14 @@ fn single_method_get_uses_static_index_17() {
 }
 
 fn status_200_uses_static_index_25() {
-    let h = HeaderField { name: f":status", value: f"200" };
+    let h = QpackHeaderField { name: f":status", value: f"200" };
     let out = encode_field_section(&[h]);
     assert(out.len() == 3);
     assert(out[2] == 0xD9_u8);        // 0xC0 | 25 = 0xD9
 }
 
 fn path_slash_uses_static_index_1() {
-    let h = HeaderField { name: f":path", value: f"/" };
+    let h = QpackHeaderField { name: f":path", value: f"/" };
     let out = encode_field_section(&[h]);
     assert(out[2] == 0xC1_u8);        // 0xC0 | 1
 }
@@ -61,10 +61,10 @@ fn path_slash_uses_static_index_1() {
 fn three_indexed_fields_emit_three_single_bytes() {
     // Compose a request-line triplet: :method GET, :scheme https, :path /.
     // :method GET = 17 → 0xD1, :scheme https = 23 → 0xD7, :path / = 1 → 0xC1.
-    let hs: List<HeaderField> = [
-        HeaderField { name: f":method", value: f"GET" },
-        HeaderField { name: f":scheme", value: f"https" },
-        HeaderField { name: f":path",   value: f"/" },
+    let hs: List<QpackHeaderField> = [
+        QpackHeaderField { name: f":method", value: f"GET" },
+        QpackHeaderField { name: f":scheme", value: f"https" },
+        QpackHeaderField { name: f":path",   value: f"/" },
     ];
     let out = encode_field_section(&hs);
     assert(out.len() == 5);
@@ -75,9 +75,9 @@ fn three_indexed_fields_emit_three_single_bytes() {
 }
 
 fn field_section_decode_roundtrip_indexed() {
-    let hs: List<HeaderField> = [
-        HeaderField { name: f":method", value: f"GET" },
-        HeaderField { name: f":status", value: f"200" },
+    let hs: List<QpackHeaderField> = [
+        QpackHeaderField { name: f":method", value: f"GET" },
+        QpackHeaderField { name: f":status", value: f"200" },
     ];
     let out = encode_field_section(&hs);
     let decoded = decode_field_section(out.as_slice()).unwrap();
@@ -87,7 +87,7 @@ fn field_section_decode_roundtrip_indexed() {
 fn indexed_field_line_static_bits_are_11_pattern() {
     // Confirm opcode bit discipline: every static indexed emission has
     // the top 2 bits set (11xxxxxx), distinguishing from other opcodes.
-    let h = HeaderField { name: f":method", value: f"GET" };
+    let h = QpackHeaderField { name: f":method", value: f"GET" };
     let out = encode_field_section(&[h]);
     assert((out[2] & 0xC0_u8) == 0xC0_u8);
     // T-bit (bit 6) set = static table reference.

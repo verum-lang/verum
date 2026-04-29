@@ -46,10 +46,10 @@ fn check_settings_roundtrip() {
 
 fn check_request_parse() {
     let fields = [
-        core.net.h3.qpack.HeaderField { name: ":method", value: "GET" },
-        core.net.h3.qpack.HeaderField { name: ":scheme", value: "https" },
-        core.net.h3.qpack.HeaderField { name: ":authority", value: "x.test" },
-        core.net.h3.qpack.HeaderField { name: ":path",   value: "/" },
+        core.net.h3.qpack.QpackHeaderField { name: ":method", value: "GET" },
+        core.net.h3.qpack.QpackHeaderField { name: ":scheme", value: "https" },
+        core.net.h3.qpack.QpackHeaderField { name: ":authority", value: "x.test" },
+        core.net.h3.qpack.QpackHeaderField { name: ":path",   value: "/" },
     ];
     let _ = parse_request_from_fields(&fields, []);
 }

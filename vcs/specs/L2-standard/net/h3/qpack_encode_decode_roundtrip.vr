@@ -12,14 +12,14 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.h3.qpack.decoder.{HeaderField, decode_field_section};
+mount core.net.h3.qpack.decoder.{QpackHeaderField, decode_field_section};
 mount core.net.h3.qpack.encoder.{encode_field_section};
 
-fn fields_equal(a: &HeaderField, b: &HeaderField) -> Bool {
+fn fields_equal(a: &QpackHeaderField, b: &QpackHeaderField) -> Bool {
     a.name == b.name && a.value == b.value
 }
 
-fn assert_roundtrip(headers: List<HeaderField>) {
+fn assert_roundtrip(headers: List<QpackHeaderField>) {
     let wire = encode_field_section(&headers);
     let decoded = decode_field_section(wire.as_slice()).unwrap();
     assert(decoded.len() == headers.len());
@@ -31,26 +31,26 @@ fn assert_roundtrip(headers: List<HeaderField>) {
 }
 
 fn static_pseudoheader_roundtrip() {
-    let hs: List<HeaderField> = [
-        HeaderField { name: f":method",   value: f"GET" },
-        HeaderField { name: f":scheme",   value: f"https" },
-        HeaderField { name: f":authority", value: f"example.com" },
-        HeaderField { name: f":path",     value: f"/" },
+    let hs: List<QpackHeaderField> = [
+        QpackHeaderField { name: f":method",   value: f"GET" },
+        QpackHeaderField { name: f":scheme",   value: f"https" },
+        QpackHeaderField { name: f":authority", value: f"example.com" },
+        QpackHeaderField { name: f":path",     value: f"/" },
     ];
     assert_roundtrip(hs);
 }
 
 fn response_with_literal_fields_roundtrip() {
-    let hs: List<HeaderField> = [
-        HeaderField { name: f":status",      value: f"200" },
-        HeaderField { name: f"content-type", value: f"application/json" },
-        HeaderField { name: f"x-app-id",     value: f"warp-prod-1" },
+    let hs: List<QpackHeaderField> = [
+        QpackHeaderField { name: f":status",      value: f"200" },
+        QpackHeaderField { name: f"content-type", value: f"application/json" },
+        QpackHeaderField { name: f"x-app-id",     value: f"warp-prod-1" },
     ];
     assert_roundtrip(hs);
 }
 
 fn empty_header_section_roundtrip() {
-    let hs: List<HeaderField> = [];
+    let hs: List<QpackHeaderField> = [];
     let wire = encode_field_section(&hs);
     let decoded = decode_field_section(wire.as_slice()).unwrap();
     assert(decoded.len() == 0);

@@ -13242,20 +13242,43 @@ impl<'s> CompilationPipeline<'s> {
             _ => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
         };
 
-        // Use host CPU name and features for native targets.
-        // For WASM targets, use "generic" CPU with no features.
+        // Honour `CompilerOptions.target_cpu` / `target_features`.
+        // Pre-fix the manifest's `[llvm].target_cpu` and
+        // `[llvm].target_features` were parsed into `LlvmConfig` on the
+        // CLI side but never plumbed to the AOT pipeline — the host's
+        // CPU info was hardcoded for native builds, so a manifest
+        // declaring `target_cpu = "znver3"` (e.g. for reproducible
+        // CI artifacts that target a fixed microarchitecture) had
+        // zero observable effect. Precedence: explicit option (CLI /
+        // manifest) > host-default / "generic" for WASM.
         let is_wasm = triple.as_str().to_string_lossy().contains("wasm");
-        let (cpu_str, features_str) = if is_wasm {
-            ("generic", "")
+        let opts = self.session.options();
+        let cpu_override = opts.target_cpu.as_ref().map(|t| t.as_str().to_string());
+        let features_override = opts
+            .target_features
+            .as_ref()
+            .map(|t| t.as_str().to_string());
+        let cpu_default = if is_wasm {
+            "generic".to_string()
         } else {
-            // Get host CPU info for native compilation
-            let cpu = TargetMachine::get_host_cpu_name();
-            let features = TargetMachine::get_host_cpu_features();
-            // Leak to static — called once per compilation, acceptable
-            let cpu_s: &'static str = Box::leak(cpu.to_str().unwrap_or("generic").to_string().into_boxed_str());
-            let feat_s: &'static str = Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
-            (cpu_s, feat_s)
+            TargetMachine::get_host_cpu_name()
+                .to_str()
+                .unwrap_or("generic")
+                .to_string()
         };
+        let features_default = if is_wasm {
+            String::new()
+        } else {
+            TargetMachine::get_host_cpu_features()
+                .to_str()
+                .unwrap_or("")
+                .to_string()
+        };
+        let cpu_owned = cpu_override.unwrap_or(cpu_default);
+        let features_owned = features_override.unwrap_or(features_default);
+        // Leak to static — called once per compilation, acceptable
+        let cpu_str: &'static str = Box::leak(cpu_owned.into_boxed_str());
+        let features_str: &'static str = Box::leak(features_owned.into_boxed_str());
         debug!("LLVM target: cpu={}, features={}", cpu_str, features_str);
 
         let target_machine = target.create_target_machine(

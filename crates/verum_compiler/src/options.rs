@@ -263,6 +263,24 @@ pub struct CompilerOptions {
     /// If None, uses the host target
     pub target_triple: Option<Text>,
 
+    /// Target CPU name (e.g., `"native"`, `"generic"`, `"znver3"`,
+    /// `"apple-m1"`). When `None`, the AOT pipeline falls back to
+    /// `TargetMachine::get_host_cpu_name()` for native builds and
+    /// `"generic"` for cross / WASM. Set via `[llvm].target_cpu`
+    /// in `verum.toml`. Only consulted on the AOT (LLVM) path; the
+    /// VBC interpreter ignores the field entirely.
+    pub target_cpu: Option<Text>,
+
+    /// Target feature string passed to LLVM's TargetMachine
+    /// (e.g., `"+avx2,+fma,-sse4.2"`). When `None`, the AOT pipeline
+    /// falls back to `TargetMachine::get_host_cpu_features()` for
+    /// native builds and the empty string for cross / WASM. Set via
+    /// `[llvm].target_features` in `verum.toml`. Comma-separated
+    /// list of `+feat` (enable) / `-feat` (disable) tokens; the
+    /// pipeline does not interpret the contents — the string is
+    /// forwarded verbatim to LLVM.
+    pub target_features: Option<Text>,
+
     /// Enabled cfg features (e.g., ["test", "feature_x"])
     pub cfg_features: List<Text>,
 
@@ -391,6 +409,8 @@ impl Default for CompilerOptions {
             debug_info: true,
             verbose: 0,
             target_triple: None,
+            target_cpu: None,
+            target_features: None,
             cfg_features: List::new(),
             cfg_custom: List::new(),
             test_mode: false,
@@ -726,6 +746,36 @@ mod emit_mode_tests {
             let opts = CompilerOptions::default().with_emit_mode(mode);
             assert_eq!(opts.emit_mode, mode);
         }
+    }
+
+    #[test]
+    fn target_cpu_and_features_default_to_none() {
+        // Pin: AOT pipeline relies on `None` to mean "fall back to
+        // host detection". Defaulting to `Some("native")` or the
+        // empty string would silently change the WASM-cross-build
+        // path (which gets `"generic"` / `""` only when the override
+        // is `None`).
+        let opts = CompilerOptions::default();
+        assert!(opts.target_cpu.is_none());
+        assert!(opts.target_features.is_none());
+    }
+
+    #[test]
+    fn target_cpu_and_features_round_trip() {
+        // Pin: the field-shape contract — the build CLI populates
+        // these from `manifest.llvm.{target_cpu, target_features}`,
+        // and the AOT pipeline reads them back out via
+        // `opts.target_cpu.as_ref().map(|t| t.as_str())`. A refactor
+        // that drops or renames the fields silently re-enables the
+        // pre-fix "manifest knob does nothing" inertness.
+        let mut opts = CompilerOptions::default();
+        opts.target_cpu = Some("znver3".into());
+        opts.target_features = Some("+avx2,+fma".into());
+        assert_eq!(opts.target_cpu.as_ref().map(|t| t.as_str()), Some("znver3"));
+        assert_eq!(
+            opts.target_features.as_ref().map(|t| t.as_str()),
+            Some("+avx2,+fma")
+        );
     }
 
     #[test]
