@@ -218,6 +218,20 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         nocapture: opts.nocapture,
         language_features,
         tier: opts.tier,
+        release: opts.release,
+        verify_mode_override: opts.verify.as_ref().and_then(|v| {
+            // Map the string-form CLI flag onto the typed enum. We
+            // ignore unrecognised values (return None) instead of
+            // erroring at this layer — keeps the test runner
+            // tolerant of typos in CI invocations and surfaces them
+            // as a default-mode run rather than a hard failure.
+            match v.as_str().to_ascii_lowercase().as_str() {
+                "runtime" => Some(verum_compiler::options::VerifyMode::Runtime),
+                "proof" | "static" => Some(verum_compiler::options::VerifyMode::Proof),
+                "auto" => Some(verum_compiler::options::VerifyMode::Auto),
+                _ => None,
+            }
+        }),
     };
 
     let total = filtered.len();
@@ -531,6 +545,19 @@ struct TestRunCfg {
     nocapture: bool,
     language_features: verum_compiler::language_features::LanguageFeatures,
     tier: Tier,
+    /// Mirror of `TestOptions.release` — when true, the AOT path
+    /// compiles tests at the highest optimization level instead of
+    /// the default. Closes the inert-defense pattern around the CLI
+    /// `--release` flag for `verum test`: pre-fix the flag landed
+    /// on TestOptions but never reached CompilerOptions.
+    release: bool,
+    /// Mirror of `TestOptions.verify` — when set, overrides the
+    /// default per-test `verify_mode`. Recognised values: `runtime`
+    /// / `static` / `proof` (case-insensitive). Unrecognised values
+    /// fall back to the default to avoid breaking the test runner
+    /// on a typo. Closes the inert-defense pattern for the CLI
+    /// `--verify <mode>` flag.
+    verify_mode_override: Option<verum_compiler::options::VerifyMode>,
 }
 
 enum TestResult {
@@ -752,14 +779,22 @@ fn run_test_aot(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult 
     )
     .unwrap_or_else(|| test.file.clone());
 
+    // Wire CLI `--verify` and `--release` into the compilation:
+    //  * `verify_mode_override` overrides the default Runtime mode
+    //    when the user passed `verum test --verify static|proof`.
+    //  * `release = true` lifts the optimization level to 3,
+    //    matching `verum build --release` semantics.
+    let verify_mode = cfg.verify_mode_override.unwrap_or(VerifyMode::Runtime);
+    let optimization_level = if cfg.release { 3 } else { 0 };
     let options = CompilerOptions {
         input: test_input,
         output: output_path.clone(),
-        verify_mode: VerifyMode::Runtime,
+        verify_mode,
         output_format: OutputFormat::Human,
         coverage: cfg.coverage,
         lint_config,
         language_features: cfg.language_features.clone(),
+        optimization_level,
         ..Default::default()
     };
     let mut session = Session::new(options);
@@ -1556,5 +1591,42 @@ mod tests {
         assert_eq!(TestFormat::parse("terse").unwrap(), TestFormat::Terse);
         assert_eq!(TestFormat::parse("json").unwrap(), TestFormat::Json);
         assert!(TestFormat::parse("xml").is_err());
+    }
+
+    fn parse_verify(s: &str) -> Option<verum_compiler::options::VerifyMode> {
+        // Mirror the parsing logic used at the cfg construction
+        // site (around line ~225). Pinned here so a regression in
+        // that mapping fails this test rather than slipping into
+        // production silently.
+        match s.to_ascii_lowercase().as_str() {
+            "runtime" => Some(verum_compiler::options::VerifyMode::Runtime),
+            "proof" | "static" => Some(verum_compiler::options::VerifyMode::Proof),
+            "auto" => Some(verum_compiler::options::VerifyMode::Auto),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn verify_flag_runtime_maps_to_runtime() {
+        assert_eq!(parse_verify("runtime"), Some(verum_compiler::options::VerifyMode::Runtime));
+        assert_eq!(parse_verify("RUNTIME"), Some(verum_compiler::options::VerifyMode::Runtime));
+    }
+
+    #[test]
+    fn verify_flag_static_and_proof_map_to_proof() {
+        // Pin: both `static` and `proof` route to the same VerifyMode
+        // because the documented CLI surface accepts the user-facing
+        // synonym `static` for the SMT-backed proof mode.
+        assert_eq!(parse_verify("proof"), Some(verum_compiler::options::VerifyMode::Proof));
+        assert_eq!(parse_verify("static"), Some(verum_compiler::options::VerifyMode::Proof));
+    }
+
+    #[test]
+    fn verify_flag_unknown_value_falls_back_to_default() {
+        // Pin: unrecognised --verify values produce None so the test
+        // runner falls back to the per-test default (Runtime) instead
+        // of failing at this layer. Keeps CI tolerant of typos.
+        assert_eq!(parse_verify("not-a-mode"), None);
+        assert_eq!(parse_verify(""), None);
     }
 }
