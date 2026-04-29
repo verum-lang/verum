@@ -1003,6 +1003,33 @@ pub fn compile(
     use verum_vbc::codegen::VbcCodegen;
     use crate::phases::VbcTierStats;
 
+    // Log the requested target tier + output type so callers
+    // and telemetry have a record of what was asked, even when
+    // the higher-tier codegen (AOT / object files / shared libs)
+    // is not yet realised in `compile()` itself. Closes the
+    // inert-defense pattern around `target_tier` and
+    // `output_type` at the API-entry layer: previously these
+    // fields were passed in but their values disappeared
+    // without trace. The actual AOT lowering runs via
+    // `pipeline.rs::lower_vbc_to_llvm` at a higher integration
+    // layer; the `compile()` API entry-point is the
+    // VBC-bytecode-only fast path.
+    tracing::debug!(
+        "compile() invoked: target_tier={:?}, output_type={:?}, opt_level={}, debug_info={}",
+        config.target_tier,
+        config.output_type,
+        config.optimization_level,
+        config.debug_info
+    );
+    if !matches!(config.output_type, OutputType::VbcModule) {
+        tracing::warn!(
+            "compile() returns VBC modules only; output_type={:?} requires additional \
+             lowering through `CompilationPipeline::run_native_compilation` \
+             (use pipeline.rs entry-point for AOT artifacts)",
+            config.output_type
+        );
+    }
+
     let mut vbc_modules = List::new();
     let mut codegen_errors = List::new();
 
