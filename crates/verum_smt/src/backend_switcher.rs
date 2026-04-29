@@ -1006,20 +1006,40 @@ impl SmtBackendSwitcher {
                         cvc5_elapsed_ms: cvc5_elapsed.as_millis() as u64,
                     },
                 );
-                eprintln!(
-                    "[CROSS-VALIDATE] ⚠ CRITICAL: Z3 and CVC5 DIVERGED on {} goal. \
-                     This is a solver bug or encoding issue — investigate.",
-                    theory.mnemonic()
-                );
-                SolveResult::Error {
-                    backend: "cross-validate".to_string(),
-                    error: format!(
-                        "Solver divergence detected. Z3: {:?} (in {}ms), CVC5: {:?} (in {}ms)",
-                        z3_result,
-                        z3_elapsed.as_millis(),
-                        cvc5_result,
-                        cvc5_elapsed.as_millis(),
-                    ),
+                // Honour `ValidationConfig.log_mismatches`: when
+                // disabled, suppress the stderr warning. Closes
+                // the inert-defense pattern — production CI
+                // pipelines that capture and report divergences
+                // through the routing-stats sink (rather than
+                // stderr) want the flag off so they don't get
+                // duplicate noise.
+                if self.config.validation.log_mismatches {
+                    eprintln!(
+                        "[CROSS-VALIDATE] ⚠ CRITICAL: Z3 and CVC5 DIVERGED on {} goal. \
+                         This is a solver bug or encoding issue — investigate.",
+                        theory.mnemonic()
+                    );
+                }
+                // Honour `ValidationConfig.fail_on_mismatch`:
+                // when disabled (default), divergence still
+                // returns the Z3 result rather than a hard error
+                // — this is the documented "log but don't fail"
+                // policy that the field controls. When enabled,
+                // surface a fail-closed Error so the build halts
+                // at the first divergence (Certified strategy).
+                if self.config.validation.fail_on_mismatch {
+                    SolveResult::Error {
+                        backend: "cross-validate".to_string(),
+                        error: format!(
+                            "Solver divergence detected. Z3: {:?} (in {}ms), CVC5: {:?} (in {}ms)",
+                            z3_result,
+                            z3_elapsed.as_millis(),
+                            cvc5_result,
+                            cvc5_elapsed.as_millis(),
+                        ),
+                    }
+                } else {
+                    z3_result
                 }
             }
             _ => {
