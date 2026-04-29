@@ -143,3 +143,99 @@ public fn protocols_equal(a: Protocol, b: Protocol) -> Bool {
         (_, _) => false,
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for Protocol
+// =============================================================================
+
+implement Eq for Protocol {
+    /// Structural equality — delegates to the existing
+    /// `protocols_equal` recursive walk.  Two `Protocol` values are
+    /// equal iff their step sequences match operator-for-operator.
+    fn eq(&self, other: &Protocol) -> Bool {
+        match (self, other) {
+            (Protocol.Send { payload: pa, rest: ra },
+             Protocol.Send { payload: pb, rest: rb }) =>
+                pa == pb && **ra == **rb,
+            (Protocol.Recv { payload: pa, rest: ra },
+             Protocol.Recv { payload: pb, rest: rb }) =>
+                pa == pb && **ra == **rb,
+            (Protocol.Offer { left: la, right: ra },
+             Protocol.Offer { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (Protocol.Select { left: la, right: ra },
+             Protocol.Select { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (Protocol.End, Protocol.End) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for Protocol {
+    /// Renders a session-type protocol in the standard notation:
+    ///   `Send  { payload, rest }`   → `!payload.<rest>`
+    ///   `Recv  { payload, rest }`   → `?payload.<rest>`
+    ///   `Offer { left, right }`     → `<left> ⊕ <right>`   (external choice)
+    ///   `Select { left, right }`    → `<left> & <right>`   (internal choice)
+    ///   `End`                       → `end`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Protocol.Send { payload, rest } => {
+                f.write_str(f"!{payload}.".as_str())?;
+                (**rest).fmt(f)
+            },
+            Protocol.Recv { payload, rest } => {
+                f.write_str(f"?{payload}.".as_str())?;
+                (**rest).fmt(f)
+            },
+            Protocol.Offer { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" ⊕ ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            Protocol.Select { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" & ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            Protocol.End => f.write_str("end"),
+        }
+    }
+}
+
+implement Debug for Protocol {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Protocol.Send { payload, rest } => {
+                f.write_str(f"Send({payload}, ".as_str())?;
+                (**rest).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Protocol.Recv { payload, rest } => {
+                f.write_str(f"Recv({payload}, ".as_str())?;
+                (**rest).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Protocol.Offer { left, right } => {
+                f.write_str("Offer(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Protocol.Select { left, right } => {
+                f.write_str("Select(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            Protocol.End => f.write_str("End"),
+        }
+    }
+}
