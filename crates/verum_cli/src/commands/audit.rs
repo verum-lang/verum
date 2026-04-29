@@ -1485,6 +1485,232 @@ struct EnactUsage {
     file: PathBuf,
 }
 
+// =============================================================================
+// `verum audit --kernel-recheck` (#122)
+// =============================================================================
+//
+// Walks every `.vr` file in the project, runs
+// `KernelRecheck::recheck_module` on each, and reports the
+// aggregated per-name K-rule outcomes.  Catches refinement-type
+// leakage (K-Refine-omega), universe-ascent violations
+// (K-Universe-Ascent), naturality-square shape errors
+// (K-Eps-Mu), and round-trip inversion failures (K-Round-Trip)
+// before the verifier dispatcher runs — useful as a fast first
+// gate in CI pipelines.
+//
+// Non-zero exit when any rejection surfaces.
+
+/// Per-file aggregate produced by the kernel-recheck audit.
+#[derive(Debug, Clone)]
+struct KernelRecheckFileReport {
+    file: PathBuf,
+    admitted: usize,
+    rejected: Vec<KernelRecheckRejection>,
+}
+
+#[derive(Debug, Clone)]
+struct KernelRecheckRejection {
+    item_name: Text,
+    item_kind: &'static str,
+    reason: Text,
+}
+
+/// Legacy entry-point for `verum audit --kernel-recheck` with plain output.
+pub fn audit_kernel_recheck() -> Result<()> {
+    audit_kernel_recheck_with_format(AuditFormat::Plain)
+}
+
+/// Entry point for `verum audit --kernel-recheck [--format FORMAT]`.
+///
+/// Walks every `.vr` file under the manifest root, runs
+/// `KernelRecheck::recheck_module` on each, and reports per-file
+/// admitted / rejected counts.  Returns `CliError::VerificationFailed`
+/// when any rejection surfaces (CI-friendly non-zero exit).
+pub fn audit_kernel_recheck_with_format(format: AuditFormat) -> Result<()> {
+    use verum_verification::kernel_recheck::KernelRecheck;
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Running kernel-recheck against the project module set");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+    let total_files = vr_files.len();
+
+    let mut reports: Vec<KernelRecheckFileReport> = Vec::new();
+    let mut total_admitted = 0usize;
+    let mut total_rejected = 0usize;
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        let outcomes = KernelRecheck::recheck_module(&module);
+        let mut admitted = 0usize;
+        let mut rejected: Vec<KernelRecheckRejection> = Vec::new();
+        for (item_name, kind_label, result) in outcomes.iter() {
+            match result {
+                Ok(()) => admitted += 1,
+                Err(err) => rejected.push(KernelRecheckRejection {
+                    item_name: item_name.clone(),
+                    item_kind: kind_label,
+                    reason: Text::from(format!("{}", err)),
+                }),
+            }
+        }
+        if admitted > 0 || !rejected.is_empty() {
+            total_admitted += admitted;
+            total_rejected += rejected.len();
+            reports.push(KernelRecheckFileReport {
+                file: rel_path,
+                admitted,
+                rejected,
+            });
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => print_kernel_recheck_report(
+            &reports,
+            total_files,
+            parsed_files,
+            skipped_files,
+            total_admitted,
+            total_rejected,
+        ),
+        AuditFormat::Json => print_kernel_recheck_report_json(
+            &reports,
+            total_files,
+            parsed_files,
+            skipped_files,
+            total_admitted,
+            total_rejected,
+        ),
+    }
+
+    if total_rejected > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "kernel-recheck rejected {} obligation(s) across {} file(s)",
+            total_rejected,
+            reports.iter().filter(|r| !r.rejected.is_empty()).count()
+        )));
+    }
+    Ok(())
+}
+
+fn print_kernel_recheck_report(
+    reports: &[KernelRecheckFileReport],
+    total_files: usize,
+    parsed_files: usize,
+    skipped_files: usize,
+    total_admitted: usize,
+    total_rejected: usize,
+) {
+    println!();
+    println!("{}", "Kernel-recheck report".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Walked {} .vr file(s); parsed {}, skipped {} unparseable.",
+        total_files, parsed_files, skipped_files,
+    );
+    println!(
+        "  {} admitted, {} rejected across {} file(s) with kernel-recheckable items.",
+        total_admitted,
+        total_rejected,
+        reports.len(),
+    );
+    println!();
+
+    for r in reports {
+        if r.rejected.is_empty() {
+            continue;
+        }
+        println!(
+            "  {}  ({} admitted, {} rejected)",
+            r.file.display().to_string().bold(),
+            r.admitted,
+            r.rejected.len(),
+        );
+        for rej in &r.rejected {
+            println!(
+                "    {} {} `{}` — {}",
+                "✗".red(),
+                rej.item_kind.dimmed(),
+                rej.item_name.as_str(),
+                rej.reason.as_str(),
+            );
+        }
+    }
+
+    if total_rejected == 0 {
+        println!("  {} every kernel-recheckable item admitted.", "✓".green());
+    }
+}
+
+fn print_kernel_recheck_report_json(
+    reports: &[KernelRecheckFileReport],
+    total_files: usize,
+    parsed_files: usize,
+    skipped_files: usize,
+    total_admitted: usize,
+    total_rejected: usize,
+) {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(out, "{{");
+    let _ = writeln!(out, "  \"schema_version\": 1,");
+    let _ = writeln!(out, "  \"command\": \"audit-kernel-recheck\",");
+    let _ = writeln!(out, "  \"total_files\": {},", total_files);
+    let _ = writeln!(out, "  \"parsed_files\": {},", parsed_files);
+    let _ = writeln!(out, "  \"skipped_files\": {},", skipped_files);
+    let _ = writeln!(out, "  \"total_admitted\": {},", total_admitted);
+    let _ = writeln!(out, "  \"total_rejected\": {},", total_rejected);
+    let _ = writeln!(out, "  \"reports\": [");
+    for (i, r) in reports.iter().enumerate() {
+        let _ = writeln!(out, "    {{");
+        let _ = writeln!(
+            out,
+            "      \"file\": \"{}\",",
+            r.file.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let _ = writeln!(out, "      \"admitted\": {},", r.admitted);
+        let _ = writeln!(out, "      \"rejected\": [");
+        for (j, rej) in r.rejected.iter().enumerate() {
+            let _ = writeln!(out, "        {{");
+            let _ = writeln!(
+                out,
+                "          \"item_name\": \"{}\",",
+                rej.item_name.as_str().replace('\\', "\\\\").replace('"', "\\\"")
+            );
+            let _ = writeln!(out, "          \"item_kind\": \"{}\",", rej.item_kind);
+            let _ = writeln!(
+                out,
+                "          \"reason\": \"{}\"",
+                rej.reason.as_str().replace('\\', "\\\\").replace('"', "\\\"")
+            );
+            let comma = if j + 1 < r.rejected.len() { "," } else { "" };
+            let _ = writeln!(out, "        }}{}", comma);
+        }
+        let _ = writeln!(out, "      ]");
+        let comma = if i + 1 < reports.len() { "," } else { "" };
+        let _ = writeln!(out, "    }}{}", comma);
+    }
+    let _ = writeln!(out, "  ]");
+    let _ = writeln!(out, "}}");
+    print!("{}", out);
+}
+
 /// Legacy entry-point for `verum audit --epsilon` with plain output.
 pub fn audit_epsilon() -> Result<()> {
     audit_epsilon_with_format(AuditFormat::Plain)
