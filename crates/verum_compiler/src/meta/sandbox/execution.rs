@@ -573,11 +573,70 @@ impl SandboxedExecutor {
                         )),
                     });
                 }
-                // Delegate to asset registry (simplified for now)
-                Err(SandboxError::UnsafeOperation {
-                    operation: Text::from(func_name),
-                    reason: Text::from("Asset loading not implemented in sandbox executor"),
-                })
+                // Pre-fix this branch returned a hardcoded "Asset loading not
+                // implemented" error EVEN WHEN the BuildAssets gate above
+                // passed — making the gate a misleading no-op. Now actually
+                // delegates to the BuildAssets subsystem's path-validated
+                // file readers.
+                //
+                // We use the `_uncached` variants because `ctx` arrives as
+                // `&MetaContext` here (not `&mut`) — threading `&mut`
+                // through `execute_expr`'s recursive callgraph would
+                // balloon blast radius. Cache miss cost is dominated by
+                // the file-read cost itself, so the architectural
+                // tradeoff is favourable.
+                if arg_values.len() != 1 {
+                    return Err(SandboxError::UnsafeOperation {
+                        operation: Text::from(func_name),
+                        reason: Text::from(format!(
+                            "{} expects exactly 1 argument (the path)",
+                            func_name
+                        )),
+                    });
+                }
+                let path = match &arg_values[0] {
+                    ConstValue::Text(t) => t.clone(),
+                    _ => {
+                        return Err(SandboxError::UnsafeOperation {
+                            operation: Text::from(func_name),
+                            reason: Text::from(format!(
+                                "{} requires a Text argument (the path)",
+                                func_name
+                            )),
+                        });
+                    }
+                };
+                match func_name {
+                    "include_str" | "include_file" => {
+                        ctx.build_assets
+                            .read_text_uncached(path.as_str())
+                            .map(ConstValue::Text)
+                            .map_err(|e| SandboxError::UnsafeOperation {
+                                operation: Text::from(func_name),
+                                reason: Text::from(format!("{:?}", e)),
+                            })
+                    }
+                    "include_bytes" | "load_build_asset" => {
+                        ctx.build_assets
+                            .read_bytes_uncached(path.as_str())
+                            .map(|bytes| {
+                                ConstValue::Array(
+                                    bytes
+                                        .into_iter()
+                                        .map(|b| ConstValue::Int(b as i128))
+                                        .collect(),
+                                )
+                            })
+                            .map_err(|e| SandboxError::UnsafeOperation {
+                                operation: Text::from(func_name),
+                                reason: Text::from(format!("{:?}", e)),
+                            })
+                    }
+                    // Unreachable — outer match guard already filtered to
+                    // these four names. The catch-all is defensive in
+                    // case the outer pattern is later widened.
+                    _ => unreachable!("outer match guard restricts func_name"),
+                }
             }
 
             // ========== Unknown function ==========
@@ -683,5 +742,67 @@ mod tests {
         // Both paths produce identical tagged-tuple shapes.
         assert!(matches!(&qualified, ConstValue::Tuple(p) if p.len() == 2));
         assert!(matches!(&bare, ConstValue::Tuple(p) if p.len() == 2));
+    }
+
+    #[test]
+    fn include_str_blocked_when_asset_gate_closed() {
+        // Pin the security gate: include_str / include_bytes /
+        // include_file / load_build_asset MUST refuse with
+        // AssetLoadingNotAllowed when the BuildAssets context isn't
+        // active. Pre-fix the gate fired correctly but then a
+        // hardcoded "not implemented" error masked the wired path —
+        // this test pins both the gate and the new wiring at the
+        // same boundary.
+        let exec = SandboxedExecutor::new();
+        let ctx = MetaContext::new();
+        // Gate is closed by default (no BuildAssets context).
+        let err = exec
+            .execute_builtin_function(
+                "include_str",
+                vec![ConstValue::Text(Text::from("anything.txt"))],
+                &ctx,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, SandboxError::AssetLoadingNotAllowed { .. }),
+            "expected AssetLoadingNotAllowed, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn include_str_reads_file_when_gate_open() {
+        // End-to-end pin: with the asset-loading gate open AND a
+        // configured project root, include_str reads the file's
+        // text content via the BuildAssets read_text_uncached path.
+        // Pre-fix this returned a hardcoded "not implemented"
+        // SandboxError::UnsafeOperation regardless of gate state.
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let asset_path = dir.path().join("hello.txt");
+        let mut f = std::fs::File::create(&asset_path).unwrap();
+        f.write_all(b"hello world").unwrap();
+
+        let exec = SandboxedExecutor::new();
+        let mut ctx = MetaContext::new();
+        ctx.build_assets = ctx
+            .build_assets
+            .clone()
+            .with_project_root(dir.path().to_string_lossy().to_string());
+
+        let result = exec.limiter().with_asset_loading(|| {
+            exec.execute_builtin_function(
+                "include_str",
+                vec![ConstValue::Text(Text::from("hello.txt"))],
+                &ctx,
+            )
+        });
+
+        let value = result.expect("include_str must succeed when gate is open + path resolves");
+        assert!(
+            matches!(&value, ConstValue::Text(t) if t.as_str() == "hello world"),
+            "expected ConstValue::Text(\"hello world\"), got {:?}",
+            value
+        );
     }
 }

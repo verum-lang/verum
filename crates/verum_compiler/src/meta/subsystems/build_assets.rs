@@ -279,6 +279,32 @@ impl BuildAssetsInfo {
         ))))
     }
 
+    /// Read text content from a file WITHOUT touching the cache.
+    /// Used by callers that hold an `&self` (no `&mut` available)
+    /// and don't need cache participation — e.g. the sandboxed
+    /// meta executor's `include_str` / `include_file` builtins,
+    /// where threading `&mut MetaContext` through `execute_expr`
+    /// would balloon blast radius. Path validation + sandbox
+    /// gating are identical to `load_text`; only the cache
+    /// touch is dropped.
+    pub fn read_text_uncached(&self, path: &str) -> Result<Text, MetaError> {
+        let resolved = self.resolve_path(path)?;
+        let content = std::fs::read_to_string(&resolved).map_err(|e| {
+            MetaError::Other(Text::from(format!("Failed to read file: {}", e)))
+        })?;
+        Ok(Text::from(content))
+    }
+
+    /// Read binary content from a file WITHOUT touching the cache.
+    /// Symmetric to `read_text_uncached`. Used by `include_bytes` /
+    /// `load_build_asset` from the sandboxed meta executor.
+    pub fn read_bytes_uncached(&self, path: &str) -> Result<Vec<u8>, MetaError> {
+        let resolved = self.resolve_path(path)?;
+        std::fs::read(&resolved).map_err(|e| {
+            MetaError::Other(Text::from(format!("Failed to read file: {}", e)))
+        })
+    }
+
     /// Load binary content from a file
     pub fn load(&mut self, path: &str) -> Result<Vec<u8>, MetaError> {
         let path_text = Text::from(path);
