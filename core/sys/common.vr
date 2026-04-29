@@ -1245,6 +1245,47 @@ implement SysContextError {
     }
 }
 
+implement Display for SysContextError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.message())
+    }
+}
+
+implement Debug for SysContextError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            SysContextError.SlotNotFound { slot } =>
+                f.write_str(f"SysContextError.SlotNotFound {{ slot: {slot} }}".as_str()),
+            SysContextError.SlotOverflow { slot } =>
+                f.write_str(f"SysContextError.SlotOverflow {{ slot: {slot} }}".as_str()),
+            SysContextError.StackOverflow { depth } =>
+                f.write_str(f"SysContextError.StackOverflow {{ depth: {depth} }}".as_str()),
+            SysContextError.TlsNotInitialized =>
+                f.write_str("SysContextError.TlsNotInitialized"),
+            SysContextError.InvalidSlot { slot } =>
+                f.write_str(f"SysContextError.InvalidSlot {{ slot: {slot} }}".as_str()),
+        }
+    }
+}
+
+implement Eq for SysContextError {
+    fn eq(&self, other: &SysContextError) -> Bool {
+        match (self, other) {
+            (SysContextError.SlotNotFound { slot: a },
+             SysContextError.SlotNotFound { slot: b }) => a == b,
+            (SysContextError.SlotOverflow { slot: a },
+             SysContextError.SlotOverflow { slot: b }) => a == b,
+            (SysContextError.StackOverflow { depth: a },
+             SysContextError.StackOverflow { depth: b }) => a == b,
+            (SysContextError.TlsNotInitialized,
+             SysContextError.TlsNotInitialized) => true,
+            (SysContextError.InvalidSlot { slot: a },
+             SysContextError.InvalidSlot { slot: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Cross-Platform Context API
 // =============================================================================

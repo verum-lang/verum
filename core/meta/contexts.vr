@@ -1989,6 +1989,14 @@ implement Debug for SchemaError {
     }
 }
 
+implement Eq for SchemaError {
+    fn eq(&self, other: &SchemaError) -> Bool {
+        self.message == other.message
+            && self.severity == other.severity
+            && self.suggestion == other.suggestion
+    }
+}
+
 // =============================================================================
 // DepGraph Context (Dependency Analysis)
 // =============================================================================
@@ -3253,6 +3261,18 @@ implement MetaParseError {
             msg = f"{msg}\nFound: {found}";
         }
         msg
+    }
+}
+
+implement Display for MetaParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(&self.format())
+    }
+}
+
+implement Debug for MetaParseError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"MetaParseError {{ message: {self.message}, expected: {self.expected.len()} tok(s) }}".as_str())
     }
 }
 
