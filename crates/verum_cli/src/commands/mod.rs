@@ -77,6 +77,9 @@ pub mod cert_replay;
 /// distribution registry: publish / lookup / search / verify /
 /// multi-mirror consensus check.
 pub mod cog_registry;
+/// `verum cubical` subcommand — typed cubical/HoTT primitive
+/// catalogue + computation-rule registry + face-formula validator.
+pub mod cubical;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
