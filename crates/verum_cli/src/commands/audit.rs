@@ -4521,3 +4521,410 @@ pub fn audit_bridge_admits_with_format(format: AuditFormat) -> Result<()> {
 
     Ok(())
 }
+
+// =============================================================================
+// HTT mechanisation roadmap audit
+// =============================================================================
+
+/// `verum audit --htt-roadmap` — emits per-section coverage of Lurie
+/// HTT (2009) mechanisation status from
+/// `verum_kernel::mechanisation_roadmap::htt_roadmap()`.
+pub fn audit_htt_roadmap(format: AuditFormat) -> Result<()> {
+    use verum_kernel::mechanisation_roadmap::{
+        CoverageReport, htt_roadmap,
+    };
+
+    let entries = htt_roadmap();
+    let report = CoverageReport::compute(&entries);
+
+    match format {
+        AuditFormat::Plain => {
+            ui::step("HTT (Lurie 2009) mechanisation roadmap");
+            println!();
+            println!(
+                "  {:<35}  {:<13}  {}",
+                "Section", "Status", "Kernel module(s)"
+            );
+            println!(
+                "  {}  {}  {}",
+                "-".repeat(35),
+                "-".repeat(13),
+                "-".repeat(40)
+            );
+            for e in &entries {
+                println!(
+                    "  {:<35}  {:<13}  {}",
+                    e.section.as_str(),
+                    e.status.name(),
+                    e.kernel_modules.as_str()
+                );
+            }
+            println!();
+            println!("  {}", report.summary("HTT"));
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str("  \"reference\": \"Lurie 2009 - Higher Topos Theory\",\n");
+            out.push_str(&format!(
+                "  \"total\": {},\n  \"mechanised\": {},\n  \"partial\": {},\n  \"axiom_cited\": {},\n  \"pending\": {},\n  \"coverage_ratio\": {:.4},\n",
+                report.total,
+                report.mechanised,
+                report.partial,
+                report.axiom_cited,
+                report.pending,
+                report.coverage_ratio()
+            ));
+            out.push_str("  \"sections\": [\n");
+            for (i, e) in entries.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {{ \"section\": \"{}\", \"title\": \"{}\", \"status\": \"{}\", \"kernel_modules\": \"{}\" }}{}\n",
+                    json_escape(e.section.as_str()),
+                    json_escape(e.title.as_str()),
+                    e.status.name(),
+                    json_escape(e.kernel_modules.as_str()),
+                    if i + 1 < entries.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            println!("{}", out);
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Adámek-Rosický 1994 mechanisation roadmap audit
+// =============================================================================
+
+/// `verum audit --ar-roadmap` — emits per-section coverage of
+/// Adámek-Rosický 1994 mechanisation status.
+pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
+    use verum_kernel::mechanisation_roadmap::{
+        CoverageReport, adamek_rosicky_roadmap,
+    };
+
+    let entries = adamek_rosicky_roadmap();
+    let report = CoverageReport::compute(&entries);
+
+    match format {
+        AuditFormat::Plain => {
+            ui::step("Adamek-Rosicky 1994 mechanisation roadmap");
+            println!();
+            println!(
+                "  {:<35}  {:<13}  {}",
+                "Section", "Status", "Kernel module(s)"
+            );
+            println!(
+                "  {}  {}  {}",
+                "-".repeat(35),
+                "-".repeat(13),
+                "-".repeat(40)
+            );
+            for e in &entries {
+                println!(
+                    "  {:<35}  {:<13}  {}",
+                    e.section.as_str(),
+                    e.status.name(),
+                    e.kernel_modules.as_str()
+                );
+            }
+            println!();
+            println!("  {}", report.summary("AR 1994"));
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str("  \"reference\": \"Adamek-Rosicky 1994 - Locally Presentable and Accessible Categories\",\n");
+            out.push_str(&format!(
+                "  \"total\": {},\n  \"mechanised\": {},\n  \"partial\": {},\n  \"axiom_cited\": {},\n  \"pending\": {},\n  \"coverage_ratio\": {:.4},\n",
+                report.total,
+                report.mechanised,
+                report.partial,
+                report.axiom_cited,
+                report.pending,
+                report.coverage_ratio()
+            ));
+            out.push_str("  \"sections\": [\n");
+            for (i, e) in entries.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {{ \"section\": \"{}\", \"title\": \"{}\", \"status\": \"{}\", \"kernel_modules\": \"{}\" }}{}\n",
+                    json_escape(e.section.as_str()),
+                    json_escape(e.title.as_str()),
+                    e.status.name(),
+                    json_escape(e.kernel_modules.as_str()),
+                    if i + 1 < entries.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            println!("{}", out);
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Kernel self-recognition audit (ZFC + 2-inacc)
+// =============================================================================
+
+/// `verum audit --self-recognition` — emits per-rule decomposition
+/// of the seven kernel rules into ZFC axioms + Grothendieck universes.
+pub fn audit_self_recognition(format: AuditFormat) -> Result<()> {
+    use verum_kernel::zfc_self_recognition::{
+        KernelRuleId, SelfRecognitionAudit, is_zfc_plus_2_inacc_provable,
+        required_meta_theory,
+    };
+
+    let mut audit = SelfRecognitionAudit::new();
+    for rule in KernelRuleId::full_list() {
+        audit.cite(rule);
+    }
+    let zfc_required = audit.required_zfc_axioms();
+    let inacc_required = audit.required_inaccessibles();
+    let provable = audit.is_provable_in_zfc_plus_2_inacc();
+
+    match format {
+        AuditFormat::Plain => {
+            ui::step("Kernel self-recognition vs. ZFC + 2 inaccessibles");
+            println!();
+            println!(
+                "  {:<13}  {:<8}  {:<6}  Citation",
+                "Rule", "ZFC ax", "Inacc"
+            );
+            println!(
+                "  {}  {}  {}  {}",
+                "-".repeat(13),
+                "-".repeat(8),
+                "-".repeat(6),
+                "-".repeat(40)
+            );
+            for rule in KernelRuleId::full_list() {
+                let req = required_meta_theory(rule);
+                println!(
+                    "  {:<13}  {:<8}  {:<6}  {}",
+                    rule.name(),
+                    req.zfc_axioms.len(),
+                    req.inaccessibles.len(),
+                    req.citation.as_str()
+                );
+            }
+            println!();
+            println!("  Trusted-base report:");
+            println!(
+                "    ZFC axioms required: [{}]",
+                zfc_required
+                    .iter()
+                    .map(|a| a.name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            println!(
+                "    Inaccessibles required: [{}]",
+                inacc_required
+                    .iter()
+                    .map(|k| k.name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            println!(
+                "    Provable in ZFC + 2-inacc: {}",
+                if provable { "YES" } else { "NO" }
+            );
+            for rule in KernelRuleId::full_list() {
+                if !is_zfc_plus_2_inacc_provable(rule) {
+                    eprintln!(
+                        "  E_SELF_RECOGNITION: rule {} not provable in ZFC + 2-inacc",
+                        rule.name()
+                    );
+                }
+            }
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!(
+                "  \"provable_in_zfc_plus_2_inacc\": {},\n",
+                provable
+            ));
+            out.push_str("  \"zfc_axioms_required\": [");
+            for (i, ax) in zfc_required.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&format!("\"{}\"", ax.name()));
+            }
+            out.push_str("],\n");
+            out.push_str("  \"inaccessibles_required\": [");
+            for (i, k) in inacc_required.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&format!("\"{}\"", k.name()));
+            }
+            out.push_str("],\n");
+            out.push_str("  \"rules\": [\n");
+            let rules: Vec<_> = KernelRuleId::full_list().to_vec();
+            for (i, rule) in rules.iter().enumerate() {
+                let req = required_meta_theory(*rule);
+                out.push_str(&format!(
+                    "    {{ \"rule\": \"{}\", \"zfc_axioms\": [{}], \"inaccessibles\": [{}], \"citation\": \"{}\" }}{}\n",
+                    rule.name(),
+                    req.zfc_axioms
+                        .iter()
+                        .map(|a| format!("\"{}\"", a.name()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    req.inaccessibles
+                        .iter()
+                        .map(|k| format!("\"{}\"", k.name()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    json_escape(req.citation.as_str()),
+                    if i + 1 < rules.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            println!("{}", out);
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Kernel-intrinsic dispatch audit
+// =============================================================================
+
+/// `verum audit --kernel-intrinsics` — emits the available kernel
+/// intrinsic dispatch table from
+/// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.  Used
+/// by the compiler's elaborator + by reviewers to confirm that
+/// every `kernel_*` axiom in `core/proof/kernel_bridge.vr` has a
+/// kernel-side dispatcher.
+pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
+    use verum_kernel::intrinsic_dispatch::{
+        available_intrinsics, dispatch_intrinsic, IntrinsicValue,
+    };
+
+    let names = available_intrinsics();
+
+    match format {
+        AuditFormat::Plain => {
+            ui::step("Kernel intrinsic dispatch table");
+            println!();
+            println!(
+                "  {:<45}  {}",
+                "Intrinsic name", "Default-decision (no args)"
+            );
+            println!("  {}  {}", "-".repeat(45), "-".repeat(40));
+            for name in names {
+                let decision = dispatch_intrinsic(name, &[])
+                    .and_then(|v| v.as_bool())
+                    .map(|b| if b { "holds" } else { "open (needs args)" })
+                    .unwrap_or("requires args");
+                println!("  {:<45}  {}", name, decision);
+            }
+            println!();
+            println!(
+                "  Total dispatchable intrinsics: {} (each backs a kernel_* axiom in kernel_bridge.vr)",
+                names.len()
+            );
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!(
+                "  \"intrinsic_count\": {},\n",
+                names.len()
+            ));
+            out.push_str("  \"intrinsics\": [\n");
+            for (i, name) in names.iter().enumerate() {
+                let probe = dispatch_intrinsic(name, &[]);
+                let decidable = probe.is_some();
+                let default_holds = probe.and_then(|v| v.as_bool()).unwrap_or(false);
+                out.push_str(&format!(
+                    "    {{ \"name\": \"{}\", \"decidable_at_no_args\": {}, \"default_holds\": {} }}{}\n",
+                    name,
+                    decidable,
+                    default_holds,
+                    if i + 1 < names.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            // Suppress unused warning when format doesn't need it.
+            let _ = IntrinsicValue::Unit;
+            println!("{}", out);
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Cross-format CI gate audit
+// =============================================================================
+
+/// `verum audit --cross-format` — emits the cross-format CI hard
+/// gate status: every required foreign proof-assistant backend must
+/// pass (Coq / Lean 4 / Isabelle / Dedukti).
+pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::cross_format_gate::{
+        format_replay_command, required_formats_for_msfs,
+    };
+
+    let formats = required_formats_for_msfs();
+
+    match format {
+        AuditFormat::Plain => {
+            ui::step("Cross-format CI hard gate (MSFS)");
+            println!();
+            println!(
+                "  {:<10}  {:<5}  Replay command",
+                "Format", "Ext"
+            );
+            println!(
+                "  {}  {}  {}",
+                "-".repeat(10),
+                "-".repeat(5),
+                "-".repeat(40)
+            );
+            for f in &formats {
+                let cmd = format_replay_command(*f, "<artefact>");
+                println!(
+                    "  {:<10}  {:<5}  {}",
+                    f.name(),
+                    f.extension(),
+                    cmd
+                );
+            }
+            println!();
+            println!(
+                "  Hard gate: a proof passes iff every format reports Passed."
+            );
+            println!(
+                "  Required formats: [{}]",
+                formats.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
+            );
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!(
+                "  \"required_format_count\": {},\n",
+                formats.len()
+            ));
+            out.push_str("  \"formats\": [\n");
+            for (i, f) in formats.iter().enumerate() {
+                let cmd = format_replay_command(*f, "<artefact>");
+                out.push_str(&format!(
+                    "    {{ \"format\": \"{}\", \"extension\": \"{}\", \"replay_command\": \"{}\" }}{}\n",
+                    f.name(),
+                    f.extension(),
+                    json_escape(&cmd),
+                    if i + 1 < formats.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            println!("{}", out);
+        }
+    }
+    Ok(())
+}

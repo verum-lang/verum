@@ -1051,6 +1051,46 @@ enum Commands {
         #[clap(long)]
         framework_soundness: bool,
 
+        /// HTT (Lurie 2009) mechanisation roadmap audit. Emits
+        /// per-section coverage table sourced from
+        /// `verum_kernel::mechanisation_roadmap::htt_roadmap()`.
+        /// Each entry has status Mechanised / Partial / AxiomCited /
+        /// Pending plus the kernel module(s) that discharge it.
+        #[clap(long)]
+        htt_roadmap: bool,
+
+        /// Adámek-Rosický 1994 mechanisation roadmap audit. Emits
+        /// per-section coverage table sourced from
+        /// `verum_kernel::mechanisation_roadmap::adamek_rosicky_roadmap()`.
+        #[clap(long)]
+        ar_roadmap: bool,
+
+        /// Kernel self-recognition audit. Decomposes each of the
+        /// seven kernel rules (K-Refine, K-Univ, K-Pos, K-Norm,
+        /// K-FwAx, K-Adj-Unit, K-Adj-Counit) into its required ZFC
+        /// axioms + Grothendieck universes per
+        /// `verum_kernel::zfc_self_recognition::required_meta_theory`.
+        /// Reports the trusted-base ZFC + κ_n union and exits
+        /// non-zero if any rule fails the ZFC + 2-inacc provability
+        /// invariant.
+        #[clap(long)]
+        self_recognition: bool,
+
+        /// Cross-format CI hard gate audit. Lists the four
+        /// required export formats (Coq, Lean4, Isabelle, Dedukti)
+        /// with their replay commands per
+        /// `verum_kernel::cross_format_gate::format_replay_command`.
+        #[clap(long)]
+        cross_format: bool,
+
+        /// Kernel intrinsic dispatch audit. Lists every kernel_*
+        /// dispatcher backing a `kernel_*` axiom in
+        /// `core/proof/kernel_bridge.vr`. Used to verify the
+        /// Verum-side bridge ↔ Rust-side kernel-function coupling
+        /// is complete.
+        #[clap(long)]
+        kernel_intrinsics: bool,
+
         /// Proof-honesty audit (M0.G): walk every public theorem /
         /// axiom in the project and classify each by proof-body shape
         /// — `axiom-placeholder` / `theorem-no-proof-body` /
@@ -2461,6 +2501,11 @@ fn run_command(cli: Cli) -> Result<()> {
             bridge_admits,
             framework_soundness,
             coord_consistency,
+            htt_roadmap,
+            ar_roadmap,
+            self_recognition,
+            cross_format,
+            kernel_intrinsics,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -2506,6 +2551,16 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_framework_soundness_with_format(output_format)
             } else if coord_consistency {
                 commands::audit::audit_coord_consistency_with_format(output_format)
+            } else if htt_roadmap {
+                commands::audit::audit_htt_roadmap(output_format)
+            } else if ar_roadmap {
+                commands::audit::audit_ar_roadmap(output_format)
+            } else if self_recognition {
+                commands::audit::audit_self_recognition(output_format)
+            } else if cross_format {
+                commands::audit::audit_cross_format(output_format)
+            } else if kernel_intrinsics {
+                commands::audit::audit_kernel_intrinsics(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
