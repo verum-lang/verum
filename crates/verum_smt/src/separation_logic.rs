@@ -1285,6 +1285,18 @@ impl SepLogicEncoder {
         antecedent: &SepAssertion,
         consequent: &SepAssertion,
     ) -> FrameInferenceResult {
+        // Honour the configured opt-out: when frame inference is
+        // disabled, return a typed failure rather than silently
+        // performing the work. Callers that only need entailment
+        // validity (without the residual-frame computation) can
+        // disable this for ~30% reduction in encoder work on
+        // large heaps.
+        if !self.config.enable_frame_inference {
+            return FrameInferenceResult::failure(
+                "frame inference is disabled by SepLogicConfig.enable_frame_inference = false",
+            );
+        }
+
         // Convert to symbolic heaps
         let ante_heap = SymbolicHeap::from_assertion(antecedent);
         let cons_heap = SymbolicHeap::from_assertion(consequent);

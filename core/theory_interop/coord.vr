@@ -399,3 +399,54 @@ public fn theorem_coord_as_text(t: MsfsTheoremCoord) -> Text {
       .concat(", ")
       .concat(tau_str)
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for TranslationVerdict
+// =============================================================================
+
+implement Eq for TranslationVerdict {
+    fn eq(&self, other: &TranslationVerdict) -> Bool {
+        match (self, other) {
+            (TranslationVerdict.Morita,         TranslationVerdict.Morita)         => true,
+            (TranslationVerdict.Strong,         TranslationVerdict.Strong)         => true,
+            (TranslationVerdict.Moderate,       TranslationVerdict.Moderate)       => true,
+            (TranslationVerdict.Weak,           TranslationVerdict.Weak)           => true,
+            (TranslationVerdict.Untranslatable, TranslationVerdict.Untranslatable) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Clone for TranslationVerdict {
+    fn clone(&self) -> TranslationVerdict {
+        match self {
+            TranslationVerdict.Morita         => TranslationVerdict.Morita,
+            TranslationVerdict.Strong         => TranslationVerdict.Strong,
+            TranslationVerdict.Moderate       => TranslationVerdict.Moderate,
+            TranslationVerdict.Weak           => TranslationVerdict.Weak,
+            TranslationVerdict.Untranslatable => TranslationVerdict.Untranslatable,
+        }
+    }
+}
+
+implement Copy for TranslationVerdict {}
+
+implement Display for TranslationVerdict {
+    /// Renders the verdict using the lower-case stable tag (matches
+    /// `audit-reports/coherent.json` schema and `verdict_as_text`).
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(verdict_as_text(self.clone()).as_str())
+    }
+}
+
+implement Debug for TranslationVerdict {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            TranslationVerdict.Morita         => f.write_str("Morita"),
+            TranslationVerdict.Strong         => f.write_str("Strong"),
+            TranslationVerdict.Moderate       => f.write_str("Moderate"),
+            TranslationVerdict.Weak           => f.write_str("Weak"),
+            TranslationVerdict.Untranslatable => f.write_str("Untranslatable"),
+        }
+    }
+}
