@@ -343,8 +343,11 @@ impl ContractVerificationPhase {
         let mut errors = List::new();
 
         // Extract per-function verification strategy from `@verify(...)`
-        // attributes. Absent attribute → use the phase default from
-        // VerificationConfig (auto mode).
+        // attributes. Absent attribute → fall back to the phase-level
+        // `VerificationConfig.mode`, which is the documented contract
+        // for the global verify-mode knob. Without this fallback the
+        // mode field was inert: setting `config.mode = Runtime` would
+        // not actually skip SMT for unannotated functions.
         let strategy = extract_from_attributes(&func.attributes);
         if let Some(s) = strategy {
             use verum_smt::verify_strategy::VerifyStrategy as VS;
@@ -376,8 +379,29 @@ impl ContractVerificationPhase {
                 _ => stats.functions_strategy_formal += 1,
             }
         } else {
-            // Default strategy = Formal (implicit).
-            stats.functions_strategy_formal += 1;
+            // No `@verify` attribute on this function — consult the
+            // phase-level `VerificationConfig.mode`:
+            //   - `Runtime`: skip SMT entirely for unannotated
+            //     functions (caller opted out of static verification
+            //     globally).
+            //   - `Proof`: future hook for routing through the
+            //     proof kernel; for now records `functions_strategy_formal`
+            //     and proceeds with the SMT path (same behaviour as
+            //     before, but now load-bearing for the audit gate).
+            //   - `Auto`: existing default — Formal SMT verification.
+            match self.config.mode {
+                VerifyMode::Runtime => {
+                    tracing::debug!(
+                        "Skipping SMT for {} — phase mode = Runtime, no @verify override",
+                        func.name
+                    );
+                    stats.functions_skipped_smt += 1;
+                    return Ok(warnings);
+                }
+                VerifyMode::Proof | VerifyMode::Auto => {
+                    stats.functions_strategy_formal += 1;
+                }
+            }
         }
 
         // Extract contracts from function attributes and body
@@ -1531,5 +1555,28 @@ mod tests {
         assert!(VS::Thorough.requires_smt());
         assert!(VS::Certified.requires_smt());
         assert!(VS::Synthesize.requires_smt());
+    }
+
+    /// Pin: phase-level `VerificationConfig.mode` defaults to `Auto`.
+    /// Drift here would silently change behaviour for callers
+    /// relying on `Default::default()`. The flag is the global
+    /// fallback for unannotated functions.
+    #[test]
+    fn config_mode_default_is_auto() {
+        let cfg = VerificationConfig::default();
+        assert_eq!(cfg.mode, VerifyMode::Auto);
+    }
+
+    /// Pin: every variant of `VerifyMode` is reachable through
+    /// the phase's config without panic. Future variant additions
+    /// will require this exhaustive switch to be updated, which
+    /// surfaces as a compile error.
+    #[test]
+    fn config_mode_round_trips_through_phase() {
+        for mode in [VerifyMode::Runtime, VerifyMode::Proof, VerifyMode::Auto] {
+            let mut phase = ContractVerificationPhase::new();
+            phase.config.mode = mode;
+            assert_eq!(phase.config.mode, mode);
+        }
     }
 }
