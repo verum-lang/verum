@@ -64,6 +64,16 @@ pub fn publish(options: PublishOptions) -> Result<()> {
     // Create package metadata
     let metadata = create_metadata(&manifest_dir, &manifest, artifacts, checksum, signature)?;
 
+    // Honour `PublishOptions.verify_proofs`: when set, fail the
+    // publish if any `@verify` function failed to prove. Pre-fix
+    // the flag landed on PublishOptions but no code path consulted
+    // it — `verum publish --verify-proofs` would happily upload a
+    // package whose proof bundle contained `ProofStatus::Failed`
+    // entries, defeating the documented enforcement contract.
+    if let Some(reason) = check_verify_proofs_gate(options.verify_proofs, metadata.proofs.as_ref()) {
+        return Err(crate::error::CliError::Custom(reason));
+    }
+
     // Pin to IPFS if requested
     if options.pin_ipfs {
         ui::step("Pinning to IPFS");
@@ -646,6 +656,45 @@ fn create_metadata(
         checksum,
         published_at: chrono::Utc::now().timestamp(),
     })
+}
+
+/// Pure helper: check the `verify_proofs` gate against the metadata
+/// proof bundle. Returns `Some(reason)` when the gate is set AND
+/// any proof failed; otherwise `None`.
+///
+/// Extracted so the gate semantics can be unit-tested without
+/// constructing a full publish context. The check is gated: when
+/// the flag is OFF (default), the existing permissive behaviour
+/// is preserved (proof bundle is metadata-only). When ON, the
+/// failure list is surfaced so publishers can fix the offending
+/// functions before retry.
+fn check_verify_proofs_gate(
+    enforce: bool,
+    proofs: Option<&crate::registry::types::VerificationProofs>,
+) -> Option<String> {
+    if !enforce {
+        return None;
+    }
+    let proofs = proofs?;
+    let failed: Vec<&str> = proofs
+        .proofs
+        .iter()
+        .filter(|p| matches!(
+            p.status,
+            crate::registry::types::ProofStatus::Failed
+        ))
+        .map(|p| p.function.as_str())
+        .collect();
+    if failed.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "publish blocked by --verify-proofs: {} function(s) failed proof: {}. \
+             Fix the offending @verify items or rerun without --verify-proofs.",
+            failed.len(),
+            failed.join(", "),
+        ))
+    }
 }
 
 /// Generate verification proofs for the package
@@ -1567,5 +1616,102 @@ impl ValidationReport {
                 "Cog has issues that must be fixed before publishing.".red()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::types::{
+        ProofInfo, ProofStatus, VerificationLevel, VerificationProofs,
+    };
+
+    fn proofs_with(statuses: Vec<(&str, ProofStatus)>) -> VerificationProofs {
+        let mut list = List::new();
+        for (name, status) in statuses {
+            list.push(ProofInfo {
+                function: Text::from(name),
+                status,
+                time_ms: 0,
+                file: None,
+            });
+        }
+        VerificationProofs {
+            solver: "z3".into(),
+            proofs: list,
+            level: VerificationLevel::Proof,
+        }
+    }
+
+    #[test]
+    fn verify_proofs_off_passes_even_with_failures() {
+        // Pin: with the gate off (default), the publish proceeds
+        // even when the proof bundle contains failed entries —
+        // matches the pre-fix permissive behaviour.
+        let proofs = proofs_with(vec![("bad", ProofStatus::Failed)]);
+        let result = check_verify_proofs_gate(false, Some(&proofs));
+        assert!(
+            result.is_none(),
+            "gate off must not block publish even with failed proofs",
+        );
+    }
+
+    #[test]
+    fn verify_proofs_on_blocks_when_any_failed() {
+        // Pin: with the gate on AND any proof failed, the publish
+        // is blocked with a typed error that names the offending
+        // functions.
+        let proofs = proofs_with(vec![
+            ("verified_fn", ProofStatus::Verified),
+            ("bad_fn_1", ProofStatus::Failed),
+            ("bad_fn_2", ProofStatus::Failed),
+        ]);
+        let result = check_verify_proofs_gate(true, Some(&proofs));
+        let reason = result.expect("gate on with failures must surface a reason");
+        assert!(
+            reason.contains("--verify-proofs"),
+            "rejection must name the gate flag, got: {}",
+            reason,
+        );
+        assert!(
+            reason.contains("bad_fn_1") && reason.contains("bad_fn_2"),
+            "rejection must name every failed function, got: {}",
+            reason,
+        );
+        assert!(
+            reason.contains("2 function"),
+            "rejection must surface the failure count, got: {}",
+            reason,
+        );
+    }
+
+    #[test]
+    fn verify_proofs_on_passes_when_all_verified() {
+        // Pin: with the gate on AND every proof verified, the
+        // publish proceeds — flag enforces a tighter policy
+        // without breaking otherwise-valid bundles.
+        let proofs = proofs_with(vec![
+            ("good_fn_1", ProofStatus::Verified),
+            ("good_fn_2", ProofStatus::Verified),
+        ]);
+        let result = check_verify_proofs_gate(true, Some(&proofs));
+        assert!(
+            result.is_none(),
+            "gate on with all-verified proofs must not block, got: {:?}",
+            result,
+        );
+    }
+
+    #[test]
+    fn verify_proofs_on_passes_when_no_proof_bundle() {
+        // Pin: with the gate on AND no proof bundle (a package
+        // with zero @verify items), the publish proceeds — the
+        // gate enforces "no failed proofs", not "must have proofs".
+        // The latter would be a separate, stricter gate.
+        let result = check_verify_proofs_gate(true, None);
+        assert!(
+            result.is_none(),
+            "gate on with no proof bundle must not block — empty bundle ≠ failed bundle",
+        );
     }
 }
