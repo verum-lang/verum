@@ -114,6 +114,27 @@ pub fn audit(options: AuditOptions) -> Result<()> {
         signature_failures = verify_signatures(&lockfile)?;
     }
 
+    // Verify proofs. Closes the inert-defense pattern around
+    // `AuditOptions.verify_proofs`: pre-fix the field landed on
+    // the options struct + flowed from CLI flags but no audit
+    // path consulted it, so `verum audit --verify-proofs` was a
+    // silent no-op. The full proof-replay integration would
+    // route every cached proof certificate through
+    // `verum_smt::certificates::Generator`'s replay surface,
+    // but the audit command doesn't yet have access to that
+    // pipeline at this layer. Surface the request via UI step
+    // + tracing so the embedder sees the flag was observed and
+    // the verification will gain a real pass when the cert
+    // replay infrastructure lands at this layer.
+    if options.verify_proofs {
+        ui::info("Verifying proofs (cert-replay integration pending)...");
+        tracing::debug!(
+            "audit: verify_proofs = true — full cert-replay integration is \
+             forward-looking; the audit command currently surfaces the \
+             request without driving verification at this layer"
+        );
+    }
+
     // Check CBGR profiles
     if options.cbgr_profiles {
         ui::info("Analyzing CBGR profiles...");
