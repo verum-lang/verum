@@ -77,3 +77,120 @@ public fn check_layer_flow(actual: StratifiedUniverse, expected: StratifiedUnive
         _ => LayerVerdict.LayerOk,
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for Layer / StratifiedUniverse / LayerVerdict
+// =============================================================================
+
+implement Eq for Layer {
+    fn eq(&self, other: &Layer) -> Bool {
+        match (self, other) {
+            (Layer.Fibrant, Layer.Fibrant) => true,
+            (Layer.Strict,  Layer.Strict)  => true,
+            _ => false,
+        }
+    }
+}
+
+implement Clone for Layer {
+    fn clone(&self) -> Layer {
+        match self {
+            Layer.Fibrant => Layer.Fibrant,
+            Layer.Strict  => Layer.Strict,
+        }
+    }
+}
+
+implement Copy for Layer {}
+
+implement Display for Layer {
+    /// Renders the layer name in the standard 2LTT notation.
+    /// `Fibrant` → `fibrant` (carries identity types via paths)
+    /// `Strict`  → `strict`  (UIP, decidable equality)
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Layer.Fibrant => f.write_str("fibrant"),
+            Layer.Strict  => f.write_str("strict"),
+        }
+    }
+}
+
+implement Debug for Layer {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Layer.Fibrant => f.write_str("Fibrant"),
+            Layer.Strict  => f.write_str("Strict"),
+        }
+    }
+}
+
+implement Eq for StratifiedUniverse {
+    fn eq(&self, other: &StratifiedUniverse) -> Bool {
+        self.layer == other.layer && self.level == other.level
+    }
+}
+
+implement Clone for StratifiedUniverse {
+    fn clone(&self) -> StratifiedUniverse {
+        StratifiedUniverse { layer: self.layer.clone(), level: self.level }
+    }
+}
+
+implement Display for StratifiedUniverse {
+    /// Renders as `U_<layer>_<level>` matching the literature's
+    /// `U^Fib_n` / `U^Strict_n` notation in Latin-1 form.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self.layer {
+            Layer.Fibrant =>
+                f.write_str(f"U_fib_{self.level}".as_str()),
+            Layer.Strict  =>
+                f.write_str(f"U_strict_{self.level}".as_str()),
+        }
+    }
+}
+
+implement Debug for StratifiedUniverse {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(f"StratifiedUniverse {{ layer: {self.layer:?}, level: {self.level} }}".as_str())
+    }
+}
+
+implement Eq for LayerVerdict {
+    fn eq(&self, other: &LayerVerdict) -> Bool {
+        match (self, other) {
+            (LayerVerdict.LayerOk, LayerVerdict.LayerOk) => true,
+            (LayerVerdict.StrictInFibrant { universe: a },
+             LayerVerdict.StrictInFibrant { universe: b }) => a == b,
+            (LayerVerdict.LevelMismatch { from_level: fa, to_level: ta },
+             LayerVerdict.LevelMismatch { from_level: fb, to_level: tb }) =>
+                fa == fb && ta == tb,
+            _ => false,
+        }
+    }
+}
+
+implement Display for LayerVerdict {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LayerVerdict.LayerOk =>
+                f.write_str("layer-flow OK"),
+            LayerVerdict.StrictInFibrant { universe } =>
+                f.write_str(f"strict universe {universe} cannot flow into fibrant context".as_str()),
+            LayerVerdict.LevelMismatch { from_level, to_level } =>
+                f.write_str(f"universe level {from_level} cannot flow into level {to_level}".as_str()),
+        }
+    }
+}
+
+implement Debug for LayerVerdict {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LayerVerdict.LayerOk =>
+                f.write_str("LayerOk"),
+            LayerVerdict.StrictInFibrant { universe } =>
+                f.write_str(f"StrictInFibrant({universe:?})".as_str()),
+            LayerVerdict.LevelMismatch { from_level, to_level } =>
+                f.write_str(f"LevelMismatch({from_level}, {to_level})".as_str()),
+        }
+    }
+}
