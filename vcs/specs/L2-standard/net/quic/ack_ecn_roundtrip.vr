@@ -13,14 +13,14 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.frame.{
-    Frame, AckRange, EcnCounts,
+    QuicFrame, AckRange, EcnCounts,
     encode_frame, decode_all_frames,
 };
 
 fn assert_ack_ecn_eq(f: &Frame, want_largest: UInt64, want_delay: UInt64,
                      want_e0: UInt64, want_e1: UInt64, want_ce: UInt64) {
     match f {
-        Frame.AckFrame { largest_acked, ack_delay, ranges: _, ecn } => {
+        QuicFrame.AckFrame { largest_acked, ack_delay, ranges: _, ecn } => {
             assert(largest_acked == want_largest);
             assert(ack_delay == want_delay);
             match ecn {
@@ -41,7 +41,7 @@ fn ecn_ack_encodes_to_type_0x03() {
         AckRange { smallest: 10_u64, largest: 10_u64 },
     ];
     let ecn = Some(EcnCounts { ect0: 5_u64, ect1: 3_u64, ce: 1_u64 });
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 10_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -60,7 +60,7 @@ fn plain_ack_encodes_to_type_0x02() {
     let ranges: List<AckRange> = [
         AckRange { smallest: 20_u64, largest: 20_u64 },
     ];
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 20_u64,
         ack_delay:     0_u64,
         ranges:        ranges,
@@ -71,7 +71,7 @@ fn plain_ack_encodes_to_type_0x02() {
     assert(buf[0] == 0x02_u8);
     let frames = decode_all_frames(&buf).unwrap();
     match &frames[0] {
-        Frame.AckFrame { ecn, .. } => {
+        QuicFrame.AckFrame { ecn, .. } => {
             match ecn {
                 None => {},
                 _ => panic("plain ACK must not carry ECN"),
@@ -87,7 +87,7 @@ fn ecn_ack_with_multiple_ranges_preserves_all_fields() {
         AckRange { smallest: 50_u64,  largest: 60_u64 },
     ];
     let ecn = Some(EcnCounts { ect0: 1000_u64, ect1: 1001_u64, ce: 7_u64 });
-    let f = Frame.AckFrame {
+    let f = QuicFrame.AckFrame {
         largest_acked: 102_u64,
         ack_delay:     12345_u64,
         ranges:        ranges,

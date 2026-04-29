@@ -12,11 +12,11 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_all_frames, StreamFlags};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_all_frames, StreamFlags};
 
 fn stream_frame_with_fin_and_offset_has_all_bits_set() {
     let data: List<Byte> = [0x68_u8, 0x69_u8];   // "hi"
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 4_u64,
         offset:    100_u64,
         data:      data,
@@ -30,7 +30,7 @@ fn stream_frame_with_fin_and_offset_has_all_bits_set() {
 
 fn stream_frame_without_offset_clears_off_bit() {
     let data: List<Byte> = [0x01_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 0_u64,
         offset:    0_u64,
         data:      data,
@@ -44,7 +44,7 @@ fn stream_frame_without_offset_clears_off_bit() {
 
 fn stream_frame_with_fin_only() {
     let data: List<Byte> = [0x00_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 8_u64,
         offset:    0_u64,
         data:      data,
@@ -58,7 +58,7 @@ fn stream_frame_with_fin_only() {
 
 fn stream_frame_roundtrip_preserves_payload_and_fin() {
     let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 12_u64,
         offset:    256_u64,
         data:      data.clone(),
@@ -69,7 +69,7 @@ fn stream_frame_roundtrip_preserves_payload_and_fin() {
     let frames = decode_all_frames(&buf).unwrap();
     assert(frames.len() == 1);
     match &frames[0] {
-        Frame.StreamFrame { stream_id, offset, data: d, fin } => {
+        QuicFrame.StreamFrame { stream_id, offset, data: d, fin } => {
             assert(stream_id == 12_u64);
             assert(offset    == 256_u64);
             assert(d.len()   == 4);

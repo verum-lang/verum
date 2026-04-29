@@ -17,7 +17,8 @@ mount core.net.quic.connection_sm.retry.{
 mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.connection_sm.{QuicSpaceKeys};
 mount core.net.quic.crypto.header_protection.{HpKey};
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame
+};
 
 fn make_keys() -> QuicSpaceKeys {
     let key_arr: [Byte; 16] = [0_u8; 16];
@@ -29,7 +30,7 @@ fn make_keys() -> QuicSpaceKeys {
 }
 
 fn check_coalesce_shape() -> Result<(), CoalesceError> {
-    let mut initial_frames: List<Frame> = [Frame.PingFrame];
+    let mut initial_frames: List<Frame> = [QuicFrame.PingFrame];
     pad_initial_frames(&mut initial_frames, 200);
 
     let plan = CoalescePlan {
@@ -46,7 +47,7 @@ fn check_coalesce_shape() -> Result<(), CoalesceError> {
                 keys:          make_keys(),
             },
             CoalescedPacket.OneRttPkt {
-                frames:        [Frame.PingFrame],
+                frames:        [QuicFrame.PingFrame],
                 pn:            0_u64,
                 pn_len:        1_u8,
                 largest_acked: None,

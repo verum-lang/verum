@@ -12,7 +12,7 @@
 // Initial packet.
 
 mount core.net.quic.frame.{
-    Frame, AckRange, EcnCounts, FrameError,
+    QuicFrame, AckRange, EcnCounts, FrameError,
     decode_frame, decode_all_frames, encode_frame,
 };
 mount core.net.quic.packet.{
@@ -29,27 +29,27 @@ mount core.net.quic.connection_id.{ConnectionId, CidError};
 mount core.net.quic.version.{VERSION_1, VERSION_2, is_supported, is_greased};
 
 fn check_frame_attrs() -> Bool {
-    let ping = Frame.PingFrame;
+    let ping = QuicFrame.PingFrame;
     let _ = ping.is_ack_eliciting();
     let _ = ping.is_probing();
     let _ = ping.is_flow_controlled();
 
-    let padding = Frame.PaddingRun(5);
+    let padding = QuicFrame.PaddingRun(5);
     let _ = padding.is_probing();
 
-    let hd = Frame.HandshakeDone;
+    let hd = QuicFrame.HandshakeDone;
     let _ = hd.is_ack_eliciting();
     true
 }
 
 fn check_frame_roundtrip_shape() -> Result<(), FrameError> {
-    let f = Frame.MaxData(1024_u64);
+    let f = QuicFrame.MaxData(1024_u64);
     let mut buf: List<Byte> = [];
     let _ = encode_frame(&f, &mut buf);
 
     let (decoded, _) = decode_frame(buf.as_slice(), 0)?;
     match decoded {
-        Frame.MaxData(_) => Ok(()),
+        QuicFrame.MaxData(_) => Ok(()),
         _ => Ok(()),   // shape-only — byte-exact verify in run tests
     }
 }

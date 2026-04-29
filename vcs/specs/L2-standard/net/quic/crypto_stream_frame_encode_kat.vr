@@ -31,7 +31,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_frame};
 
 fn crypto_frame_offset_zero_byte_exact() {
     // CRYPTO offset=0, data=[0x01 0x00 0x02 0x01 0x01 0x00 0x00 0x3A]
@@ -40,7 +40,7 @@ fn crypto_frame_offset_zero_byte_exact() {
         0x01_u8, 0x00_u8, 0x02_u8, 0x01_u8,
         0x01_u8, 0x00_u8, 0x00_u8, 0x3A_u8,
     ];
-    let f = Frame.CryptoFrame { offset: 0_u64, data: data.clone() };
+    let f = QuicFrame.CryptoFrame { offset: 0_u64, data: data.clone() };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     // Wire: type(1) + offset(1) + len(1) + 8 data = 11 bytes.
@@ -54,7 +54,7 @@ fn crypto_frame_offset_zero_byte_exact() {
 
 fn crypto_frame_nonzero_offset_byte_exact() {
     let data: List<Byte> = [0xAB_u8, 0xCD_u8];
-    let f = Frame.CryptoFrame { offset: 16_u64, data: data };
+    let f = QuicFrame.CryptoFrame { offset: 16_u64, data: data };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 5);
@@ -69,7 +69,7 @@ fn stream_frame_offset_zero_not_fin_type_is_0x0A() {
     // Minimal STREAM: offset=0 (no OFF bit), LEN always set, FIN clear
     //   → type = 0x08 | 0x02 = 0x0A.
     let data: List<Byte> = [0x48_u8, 0x49_u8];    // "HI"
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 4_u64,
         offset:    0_u64,
         data:      data,
@@ -87,7 +87,7 @@ fn stream_frame_offset_zero_not_fin_type_is_0x0A() {
 }
 
 fn stream_frame_fin_sets_low_bit() {
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 8_u64,
         offset:    0_u64,
         data:      [],
@@ -106,7 +106,7 @@ fn stream_frame_fin_sets_low_bit() {
 
 fn stream_frame_nonzero_offset_sets_off_bit() {
     let data: List<Byte> = [0xFF_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 2_u64,
         offset:    32_u64,
         data:      data,
@@ -128,7 +128,7 @@ fn stream_frame_nonzero_offset_sets_off_bit() {
 
 fn stream_frame_fin_and_offset_together_type_0x0F() {
     let data: List<Byte> = [0xAA_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 12_u64,
         offset:    5_u64,
         data:      data,
@@ -144,12 +144,12 @@ fn stream_frame_fin_and_offset_together_type_0x0F() {
 
 fn crypto_frame_decode_roundtrip() {
     let data: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
-    let f = Frame.CryptoFrame { offset: 4_u64, data: data.clone() };
+    let f = QuicFrame.CryptoFrame { offset: 4_u64, data: data.clone() };
     let mut wire: List<Byte> = [];
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.CryptoFrame { offset, data: dec } => {
+        QuicFrame.CryptoFrame { offset, data: dec } => {
             assert(offset == 4_u64);
             assert(dec.len() == 4);
             assert(dec[0] == 0xDE_u8 && dec[3] == 0xEF_u8);
@@ -160,7 +160,7 @@ fn crypto_frame_decode_roundtrip() {
 
 fn stream_frame_decode_preserves_fin() {
     let data: List<Byte> = [0x01_u8, 0x02_u8];
-    let f = Frame.StreamFrame {
+    let f = QuicFrame.StreamFrame {
         stream_id: 4_u64,
         offset:    100_u64,
         data:      data.clone(),
@@ -170,7 +170,7 @@ fn stream_frame_decode_preserves_fin() {
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.StreamFrame { stream_id, offset, data: dec, fin } => {
+        QuicFrame.StreamFrame { stream_id, offset, data: dec, fin } => {
             assert(stream_id == 4_u64);
             assert(offset == 100_u64);
             assert(dec.len() == 2);

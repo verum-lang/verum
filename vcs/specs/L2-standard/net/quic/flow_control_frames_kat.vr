@@ -22,10 +22,10 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_frame};
 
 fn max_data_byte_exact() {
-    let f = Frame.MaxData(42_u64);
+    let f = QuicFrame.MaxData(42_u64);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 2);
@@ -34,7 +34,7 @@ fn max_data_byte_exact() {
 }
 
 fn max_stream_data_byte_exact() {
-    let f = Frame.MaxStreamData { stream_id: 4_u64, limit: 16_u64 };
+    let f = QuicFrame.MaxStreamData { stream_id: 4_u64, limit: 16_u64 };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 3);
@@ -44,8 +44,8 @@ fn max_stream_data_byte_exact() {
 }
 
 fn max_streams_bidi_uni_distinct_types() {
-    let fb = Frame.MaxStreamsBidi(8_u64);
-    let fu = Frame.MaxStreamsUni(8_u64);
+    let fb = QuicFrame.MaxStreamsBidi(8_u64);
+    let fu = QuicFrame.MaxStreamsUni(8_u64);
     let mut ob: List<Byte> = [];
     let mut ou: List<Byte> = [];
     let _ = encode_frame(&fb, &mut ob);
@@ -57,7 +57,7 @@ fn max_streams_bidi_uni_distinct_types() {
 }
 
 fn data_blocked_byte_exact() {
-    let f = Frame.DataBlocked(12_u64);
+    let f = QuicFrame.DataBlocked(12_u64);
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 2);
@@ -66,7 +66,7 @@ fn data_blocked_byte_exact() {
 }
 
 fn stream_data_blocked_byte_exact() {
-    let f = Frame.StreamDataBlocked { stream_id: 6_u64, limit: 20_u64 };
+    let f = QuicFrame.StreamDataBlocked { stream_id: 6_u64, limit: 20_u64 };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     assert(out.len() == 3);
@@ -76,8 +76,8 @@ fn stream_data_blocked_byte_exact() {
 }
 
 fn streams_blocked_bidi_uni_distinct_types() {
-    let fb = Frame.StreamsBlockedBidi(2_u64);
-    let fu = Frame.StreamsBlockedUni(3_u64);
+    let fb = QuicFrame.StreamsBlockedBidi(2_u64);
+    let fu = QuicFrame.StreamsBlockedUni(3_u64);
     let mut ob: List<Byte> = [];
     let mut ou: List<Byte> = [];
     let _ = encode_frame(&fb, &mut ob);
@@ -90,34 +90,34 @@ fn streams_blocked_bidi_uni_distinct_types() {
 
 fn flow_control_frames_all_ack_eliciting() {
     // RFC 9000 §13.2.1 — all flow-control frames are ack-eliciting.
-    assert(Frame.MaxData(1_u64).is_ack_eliciting());
-    assert(Frame.MaxStreamData { stream_id: 4_u64, limit: 1_u64 }.is_ack_eliciting());
-    assert(Frame.MaxStreamsBidi(1_u64).is_ack_eliciting());
-    assert(Frame.MaxStreamsUni(1_u64).is_ack_eliciting());
-    assert(Frame.DataBlocked(1_u64).is_ack_eliciting());
-    assert(Frame.StreamDataBlocked { stream_id: 4_u64, limit: 1_u64 }.is_ack_eliciting());
-    assert(Frame.StreamsBlockedBidi(1_u64).is_ack_eliciting());
-    assert(Frame.StreamsBlockedUni(1_u64).is_ack_eliciting());
+    assert(QuicFrame.MaxData(1_u64).is_ack_eliciting());
+    assert(QuicFrame.MaxStreamData { stream_id: 4_u64, limit: 1_u64 }.is_ack_eliciting());
+    assert(QuicFrame.MaxStreamsBidi(1_u64).is_ack_eliciting());
+    assert(QuicFrame.MaxStreamsUni(1_u64).is_ack_eliciting());
+    assert(QuicFrame.DataBlocked(1_u64).is_ack_eliciting());
+    assert(QuicFrame.StreamDataBlocked { stream_id: 4_u64, limit: 1_u64 }.is_ack_eliciting());
+    assert(QuicFrame.StreamsBlockedBidi(1_u64).is_ack_eliciting());
+    assert(QuicFrame.StreamsBlockedUni(1_u64).is_ack_eliciting());
 }
 
 fn max_data_decode_roundtrip() {
-    let f = Frame.MaxData(1_000_000_u64);
+    let f = QuicFrame.MaxData(1_000_000_u64);
     let mut wire: List<Byte> = [];
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.MaxData(n) => assert(n == 1_000_000_u64),
+        QuicFrame.MaxData(n) => assert(n == 1_000_000_u64),
         _ => panic("expected MaxData"),
     }
 }
 
 fn max_stream_data_decode_roundtrip() {
-    let f = Frame.MaxStreamData { stream_id: 12_u64, limit: 2048_u64 };
+    let f = QuicFrame.MaxStreamData { stream_id: 12_u64, limit: 2048_u64 };
     let mut wire: List<Byte> = [];
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.MaxStreamData { stream_id, limit } => {
+        QuicFrame.MaxStreamData { stream_id, limit } => {
             assert(stream_id == 12_u64);
             assert(limit == 2048_u64);
         },

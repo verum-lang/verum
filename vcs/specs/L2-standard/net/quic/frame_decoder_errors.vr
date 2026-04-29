@@ -19,7 +19,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, FrameError, decode_frame, decode_all_frames};
+mount core.net.quic.frame.{QuicFrame, FrameError, decode_frame, decode_all_frames};
 
 fn empty_buffer_at_pos_0_is_truncated() {
     let empty: List<Byte> = [];
@@ -57,7 +57,7 @@ fn padding_run_is_never_invalid_type() {
     let (frame, new_pos) = decode_frame(buf.as_slice(), 0).unwrap();
     assert(new_pos == 4);
     match frame {
-        Frame.PaddingRun(n) => assert(n == 4),
+        QuicFrame.PaddingRun(n) => assert(n == 4),
         _ => panic("expected PaddingRun(4)"),
     }
 }
@@ -67,7 +67,7 @@ fn ping_frame_decodes_clean() {
     let (frame, new_pos) = decode_frame(buf.as_slice(), 0).unwrap();
     assert(new_pos == 1);
     match frame {
-        Frame.PingFrame => {},
+        QuicFrame.PingFrame => {},
         _ => panic("expected PingFrame"),
     }
 }
@@ -115,7 +115,7 @@ fn decode_all_accepts_pure_padding() {
     let frames = decode_all_frames(&buf).unwrap();
     assert(frames.len() == 1);
     match &frames[0] {
-        Frame.PaddingRun(n) => assert(*n == 3),
+        QuicFrame.PaddingRun(n) => assert(*n == 3),
         _ => panic("all-zero buffer must be a single PaddingRun(3)"),
     }
 }

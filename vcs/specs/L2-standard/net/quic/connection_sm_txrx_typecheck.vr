@@ -22,7 +22,8 @@ mount core.net.quic.connection_sm.rx.{
 mount core.net.quic.connection_sm.dispatch.{
     dispatch_frames, DispatchOutcome, CryptoChunk, NewCid,
 };
-mount core.net.quic.frame.{Frame};
+mount core.net.quic.frame.{QuicFrame
+};
 mount core.net.quic.packet.{LongPacketType};
 mount core.net.quic.connection_id.{ConnectionId};
 mount core.net.quic.recovery.{LossDetection, NewReno, PnSpaceKind};
@@ -48,7 +49,7 @@ fn check_tx_shape() -> Result<(), TxError> {
     let dcid = ConnectionId.empty();
     let scid = ConnectionId.empty();
     let keys = make_keys();
-    let frames: List<Frame> = [Frame.PingFrame];
+    let frames: List<Frame> = [QuicFrame.PingFrame];
 
     let _ = build_long_packet(LongPacketInput {
         ptype: LongPacketType.Initial,
@@ -74,7 +75,7 @@ fn check_tx_shape() -> Result<(), TxError> {
 }
 
 fn check_dispatch() {
-    let frames: List<Frame> = [Frame.PingFrame, Frame.PaddingRun(4)];
+    let frames: List<Frame> = [QuicFrame.PingFrame, QuicFrame.PaddingRun(4)];
     let mut loss = LossDetection.new();
     let mut cc = NewReno.new();
     let mut flow = ConnFlowControl.new(1_000_000_u64, 1_000_000_u64, 100_u64, 100_u64, 100_u64, 100_u64);

@@ -9,7 +9,7 @@
 
 mount core.net.quic.{
     QuicConfig, QuicError, TransportErrorCode, ApplicationErrorCode,
-    Connection, QuicListener, ConnectionEvent,
+    QuicConnection, QuicListener, ConnectionEvent,
     QuicStream, StreamDirection,
 };
 mount core.net.addr.{SocketAddr};
@@ -34,9 +34,9 @@ fn typecheck_server_config() -> QuicConfig {
 
 // Connect / accept shape (async).
 async fn typecheck_connect(peer: &SocketAddr, config: core.net.quic.QuicConfig)
-    -> Result<Connection, QuicError>
+    -> Result<QuicConnection, QuicError>
 {
-    Connection.connect(peer, config).await
+    QuicConnection.connect(peer, config).await
 }
 
 async fn typecheck_listen(local: &SocketAddr, config: core.net.quic.QuicConfig)
@@ -46,13 +46,13 @@ async fn typecheck_listen(local: &SocketAddr, config: core.net.quic.QuicConfig)
 }
 
 async fn typecheck_accept(listener: &QuicListener)
-    -> Result<(Connection, SocketAddr), QuicError>
+    -> Result<(QuicConnection, SocketAddr), QuicError>
 {
     listener.accept().await
 }
 
 // Stream open / write / read / close.
-async fn typecheck_stream_flow(conn: &Connection) -> Result<Int, QuicError> {
+async fn typecheck_stream_flow(conn: &QuicConnection) -> Result<Int, QuicError> {
     let stream = conn.open_bidi_stream().await?;
     stream.write_all(b"hello").await?;
     let mut buf: [Byte; 1024] = [0; 1024];
@@ -61,8 +61,8 @@ async fn typecheck_stream_flow(conn: &Connection) -> Result<Int, QuicError> {
     Ok(n)
 }
 
-// Connection events.
-async fn typecheck_events(conn: &Connection) -> Result<Int, QuicError> {
+// QuicConnection events.
+async fn typecheck_events(conn: &QuicConnection) -> Result<Int, QuicError> {
     match conn.next_event().await? {
         ConnectionEvent.IncomingStream(_) => Ok(1),
         ConnectionEvent.DatagramReceived(_) => Ok(2),
@@ -73,7 +73,7 @@ async fn typecheck_events(conn: &Connection) -> Result<Int, QuicError> {
 }
 
 // Datagram round-trip.
-async fn typecheck_datagram(conn: &Connection) -> Result<(), QuicError> {
+async fn typecheck_datagram(conn: &QuicConnection) -> Result<(), QuicError> {
     conn.send_datagram(b"d").await
 }
 

@@ -12,7 +12,7 @@
 // packet events.
 
 mount core.net.quic.recovery.*;
-mount core.net.quic.frame.{Frame, AckRange};
+mount core.net.quic.frame.{QuicFrame, AckRange};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 

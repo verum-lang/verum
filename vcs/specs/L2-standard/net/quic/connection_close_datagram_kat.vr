@@ -17,10 +17,10 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+mount core.net.quic.frame.{QuicFrame, encode_frame, decode_frame};
 
 fn connection_close_transport_empty_reason() {
-    let f = Frame.ConnectionCloseTransport {
+    let f = QuicFrame.ConnectionCloseTransport {
         error_code: 0_u64,
         frame_type: 0_u64,
         reason:     [],
@@ -38,7 +38,7 @@ fn connection_close_transport_empty_reason() {
 fn connection_close_transport_with_reason_byte_exact() {
     // PROTOCOL_VIOLATION (0x0A), source frame = 0x06 CRYPTO, reason "bad".
     let reason: List<Byte> = [0x62_u8, 0x61_u8, 0x64_u8];    // "bad"
-    let f = Frame.ConnectionCloseTransport {
+    let f = QuicFrame.ConnectionCloseTransport {
         error_code: 0x0A_u64,
         frame_type: 0x06_u64,
         reason:     reason,
@@ -58,7 +58,7 @@ fn connection_close_transport_with_reason_byte_exact() {
 
 fn connection_close_application_variant_byte_exact() {
     let reason: List<Byte> = [0x48_u8, 0x33_u8];             // "H3"
-    let f = Frame.ConnectionCloseApplication {
+    let f = QuicFrame.ConnectionCloseApplication {
         error_code: 0x0100_u64,    // H3_NO_ERROR (RFC 9114)
         reason:     reason,
     };
@@ -77,10 +77,10 @@ fn connection_close_application_variant_byte_exact() {
 
 fn connection_close_frames_not_ack_eliciting() {
     // §13.2.1 — CONNECTION_CLOSE frames MUST NOT elicit an ACK.
-    let t = Frame.ConnectionCloseTransport {
+    let t = QuicFrame.ConnectionCloseTransport {
         error_code: 0_u64, frame_type: 0_u64, reason: [],
     };
-    let a = Frame.ConnectionCloseApplication {
+    let a = QuicFrame.ConnectionCloseApplication {
         error_code: 0_u64, reason: [],
     };
     assert(!t.is_ack_eliciting());
@@ -90,7 +90,7 @@ fn connection_close_frames_not_ack_eliciting() {
 fn datagram_with_length_type_0x31() {
     // DATAGRAM with explicit length (must be used when not the last frame).
     let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
-    let f = Frame.Datagram { data: data, with_length: true };
+    let f = QuicFrame.Datagram { data: data, with_length: true };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     // type(1) + length(1) + 3 = 5.
@@ -104,7 +104,7 @@ fn datagram_with_length_type_0x31() {
 fn datagram_no_length_type_0x30() {
     // DATAGRAM without length — consumes rest of packet payload.
     let data: List<Byte> = [0xDE_u8, 0xAD_u8];
-    let f = Frame.Datagram { data: data, with_length: false };
+    let f = QuicFrame.Datagram { data: data, with_length: false };
     let mut out: List<Byte> = [];
     let _ = encode_frame(&f, &mut out);
     // type(1) + 2 data = 3.
@@ -116,7 +116,7 @@ fn datagram_no_length_type_0x30() {
 
 fn connection_close_transport_decode_roundtrip() {
     let reason: List<Byte> = [0x78_u8, 0x79_u8, 0x7A_u8];     // "xyz"
-    let f = Frame.ConnectionCloseTransport {
+    let f = QuicFrame.ConnectionCloseTransport {
         error_code: 0x0D_u64,       // APPLICATION_ERROR
         frame_type: 0_u64,
         reason:     reason.clone(),
@@ -125,7 +125,7 @@ fn connection_close_transport_decode_roundtrip() {
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.ConnectionCloseTransport { error_code, frame_type, reason: r2 } => {
+        QuicFrame.ConnectionCloseTransport { error_code, frame_type, reason: r2 } => {
             assert(error_code == 0x0D_u64);
             assert(frame_type == 0_u64);
             assert(r2.len() == 3);
@@ -137,7 +137,7 @@ fn connection_close_transport_decode_roundtrip() {
 
 fn connection_close_application_decode_roundtrip() {
     let reason: List<Byte> = [0x42_u8];
-    let f = Frame.ConnectionCloseApplication {
+    let f = QuicFrame.ConnectionCloseApplication {
         error_code: 0x0101_u64,
         reason:     reason.clone(),
     };
@@ -145,7 +145,7 @@ fn connection_close_application_decode_roundtrip() {
     let _ = encode_frame(&f, &mut wire);
     let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
     match decoded {
-        Frame.ConnectionCloseApplication { error_code, reason: r2 } => {
+        QuicFrame.ConnectionCloseApplication { error_code, reason: r2 } => {
             assert(error_code == 0x0101_u64);
             assert(r2.len() == 1);
             assert(r2[0] == 0x42_u8);
