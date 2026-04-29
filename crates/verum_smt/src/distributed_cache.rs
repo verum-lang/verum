@@ -1059,9 +1059,24 @@ impl DistributedCache {
     }
 
     // ==================== Redis Backend ====================
+    //
+    // Redis is the *non-S3* fallback path: it is reachable only
+    // when `distributed-cache` is OFF (the S3 fetch_remote /
+    // upload_remote variants don't consult Redis).  Cfg-gate the
+    // three Redis helpers on the same `not(distributed-cache)`
+    // condition as the call sites at lines 706 / 830 to keep them
+    // out of compilation when both features are on (the workspace
+    // default), which avoids a `dead_code` lint without an
+    // `#[allow]` crutch.
+    //
+    // Wiring Redis into the S3 path as a co-existing fallback is a
+    // separate architectural change — would let `distributed-cache`
+    // + `redis-cache` co-exist (S3 first, Redis on miss, filesystem
+    // last).  Until that lands, the cfg-pair below correctly tracks
+    // reachability.
 
     /// Fetch entry from Redis cache
-    #[cfg(feature = "redis-cache")]
+    #[cfg(all(feature = "redis-cache", not(feature = "distributed-cache")))]
     async fn fetch_from_redis(
         &self,
         client: &RedisClient,
@@ -1101,7 +1116,7 @@ impl DistributedCache {
     }
 
     /// Upload entry to Redis cache
-    #[cfg(feature = "redis-cache")]
+    #[cfg(all(feature = "redis-cache", not(feature = "distributed-cache")))]
     async fn upload_to_redis(
         &self,
         client: &RedisClient,
@@ -1132,7 +1147,7 @@ impl DistributedCache {
     }
 
     /// Get Redis key with namespace prefix
-    #[cfg(feature = "redis-cache")]
+    #[cfg(all(feature = "redis-cache", not(feature = "distributed-cache")))]
     fn get_redis_key(&self, key: &str) -> String {
         format!("verum:smt:cache:{}", key)
     }
