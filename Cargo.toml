@@ -45,6 +45,13 @@ members = [
     "vcs/tools/isabelle_graph_import",
 ]
 
+# `vcs/fuzz` cannot join the workspace yet — it has ~344 pre-existing
+# rand-API errors that need a separate audit (rand 0.9 → 0.10 API
+# migration: random_range, RngExt).  Until that lands, the crate runs
+# standalone via `cd vcs/fuzz && cargo test --lib` after its own
+# `Cargo.toml` is set to a non-inherited version block.
+exclude = ["vcs/fuzz"]
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
