@@ -237,6 +237,45 @@ impl EnterpriseClient {
         true
     }
 
+    /// Whether the access-control policy requires every installed
+    /// cog to ship a verified signature.
+    ///
+    /// Surfaces `EnterpriseConfig.access_control.require_signature`
+    /// as a public read so callers driving install / publish flows
+    /// can branch on the policy without re-reading the config.
+    pub fn requires_signature(&self) -> bool {
+        self.config.access_control.require_signature
+    }
+
+    /// Combined access check: cog name passes the allow / deny lists
+    /// AND, when `require_signature = true`, the caller has confirmed
+    /// the cog ships a verified signature.
+    ///
+    /// This is the load-bearing wiring for
+    /// `AccessControl.require_signature`. Pre-fix the field was
+    /// inert: enterprises that set the flag in `enterprise.toml`
+    /// would still install unsigned cogs because no code path
+    /// consulted the flag. Now the policy is enforced at every
+    /// gate that calls this method.
+    ///
+    /// Callers that don't have signature info yet should call
+    /// `is_cog_allowed` for the name-only check and
+    /// `requires_signature` to decide whether to look up the
+    /// signature before proceeding.
+    pub fn is_cog_allowed_with_signature(
+        &self,
+        cog_name: &str,
+        has_valid_signature: bool,
+    ) -> bool {
+        if !self.is_cog_allowed(cog_name) {
+            return false;
+        }
+        if self.requires_signature() && !has_valid_signature {
+            return false;
+        }
+        true
+    }
+
     /// Check if license is allowed
     pub fn is_license_allowed(&self, license: &str) -> bool {
         if let Some(allowed) = &self.config.access_control.allowed_licenses {
@@ -416,3 +455,83 @@ impl SbomGenerator {
 
 // Add uuid dependency for SPDX
 use uuid;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enterprise_config_with_signature_required(required: bool) -> EnterpriseConfig {
+        let mut cfg = EnterpriseConfig::default();
+        cfg.access_control.require_signature = required;
+        cfg.offline = true; // skip HTTP client construction in tests
+        cfg
+    }
+
+    #[test]
+    fn requires_signature_mirrors_config() {
+        // Pin: the read accessor surfaces the configured stance
+        // verbatim. Lets driver code branch on the policy without
+        // having to re-read EnterpriseConfig internals.
+        let cfg = enterprise_config_with_signature_required(true);
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(client.requires_signature());
+
+        let cfg = enterprise_config_with_signature_required(false);
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(!client.requires_signature());
+    }
+
+    #[test]
+    fn signature_required_rejects_unsigned_cog() {
+        // Pin: with `require_signature = true`, the combined check
+        // rejects an otherwise-allowed cog whose signature isn't
+        // verified. The name-only `is_cog_allowed` would still pass
+        // — proving the new combined API is doing real work, not
+        // just delegating.
+        let cfg = enterprise_config_with_signature_required(true);
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+
+        assert!(
+            client.is_cog_allowed("anything"),
+            "name-only check passes — no allow / deny list configured",
+        );
+        assert!(
+            !client.is_cog_allowed_with_signature("anything", false),
+            "require_signature=true must reject unsigned cogs even when name-only check passes",
+        );
+        assert!(
+            client.is_cog_allowed_with_signature("anything", true),
+            "require_signature=true accepts signed cogs",
+        );
+    }
+
+    #[test]
+    fn signature_optional_accepts_unsigned_cog() {
+        // Pin: with `require_signature = false` (the default), the
+        // combined check accepts an unsigned cog as long as the
+        // name passes the allow / deny lists.
+        let cfg = enterprise_config_with_signature_required(false);
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+
+        assert!(
+            client.is_cog_allowed_with_signature("anything", false),
+            "default policy accepts unsigned cogs",
+        );
+    }
+
+    #[test]
+    fn signature_check_still_honours_deny_list() {
+        // Pin: signature verification doesn't bypass the deny list
+        // — a signed cog on the deny list is still rejected. The
+        // signature gate is ADDITIONAL to the existing checks, not
+        // a replacement.
+        let mut cfg = enterprise_config_with_signature_required(true);
+        cfg.access_control.deny_list.push("forbidden-cog".into());
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+
+        assert!(
+            !client.is_cog_allowed_with_signature("forbidden-cog", true),
+            "deny list trumps signature verification",
+        );
+    }
+}
