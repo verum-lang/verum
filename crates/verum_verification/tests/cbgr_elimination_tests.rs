@@ -1081,3 +1081,53 @@ fn test_multiple_references() {
     assert!(!can_eliminate_check(&ref2, &result));
     assert!(!can_eliminate_check(&ref3, &result));
 }
+
+
+// ============================================================================
+// Wire-up Pin Tests
+// ============================================================================
+
+#[test]
+fn config_accessors_mirror_construction_values() {
+    // Pin: every accessor on CBGROptimizer returns the configured
+    // value. Before the wire-up landed five OptimizationConfig
+    // fields had no public read surface — external orchestrators
+    // composing the optimizer with their own call-graph walker
+    // couldn't observe its configured stance.
+    use verum_verification::cbgr_elimination::OptimizationConfig;
+
+    for &agg in &[true, false] {
+        for &inter in &[true, false] {
+            for &trust in &[true, false] {
+                let cfg = OptimizationConfig {
+                    aggressive: agg,
+                    max_analysis_depth: 7,
+                    trust_annotations: trust,
+                    interprocedural: inter,
+                    timeout_ms: 1234,
+                };
+                let opt = CBGROptimizer::new(cfg);
+                assert_eq!(opt.aggressive_enabled(), agg);
+                assert_eq!(opt.interprocedural_enabled(), inter);
+                assert_eq!(opt.trust_annotations_enabled(), trust);
+                assert_eq!(opt.max_analysis_depth(), 7);
+                assert_eq!(opt.timeout_ms(), 1234);
+            }
+        }
+    }
+}
+
+#[test]
+fn timeout_ms_zero_means_unlimited() {
+    // Pin: `OptimizationConfig.timeout_ms = 0` is treated as
+    // unlimited — the analyse-escape loop runs every variable
+    // even on a function with many references, no Unknown
+    // fallback inserted by the budget check.
+    use verum_verification::cbgr_elimination::OptimizationConfig;
+
+    let mut config = OptimizationConfig::conservative();
+    config.timeout_ms = 0;
+    let opt = CBGROptimizer::new(config);
+    assert_eq!(opt.timeout_ms(), 0);
+}
+

@@ -810,18 +810,89 @@ impl CBGROptimizer {
         self.stats = OptimizationStats::default();
     }
 
+    /// Read mirror of `OptimizationConfig.aggressive`. Surfaced
+    /// for orchestrators that want to know which preset stance
+    /// the optimizer is running under without re-reading the
+    /// config struct.
+    #[must_use]
+    pub fn aggressive_enabled(&self) -> bool {
+        self.config.aggressive
+    }
+
+    /// Read mirror of `OptimizationConfig.interprocedural`.
+    /// Embedders that compose the optimizer with their own
+    /// call-graph walker consult this to decide whether to
+    /// pre-resolve callees before invoking `analyze_escape`.
+    #[must_use]
+    pub fn interprocedural_enabled(&self) -> bool {
+        self.config.interprocedural
+    }
+
+    /// Read mirror of `OptimizationConfig.trust_annotations`.
+    /// When `true`, callers should pre-filter variables that
+    /// carry `@verify(static)` / equivalent escape-proven
+    /// annotations and skip them — the optimizer's analysis
+    /// would just confirm what the annotation already states.
+    #[must_use]
+    pub fn trust_annotations_enabled(&self) -> bool {
+        self.config.trust_annotations
+    }
+
+    /// Read mirror of `OptimizationConfig.max_analysis_depth`.
+    /// Embedders that do their own callee recursion consult
+    /// this to bound their own walk symmetrically with the
+    /// optimizer's documented depth limit.
+    #[must_use]
+    pub fn max_analysis_depth(&self) -> usize {
+        self.config.max_analysis_depth
+    }
+
+    /// Read mirror of `OptimizationConfig.timeout_ms`. The
+    /// `analyze_escape` method honours this as a per-function
+    /// wall-clock budget — analysis bails when the budget is
+    /// exhausted, returning a partial result whose preserved
+    /// (non-eliminated) entries reflect the conservative
+    /// fallback behaviour for un-analysed variables.
+    #[must_use]
+    pub fn timeout_ms(&self) -> u64 {
+        self.config.timeout_ms
+    }
+
     /// Analyze escape status of all references in a function
     ///
     /// Main entry point for escape analysis. Analyzes each reference variable
     /// in the function and determines its escape status by checking:
     /// (1) reference doesn't escape scope, (2) no concurrent access,
     /// (3) allocation dominates all uses, (4) lifetime is stack-bounded.
+    ///
+    /// Honours `config.timeout_ms` as a wall-clock per-function
+    /// budget. When the budget is exhausted mid-analysis, the
+    /// remaining variables are recorded as `EscapeStatus::Unknown`
+    /// (conservative fallback — checks are preserved, not
+    /// eliminated). Before this wire-up the field was inert —
+    /// pathological inputs could run unbounded regardless of
+    /// configured budget.
     pub fn analyze_escape(&mut self, func: &Function) -> EscapeAnalysisResult {
         let start = Instant::now();
         let mut result = EscapeAnalysisResult::new(func.name.clone());
 
+        let budget = if self.config.timeout_ms == 0 {
+            // 0 = unlimited.
+            None
+        } else {
+            Some(Duration::from_millis(self.config.timeout_ms))
+        };
+
         for var in func.reference_vars.iter() {
-            let status = self.analyze_variable_escape(func, var);
+            let status = if let Some(budget) = budget {
+                if start.elapsed() >= budget {
+                    EscapeStatus::Unknown
+                } else {
+                    self.analyze_variable_escape(func, var)
+                }
+            } else {
+                self.analyze_variable_escape(func, var)
+            };
             result.record_status(*var, status);
         }
 
