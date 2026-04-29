@@ -257,3 +257,67 @@ public fn is_stricter_than(level: VerificationLevel, other: VerificationLevel) -
         nu_finite_offset(level) > nu_finite_offset(other)
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq + Clone for VerificationLevel
+// =============================================================================
+
+implement Eq for VerificationLevel {
+    /// Verification levels compare by their canonical annotation
+    /// string — equivalent to a tag-only comparison since each
+    /// variant has no payload, but stays robust if future variants
+    /// gain payload fields.
+    fn eq(&self, other: &VerificationLevel) -> Bool {
+        to_annotation(self.clone()) == to_annotation(other.clone())
+    }
+}
+
+implement Clone for VerificationLevel {
+    fn clone(&self) -> VerificationLevel {
+        match self {
+            VerificationLevel.Runtime         => VerificationLevel.Runtime,
+            VerificationLevel.Static          => VerificationLevel.Static,
+            VerificationLevel.Fast            => VerificationLevel.Fast,
+            VerificationLevel.Formal          => VerificationLevel.Formal,
+            VerificationLevel.Proof           => VerificationLevel.Proof,
+            VerificationLevel.Thorough        => VerificationLevel.Thorough,
+            VerificationLevel.Reliable        => VerificationLevel.Reliable,
+            VerificationLevel.Certified       => VerificationLevel.Certified,
+            VerificationLevel.CoherentStatic  => VerificationLevel.CoherentStatic,
+            VerificationLevel.CoherentRuntime => VerificationLevel.CoherentRuntime,
+            VerificationLevel.Coherent        => VerificationLevel.Coherent,
+            VerificationLevel.Synthesize      => VerificationLevel.Synthesize,
+        }
+    }
+}
+
+implement Copy for VerificationLevel {}
+
+implement Display for VerificationLevel {
+    /// Renders as the canonical annotation form — round-trips back
+    /// to the same value via `parse_level`.  Mirrors VVA §2.3
+    /// strategy names so audit logs read directly as the source
+    /// `@verify(<level>)` annotation.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(to_annotation(self.clone()).as_str())
+    }
+}
+
+implement Debug for VerificationLevel {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            VerificationLevel.Runtime         => f.write_str("Runtime"),
+            VerificationLevel.Static          => f.write_str("Static"),
+            VerificationLevel.Fast            => f.write_str("Fast"),
+            VerificationLevel.Formal          => f.write_str("Formal"),
+            VerificationLevel.Proof           => f.write_str("Proof"),
+            VerificationLevel.Thorough        => f.write_str("Thorough"),
+            VerificationLevel.Reliable        => f.write_str("Reliable"),
+            VerificationLevel.Certified       => f.write_str("Certified"),
+            VerificationLevel.CoherentStatic  => f.write_str("CoherentStatic"),
+            VerificationLevel.CoherentRuntime => f.write_str("CoherentRuntime"),
+            VerificationLevel.Coherent        => f.write_str("Coherent"),
+            VerificationLevel.Synthesize      => f.write_str("Synthesize"),
+        }
+    }
+}
