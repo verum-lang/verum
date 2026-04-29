@@ -406,11 +406,41 @@ multi-reader stress test pending.
 
 ## Vector 8 — Tooling abuse
 
-### 8.1 LSP responses to malformed source
+### 8.1 LSP responses to malformed source — DEFENSE CONFIRMED 2026-04-29
 
-**Status:** PARTIAL DEFENSE — LSP entry points wrap incoming requests in
-catch-and-respond; specific panic-paths from malformed source not exhaustively
-fuzzed.
+**Status:** DEFENSE CONFIRMED + 2 real panic paths closed.
+
+**Audit:** Wrote 16 adversarial-input cases against
+`completion::complete_at_position` (the user-reachable LSP entry
+point that ingests arbitrary document text + cursor position).  The
+sweep found and closed two real panic paths:
+
+1. **`get_trigger_context` byte-vs-char-boundary panic** — naive
+   `&line[..character.min(line.len()) as usize]` panics with
+   "byte index N is not a char boundary" when `character` (the LSP
+   cursor position) falls inside a multi-byte UTF-8 sequence.
+   Repro: a combining accent (`U+0301`, 2 bytes) at position 4 in
+   `"fn ́foo()..."`.  Fix: extracted `safe_prefix_at` helper that
+   rounds the cursor offset DOWN to the nearest char boundary —
+   showing completions for the already-typed prefix is always safe.
+2. **`get_receiver_name` char-index-as-byte-offset bug** — the
+   identifier extractor walked `before_dot.chars().rev().enumerate()`
+   and used the char-index `i` as if it were a byte offset:
+   `start = before_dot.len() - i`.  For ASCII-only code this happens
+   to coincide with the byte offset; the moment a multi-byte char
+   appears in the line the slice panics.  Fix: walk via
+   `char_indices().rev()` so `byte_idx` is always a real byte offset.
+
+**Guardrail:** `crates/verum_lsp/tests/malformed_input_fuzz.rs` —
+16 tests covering the empirical failure modes:
+empty doc / mid-token EOF / unbalanced bracket pyramid / deep
+generic angle spam / non-UTF-8 bytes / position past EOF / position
+at u32::MAX / zero-position trigger chars / 64KB single line /
+embedded NUL bytes / combining unicode / 4-byte emoji as receiver /
+multi-byte identifier before dot / 10K short lines / malformed
+attribute / malformed import.  Every case asserts no-panic;
+emoji-receiver case sweeps every byte offset in the line so at
+least one always lands mid-codepoint.
 
 ### 8.2 Lint rules false-positive/negative — DEFENSE CONFIRMED 2026-04-28
 
@@ -532,11 +562,12 @@ These confirm that lenient-skip in the codegen is itself an attack surface;
 | 7.1 Gen counter race | **DEFENSE CONFIRMED** | 8-thread × 5K stress test (2026-04-28) |
 | 7.2 Hazard reclamation | PARTIAL | concurrent stress |
 | 7.3 LocalHeap affinity | PENDING | cross-thread test |
-| 8.1 LSP fuzz | PARTIAL | LSP fuzz harness |
+| 8.1 LSP fuzz | **DEFENSE CONFIRMED** | 16 adversarial-input tests + 2 real panic paths closed (2026-04-29) |
 | 8.2 Lint rules | **DEFENSE CONFIRMED** | 18 patterns + 167 tests across 19 files (2026-04-28) |
 | 8.3 vtest recovery | PARTIAL | edge cases |
 
-**20 vectors confirmed defended (was 19), 7 partial, 0 pending** post
+**21 vectors confirmed defended (was 20), 6 partial, 0 pending** post
+2026-04-29 RT-2.8.1 closure (2 real LSP panic paths closed).  Earlier
 2026-04-28 round-2-batch + RT-2.6.2 + RT-2.1.2 + RT-2.2.2 + RT-2.3.3 +
 RT-2.2.3 + RT-2.5 + RT-2.7.1 + RT-2.3.1 + RT-2.3.2 closures.  Earlier:
 RT-2.3.2 + RT-2.4.3 + RT-2.4.1 + RT-2.4.2 + RT-2.8.2 + RT-2.6.1 +
