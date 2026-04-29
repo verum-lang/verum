@@ -1,14 +1,13 @@
 // =============================================================================
-// core/net/weft/json_extractor.vr — WeftExtractorJson<T> handler-argument extractor
+// core/net/weft/json_extractor.vr — Json<T> handler-argument extractor
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §11 (Phase 1 follow-up:
-//        "Полноценный JSON-extractor")
+// Spec:  internal/specs/net-framework.md §5.3 (Json<T>) + §11 (Phase 1
+//        follow-up: "Полноценный JSON-extractor")
 // =============================================================================
 //
-// Closes the framework's Phase 1 follow-up by lifting the placeholder
-// `WeftExtractorJson<T>` type from `core.net.weft.handler` into a fully-functional
-// FromRequest impl backed by `core.encoding.json`.
+// Provides the spec-canonical `Json<T>` extractor — drop-in for axum-style
+// handlers — backed by `core.encoding.json`.
 //
 // The extractor performs five gates in fixed order:
 //
@@ -300,7 +299,7 @@ implement JsonExtractorConfig {
 }
 
 // =============================================================================
-// WeftExtractorJson<T> extraction — the entry point
+// Json<T> extraction — the entry point
 // =============================================================================
 
 /// Try to extract a typed `T` from the request body. Composable
@@ -391,27 +390,28 @@ fn lowercase_slice(bytes: &[Byte], start: Int, end: Int) -> Text {
 // FromRequest impl — wraps extract_json with the default config
 // =============================================================================
 
-/// Re-export the placeholder type from the handler module so
-/// users see the same `WeftExtractorJson<T>` they imported there. This module's
-/// `FromRequest for WeftExtractorJson<T>` impl supersedes the placeholder once
-/// the user mounts `core.net.weft.json_extractor`.
-public type WeftExtractorJson<T> is { inner: T };
+/// `Json<T>` — typed JSON body extractor. axum-style: declare a
+/// handler parameter of type `Json<MyType>` and Weft will run all
+/// five gates (content-type, size cap, UTF-8, parse, materialise) and
+/// hand you the typed value, or short-circuit with a typed
+/// `JsonExtractError`.
+public type Json<T> is { inner: T };
 
-implement<T> WeftExtractorJson<T> {
+implement<T> Json<T> {
     public fn into_inner(self) -> T { self.inner }
     public fn as_ref(&self) -> &T { &self.inner }
 }
 
-implement<T> FromRequest for WeftExtractorJson<T>
+implement<T> FromRequest for Json<T>
     where T: JsonDeserialize<T>
 {
     type Rejection = JsonExtractError;
 
     async fn from_request(req: &mut WeftRequest)
-        -> Result<WeftExtractorJson<T>, JsonExtractError>
+        -> Result<Json<T>, JsonExtractError>
     {
         let cfg = JsonExtractorConfig.default();
         let value = extract_json<T>(req, &cfg)?;
-        Ok(WeftExtractorJson { inner: value })
+        Ok(Json { inner: value })
     }
 }
