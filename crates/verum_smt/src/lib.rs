@@ -125,6 +125,10 @@ pub mod proof_carrying_code; // PCC: serializable proof bundles attached to VBC
 // registry + AdmittedReplay fallback; per-target lowering
 // is shipped incrementally.
 pub mod proof_replay;
+/// Cross-format foreign-system runner.  Trait-bounded interface over
+/// per-format external tools (coqc / lean / isabelle / kontroli) plus
+/// adapters that lift `CheckResult` → kernel-side `FormatStatus`.
+pub mod cross_format_runner;
 // Persistent CertificateStore — bridges SMT-verification-emitted
 // SmtCertificates to proof-replay consumption in `verum export`.
 // Trait + FileSystemCertificateStore + InMemoryCertificateStore.
