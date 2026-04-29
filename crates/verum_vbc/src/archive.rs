@@ -811,6 +811,23 @@ pub fn write_archive<W: Write>(archive: &VbcArchive, mut writer: W) -> io::Resul
 }
 
 /// Reads a VBC archive from a reader
+/// Architectural upper bounds for archive index entries.
+///
+/// Hostile archives can claim `module_count`, `name_len`,
+/// `dep_count`, and `data_size` values up to their full integer
+/// range (u32 = 4 billion, u64 = 18 EB).  Allocating those sizes
+/// before checking against the actual file content is a memory-
+/// amplification denial-of-service: a 32-byte header can request
+/// terabytes of allocations.
+///
+/// These bounds reflect "no real-world Verum archive ever
+/// approaches this" — any input that exceeds them is rejected as
+/// malformed before any allocation is performed.
+const MAX_MODULES_PER_ARCHIVE: u32 = 1 << 16;       // 65 536
+const MAX_MODULE_NAME_BYTES: u32 = 1 << 14;         // 16 KB
+const MAX_DEPS_PER_MODULE: u32 = 1 << 12;           // 4 096
+const MAX_MODULE_DATA_BYTES: u64 = 1 << 30;         // 1 GB
+
 pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     // Read header
     let mut magic = [0u8; 4];
@@ -836,6 +853,19 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     reader.read_exact(&mut buf8)?;
     let index_size = u64::from_le_bytes(buf8);
 
+    // Memory-amplification defense: reject implausibly large
+    // module counts before allocating the index Vec.  See
+    // MAX_MODULES_PER_ARCHIVE rationale.
+    if module_count > MAX_MODULES_PER_ARCHIVE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "archive module_count ({}) exceeds maximum ({})",
+                module_count, MAX_MODULES_PER_ARCHIVE,
+            ),
+        ));
+    }
+
     let header = ArchiveHeader {
         magic,
         version_major,
@@ -849,13 +879,24 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     // Seek to index
     reader.seek(SeekFrom::Start(index_offset))?;
 
-    // Read index
+    // Read index.  `module_count` already bounded above, so the
+    // Vec::with_capacity allocation is safe.
     let mut index = Vec::with_capacity(module_count as usize);
     for _ in 0..module_count {
-        // Name
+        // Name length — reject implausibly large names before
+        // allocating the name buffer.
         reader.read_exact(&mut buf4)?;
-        let name_len = u32::from_le_bytes(buf4) as usize;
-        let mut name_bytes = vec![0u8; name_len];
+        let name_len = u32::from_le_bytes(buf4);
+        if name_len > MAX_MODULE_NAME_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "archive module name_len ({}) exceeds maximum ({})",
+                    name_len, MAX_MODULE_NAME_BYTES,
+                ),
+            ));
+        }
+        let mut name_bytes = vec![0u8; name_len as usize];
         reader.read_exact(&mut name_bytes)?;
         let name = String::from_utf8_lossy(&name_bytes).to_string();
 
@@ -867,10 +908,33 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
         reader.read_exact(&mut buf8)?;
         let content_hash = u64::from_le_bytes(buf8);
 
-        // Dependencies
+        // Reject implausibly large data sizes before reaching the
+        // matching `vec![0u8; data_size]` below.  Cheap to detect
+        // here at index-read time; the per-module loop below trusts
+        // this check.
+        if data_size > MAX_MODULE_DATA_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "archive module '{}' data_size ({}) exceeds maximum ({})",
+                    name, data_size, MAX_MODULE_DATA_BYTES,
+                ),
+            ));
+        }
+
+        // Dependencies — same defense.
         reader.read_exact(&mut buf4)?;
-        let dep_count = u32::from_le_bytes(buf4) as usize;
-        let mut dependencies = Vec::with_capacity(dep_count);
+        let dep_count = u32::from_le_bytes(buf4);
+        if dep_count > MAX_DEPS_PER_MODULE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "archive module '{}' dep_count ({}) exceeds maximum ({})",
+                    name, dep_count, MAX_DEPS_PER_MODULE,
+                ),
+            ));
+        }
+        let mut dependencies = Vec::with_capacity(dep_count as usize);
         for _ in 0..dep_count {
             reader.read_exact(&mut buf4)?;
             dependencies.push(u32::from_le_bytes(buf4));
@@ -885,7 +949,8 @@ pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
         });
     }
 
-    // Read module data
+    // Read module data.  `module_count` and per-entry `data_size`
+    // already bounded above.
     let mut module_data = Vec::with_capacity(module_count as usize);
     for entry in &index {
         reader.seek(SeekFrom::Start(entry.data_offset))?;
@@ -926,6 +991,71 @@ mod tests {
 
         assert_eq!(archive.module_count(), 0);
         assert!(!archive.is_stdlib());
+    }
+
+    /// Hostile archive header claims `module_count = u32::MAX`.
+    /// Pre-fix the deserializer would `Vec::with_capacity(u32::MAX)`
+    /// — ~70 GB on most allocators — before discovering the file is
+    /// too short.  Post-fix the size is rejected before any
+    /// allocation.
+    #[test]
+    fn test_read_archive_rejects_huge_module_count() {
+        let mut payload = Vec::new();
+        // Magic
+        payload.extend_from_slice(&ARCHIVE_MAGIC);
+        // version_major / version_minor
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        // flags
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        // module_count — adversarial
+        payload.extend_from_slice(&u32::MAX.to_le_bytes());
+        // index_offset / index_size (irrelevant; the size check
+        // fires first)
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+
+        let cursor = io::Cursor::new(payload);
+        let result = read_archive(cursor);
+        assert!(
+            result.is_err(),
+            "u32::MAX module_count must be rejected at the size gate"
+        );
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("module_count"),
+            "error must identify the offending field, got: {}",
+            msg,
+        );
+    }
+
+    /// Hostile name_len in the index entry — would request a u32::MAX
+    /// (4 GB) byte allocation for the name buffer.  Post-fix: rejected.
+    #[test]
+    fn test_read_archive_rejects_huge_name_len() {
+        let mut payload = Vec::new();
+        // Header — module_count = 1
+        payload.extend_from_slice(&ARCHIVE_MAGIC);
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        // index_offset = end of header (we'll seek there)
+        let header_end = (4 + 2 + 2 + 4 + 4 + 8 + 8) as u64;
+        payload.extend_from_slice(&header_end.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        // Index entry: hostile name_len
+        payload.extend_from_slice(&u32::MAX.to_le_bytes());
+
+        let cursor = io::Cursor::new(payload);
+        let result = read_archive(cursor);
+        assert!(result.is_err(), "u32::MAX name_len must be rejected");
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("name_len"),
+            "error must identify name_len, got: {}",
+            msg,
+        );
     }
 
     #[test]
