@@ -1738,7 +1738,20 @@ impl CertificateGenerator {
             "proof": format!("{:?}", proof),
         });
 
-        Ok(json.to_string().into())
+        // `pretty_print` was a config field with no readers — every
+        // call serialised compactly regardless of the flag.  JSON is
+        // the only certificate format with a meaningful pretty-vs-
+        // compact distinction (Coq/Lean/Dedukti are emitted as
+        // structured ASCII text where the layout is part of the
+        // grammar), so the flag is honoured here.
+        let serialised = if self.config.pretty_print {
+            serde_json::to_string_pretty(&json)
+                .map_err(|e| CertificateError::GenerationFailed(e.to_string().into()))?
+        } else {
+            json.to_string()
+        };
+
+        Ok(serialised.into())
     }
 }
 
