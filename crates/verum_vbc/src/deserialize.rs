@@ -1357,4 +1357,49 @@ mod tests {
         let result = deserialize_module(data);
         assert!(result.is_err());
     }
+
+    /// Hostile module header claims `type_table_count = u32::MAX`.
+    /// Pre-fix the deserializer would `Vec::with_capacity(u32::MAX)`
+    /// — multi-GB allocation — before discovering the file is too
+    /// short.  Post-fix the size is rejected at the parse-header
+    /// gate before any allocation.
+    #[test]
+    fn test_deserialize_rejects_huge_type_table_count() {
+        let mut module = VbcModule::new("victim".to_string());
+        module.add_constant(Constant::Int(0)); // ensure offsets are non-trivial
+        let mut bytes = serialize_module(&module).unwrap();
+
+        // VbcHeader layout: magic(4) + version(4) + flags(4) +
+        // type_table_offset(4) + type_table_count(4) at offset 16.
+        // Patch type_table_count to u32::MAX in little-endian.
+        let mark = b"VBC1";
+        assert!(bytes.starts_with(mark));
+        // Use a sentinel scan to find the type_table_count field
+        // robustly across header-layout evolution: read the
+        // serialized module, parse its header, find its offset.
+        // For test purposes we just patch the first u32 after the
+        // magic/version/flags/type_table_offset fields — this is
+        // brittle but acceptable inside the test.  Use the actual
+        // header struct to compute the byte offset.
+        //
+        // Layout (matches format::VbcHeader serialize order):
+        //   magic[4] version[4] flags[4] module_name_offset[4]
+        //   type_table_offset[4] type_table_count[4]   ← target
+        let count_offset = 4 + 4 + 4 + 4 + 4;
+        bytes[count_offset..count_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let result = deserialize_module(&bytes);
+        match result {
+            Err(VbcError::TableTooLarge { field, count, max }) => {
+                assert_eq!(field, "type_table_count");
+                assert_eq!(count, u32::MAX);
+                assert_eq!(max, MAX_TYPE_TABLE_ENTRIES);
+            }
+            other => panic!(
+                "expected TableTooLarge {{ field: type_table_count, .. }}, \
+                 got {:?}",
+                other.err()
+            ),
+        }
+    }
 }
