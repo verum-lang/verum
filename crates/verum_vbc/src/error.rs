@@ -62,6 +62,21 @@ pub enum VbcError {
         size: u32,
     },
 
+    /// Implausibly large table count — memory-amplification defense
+    /// against hostile bytecode headers that claim multi-billion
+    /// `Vec::with_capacity` allocations before any entry is read.
+    /// Each module-level table (types / functions / constants /
+    /// specializations) carries its own architectural upper bound.
+    #[error("table '{field}' count {count} exceeds maximum {max} — refusing memory-amplification request")]
+    TableTooLarge {
+        /// Header field name (e.g. `type_table_count`).
+        field: &'static str,
+        /// Adversarial count claimed by the input.
+        count: u32,
+        /// Architectural upper bound.
+        max: u32,
+    },
+
     // === Type Errors ===
     /// Invalid type ID reference.
     #[error("invalid type reference: TypeId({0})")]
