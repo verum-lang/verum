@@ -119,10 +119,36 @@ on dealloc, advancing the effective generation before re-alloc lands
 on the same slot. The guardrail tests the production pattern, not
 the stub.
 
-### 2.2 Refinement check at every callsite of a hot function
+### 2.2 Refinement check at every callsite of a hot function — DEFENSE CONFIRMED 2026-04-29
 
-**Status:** PENDING — depends on whether the verifier caches per-predicate
-per-typed-args; test by generating a hot loop with refinement-typed args.
+**Status:** DEFENSE CONFIRMED — the `SubsumptionChecker` interns each
+`(φ₁, φ₂)` pair into a result cache keyed by canonical hash. Hot-loop
+callers see ~zero amortised cost: the syntactic fast path covers
+reflexive checks at ~0 ns each, and SMT-driven checks for
+non-reflexive pairs cache their result on the first call so
+subsequent identical queries return without invoking Z3.
+
+**Guardrail:** `crates/verum_smt/tests/hot_loop_cache_invariant.rs` —
+4 tests pin the contract:
+
+- **`hot_loop_same_obligation_hits_cache`** — 1000 iterations of the
+  reflexive `(x > 0, x > 0)` check must resolve via the syntactic
+  fast path; no SMT calls. The syntactic path is even faster than
+  a cache hit since the hash isn't computed.
+- **`hot_loop_distinct_obligations_share_no_keys`** — 200 distinct
+  refinements produce zero false-positive cache hits; the hash
+  key is a faithful canonical fingerprint, not a lossy bucket.
+- **`hot_loop_cache_hit_after_warming`** — non-reflexive
+  `(x > 5, x > 0)` reaches SMT at most once across two calls; the
+  second call short-circuits through the cache.
+- **`hot_loop_amortised_p99_invariant`** — 1000-iteration tight
+  loop on a non-reflexive pair reaches SMT at most 10 times
+  (≤ 1% budget); in practice 0 or 1 iterations reach SMT.
+
+**Verdict:** the verifier amortises refinement checks correctly across
+hot loops. Adversarial workloads that try to defeat caching by
+re-checking the same obligation at every iteration cannot inflate the
+solver-side cost — the cache is exhaustive over `(φ₁, φ₂)` pairs.
 
 ### 2.3 10^6 lightweight async tasks — DEFENSE CONFIRMED 2026-04-28
 
@@ -322,7 +348,7 @@ null-terminator write instead of N grows + N writes + N terminators) gave
 | 1.2 SMT exponential | **DEFENSE CONFIRMED** | closed via round-1 §5.1 (2026-04-28) |
 | 1.3 Module fan-out | **DEFENSE CONFIRMED** | 64-leaf+hub+aggregator guardrail (2026-04-28) |
 | 2.1 Alloc pressure | **DEFENSE CONFIRMED** | wire-frame done + generation-churn no-collision guardrail (2026-04-29) |
-| 2.2 Refinement caching | PENDING | hot-loop test |
+| 2.2 Refinement caching | **DEFENSE CONFIRMED** | hot-loop cache-invariant test (2026-04-29) |
 | 2.3 10^6 tasks | **DEFENSE CONFIRMED** | atomic spawn-time cap (2026-04-28) |
 | 2.4 Channel backlog | **DEFENSE CONFIRMED** | zero-internal-unbounded audit (2026-04-28) |
 | 3.1 False sharing | PENDING | pinned multi-thread |
