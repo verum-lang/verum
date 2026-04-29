@@ -24,13 +24,14 @@
 
 use super::common::{DeriveContext, FieldInfo};
 use super::{DeriveMacro, DeriveResult, ident_expr, method_call, string_lit};
+use smallvec::smallvec;
 use verum_ast::Span;
 use verum_ast::decl::Item;
-use verum_ast::expr::{Block, Expr, ExprKind, UnOp};
+use verum_ast::expr::{Block, ConditionKind, Expr, ExprKind, IfCondition, UnOp};
 use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::stmt::{Stmt, StmtKind};
 use verum_ast::ty::{Ident, Path, Type, TypeKind};
-use verum_common::{List, Maybe, Text};
+use verum_common::{Heap, List, Maybe, Text};
 
 pub struct DeriveShellRender;
 
@@ -131,7 +132,33 @@ fn render_field(
     let mut stmts: Vec<Stmt> = Vec::new();
     let field_value = field.access_on_self(span);
 
-    // Insert separator (space) between fields.
+    // Bool flag refinement — emit only when true.
+    if field.is_bool() && flag_text.is_some() {
+        let flag = flag_text.unwrap();
+        let mut inner: List<Stmt> = List::new();
+        if !is_first {
+            inner.push(push_lit_stmt(out, Text::from(" "), span));
+        }
+        inner.push(push_lit_stmt(out, flag, span));
+
+        // if self.<field> { ...inner... }
+        let cond = IfCondition {
+            conditions: smallvec![ConditionKind::Expr(field_value)],
+            span,
+        };
+        let if_expr = Expr::new(
+            ExprKind::If {
+                condition:   Heap::new(cond),
+                then_branch: Block::new(inner, Maybe::None, span),
+                else_branch: Maybe::None,
+            },
+            span,
+        );
+        stmts.push(Stmt::expr(if_expr, /* has_semi */ true));
+        return stmts;
+    }
+
+    // All other fields: leading space, then payload.
     if !is_first {
         stmts.push(push_lit_stmt(out, Text::from(" "), span));
     }
@@ -139,9 +166,6 @@ fn render_field(
     if positional {
         stmts.push(push_escape_stmt(out, field_value, span));
     } else if let Some(flag) = flag_text {
-        // Emit `<flag> <escaped-value>` for every type.  The "Bool flag
-        // → emit only when true" refinement requires an If-expr with
-        // IfCondition wrapper; see module doc.
         stmts.push(push_lit_stmt(out, flag, span));
         stmts.push(push_lit_stmt(out, Text::from(" "), span));
         stmts.push(push_escape_stmt(out, field_value, span));
