@@ -768,7 +768,7 @@ public type SmallArena is ArenaAllocator<4096, 16>;
 public type MediumArena is ArenaAllocator<16384, 32>;
 
 /// Connection pool (1KB blocks, 128 connections)
-public type ConnectionPool is PoolAllocator<1024, 128>;
+public type ConnectionPoolArena is PoolAllocator<1024, 128>;
 
 /// Request context pool (256B blocks, 256 contexts)
 public type RequestContextPool is PoolAllocator<256, 256>;

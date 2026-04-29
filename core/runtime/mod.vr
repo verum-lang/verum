@@ -149,7 +149,7 @@ public mount .env.{
 
 // Recovery strategies
 public mount .recovery.{
-    RetryPolicy,
+    RecoveryRetryPolicy,
     RuntimeRetryConfig,
     RecoveryCircuitBreaker,
     RecoveryCircuitState,

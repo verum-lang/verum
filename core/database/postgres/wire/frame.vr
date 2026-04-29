@@ -56,7 +56,7 @@ implement Debug for FrameError {
 }
 
 implement Eq for FrameError {
-    fn eq(&self, other: &FrameError) -> Bool {
+    fn eq(&self, other: &PgFrameError) -> Bool {
         match (self, other) {
             (FeShort { wanted: wa, available: aa },
              FeShort { wanted: wb, available: ab }) => wa == wb && aa == ab,
@@ -113,13 +113,13 @@ public fn frame_untagged<F: fn(&mut WireBuf) -> ()>(write_payload: F) -> List<By
 // Frame reader — splits a stream byte buffer into individual messages.
 // -----------------------------------------------------------------------------
 
-public type Frame is {
+public type PgFrame is {
     tag: Byte,           // 0 if this is a tag-less frame (only ever the very
                          // first response to SSLRequest, in practice)
     payload: List<Byte>, // body excluding the tag and the 4-byte length
 }
 
-implement Frame {
+implement PgFrame {
     public fn tag(&self) -> Byte { self.tag }
     public fn payload(&self) -> &List<Byte> { &self.payload }
     public fn into_payload(self) -> List<Byte> { self.payload }
@@ -154,12 +154,12 @@ public fn try_parse_tagged(buf: &[Byte]) -> Result<Maybe<TaggedReadOutcome>, Fra
         i = i + 1;
     }
     Ok(Some(TaggedReadOutcome {
-        frame: Frame { tag: tag, payload: payload },
+        frame: PgFrame { tag: tag, payload: payload },
         bytes_consumed: total_frame,
     }))
 }
 
 public type TaggedReadOutcome is {
-    frame: Frame,
+    frame: PgFrame,
     bytes_consumed: Int,
 };

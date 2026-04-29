@@ -17,7 +17,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.types.{WireReader, WireValue, WvNull, WvPresent, FmtBinary, FmtText};
-mount core.database.postgres.wire.frame.Frame;
+mount core.database.postgres.wire.frame.PgFrame;
 mount core.database.postgres.wire.types.{
     BE_AUTH_REQUEST, BE_PARAMETER_STATUS, BE_BACKEND_KEY_DATA,
     BE_READY_FOR_QUERY, BE_ROW_DESCRIPTION, BE_DATA_ROW,
@@ -488,7 +488,7 @@ public type BackendMessage is
 /// Dispatch a `Frame` to the right parser. The DataRow path needs the
 /// per-column format vector from a preceding RowDescription, which is
 /// caller state — pass it in or use `Vec::new()` to default to text.
-public fn parse_backend(frame: Frame, data_row_formats: &List<Int>) -> Result<BackendMessage, BackendDecodeError> {
+public fn parse_backend(frame: PgFrame, data_row_formats: &List<Int>) -> Result<BackendMessage, BackendDecodeError> {
     let tag = frame.tag();
     let payload = frame.into_payload();
     if tag == BE_AUTH_REQUEST     { return Ok(BmAuth(parse_auth_request(payload)?)); }

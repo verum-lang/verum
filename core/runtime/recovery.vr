@@ -73,7 +73,7 @@ public type RetryPredicate is
     | Custom(fn(&Text) -> Bool);
 
 /// Retry policy with runtime state
-public type RetryPolicy is {
+public type RecoveryRetryPolicy is {
     /// Configuration
     config: RuntimeRetryConfig,
 
@@ -87,7 +87,7 @@ public type RetryPolicy is {
     last_error: Maybe<Text>,
 };
 
-implement RetryPolicy {
+implement RecoveryRetryPolicy {
     /// Create new retry policy from config
     public fn new(config: RuntimeRetryConfig) -> Self {
         Self {
@@ -131,7 +131,7 @@ implement RetryPolicy {
 /// - Overhead per attempt: ~50ns (policy check + timing)
 /// - Sleep implementation: uses sys.nanosleep
 public async fn execute_with_retry<F, T, E>(
-    policy: &mut RetryPolicy,
+    policy: &mut RecoveryRetryPolicy,
     operation: fn() -> Future<Result<T, E>>,
 ) -> Result<T, E>
 where E: Display
