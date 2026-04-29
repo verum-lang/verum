@@ -1031,6 +1031,23 @@ enum Commands {
         format: String,
     },
 
+    /// Cubical / HoTT first-class catalogue (#78) — typed
+    /// primitive inventory (Path / Refl / J / Transp / Coe /
+    /// Hcomp / Comp / Glue / Equiv / Univalence + 7 more) +
+    /// computation-rule registry + face-formula validator.
+    /// Architectural foundation for foundation-neutral cubical
+    /// type theory in Verum.
+    ///
+    /// Subcommands:
+    ///   verum cubical primitives [--category C] [--output ...]
+    ///   verum cubical explain    <name> [--output ...]
+    ///   verum cubical rules      [--output ...]
+    ///   verum cubical face       <formula> [--output ...]
+    Cubical {
+        #[clap(subcommand)]
+        sub: CubicalSub,
+    },
+
     /// Cog distribution registry (#82) — publish, lookup, search,
     /// verify reproducibility envelopes, and check multi-mirror
     /// consensus.  Per-cog reproducibility hash chain (sources +
@@ -1582,6 +1599,36 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum CubicalSub {
+    /// List every primitive with a one-line semantics summary.
+    /// Optional `--category` filters to one of: identity / path_ops /
+    /// induction / transport / composition / glue / universe.
+    Primitives {
+        #[clap(long)]
+        category: Option<String>,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    /// Full structured doc for a single primitive.
+    Explain {
+        name: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    /// List every computation / reduction rule.
+    Rules {
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    /// Parse + validate a face formula (e.g. `i = 0 ∧ j = 1`).
+    Face {
+        formula: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum CogRegistrySub {
     Publish {
@@ -3171,6 +3218,18 @@ fn run_command(cli: Cli) -> Result<()> {
             out,
             format,
         } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
+        Commands::Cubical { sub } => match sub {
+            CubicalSub::Primitives { category, output } => {
+                commands::cubical::run_primitives(category.as_deref(), &output)
+            }
+            CubicalSub::Explain { name, output } => {
+                commands::cubical::run_explain(&name, &output)
+            }
+            CubicalSub::Rules { output } => commands::cubical::run_rules(&output),
+            CubicalSub::Face { formula, output } => {
+                commands::cubical::run_face(&formula, &output)
+            }
+        },
         Commands::CogRegistry { sub } => match sub {
             CogRegistrySub::Publish {
                 manifest,

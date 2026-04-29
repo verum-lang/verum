@@ -138,6 +138,12 @@ pub mod cert_replay;
 /// filesystem-backed reference impls + `MultiMirrorClient`
 /// composite that requires consensus across mirrors.
 pub mod cog_registry;
+/// Cubical / HoTT first-class catalogue (#78) — typed primitive
+/// inventory (Path, Refl, J, Transp, Coe, Hcomp, Comp, Glue,
+/// Equiv, Univalence + 7 more) + computation-rule registry +
+/// face-formula validator.  The architectural foundation for
+/// foundation-neutral cubical type theory in Verum.
+pub mod cubical;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
