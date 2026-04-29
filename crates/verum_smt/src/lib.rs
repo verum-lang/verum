@@ -110,6 +110,12 @@
 pub mod context;
 pub mod cost;
 pub mod counterexample;
+/// Industrial-tactic fast path — adapts the deterministic
+/// `verum_kernel::tactics_industrial::{tactic_lia, tactic_decide,
+/// tactic_induction, tactic_congruence, tactic_eauto}` into the
+/// SMT tactic dispatcher's call site, allowing `apply lia` (etc.)
+/// to be closed in-kernel before falling through to Z3.
+pub mod industrial_fast_path;
 pub mod domains; // Phase D.3: sheaf + epistemic domain encodings
 pub mod refinement_reflection; // Liquid-style: user fns as SMT axioms
 pub mod expr_to_smtlib; // Expr → SMT-LIB2 translator for reflection
