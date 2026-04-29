@@ -5243,15 +5243,42 @@ impl ProofValidator {
         let mut translator = verum_smt::Translator::new(&smt_context);
         let solver = smt_context.solver();
 
-        // Bind any hypotheses as assumptions
-        // This allows the formula to reference hypothesis variables
+        // Bind hypotheses as assumptions. Each hypothesis carries an
+        // actual proposition (`prop`); we translate that proposition to
+        // a Z3 expression and assert it. The hypothesis name is also
+        // bound to its translated value so the formula being rechecked
+        // can refer to it by name.
+        //
+        // Pre-fix this loop bound a FRESH `Bool::new_const(name)` and
+        // asserted that — completely discarding `prop`. Z3 then saw
+        // every hypothesis as the opaque true boolean `h0 := true`,
+        // regardless of whether the hypothesis actually said `x > 5`
+        // or `is_sorted(xs)`. Re-checks that should have found
+        // counterexamples silently passed because the actual semantic
+        // content of the hypothesis context never made it to the
+        // solver.
         for scope in self.hypotheses.scopes.iter() {
             for (name, prop) in scope.hypotheses.iter() {
-                // Create a symbolic boolean for each hypothesis
-                let hyp_const = z3::ast::Bool::new_const(name.as_str());
-                translator.bind(name.clone(), z3::ast::Dynamic::from_ast(&hyp_const));
-                // Assert the hypothesis as true (it's assumed in this context)
-                solver.assert(&hyp_const);
+                let translated = match translator.translate_expr(prop) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        // Hypothesis can't be translated to Z3 (e.g. it
+                        // references types we can't encode). Skip it
+                        // rather than silently substituting a vacuous
+                        // `true` — the rechecker will operate without
+                        // this assumption, which is sound but more
+                        // conservative.
+                        continue;
+                    }
+                };
+                translator.bind(name.clone(), translated.clone());
+                if let Some(prop_bool) = translated.as_bool() {
+                    solver.assert(&prop_bool);
+                }
+                // If `prop` doesn't translate to a Bool (e.g. it's an
+                // Int-valued expression mistakenly stored as a
+                // hypothesis), the binding is still useful for naming
+                // but no truth-assertion can be made.
             }
         }
 
