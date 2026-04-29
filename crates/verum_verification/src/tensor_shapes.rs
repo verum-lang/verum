@@ -1562,10 +1562,38 @@ impl ShapeVerifier {
         self.constraint_system.check_satisfiable()
     }
 
+    /// Reject any input shape whose rank exceeds the configured
+    /// `max_rank` cap. Called at the head of every `verify_*`
+    /// operation so the cap applies uniformly across the
+    /// verification surface — before this wire-up the field was
+    /// inert: an analyser configured with `max_rank = 4` would
+    /// happily verify a rank-100 reshape, defeating the
+    /// documented "Maximum tensor rank to verify" contract.
+    fn check_rank_bound(
+        &self,
+        operation: &'static str,
+        shape: &TensorShape,
+    ) -> ShapeResult<()> {
+        if shape.rank() > self.config.max_rank {
+            return Err(ShapeError::InvalidOperation {
+                operation: operation.into(),
+                requirement: Text::from(format!(
+                    "rank ≤ max_rank ({})",
+                    self.config.max_rank
+                )),
+                actual: Text::from(format!("rank {}", shape.rank())),
+            });
+        }
+        Ok(())
+    }
+
     /// Verify matrix multiplication: [M, K] × [K, N] → [M, N]
     ///
     /// Ensures that the inner dimensions match (K = K).
     pub fn verify_matmul(&self, a: &TensorShape, b: &TensorShape) -> ShapeResult<TensorShape> {
+        self.check_rank_bound("matmul", a)?;
+        self.check_rank_bound("matmul", b)?;
+
         // Matrix multiplication requires rank 2 tensors
         if a.rank() != 2 {
             return Err(ShapeError::InvalidOperation {
@@ -1607,6 +1635,8 @@ impl ShapeVerifier {
 
     /// Verify element-wise operation requiring matching shapes
     pub fn verify_elementwise(&self, a: &TensorShape, b: &TensorShape) -> ShapeResult<TensorShape> {
+        self.check_rank_bound("elementwise", a)?;
+        self.check_rank_bound("elementwise", b)?;
         // Element-wise operations require same rank
         if a.rank() != b.rank() {
             return Err(ShapeError::ShapeMismatch {
@@ -1638,6 +1668,8 @@ impl ShapeVerifier {
     ///   - One of them is 1
     ///   - One of them is broadcast
     pub fn verify_broadcast(&self, a: &TensorShape, b: &TensorShape) -> ShapeResult<TensorShape> {
+        self.check_rank_bound("broadcast", a)?;
+        self.check_rank_bound("broadcast", b)?;
         if !self.config.allow_broadcast {
             return Err(ShapeError::InvalidOperation {
                 operation: "broadcast".into(),
@@ -1649,6 +1681,20 @@ impl ShapeVerifier {
         let rank_a = a.rank();
         let rank_b = b.rank();
         let result_rank = rank_a.max(rank_b);
+        // The broadcast result rank is `max(rank_a, rank_b)`;
+        // gate it against `max_rank` too so a broadcast that
+        // would produce a too-tall result is caught at the
+        // entry rather than further along the pipeline.
+        if result_rank > self.config.max_rank {
+            return Err(ShapeError::InvalidOperation {
+                operation: "broadcast".into(),
+                requirement: Text::from(format!(
+                    "result rank ≤ max_rank ({})",
+                    self.config.max_rank
+                )),
+                actual: Text::from(format!("result rank {result_rank}")),
+            });
+        }
 
         let mut result = TensorShape::new();
 
@@ -1693,6 +1739,7 @@ impl ShapeVerifier {
         axis: usize,
         keep_dims: bool,
     ) -> ShapeResult<TensorShape> {
+        self.check_rank_bound("reduction", input)?;
         if axis >= input.rank() {
             return Err(ShapeError::InvalidOperation {
                 operation: "reduction".into(),
@@ -1720,6 +1767,7 @@ impl ShapeVerifier {
         input: &TensorShape,
         axes: Maybe<List<usize>>,
     ) -> ShapeResult<TensorShape> {
+        self.check_rank_bound("transpose", input)?;
         let rank = input.rank();
 
         let axes = match axes {
@@ -1777,6 +1825,12 @@ impl ShapeVerifier {
         input: &TensorShape,
         new_shape: &TensorShape,
     ) -> ShapeResult<TensorShape> {
+        self.check_rank_bound("reshape", input)?;
+        // The reshape *output* rank may differ from the input —
+        // gate it too so a reshape that produces a too-tall
+        // result is rejected at the entry rather than later in
+        // the pipeline.
+        self.check_rank_bound("reshape", new_shape)?;
         // Compute total elements in both shapes
         let input_size = self.compute_total_elements(input)?;
         let output_size = self.compute_total_elements(new_shape)?;
@@ -1808,6 +1862,13 @@ impl ShapeVerifier {
                 requirement: "at least one input".into(),
                 actual: "empty input list".into(),
             });
+        }
+
+        // Gate every input shape against the rank cap so concat
+        // fails early when any operand is too tall, rather than
+        // discovering it deep in the rank-equality check loop.
+        for shape in shapes {
+            self.check_rank_bound("concat", shape)?;
         }
 
         let first = &shapes[0];
