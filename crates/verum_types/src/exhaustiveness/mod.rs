@@ -336,6 +336,17 @@ pub fn check_exhaustiveness_with_options<'a>(
     let range_analysis = analyze_range_patterns_in_matrix(&matrix);
     let mut warnings = List::new();
 
+    // `warn_all_guarded` gate (default true): emit W0603 when
+    // every pattern carries a guard. Before this wire-up the
+    // field on the main mod.rs path was inert — only the
+    // dependent path emitted the warning. Now both paths agree.
+    if all_guarded
+        && !matrix.rows.is_empty()
+        && config.warn_all_guarded
+    {
+        warnings.push(ExhaustivenessWarning::all_guarded(None));
+    }
+
     if let Some(ref analysis) = range_analysis {
         for overlap in analysis.overlaps.iter() {
             if overlap.is_redundant {
@@ -355,6 +366,18 @@ pub fn check_exhaustiveness_with_options<'a>(
             }
         }
     }
+
+    // `max_witnesses` cap (default 3): truncate the uncovered
+    // list so consumers get a bounded enumeration. Before this
+    // wire-up the cap was inert — every witness reached the
+    // diagnostic surface regardless of the configured limit,
+    // producing huge errors on cardinality-exploding scrutinees
+    // like `Int{x: x in 0..1_000_000}`.
+    let uncovered = if config.max_witnesses > 0 && uncovered.len() > config.max_witnesses {
+        uncovered.into_iter().take(config.max_witnesses).collect()
+    } else {
+        uncovered
+    };
 
     Ok(ExhaustivenessResult {
         is_exhaustive: uncovered.is_empty(),
