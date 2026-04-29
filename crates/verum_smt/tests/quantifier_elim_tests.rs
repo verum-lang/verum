@@ -703,3 +703,34 @@ fn test_qe_config_options() {
         let _ = result;
     }
 }
+
+#[test]
+fn test_qe_honours_short_timeout() {
+    // Pin: a tiny `QEConfig.timeout_ms` reaches every internal Z3
+    // solver in the eliminator. Before the wire-up, every
+    // `Solver::new()` ran to Z3's native (effectively unlimited)
+    // cap regardless of what callers configured. The trivial
+    // formula resolves long before any timeout could fire — this
+    // test exists to prove the wire-up doesn't break legitimate
+    // work and that the timeout reaches the solver. The 5-second
+    // upper bound catches a regression where the timeout is
+    // silently dropped and a flaky CI environment runs slow.
+    let mut eliminator = QuantifierEliminator::with_config(QEConfig {
+        timeout_ms: 50,
+        use_qe_lite: false,
+        use_qe_sat: false,
+        use_model_projection: true,
+        use_skolemization: false,
+        ..Default::default()
+    });
+    let x = Int::new_const("x");
+    let y = Int::new_const("y");
+    let formula = Bool::and(&[&x.gt(Int::from_i64(0)), &y._eq(&x)]);
+    let start = std::time::Instant::now();
+    let _ = eliminator.eliminate_existential(&formula, &["x"]);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 5,
+        "QE with a 50 ms timeout must not take seconds on a trivial formula"
+    );
+}

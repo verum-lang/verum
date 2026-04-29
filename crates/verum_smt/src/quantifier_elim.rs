@@ -1004,6 +1004,21 @@ impl QuantifierEliminator {
         eliminator
     }
 
+    /// Construct a Z3 solver carrying this eliminator's
+    /// `config.timeout_ms`. Every internal `Solver::new()` site
+    /// in QE work routes through this helper so the timeout
+    /// field — documented on `QEConfig` and asserted in tests —
+    /// actually constrains the underlying Z3 solver instances.
+    /// Without this wiring solver checks ran to Z3's native cap,
+    /// regardless of what callers asked for.
+    fn fresh_solver(&self) -> Solver {
+        let solver = Solver::new();
+        let mut params = z3::Params::new();
+        params.set_u32("timeout", self.config.timeout_ms as u32);
+        solver.set_params(&params);
+        solver
+    }
+
     /// Get statistics
     pub fn stats(&self) -> &QEStats {
         &self.stats
@@ -1194,7 +1209,7 @@ impl QuantifierEliminator {
         // This gives us an over-approximation that is preserved by the loop
 
         // Create solver for verification
-        let solver = Solver::new();
+        let solver = self.fresh_solver();
 
         // Attempt 1: Eliminate modified variables from postcondition
         let mut inv_candidate = self.eliminate_existential(postcondition, modified_vars)?;
@@ -1440,7 +1455,7 @@ impl QuantifierEliminator {
         let start = Instant::now();
 
         // Check satisfiability and get model
-        let solver = Solver::new();
+        let solver = self.fresh_solver();
         solver.assert(formula);
 
         if solver.check() != SatResult::Sat {
@@ -1928,7 +1943,7 @@ impl QuantifierEliminator {
         eliminated: &Bool,
         vars: &[&str],
     ) -> Result<bool, Text> {
-        let solver = Solver::new();
+        let solver = self.fresh_solver();
 
         // Check: ∃vars. original ⇒ eliminated
         solver.push();
