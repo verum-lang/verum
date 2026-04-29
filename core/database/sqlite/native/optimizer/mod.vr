@@ -4,7 +4,7 @@
 // Layer: 4-5 (between codegen + interpreter)
 // Spec: sqlite-native.md §11.5
 //
-// Pre-emission optimisation passes operating on a `Vec<Opcode>` view.
+// Pre-emission optimisation passes operating on a `List<Opcode>` view.
 // Each pass implements the `OptimizationPass` protocol; passes are
 // composed into a deterministic `PassPipeline` that's idempotent on
 // already-canonicalised input.
