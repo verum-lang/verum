@@ -305,6 +305,352 @@ fn escape_dot(s: &str) -> String {
 }
 
 // =============================================================================
+// Citation extraction — AST visitor (#92 hardening)
+// =============================================================================
+//
+// Pre-this-module: the CLI collected citations by `format!("{:?}",
+// proof_body)` then matching identifier suffixes (`*_lemma`,
+// `*_thm`, …).  Two correctness problems:
+//
+//   1. False positives — any string-shaped match in pretty-printed
+//      AST output (struct field names, debug-rendering of variants,
+//      span debug output) was treated as a citation.
+//   2. False negatives — citations that don't follow the naming
+//      convention (e.g. `triangle_inequality`, `comm_assoc`) were
+//      silently dropped.
+//
+// Both classes vanish when we walk the typed `ProofBody` AST
+// directly: every citation lives in a known position (`apply X`,
+// `rewrite X`, `exact X`, `auto with [X, Y]`, `simp [X, Y]`,
+// `unfold X`, `Named.name`).  We collect those identifier
+// references and cross-check against an allowlist derived from the
+// corpus's `Theorem`/`Lemma`/`Corollary`/`Axiom` names.
+
+/// Walk a [`verum_ast::decl::ProofBody`] and collect every cited
+/// identifier reachable from tactic-application positions.
+///
+/// Identifiers are projected to their last path segment (e.g.
+/// `core.proof.foo_lemma` → `foo_lemma`).  After projection the set
+/// is filtered against `allowlist` (the corpus's known item names);
+/// non-matching identifiers (locally-bound hypotheses, anonymous
+/// arguments, framework-call patterns) are dropped.
+///
+/// Returns a sorted, deduplicated list of bare names.
+pub fn collect_proof_citations(
+    body: &verum_ast::decl::ProofBody,
+    allowlist: &BTreeSet<String>,
+) -> Vec<Text> {
+    let mut visitor = CitationVisitor {
+        candidates: BTreeSet::new(),
+    };
+    visitor.visit_proof_body(body);
+    let mut hits: Vec<Text> = visitor
+        .candidates
+        .into_iter()
+        .filter(|n| allowlist.contains(n))
+        .map(Text::from)
+        .collect();
+    hits.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    hits
+}
+
+/// Build the corpus-wide name allowlist used for citation
+/// resolution: every `Theorem` / `Lemma` / `Corollary` / `Axiom`
+/// name (bare, last-segment form) the auto-paper pipeline knows
+/// about.  Pass the result into [`collect_proof_citations`].
+pub fn build_citation_allowlist(items: &[DocItem]) -> BTreeSet<String> {
+    items
+        .iter()
+        .map(|i| i.name.as_str().to_string())
+        .collect()
+}
+
+struct CitationVisitor {
+    candidates: BTreeSet<String>,
+}
+
+impl CitationVisitor {
+    fn visit_proof_body(&mut self, body: &verum_ast::decl::ProofBody) {
+        use verum_ast::decl::ProofBody;
+        match body {
+            ProofBody::Term(e) => self.visit_expr(e),
+            ProofBody::Tactic(t) => self.visit_tactic(t),
+            ProofBody::Structured(s) => {
+                for step in s.steps.iter() {
+                    self.visit_step(step);
+                }
+                if let verum_common::Maybe::Some(c) = &s.conclusion {
+                    self.visit_tactic(c);
+                }
+            }
+            ProofBody::ByMethod(m) => self.visit_proof_method(m),
+        }
+    }
+
+    fn visit_proof_method(&mut self, m: &verum_ast::decl::ProofMethod) {
+        // Recursively collect every TacticExpr / Expr embedded in a
+        // ProofMethod variant.  Use a serde-driven walk: the method
+        // is `Serialize` already, and the JSON walker below picks up
+        // every `"name"` field — robust under future ProofMethod
+        // variants.
+        if let Ok(v) = serde_json::to_value(m) {
+            self.walk_value_for_idents(&v);
+        }
+    }
+
+    fn visit_step(&mut self, step: &verum_ast::decl::ProofStep) {
+        use verum_ast::decl::ProofStepKind;
+        match &step.kind {
+            ProofStepKind::Have {
+                proposition,
+                justification,
+                ..
+            } => {
+                self.visit_expr(proposition);
+                self.visit_tactic(justification);
+            }
+            ProofStepKind::Show {
+                proposition,
+                justification,
+            }
+            | ProofStepKind::Suffices {
+                proposition,
+                justification,
+            } => {
+                self.visit_expr(proposition);
+                self.visit_tactic(justification);
+            }
+            ProofStepKind::Let { value, .. } => self.visit_expr(value),
+            ProofStepKind::Obtain { from, .. } => self.visit_expr(from),
+            ProofStepKind::Calc(chain) => self.visit_calc(chain),
+            ProofStepKind::Cases { scrutinee, cases } => {
+                self.visit_expr(scrutinee);
+                for case in cases.iter() {
+                    self.visit_proof_case(case);
+                }
+            }
+            ProofStepKind::Focus { steps, .. } => {
+                for s in steps.iter() {
+                    self.visit_step(s);
+                }
+            }
+            ProofStepKind::Tactic(t) => self.visit_tactic(t),
+        }
+    }
+
+    fn visit_calc(&mut self, chain: &verum_ast::decl::CalculationChain) {
+        self.visit_expr(&chain.start);
+        for step in chain.steps.iter() {
+            // Each calc step has an `expr: Expr` and `justification:
+            // Option<TacticExpr>`-shaped fields — reuse the JSON walk
+            // to stay robust under field-name evolution.
+            if let Ok(v) = serde_json::to_value(step) {
+                self.walk_value_for_idents(&v);
+            }
+        }
+    }
+
+    fn visit_proof_case(&mut self, case: &verum_ast::decl::ProofCase) {
+        // ProofCase = { pattern: Pattern, body: ... }; extract via JSON.
+        if let Ok(v) = serde_json::to_value(case) {
+            self.walk_value_for_idents(&v);
+        }
+    }
+
+    fn visit_tactic(&mut self, t: &verum_ast::decl::TacticExpr) {
+        use verum_ast::decl::TacticExpr;
+        match t {
+            TacticExpr::Trivial
+            | TacticExpr::Assumption
+            | TacticExpr::Reflexivity
+            | TacticExpr::Ring
+            | TacticExpr::Field
+            | TacticExpr::Omega
+            | TacticExpr::Blast
+            | TacticExpr::Split
+            | TacticExpr::Left
+            | TacticExpr::Right
+            | TacticExpr::Compute => {}
+
+            TacticExpr::Intro(idents) => {
+                // `intro h` binds a NEW hypothesis name — not a
+                // citation.  Skip.
+                let _ = idents;
+            }
+            TacticExpr::Apply { lemma, args } => {
+                self.visit_expr(lemma);
+                for a in args.iter() {
+                    self.visit_expr(a);
+                }
+            }
+            TacticExpr::Rewrite { hypothesis, .. } => {
+                self.visit_expr(hypothesis);
+            }
+            TacticExpr::Simp { lemmas, .. } => {
+                for l in lemmas.iter() {
+                    self.visit_expr(l);
+                }
+            }
+            TacticExpr::Auto { with_hints } => {
+                for ident in with_hints.iter() {
+                    self.record_ident_str(ident.name.as_str());
+                }
+            }
+            TacticExpr::Smt { .. } => {}
+            TacticExpr::Exists(e) => self.visit_expr(e),
+            TacticExpr::CasesOn(_) | TacticExpr::InductionOn(_) => {
+                // These name a hypothesis or variable, not a lemma.
+            }
+            TacticExpr::Exact(e) => self.visit_expr(e),
+            TacticExpr::Unfold(idents) => {
+                for ident in idents.iter() {
+                    self.record_ident_str(ident.name.as_str());
+                }
+            }
+            TacticExpr::Try(inner) => self.visit_tactic(inner),
+            TacticExpr::TryElse { body, fallback } => {
+                self.visit_tactic(body);
+                self.visit_tactic(fallback);
+            }
+            TacticExpr::Repeat(inner) => self.visit_tactic(inner),
+            TacticExpr::Seq(list) | TacticExpr::Alt(list) => {
+                for t in list.iter() {
+                    self.visit_tactic(t);
+                }
+            }
+            TacticExpr::AllGoals(inner) | TacticExpr::Focus(inner) => {
+                self.visit_tactic(inner)
+            }
+            TacticExpr::Named { name, args, .. } => {
+                self.record_ident_str(name.name.as_str());
+                for a in args.iter() {
+                    self.visit_expr(a);
+                }
+            }
+            TacticExpr::Let { value, .. } => self.visit_expr(value),
+            // Unknown / future variants: walk via JSON so we don't
+            // silently drop citations under AST evolution.
+            _ => {
+                if let Ok(v) = serde_json::to_value(t) {
+                    self.walk_value_for_idents(&v);
+                }
+            }
+        }
+    }
+
+    fn visit_expr(&mut self, e: &verum_ast::expr::Expr) {
+        use verum_ast::expr::ExprKind;
+        match &e.kind {
+            ExprKind::Path(p) => self.record_path(p),
+            ExprKind::Call { func, args, .. } => {
+                self.visit_expr(func);
+                for a in args.iter() {
+                    self.visit_expr(a);
+                }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                self.visit_expr(receiver);
+                for a in args.iter() {
+                    self.visit_expr(a);
+                }
+            }
+            ExprKind::Binary { left, right, .. } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExprKind::Unary { expr, .. } => self.visit_expr(expr),
+            ExprKind::Field { expr, .. } => self.visit_expr(expr),
+            ExprKind::TupleIndex { expr, .. } => self.visit_expr(expr),
+            ExprKind::Index { expr, index } => {
+                self.visit_expr(expr);
+                self.visit_expr(index);
+            }
+            ExprKind::Pipeline { left, right } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExprKind::NullCoalesce { left, right } => {
+                self.visit_expr(left);
+                self.visit_expr(right);
+            }
+            ExprKind::Cast { expr, .. } => self.visit_expr(expr),
+            ExprKind::OptionalChain { expr, .. } => self.visit_expr(expr),
+            ExprKind::Try(inner) => self.visit_expr(inner),
+            ExprKind::TryBlock(inner) => self.visit_expr(inner),
+            ExprKind::NamedArg { value, .. } => self.visit_expr(value),
+            // For variants we don't enumerate, fall back to JSON walk
+            // so citations buried in struct literals / closures /
+            // match arms still surface.
+            _ => {
+                if let Ok(v) = serde_json::to_value(e) {
+                    self.walk_value_for_idents(&v);
+                }
+            }
+        }
+    }
+
+    fn record_path(&mut self, p: &verum_ast::ty::Path) {
+        // Project to the last `Name(Ident)` segment — the bare name
+        // is what the allowlist resolves against.
+        use verum_ast::ty::PathSegment;
+        for seg in p.segments.iter().rev() {
+            if let PathSegment::Name(ident) = seg {
+                self.record_ident_str(ident.name.as_str());
+                return;
+            }
+        }
+    }
+
+    fn record_ident_str(&mut self, name: &str) {
+        // Identifier filtering: must look like an identifier
+        // (alphanumeric + underscore, doesn't start with digit).
+        if name.is_empty() || name.len() > 200 {
+            return;
+        }
+        let first = name.chars().next().unwrap();
+        if !first.is_alphabetic() && first != '_' {
+            return;
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        {
+            return;
+        }
+        // If it's a dotted path, strip to the last segment.
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        self.candidates.insert(bare.to_string());
+    }
+
+    /// Fallback for AST variants we don't enumerate by hand: walk the
+    /// serde-JSON projection looking for `"name"` / `"path"` /
+    /// `"segments"` keys.  Picks up any cited identifier the typed
+    /// visitors might miss under future AST evolution.
+    fn walk_value_for_idents(&mut self, v: &serde_json::Value) {
+        match v {
+            serde_json::Value::Object(map) => {
+                // `{"Path": {"segments": [...]}}` or
+                // `{"Name": {"name": "foo", ...}}` shapes.
+                for (k, val) in map {
+                    if (k == "name" || k == "Name") && val.is_string() {
+                        if let Some(s) = val.as_str() {
+                            self.record_ident_str(s);
+                        }
+                    }
+                    self.walk_value_for_idents(val);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    self.walk_value_for_idents(v);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// =============================================================================
 // DocRenderer — the trait boundary
 // =============================================================================
 
@@ -1002,5 +1348,168 @@ mod tests {
         let broken = corpus.validate_cross_refs();
         assert!(!broken.is_empty());
         assert_eq!(broken[0].broken_target.as_str(), "nonexistent");
+    }
+
+    // =========================================================================
+    // Citation visitor (#92)
+    // =========================================================================
+
+    use verum_ast::decl::{ProofBody, TacticExpr};
+    use verum_ast::expr::{Expr, ExprKind};
+    use verum_ast::span::Span;
+    use verum_ast::ty::{Ident, Path, PathSegment};
+    use verum_common::List;
+
+    fn ident(name: &str) -> Ident {
+        Ident::new(name, Span::dummy())
+    }
+
+    fn path_expr(name: &str) -> Expr {
+        let p = Path {
+            segments: smallvec::smallvec![PathSegment::Name(ident(name))],
+            span: Span::dummy(),
+        };
+        Expr {
+            kind: ExprKind::Path(p),
+            span: Span::dummy(),
+            ref_kind: None,
+            check_eliminated: false,
+        }
+    }
+
+    fn allowlist_of(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn citation_visitor_finds_apply_lemma_in_tactic() {
+        let body = ProofBody::Tactic(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("foo_lemma")),
+            args: List::new(),
+        });
+        let allow = allowlist_of(&["foo_lemma", "bar_thm"]);
+        let cites = collect_proof_citations(&body, &allow);
+        let names: Vec<&str> = cites.iter().map(|t| t.as_str()).collect();
+        assert_eq!(names, vec!["foo_lemma"]);
+    }
+
+    #[test]
+    fn citation_visitor_filters_unknown_names() {
+        let body = ProofBody::Tactic(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("not_in_corpus")),
+            args: List::new(),
+        });
+        let allow = allowlist_of(&["foo", "bar"]);
+        let cites = collect_proof_citations(&body, &allow);
+        assert!(cites.is_empty(), "unknown names must be filtered out");
+    }
+
+    #[test]
+    fn citation_visitor_handles_named_tactic() {
+        let body = ProofBody::Tactic(TacticExpr::Named {
+            name: ident("triangle_inequality"),
+            generic_args: List::new(),
+            args: List::new(),
+        });
+        let allow = allowlist_of(&["triangle_inequality", "other"]);
+        let cites = collect_proof_citations(&body, &allow);
+        assert_eq!(cites.len(), 1);
+        assert_eq!(cites[0].as_str(), "triangle_inequality");
+    }
+
+    #[test]
+    fn citation_visitor_recurses_into_seq() {
+        let body = ProofBody::Tactic(TacticExpr::Seq({
+            let mut l = List::new();
+            l.push(TacticExpr::Apply {
+                lemma: verum_common::Heap::new(path_expr("a_thm")),
+                args: List::new(),
+            });
+            l.push(TacticExpr::Apply {
+                lemma: verum_common::Heap::new(path_expr("b_lemma")),
+                args: List::new(),
+            });
+            l
+        }));
+        let allow = allowlist_of(&["a_thm", "b_lemma", "noise"]);
+        let cites = collect_proof_citations(&body, &allow);
+        let names: Vec<&str> = cites.iter().map(|t| t.as_str()).collect();
+        assert_eq!(names, vec!["a_thm", "b_lemma"]);
+    }
+
+    #[test]
+    fn citation_visitor_skips_intro_idents() {
+        // `intro h` introduces a new hypothesis name — NOT a citation.
+        let body = ProofBody::Tactic(TacticExpr::Intro({
+            let mut l = List::new();
+            l.push(ident("h"));
+            l
+        }));
+        let allow = allowlist_of(&["h", "irrelevant"]);
+        let cites = collect_proof_citations(&body, &allow);
+        assert!(
+            cites.is_empty(),
+            "intro-bound names must not be treated as citations: got {:?}",
+            cites
+        );
+    }
+
+    #[test]
+    fn citation_visitor_handles_unfold() {
+        // `unfold foo bar` IS citing definitions.
+        let body = ProofBody::Tactic(TacticExpr::Unfold({
+            let mut l = List::new();
+            l.push(ident("foo_def"));
+            l.push(ident("bar_def"));
+            l
+        }));
+        let allow = allowlist_of(&["foo_def", "bar_def"]);
+        let cites = collect_proof_citations(&body, &allow);
+        let names: Vec<&str> = cites.iter().map(|t| t.as_str()).collect();
+        assert_eq!(names, vec!["bar_def", "foo_def"]);
+    }
+
+    #[test]
+    fn citation_visitor_dedups_repeat_apply() {
+        let body = ProofBody::Tactic(TacticExpr::Seq({
+            let mut l = List::new();
+            l.push(TacticExpr::Apply {
+                lemma: verum_common::Heap::new(path_expr("foo")),
+                args: List::new(),
+            });
+            l.push(TacticExpr::Apply {
+                lemma: verum_common::Heap::new(path_expr("foo")),
+                args: List::new(),
+            });
+            l
+        }));
+        let allow = allowlist_of(&["foo"]);
+        let cites = collect_proof_citations(&body, &allow);
+        assert_eq!(cites.len(), 1);
+    }
+
+    #[test]
+    fn citation_visitor_no_false_positive_from_struct_debug() {
+        // Trivial body cites nothing — pre-this-module the regex
+        // would match "ProofBody" / "TacticExpr" / "Span" debug
+        // strings.  The AST visitor doesn't see those.
+        let body = ProofBody::Tactic(TacticExpr::Trivial);
+        let allow = allowlist_of(&["TacticExpr", "ProofBody", "Span"]);
+        let cites = collect_proof_citations(&body, &allow);
+        assert!(
+            cites.is_empty(),
+            "Debug-string artefacts must not surface as citations: got {:?}",
+            cites
+        );
+    }
+
+    #[test]
+    fn build_citation_allowlist_covers_corpus() {
+        let items = vec![item_thm("alpha"), item_thm("beta"), item_thm("gamma")];
+        let allow = build_citation_allowlist(&items);
+        assert_eq!(allow.len(), 3);
+        assert!(allow.contains("alpha"));
+        assert!(allow.contains("beta"));
+        assert!(allow.contains("gamma"));
     }
 }
