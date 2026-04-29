@@ -205,12 +205,36 @@ fn clone_phase(p: &AlterEnginePhase) -> AlterEnginePhase {
 
 fn clone_failure(f: &AlterEngineFailure) -> AlterEngineFailure {
     match f {
-        AefValidation(_e) => {
-            // AlterValidationError is a sum we can't deeply clone here without
-            // pattern-matching every variant — reuse a placeholder text.
-            AefExecution(error_kind(_e))
-        }
-        AefExecution(t) => AefExecution(t.clone()),
+        AefValidation(e) => AefValidation(clone_validation_error(e)),
+        AefExecution(t)  => AefExecution(t.clone()),
+    }
+}
+
+// Pattern-match every variant of AlterValidationError to perform a
+// proper deep clone. Pre-fix `clone_failure` collapsed every
+// `AefValidation` into `AefExecution(error_kind(...))` with a "we
+// can't deeply clone here" comment — that lost (1) the variant
+// identity (every validation error became an "execution" error
+// downstream), (2) the structured payload (table/column names
+// reduced to a single discriminant tag string like
+// "no_such_table"). Diagnostics displayed via `Display for
+// AlterValidationError` were unreachable for any cloned phase
+// because the cloned phase no longer carried an
+// AlterValidationError at all.
+fn clone_validation_error(e: &AlterValidationError) -> AlterValidationError {
+    match e {
+        core.database.sqlite.native.alter.validator.VeNoSuchTable(t) =>
+            core.database.sqlite.native.alter.validator.VeNoSuchTable(t.clone()),
+        core.database.sqlite.native.alter.validator.VeNoSuchColumn(t, c) =>
+            core.database.sqlite.native.alter.validator.VeNoSuchColumn(t.clone(), c.clone()),
+        core.database.sqlite.native.alter.validator.VeDuplicateName(n) =>
+            core.database.sqlite.native.alter.validator.VeDuplicateName(n.clone()),
+        core.database.sqlite.native.alter.validator.VeNotNullWithoutDefault(t, c) =>
+            core.database.sqlite.native.alter.validator.VeNotNullWithoutDefault(t.clone(), c.clone()),
+        core.database.sqlite.native.alter.validator.VePrimaryKey(t, c) =>
+            core.database.sqlite.native.alter.validator.VePrimaryKey(t.clone(), c.clone()),
+        core.database.sqlite.native.alter.validator.VeForeignKey(t, c) =>
+            core.database.sqlite.native.alter.validator.VeForeignKey(t.clone(), c.clone()),
     }
 }
 
