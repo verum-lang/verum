@@ -5313,64 +5313,236 @@ pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
 /// pass (Coq / Lean 4 / Isabelle / Dedukti).
 pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::cross_format_gate::{
-        format_replay_command, required_formats_for_msfs,
+        evaluate_gate, CrossFormatReport, FormatStatus, required_formats_for_msfs,
     };
+    use verum_smt::cross_format_runner::{checker_for, CheckResult};
 
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Cross-format CI hard gate (MSFS) — live tool invocation");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
     let formats = required_formats_for_msfs();
+
+    let mut report = CrossFormatReport::new("project");
+
+    // Per-format status: probe tool + run on every certificate file.
+    struct FormatRow {
+        format_name: &'static str,
+        extension: &'static str,
+        certs_dir: PathBuf,
+        files_found: usize,
+        files_passed: usize,
+        files_failed: usize,
+        tool_status: &'static str,
+        first_failure_excerpt: Option<String>,
+    }
+    let mut rows: Vec<FormatRow> = Vec::new();
+
+    for f in &formats {
+        let dir_name = f.name();
+        let certs_dir = manifest_dir.join("certificates").join(dir_name);
+        let extension = f.extension();
+
+        let checker = match checker_for(*f) {
+            Some(c) => c,
+            None => {
+                report.record(*f, FormatStatus::NotRun {
+                    reason: Text::from("no checker registered for this format"),
+                });
+                rows.push(FormatRow {
+                    format_name: dir_name,
+                    extension,
+                    certs_dir: certs_dir.clone(),
+                    files_found: 0,
+                    files_passed: 0,
+                    files_failed: 0,
+                    tool_status: "no checker",
+                    first_failure_excerpt: None,
+                });
+                continue;
+            }
+        };
+
+        let tool_status = if checker.is_available() { "available" } else { "missing" };
+
+        // Discover certificate files.
+        let pattern_ext = extension.to_string();
+        let cert_files: Vec<PathBuf> = match std::fs::read_dir(&certs_dir) {
+            Ok(rd) => rd
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().map(|e| e == pattern_ext.as_str()).unwrap_or(false))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+
+        let files_found = cert_files.len();
+        let mut files_passed = 0usize;
+        let mut files_failed = 0usize;
+        let mut first_failure_excerpt: Option<String> = None;
+        let mut overall_status: Option<FormatStatus> = None;
+
+        if !checker.is_available() {
+            overall_status = Some(FormatStatus::NotRun {
+                reason: Text::from(format!(
+                    "tool missing — {}",
+                    checker.install_hint()
+                )),
+            });
+        } else if cert_files.is_empty() {
+            overall_status = Some(FormatStatus::NotRun {
+                reason: Text::from(format!(
+                    "no certificate files in certificates/{}/ — run `verum export` first",
+                    dir_name
+                )),
+            });
+        } else {
+            // Actually drive the foreign tool on every cert file.
+            for cert in &cert_files {
+                match checker.check_file(cert) {
+                    CheckResult::Passed { .. } => files_passed += 1,
+                    CheckResult::Failed { stderr_excerpt, .. } => {
+                        files_failed += 1;
+                        if first_failure_excerpt.is_none() {
+                            first_failure_excerpt = Some(format!(
+                                "{}: {}",
+                                cert.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                                stderr_excerpt.trim()
+                            ));
+                        }
+                    }
+                    CheckResult::ToolMissing { .. } => {
+                        // Should not happen since we checked is_available
+                        // above; treat as runtime tool-disappearance.
+                        overall_status = Some(FormatStatus::NotRun {
+                            reason: Text::from("tool disappeared mid-run"),
+                        });
+                        break;
+                    }
+                    CheckResult::RunnerError { reason } => {
+                        files_failed += 1;
+                        if first_failure_excerpt.is_none() {
+                            first_failure_excerpt = Some(reason);
+                        }
+                    }
+                }
+            }
+            if overall_status.is_none() {
+                overall_status = Some(if files_failed == 0 {
+                    FormatStatus::Passed {
+                        message: Text::from(format!(
+                            "{} files OK ({})",
+                            files_passed,
+                            checker.format().name()
+                        )),
+                    }
+                } else {
+                    FormatStatus::Failed {
+                        reason: Text::from(format!(
+                            "{} of {} files failed: {}",
+                            files_failed,
+                            files_found,
+                            first_failure_excerpt
+                                .clone()
+                                .unwrap_or_else(|| "see verbose output".into())
+                        )),
+                    }
+                });
+            }
+        }
+
+        report.record(*f, overall_status.unwrap_or(FormatStatus::NotRun {
+            reason: Text::from("(unreachable)"),
+        }));
+
+        rows.push(FormatRow {
+            format_name: dir_name,
+            extension,
+            certs_dir,
+            files_found,
+            files_passed,
+            files_failed,
+            tool_status,
+            first_failure_excerpt,
+        });
+    }
+
+    let gate_passes = evaluate_gate(&report);
 
     match format {
         AuditFormat::Plain => {
-            ui::step("Cross-format CI hard gate (MSFS)");
             println!();
             println!(
-                "  {:<10}  {:<5}  Replay command",
-                "Format", "Ext"
+                "  {:<10}  {:<5}  {:<10}  {:>5}  {:>4}  {:>4}  {}",
+                "Format", "Ext", "Tool", "Files", "Pass", "Fail", "Notes"
             );
             println!(
-                "  {}  {}  {}",
+                "  {}  {}  {}  {}  {}  {}  {}",
                 "─".repeat(10),
                 "─".repeat(5),
-                "─".repeat(40)
+                "─".repeat(10),
+                "─".repeat(5),
+                "─".repeat(4),
+                "─".repeat(4),
+                "─".repeat(40),
             );
-            for f in &formats {
-                let cmd = format_replay_command(*f, "<artefact>");
+            for r in &rows {
+                let notes = r
+                    .first_failure_excerpt
+                    .clone()
+                    .unwrap_or_default();
                 println!(
-                    "  {:<10}  {:<5}  {}",
-                    f.name(),
-                    f.extension(),
-                    cmd
+                    "  {:<10}  {:<5}  {:<10}  {:>5}  {:>4}  {:>4}  {}",
+                    r.format_name,
+                    r.extension,
+                    r.tool_status,
+                    r.files_found,
+                    r.files_passed,
+                    r.files_failed,
+                    notes
                 );
             }
             println!();
+            println!("  {}", report.summary());
             println!(
-                "  Hard gate: a proof passes iff every format reports Passed."
-            );
-            println!(
-                "  Required formats: [{}]",
-                formats.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
+                "  Gate verdict: {}",
+                if gate_passes { "✓ GREEN" } else { "✗ RED" }
             );
         }
         AuditFormat::Json => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
             out.push_str(&format!(
+                "  \"gate_passes\": {},\n",
+                gate_passes
+            ));
+            out.push_str(&format!(
                 "  \"required_format_count\": {},\n",
                 formats.len()
             ));
             out.push_str("  \"formats\": [\n");
-            for (i, f) in formats.iter().enumerate() {
-                let cmd = format_replay_command(*f, "<artefact>");
+            for (i, r) in rows.iter().enumerate() {
                 out.push_str(&format!(
-                    "    {{ \"format\": \"{}\", \"extension\": \"{}\", \"replay_command\": \"{}\" }}{}\n",
-                    f.name(),
-                    f.extension(),
-                    json_escape(&cmd),
-                    if i + 1 < formats.len() { "," } else { "" }
+                    "    {{ \"format\": \"{}\", \"extension\": \"{}\", \"tool_status\": \"{}\", \"files_found\": {}, \"files_passed\": {}, \"files_failed\": {}, \"first_failure\": \"{}\" }}{}\n",
+                    r.format_name,
+                    r.extension,
+                    r.tool_status,
+                    r.files_found,
+                    r.files_passed,
+                    r.files_failed,
+                    json_escape(&r.first_failure_excerpt.clone().unwrap_or_default()),
+                    if i + 1 < rows.len() { "," } else { "" }
                 ));
             }
             out.push_str("  ]\n}");
             println!("{}", out);
         }
+    }
+
+    if !gate_passes {
+        return Err(crate::error::CliError::VerificationFailed(
+            "cross-format CI hard gate is RED".to_string(),
+        ));
     }
     Ok(())
 }
