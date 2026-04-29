@@ -45,6 +45,20 @@ pub(in super::super) fn decode_task_id(val: i64) -> Option<TaskId> {
 
 /// Spawn (0xA0) - Spawn an async task (deferred execution).
 pub(in super::super) fn handle_spawn(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    // Honour the `[runtime].futures` feature gate from verum.toml.
+    // When the user opted out of futures the dispatch handler must
+    // refuse the operation rather than silently spawning a task the
+    // host promised wouldn't run. Before this gate the
+    // `futures_enabled` config field was inert — opt-out was
+    // declared but unenforced.
+    if !state.config.futures_enabled {
+        return Err(InterpreterError::Panic {
+            message:
+                "futures disabled by [runtime].futures = false in verum.toml — \
+                 spawn is unavailable in this build"
+                    .to_string(),
+        });
+    }
     let dst = read_reg(state)?;
     let func_id_raw = read_varint(state)? as u32;
     let args = read_reg_range(state)?;
@@ -337,6 +351,20 @@ pub(in super::super) fn handle_async_next(state: &mut InterpreterState) -> Inter
 
 /// NurseryInit (0xA8) - Initialize a new nursery scope.
 pub(in super::super) fn handle_nursery_init(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    // Honour the `[runtime].nurseries` feature gate from verum.toml.
+    // The nursery surface (init/spawn/await/cancel/config/error)
+    // gates at construction so a single rejection covers every
+    // nursery operation downstream — without a nursery handle the
+    // other ops are unreachable. Before this gate the
+    // `nurseries_enabled` config field was inert.
+    if !state.config.nurseries_enabled {
+        return Err(InterpreterError::Panic {
+            message:
+                "nurseries disabled by [runtime].nurseries = false in verum.toml — \
+                 nursery construction is unavailable in this build"
+                    .to_string(),
+        });
+    }
     let dst = read_reg(state)?;
     let nursery_id = state.nurseries.create();
     state.set_reg(dst, Value::from_i64(nursery_id as i64));
