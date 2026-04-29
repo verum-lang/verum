@@ -12,6 +12,8 @@ use super::constructors::Constructor;
 use crate::context::TypeEnv;
 use crate::ty::Type;
 use crate::TypeError;
+use std::sync::Arc;
+use verum_ast::expr::Expr;
 use verum_ast::literal::Literal;
 use verum_ast::pattern::{Pattern, PatternKind, VariantPatternData};
 use verum_common::{Heap, List, Maybe, Text};
@@ -25,8 +27,28 @@ pub struct PatternRow {
     /// Index in original pattern list
     pub original_index: usize,
 
-    /// Whether this row has a guard (making it conditional)
+    /// Whether this row has a guard (making it conditional). Stays
+    /// in lockstep with `guard.is_some()` for the top-level guard,
+    /// but ALSO flips `true` when the row's column tree contains a
+    /// `PatternColumn::Guarded` nested inside an or-pattern (where
+    /// the guard expression isn't liftable to the row level since
+    /// guards in or-arms are evaluated independently).
     pub has_guard: bool,
+
+    /// The actual guard expression for this row, when the pattern's
+    /// top level is `PatternKind::Guard { pattern, guard }`. Plumbed
+    /// through specialization so the SMT-backed exhaustiveness path
+    /// (`extract_guarded_patterns`) can consume real guard
+    /// expressions instead of placeholder `true` literals.
+    ///
+    /// `None` when the row has no top-level guard. Note that
+    /// `has_guard == true && guard.is_none()` is a valid state — it
+    /// means the row carries a guard nested inside an or-pattern (or
+    /// some other inner position) where the expression isn't
+    /// liftable. The SMT path treats those rows as "guard
+    /// unrepresented at row level" and falls back to the conservative
+    /// (non-SMT) exhaustiveness verdict for them.
+    pub guard: Option<Arc<Expr>>,
 }
 
 impl PatternRow {
@@ -36,7 +58,20 @@ impl PatternRow {
             columns,
             original_index,
             has_guard,
+            guard: None,
         }
+    }
+
+    /// Attach a guard expression to the row. When `Some`, also
+    /// implies `has_guard = true` so the existing flag-based gates
+    /// (which are far more numerous than the SMT path) keep working
+    /// without needing to consult both fields.
+    pub fn with_guard_expr(mut self, guard: Option<Arc<Expr>>) -> Self {
+        if guard.is_some() {
+            self.has_guard = true;
+        }
+        self.guard = guard;
+        self
     }
 
     /// Check if this row starts with a wildcard
@@ -313,8 +348,28 @@ pub fn build_matrix(
     let mut matrix = CoverageMatrix::new(scrutinee_ty.clone());
 
     for (idx, pattern) in patterns.iter().enumerate() {
-        let (columns, has_guard) = pattern_to_columns(pattern)?;
-        let row = PatternRow::new(columns, idx, has_guard);
+        // Peel a top-level `Guard { pattern, guard }` so the row
+        // carries the *real* guard expression (not just a flag). The
+        // inner pattern still goes through `pattern_to_columns`
+        // verbatim — that helper continues to set `has_guard = true`
+        // for nested guards inside or-patterns where guard semantics
+        // can't be lifted to the row level. SMT-backed exhaustiveness
+        // (`extract_guarded_patterns`) consumes `row.guard` when it's
+        // `Some`; for the nested-guard case the SMT path falls back
+        // to the conservative all-guarded verdict, mirroring the
+        // pre-fix behaviour.
+        let (top_pattern, top_guard) = match &pattern.kind {
+            PatternKind::Guard { pattern: inner, guard } => {
+                (inner.as_ref(), Some(Arc::new((**guard).clone())))
+            }
+            _ => (pattern, None),
+        };
+        let (columns, has_guard) = pattern_to_columns(top_pattern)?;
+        // If we peeled a top-level guard, force `has_guard = true`
+        // even if the inner pattern didn't carry a nested one — the
+        // peeled top-level guard still gates this row.
+        let row_has_guard = has_guard || top_guard.is_some();
+        let row = PatternRow::new(columns, idx, row_has_guard).with_guard_expr(top_guard);
         matrix.add_row(row);
     }
 
@@ -632,11 +687,10 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     for col in row.columns.iter().skip(1) {
                         new_columns.push(col.clone());
                     }
-                    specialized.add_row(PatternRow::new(
-                        new_columns,
-                        row.original_index,
-                        row.has_guard,
-                    ));
+                    specialized.add_row(
+                        PatternRow::new(new_columns, row.original_index, row.has_guard)
+                            .with_guard_expr(row.guard.clone()),
+                    );
                 }
                 PatternColumn::Constructor { name, args } if name == &ctor.name => {
                     // Matching constructor - expand arguments
@@ -644,11 +698,10 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     for col in row.columns.iter().skip(1) {
                         new_columns.push(col.clone());
                     }
-                    specialized.add_row(PatternRow::new(
-                        new_columns,
-                        row.original_index,
-                        row.has_guard,
-                    ));
+                    specialized.add_row(
+                        PatternRow::new(new_columns, row.original_index, row.has_guard)
+                            .with_guard_expr(row.guard.clone()),
+                    );
                 }
                 PatternColumn::Or(alts) => {
                     // Check if any alternative matches
@@ -659,27 +712,30 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                             for col in row.columns.iter().skip(1) {
                                 new_columns.push(col.clone());
                             }
-                            specialized.add_row(PatternRow::new(
-                                new_columns,
-                                row.original_index,
-                                row.has_guard,
-                            ));
+                            specialized.add_row(
+                                PatternRow::new(new_columns, row.original_index, row.has_guard)
+                                    .with_guard_expr(row.guard.clone()),
+                            );
                         }
                     }
                 }
                 PatternColumn::Guarded(inner) => {
-                    // Process inner pattern but mark as guarded
+                    // Process inner pattern but mark as guarded.
+                    // The Guarded *column* (nested inside or-pattern arms)
+                    // doesn't carry a liftable guard expression — only
+                    // top-level `Guard` patterns peeled by `build_matrix`
+                    // populate `row.guard`. We still propagate whatever
+                    // top-level guard the parent row carried.
                     if matches_constructor(inner, ctor) {
                         let expanded = expand_alternative(inner, ctor);
                         let mut new_columns = expanded;
                         for col in row.columns.iter().skip(1) {
                             new_columns.push(col.clone());
                         }
-                        specialized.add_row(PatternRow::new(
-                            new_columns,
-                            row.original_index,
-                            true, // Keep guard flag
-                        ));
+                        specialized.add_row(
+                            PatternRow::new(new_columns, row.original_index, true)
+                                .with_guard_expr(row.guard.clone()),
+                        );
                     }
                 }
                 PatternColumn::And(conjuncts) => {
@@ -692,11 +748,10 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         for col in row.columns.iter().skip(1) {
                             new_columns.push(col.clone());
                         }
-                        specialized.add_row(PatternRow::new(
-                            new_columns,
-                            row.original_index,
-                            row.has_guard,
-                        ));
+                        specialized.add_row(
+                            PatternRow::new(new_columns, row.original_index, row.has_guard)
+                                .with_guard_expr(row.guard.clone()),
+                        );
                     }
                 }
                 // Bool literal patterns match bool constructors "true"/"false"
@@ -708,11 +763,10 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                         for col in row.columns.iter().skip(1) {
                             new_columns.push(col.clone());
                         }
-                        specialized.add_row(PatternRow::new(
-                            new_columns,
-                            row.original_index,
-                            row.has_guard,
-                        ));
+                        specialized.add_row(
+                            PatternRow::new(new_columns, row.original_index, row.has_guard)
+                                .with_guard_expr(row.guard.clone()),
+                        );
                     }
                 }
                 // Tuple patterns match the tuple constructor "()"
@@ -723,11 +777,10 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     for col in row.columns.iter().skip(1) {
                         new_columns.push(col.clone());
                     }
-                    specialized.add_row(PatternRow::new(
-                        new_columns,
-                        row.original_index,
-                        row.has_guard,
-                    ));
+                    specialized.add_row(
+                        PatternRow::new(new_columns, row.original_index, row.has_guard)
+                            .with_guard_expr(row.guard.clone()),
+                    );
                 }
                 // TypeTest patterns: `x is Dog` covers the `Dog` constructor
                 PatternColumn::TypeTest { type_name, .. }
@@ -742,12 +795,18 @@ pub fn specialize_matrix(matrix: &CoverageMatrix, ctor: &Constructor) -> Coverag
                     // default wildcard), it provides definitive coverage (e.g.,
                     // `x is Dog` covers the `Dog` variant). For the default constructor,
                     // preserve the guarded status since the runtime check may fail.
+                    // Strip both `has_guard` and `guard` on exact matches — the
+                    // specialized row no longer carries the conditional.
                     let is_exact_match = type_name.as_str() == ctor.name.as_str();
-                    specialized.add_row(PatternRow::new(
-                        new_columns,
-                        row.original_index,
-                        if is_exact_match { false } else { row.has_guard },
-                    ));
+                    let propagated_guard = if is_exact_match { None } else { row.guard.clone() };
+                    specialized.add_row(
+                        PatternRow::new(
+                            new_columns,
+                            row.original_index,
+                            if is_exact_match { false } else { row.has_guard },
+                        )
+                        .with_guard_expr(propagated_guard),
+                    );
                 }
                 _ => {
                     // Other patterns don't match this constructor
