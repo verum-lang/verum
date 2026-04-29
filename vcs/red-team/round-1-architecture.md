@@ -262,6 +262,45 @@ A predicate Z3 cannot decide within budget is rejected at the SMT layer with
 `Err(*::Unknown)`; the error propagates to the verifier and to the kernel as a
 verification failure, never as a silent accept.
 
+### 5.3 `RefinementConfig.timeout_ms` reaches the underlying solver — DEFENSE CONFIRMED 2026-04-29
+
+**Status:** DEFENSE CONFIRMED — the public 100 ms-default per-query timeout
+is now wired end-to-end. Previously
+`SubsumptionChecker.smt_timeout_ms` was frozen at construction and
+the documented `RefinementConfig.timeout_ms` knob was inert past
+first use; the elapsed-time check inside `check_smt` would still
+flag the result as a timeout, but the underlying Z3 solver was
+unbounded and could spin against the host wall clock arbitrarily.
+
+**Wiring (commits land 2026-04-29):**
+
+- `verum_types::refinement::SmtBackend::set_timeout_ms(&mut self, u64)`
+  trait method, no-op default for legacy backends.
+- `RefinementChecker::check_with_smt` and
+  `verify_refinement_with_assumptions` call
+  `backend.set_timeout_ms(self.config.timeout_ms)` before every
+  query.
+- `RefinementZ3Backend::set_timeout_ms` overrides and forwards
+  to `SubsumptionChecker::set_smt_timeout_ms`.
+- `SubsumptionChecker::check_smt` configures Z3's `timeout`
+  parameter via `Params::set_u32` on every fresh solver
+  instance (mirrors `QESolver::fresh_solver` and the other 9
+  `solver.set_params(&params)` sites).
+
+**Pin tests:**
+- `crates/verum_smt/tests/refinement_backend_timeout_wiring.rs`
+  — three tests covering trait-default no-op, override
+  observability, and timeout-getter round-trip.
+- `crates/verum_types/tests/refinement_basic_tests.rs::smt_backend_set_timeout_ms_*`
+  — two tests pinning trait-default no-op and override
+  observability at the trait-extension boundary.
+
+This closure makes the §5.1 / §5.2 fail-closed invariants
+load-bearing in the configurable-timeout regime: previously a
+caller that dropped `timeout_ms` to 1 ms would still observe Z3
+running for the global 30 s default; now the per-query budget is
+authoritative.
+
 ---
 
 ## Vector 6 — Capability leakage through generic monomorphization
