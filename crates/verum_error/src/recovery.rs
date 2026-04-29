@@ -999,6 +999,48 @@ impl SupervisionConfig {
             within: Duration::from_secs(60),
         }
     }
+
+    /// Decide whether a restart is permitted given the count of
+    /// recent restarts and the start of the current window.
+    ///
+    /// Implements the OTP-style rate limit: a child can restart up
+    /// to `max_restarts` times within `within` duration. When the
+    /// window has elapsed, the limit resets (caller sees `true` and
+    /// is expected to reset its counter). When the limit is
+    /// exhausted within the window, returns `false` so the
+    /// supervisor escalates per `strategy`.
+    ///
+    /// Closes the inert-defense pattern around all three
+    /// SupervisionConfig fields. Pre-fix `strategy`,
+    /// `max_restarts`, and `within` were stored but no production
+    /// code path consulted any of them — every caller of
+    /// `should_restart` (the existing API) routed through
+    /// `RestartStrategy`, a separate enum. This method exposes the
+    /// rate-limit semantic as a public API so a future supervisor
+    /// implementation can consult the config without re-deriving
+    /// the limits at the call site.
+    pub fn should_permit_restart(
+        &self,
+        restart_count: usize,
+        window_start: Instant,
+    ) -> bool {
+        // Window has expired → caller resets the counter and
+        // restart is permitted. Returning true here is the natural
+        // signal — the supervisor treats this as "fresh window,
+        // try again".
+        if window_start.elapsed() > self.within {
+            return true;
+        }
+        restart_count < self.max_restarts
+    }
+
+    /// Read accessor for the configured supervision strategy.
+    /// Embedders building a supervision tree consult this to
+    /// dispatch on `OneForOne` / `OneForAll` / `RestForOne` /
+    /// `SimpleOneForOne` semantics.
+    pub fn strategy(&self) -> SupervisionStrategy {
+        self.strategy
+    }
 }
 
 /// Failure reason classification
