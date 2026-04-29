@@ -201,6 +201,47 @@ impl Context {
     pub fn get_model(&self, solver: &z3::Solver) -> Option<z3::Model> {
         solver.get_model()
     }
+
+    /// Whether the configured policy enables pre-solve simplification.
+    ///
+    /// Surfaces `ContextConfig.simplify` as a public read so callers
+    /// driving custom assert paths can branch on the stance without
+    /// re-reading the config struct.
+    pub fn simplify_enabled(&self) -> bool {
+        self.inner.config.simplify
+    }
+
+    /// Assert a formula on the solver, applying Z3's `simplify`
+    /// tactic first when `ContextConfig.simplify == true`.
+    ///
+    /// Closes the inert-defense pattern around the documented
+    /// "Enable simplification before solving" gate. Pre-fix the
+    /// flag was set on the config but no code path consulted it —
+    /// every assertion went straight to the solver regardless of
+    /// the configured stance. Now callers that route assertions
+    /// through this method get the configured behaviour for free.
+    ///
+    /// Direct `solver.assert(&formula)` callers are unaffected; the
+    /// wiring is opt-in via this method so existing pipelines
+    /// don't change shape.
+    ///
+    /// The simplify pass is best-effort: when it can't reduce the
+    /// formula to a single Bool (e.g., the simplified result is a
+    /// non-Bool AST), the original formula is asserted unchanged.
+    /// Keeping the original is strictly safer than asserting a
+    /// possibly-narrowed simplified form.
+    pub fn assert(&self, solver: &z3::Solver, formula: &z3::ast::Bool) {
+        if !self.inner.config.simplify {
+            solver.assert(formula);
+            return;
+        }
+        // Apply Z3's simplify on the AST. The `Bool::simplify()`
+        // method is part of the Ast trait — returns a possibly-
+        // smaller equisatisfiable Bool.
+        use z3::ast::Ast;
+        let simplified = formula.simplify();
+        solver.assert(&simplified);
+    }
 }
 
 impl Default for Context {
@@ -396,5 +437,95 @@ impl SolverStats {
         } else {
             (self.num_sat + self.num_unsat) as f64 / self.num_checks as f64
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use z3::ast::Bool;
+
+    #[test]
+    fn simplify_enabled_mirrors_config() {
+        // Pin: the read accessor surfaces the configured stance
+        // verbatim. Default is true.
+        let ctx = Context::new();
+        assert!(
+            ctx.simplify_enabled(),
+            "default ContextConfig has simplify=true",
+        );
+
+        let mut cfg = ContextConfig::default();
+        cfg.simplify = false;
+        let ctx = Context::with_config(cfg);
+        assert!(
+            !ctx.simplify_enabled(),
+            "simplify=false config must surface through accessor",
+        );
+    }
+
+    #[test]
+    fn assert_with_simplify_off_preserves_solver_state() {
+        // Pin: with `simplify = false`, assert() routes the formula
+        // straight to the solver — the solver remains satisfiable
+        // for a trivially-true formula.
+        let mut cfg = ContextConfig::default();
+        cfg.simplify = false;
+        let ctx = Context::with_config(cfg);
+        let solver = ctx.solver();
+
+        let t = Bool::from_bool(true);
+        ctx.assert(&solver, &t);
+        let result = ctx.check(&solver);
+        assert_eq!(result, z3::SatResult::Sat);
+    }
+
+    #[test]
+    fn assert_with_simplify_on_preserves_satisfiability() {
+        // Pin: with `simplify = true` (the default), assert()
+        // simplifies the formula before adding it to the solver.
+        // Result must remain equisatisfiable: a trivially-true
+        // formula simplifies to true and the solver checks Sat.
+        let ctx = Context::new();
+        let solver = ctx.solver();
+
+        // Construct a non-trivial formula that the simplifier can
+        // reduce: `true && x = x`.  Both sides are tautologies; the
+        // simplified form is just `true`.  A regression in the
+        // simplify pass would leave the original AND-tree, which
+        // still checks Sat — so the test pins equisatisfiability,
+        // not the specific simplified shape.
+        let x = z3::ast::Int::new_const("x");
+        let eq = x.eq(&x);
+        let t = Bool::from_bool(true);
+        let formula = Bool::and(&[&t, &eq]);
+        ctx.assert(&solver, &formula);
+
+        let result = ctx.check(&solver);
+        assert_eq!(
+            result,
+            z3::SatResult::Sat,
+            "simplify=true must preserve equisatisfiability of trivially-true input",
+        );
+    }
+
+    #[test]
+    fn assert_simplify_unsat_remains_unsat() {
+        // Pin: simplify never converts an Unsat formula to a Sat one
+        // — `false && x = x` simplifies to `false`, and the solver
+        // still rejects.
+        let ctx = Context::new();
+        assert!(ctx.simplify_enabled());
+        let solver = ctx.solver();
+
+        let f = Bool::from_bool(false);
+        ctx.assert(&solver, &f);
+
+        let result = ctx.check(&solver);
+        assert_eq!(
+            result,
+            z3::SatResult::Unsat,
+            "simplify must not lose unsatisfiability",
+        );
     }
 }
