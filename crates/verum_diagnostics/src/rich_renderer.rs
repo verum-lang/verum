@@ -774,12 +774,23 @@ impl DiffRenderer {
         output.push_str(&line[safe_end..]);
         output.push('\n');
 
-        // Underline the replacement
+        // Underline the replacement.  The leading-space count must
+        // match the *character width* of the prefix, NOT the byte
+        // length — when the prefix contains multi-byte UTF-8 the
+        // byte-count produces over-indentation that visually breaks
+        // the underline alignment in terminals (combining marks /
+        // CJK width complicate this further; we use char-count as
+        // the pragmatic proxy that's correct for most monospace
+        // fonts).
         output.push_str("     ");
         output.push_str(&self.color_scheme.gutter.wrap(self.glyphs.vertical_line));
         output.push(' ');
-        output.push_str(&" ".repeat(span_start));
-        let underline = self.glyphs.underline_char.repeat(replacement.len());
+        let prefix_char_width = line[..safe_start].chars().count();
+        output.push_str(&" ".repeat(prefix_char_width));
+        let underline = self
+            .glyphs
+            .underline_char
+            .repeat(replacement.chars().count());
         output.push_str(&self.color_scheme.suggestion_add.wrap(&underline));
         output.push_str(" add this\n");
 
