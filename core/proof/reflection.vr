@@ -360,3 +360,45 @@ public fn to_smtlib_decl(f: ReflectedFunction) -> Text {
     out = out + ") " + f.return_sort + ")";
     out
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for ReflectabilityVerdict
+// =============================================================================
+
+implement Eq for ReflectabilityVerdict {
+    fn eq(&self, other: &ReflectabilityVerdict) -> Bool {
+        match (self, other) {
+            (ReflectabilityVerdict.Reflectable,
+             ReflectabilityVerdict.Reflectable) => true,
+            (ReflectabilityVerdict.NotReflectable { reason: a },
+             ReflectabilityVerdict.NotReflectable { reason: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for ReflectabilityVerdict {
+    /// Renders the verdict in human-readable form for diagnostic
+    /// output: `reflectable` for the success case; for failure,
+    /// the embedded reason verbatim (already constructed
+    /// human-friendly upstream).
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ReflectabilityVerdict.Reflectable =>
+                f.write_str("reflectable"),
+            ReflectabilityVerdict.NotReflectable { reason } =>
+                f.write_str(reason.as_str()),
+        }
+    }
+}
+
+implement Debug for ReflectabilityVerdict {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            ReflectabilityVerdict.Reflectable =>
+                f.write_str("Reflectable"),
+            ReflectabilityVerdict.NotReflectable { reason } =>
+                f.write_str(f"NotReflectable({reason})".as_str()),
+        }
+    }
+}
