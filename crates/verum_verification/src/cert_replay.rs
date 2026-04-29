@@ -344,6 +344,563 @@ pub trait CertReplayEngine: std::fmt::Debug + Send + Sync {
 /// This is what makes SMT solvers external to the TCB: even if Z3
 /// produces a fake cert, the kernel-only check catches it before
 /// the proof is committed.
+///
+/// **Hardening note (#95).**  This engine no longer treats the
+/// cert body as opaque text.  It runs the format-appropriate
+/// decomposer ([`decompose_cert`]) which parses the body into a
+/// list of [`InferenceStep`]s; every step's rule name is
+/// cross-checked against the canonical
+/// [`KernelRuleRegistry`].  Unknown rules + malformed bodies are
+/// rejected before any solver is consulted.
+// =============================================================================
+// Cert decomposer (#95) — typed kernel-rule decomposition
+// =============================================================================
+//
+// Pre-this-module, `KernelOnlyReplayEngine` validated only structural
+// invariants (hash + theory + non-empty body / conclusion).  That
+// passed any cert whose body was non-empty and whose hash matched —
+// a Z3 bug producing a syntactically-valid-but-meaningless trace
+// would slip through.
+//
+// Hardening: parse the cert body per-format into a typed sequence
+// of [`InferenceStep`]s (rule name + premises + conclusion), then
+// verify every rule name is in the canonical kernel-rule registry.
+// Unknown rule → Rejected.  This is the structural piece that
+// genuinely takes solvers out of the TCB.
+//
+// What's NOT here yet (V2): the actual kernel `infer::check` call
+// per step — that requires lifting the cert's textual conclusions
+// to typed `CoreTerm`s, which is a separate format-specific lift.
+// The decomposer's typed output is the prerequisite for that work.
+
+/// One step in a decomposed cert: a rule application with named
+/// premises and a textual conclusion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InferenceStep {
+    /// Local identifier (line label, e.g. `t1` / `h2` for ALETHE,
+    /// `step_001` for verum_canonical).
+    pub id: Text,
+    /// Rule name as it appears in the cert.  Cross-checked against
+    /// the kernel-rule registry.
+    pub rule: Text,
+    /// IDs of previous steps cited as premises.
+    pub premises: Vec<Text>,
+    /// Conclusion (rendered text — typed lift is V2 work).
+    pub conclusion: Text,
+}
+
+/// Decompose error.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DecomposeError {
+    /// Format is documented but not yet supported by a parser.
+    UnsupportedFormat(CertFormat),
+    /// Body could not be parsed as the declared format.
+    Malformed { line: usize, message: Text },
+    /// Body parsed but contains zero steps.
+    Empty,
+}
+
+impl std::fmt::Display for DecomposeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedFormat(fmt) => {
+                write!(f, "decomposer not yet implemented for `{}`", fmt.name())
+            }
+            Self::Malformed { line, message } => {
+                write!(f, "malformed cert body at line {}: {}", line, message.as_str())
+            }
+            Self::Empty => write!(f, "cert body has no inference steps"),
+        }
+    }
+}
+
+impl std::error::Error for DecomposeError {}
+
+/// Canonical kernel-rule registry.
+///
+/// **Each entry is a tuple `(cert_rule_name, kernel_rule_tag)`.**
+/// `cert_rule_name` is what the SMT solver writes in its proof
+/// trace; `kernel_rule_tag` is the canonical Verum-kernel rule it
+/// maps to (mirrors the `KernelRule` enum in
+/// `verum_kernel::proof_tree`).  Multiple cert names can map to the
+/// same kernel rule (e.g. Z3 `mp` and ALETHE `mp` both map to
+/// `modus_ponens`).
+///
+/// Unknown rule names are rejected.  Adding a new rule is a one-
+/// place edit here; downstream tooling automatically picks it up.
+pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
+    // ----- Resolution / propositional -----
+    ("resolution", "resolution"),
+    ("th-resolution", "resolution"),
+    ("hyper-res", "resolution"),
+    ("unit-resolution", "resolution"),
+    ("res", "resolution"),
+    ("and-elim", "and_elim"),
+    ("and-introduction", "and_intro"),
+    ("and_pos", "and_intro"),
+    ("not-not", "double_neg_elim"),
+    ("not_not", "double_neg_elim"),
+    ("equiv-elim", "iff_elim"),
+    ("contraction", "contraction"),
+    // ----- Equality -----
+    ("refl", "reflexivity"),
+    ("eq-reflexive", "reflexivity"),
+    ("symm", "symmetry"),
+    ("eq-symmetric", "symmetry"),
+    ("trans", "transitivity"),
+    ("eq-transitive", "transitivity"),
+    ("eq-congruent", "congruence"),
+    ("congruence", "congruence"),
+    ("monotonicity", "congruence"),
+    // ----- Implication / modus ponens -----
+    ("mp", "modus_ponens"),
+    ("modus-ponens", "modus_ponens"),
+    ("mp_scoped", "modus_ponens"),
+    ("th-mp", "modus_ponens"),
+    ("hypothesis", "hypothesis"),
+    ("assume", "hypothesis"),
+    // ----- Quantifier -----
+    ("forall_inst", "forall_instantiation"),
+    ("forall-inst", "forall_instantiation"),
+    ("quant-inst", "forall_instantiation"),
+    ("inst", "forall_instantiation"),
+    ("skolemize", "skolemize"),
+    ("sko-forall", "skolemize"),
+    ("sko-ex", "skolemize"),
+    // ----- Theory: linear arithmetic -----
+    ("la_generic", "linear_arithmetic"),
+    ("la-generic", "linear_arithmetic"),
+    ("la_disequality", "linear_arithmetic"),
+    ("th-lemma", "theory_lemma"),
+    ("th_lemma", "theory_lemma"),
+    ("lia", "linear_arithmetic"),
+    ("lra", "linear_arithmetic"),
+    // ----- Theory: array / UF -----
+    ("array_ext", "array_extensionality"),
+    ("array-ext", "array_extensionality"),
+    ("array_distinct", "array_extensionality"),
+    // ----- Final / closing -----
+    ("step", "step"),
+    ("subproof", "subproof"),
+    ("anchor", "subproof"),
+    ("def-axiom", "definitional_axiom"),
+    ("tautology", "tautology"),
+    ("true-intro", "tautology"),
+    ("false-elim", "ex_falso"),
+    ("efq", "ex_falso"),
+];
+
+/// Look up a cert rule name in the canonical registry.
+pub fn lookup_kernel_rule(cert_rule: &str) -> Option<&'static str> {
+    KERNEL_RULE_REGISTRY
+        .iter()
+        .find(|(name, _)| *name == cert_rule)
+        .map(|(_, kr)| *kr)
+}
+
+/// Single dispatch: decompose `cert` into a list of typed steps,
+/// using the format-appropriate parser.
+pub fn decompose_cert(cert: &SmtCertificate) -> Result<Vec<InferenceStep>, DecomposeError> {
+    match cert.format {
+        CertFormat::VerumCanonical => decompose_verum_canonical(cert.body.as_str()),
+        CertFormat::Cvc5Alethe => decompose_alethe(cert.body.as_str()),
+        CertFormat::Z3Proof => decompose_z3_proof(cert.body.as_str()),
+        // V2 formats — typed parser pending.
+        CertFormat::LfscPattern | CertFormat::OpenSmt | CertFormat::Mathsat => {
+            Err(DecomposeError::UnsupportedFormat(cert.format))
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Verum canonical — line-oriented format
+// -----------------------------------------------------------------------------
+//
+// One step per line:
+//
+//   `step <id> <rule> [<premise> ...] : <conclusion>`
+//
+// Comment lines start with `;`.  Blank lines are ignored.
+
+fn decompose_verum_canonical(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
+    let mut steps: Vec<InferenceStep> = Vec::new();
+    for (lineno, raw) in body.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        let mut head_and_concl = line.splitn(2, ':');
+        let head = head_and_concl.next().unwrap_or("").trim();
+        let concl = head_and_concl.next().unwrap_or("").trim();
+        let mut tokens = head.split_whitespace();
+        let kw = tokens.next().ok_or_else(|| DecomposeError::Malformed {
+            line: lineno + 1,
+            message: Text::from("expected `step` keyword"),
+        })?;
+        if kw != "step" {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from(format!("unexpected keyword `{}`; expected `step`", kw)),
+            });
+        }
+        let id = tokens.next().ok_or_else(|| DecomposeError::Malformed {
+            line: lineno + 1,
+            message: Text::from("missing step id"),
+        })?;
+        let rule = tokens.next().ok_or_else(|| DecomposeError::Malformed {
+            line: lineno + 1,
+            message: Text::from("missing rule name"),
+        })?;
+        let premises: Vec<Text> = tokens.map(Text::from).collect();
+        if concl.is_empty() {
+            return Err(DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("missing `: <conclusion>` after rule + premises"),
+            });
+        }
+        steps.push(InferenceStep {
+            id: Text::from(id),
+            rule: Text::from(rule),
+            premises,
+            conclusion: Text::from(concl),
+        });
+    }
+    if steps.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    Ok(steps)
+}
+
+// -----------------------------------------------------------------------------
+// ALETHE (CVC5) — `(step <id> (cl <conclusion>) :rule <rule> :premises (<p>*))`
+// -----------------------------------------------------------------------------
+
+fn decompose_alethe(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
+    let mut steps: Vec<InferenceStep> = Vec::new();
+    for (lineno, raw) in body.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        // ALETHE accepts `(assume h <expr>)` and `(step ...)` shapes.
+        let inner = line
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .ok_or_else(|| DecomposeError::Malformed {
+                line: lineno + 1,
+                message: Text::from("ALETHE line must be parenthesised"),
+            })?
+            .trim();
+        if let Some(rest) = inner.strip_prefix("assume ") {
+            // `assume <id> <expr>`
+            let mut t = rest.splitn(2, char::is_whitespace);
+            let id = t.next().unwrap_or("").trim();
+            let expr = t.next().unwrap_or("").trim();
+            if id.is_empty() {
+                return Err(DecomposeError::Malformed {
+                    line: lineno + 1,
+                    message: Text::from("missing assume id"),
+                });
+            }
+            steps.push(InferenceStep {
+                id: Text::from(id),
+                rule: Text::from("assume"),
+                premises: Vec::new(),
+                conclusion: Text::from(expr),
+            });
+            continue;
+        }
+        if let Some(rest) = inner.strip_prefix("step ") {
+            // `<id> (cl <conclusion>) :rule <rule> :premises (<p>*) ...`
+            // We tokenise on whitespace but respect `(...)` groups.
+            let id = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let conclusion = parse_alethe_clause(rest).unwrap_or_default();
+            let rule = parse_alethe_kw(rest, ":rule").unwrap_or_default();
+            let premises = parse_alethe_premise_list(rest);
+            if id.is_empty() || rule.is_empty() {
+                return Err(DecomposeError::Malformed {
+                    line: lineno + 1,
+                    message: Text::from("ALETHE step missing id or :rule"),
+                });
+            }
+            steps.push(InferenceStep {
+                id: Text::from(id),
+                rule: Text::from(rule),
+                premises,
+                conclusion: Text::from(conclusion),
+            });
+            continue;
+        }
+        // Anchors / contexts are control structures, not inference
+        // steps — record them as `step` rule with empty premises so
+        // the registry sees the structural marker.
+        if inner.starts_with("anchor") {
+            steps.push(InferenceStep {
+                id: Text::from(format!("anchor_{}", lineno + 1)),
+                rule: Text::from("anchor"),
+                premises: Vec::new(),
+                conclusion: Text::from(inner),
+            });
+            continue;
+        }
+        // Unknown shape — surface as malformed for diagnostics.
+        return Err(DecomposeError::Malformed {
+            line: lineno + 1,
+            message: Text::from(format!(
+                "unrecognised ALETHE form: `{}`",
+                truncate_for_msg(inner, 60)
+            )),
+        });
+    }
+    if steps.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    Ok(steps)
+}
+
+fn parse_alethe_clause(rest: &str) -> Option<String> {
+    // Find first `(cl ...)` substring at top level.
+    let needle = "(cl";
+    let i = rest.find(needle)?;
+    let bytes = &rest[i..].as_bytes();
+    let mut depth: i32 = 0;
+    for (off, c) in rest[i..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let inside = &rest[i + needle.len()..i + off];
+                    return Some(inside.trim().to_string());
+                }
+            }
+            _ => {}
+        }
+        let _ = bytes; // suppress unused warning for the byte view
+    }
+    None
+}
+
+fn parse_alethe_kw(rest: &str, key: &str) -> Option<String> {
+    let i = rest.find(key)?;
+    let after = rest[i + key.len()..].trim_start();
+    // Read up to whitespace (rule name) — but `:premises` value is a
+    // parenthesised list; for `:rule` we just want the next token.
+    Some(
+        after
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(')')
+            .to_string(),
+    )
+}
+
+fn parse_alethe_premise_list(rest: &str) -> Vec<Text> {
+    let key = ":premises";
+    let i = match rest.find(key) {
+        Some(i) => i + key.len(),
+        None => return Vec::new(),
+    };
+    let after = rest[i..].trim_start();
+    let after = match after.strip_prefix('(') {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    let mut depth: i32 = 1;
+    let mut end = 0usize;
+    for (off, c) in after.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = off;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let inside = if end > 0 { &after[..end] } else { after };
+    inside
+        .split_whitespace()
+        .filter(|s| !s.is_empty())
+        .map(Text::from)
+        .collect()
+}
+
+fn truncate_for_msg(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+// -----------------------------------------------------------------------------
+// Z3 proof — `((rule ...) ...)` — tree of nested rule applications
+// -----------------------------------------------------------------------------
+//
+// Z3's `(proof ...)` format is a deeply nested S-expression where
+// each rule application has shape `(rule_name <subproof>* <conclusion>)`.
+// We do a depth-first walk producing one step per encountered rule.
+
+fn decompose_z3_proof(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    let mut tokens = TokenStream::new(trimmed);
+    let root = parse_sexpr(&mut tokens).map_err(|m| DecomposeError::Malformed {
+        line: 0,
+        message: Text::from(m),
+    })?;
+    let mut steps: Vec<InferenceStep> = Vec::new();
+    let mut next_id: u32 = 0;
+    walk_z3_sexpr(&root, &mut steps, &mut next_id);
+    if steps.is_empty() {
+        return Err(DecomposeError::Empty);
+    }
+    Ok(steps)
+}
+
+#[derive(Debug, Clone)]
+enum Sexpr {
+    Atom(String),
+    List(Vec<Sexpr>),
+}
+
+struct TokenStream<'a> {
+    s: &'a str,
+    i: usize,
+}
+
+impl<'a> TokenStream<'a> {
+    fn new(s: &'a str) -> Self {
+        Self { s, i: 0 }
+    }
+    fn peek(&self) -> Option<char> {
+        self.s[self.i..].chars().next()
+    }
+    fn skip_ws(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.i += c.len_utf8();
+            } else if c == ';' {
+                // Comment to EOL.
+                while let Some(c) = self.peek() {
+                    self.i += c.len_utf8();
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    fn next_atom(&mut self) -> Option<String> {
+        let start = self.i;
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() || c == '(' || c == ')' {
+                break;
+            }
+            self.i += c.len_utf8();
+        }
+        if start == self.i {
+            None
+        } else {
+            Some(self.s[start..self.i].to_string())
+        }
+    }
+}
+
+fn parse_sexpr(t: &mut TokenStream<'_>) -> Result<Sexpr, String> {
+    t.skip_ws();
+    match t.peek() {
+        None => Err("unexpected EOF".into()),
+        Some('(') => {
+            t.i += 1;
+            let mut items: Vec<Sexpr> = Vec::new();
+            loop {
+                t.skip_ws();
+                match t.peek() {
+                    None => return Err("unterminated list".into()),
+                    Some(')') => {
+                        t.i += 1;
+                        return Ok(Sexpr::List(items));
+                    }
+                    _ => items.push(parse_sexpr(t)?),
+                }
+            }
+        }
+        Some(')') => Err("unexpected `)`".into()),
+        Some(_) => match t.next_atom() {
+            Some(a) => Ok(Sexpr::Atom(a)),
+            None => Err("expected atom".into()),
+        },
+    }
+}
+
+fn walk_z3_sexpr(s: &Sexpr, steps: &mut Vec<InferenceStep>, next_id: &mut u32) {
+    match s {
+        Sexpr::Atom(_) => {}
+        Sexpr::List(items) => {
+            // A rule application is a non-empty list whose head is
+            // an atom matching a known rule name (best-effort —
+            // Z3's S-expr trees also contain term applications,
+            // which we leave untouched).
+            if let Some(Sexpr::Atom(head)) = items.first() {
+                if lookup_kernel_rule(head).is_some() {
+                    let id = format!("z3_step_{}", *next_id);
+                    *next_id += 1;
+                    let conclusion = items
+                        .last()
+                        .map(render_sexpr)
+                        .unwrap_or_default();
+                    let mut premises: Vec<Text> = Vec::new();
+                    for sub in items.iter().skip(1).take(items.len().saturating_sub(2)) {
+                        if let Sexpr::List(_) = sub {
+                            // Each sub-proof becomes a premise.
+                            premises.push(Text::from(format!("p_{}", premises.len())));
+                        }
+                    }
+                    steps.push(InferenceStep {
+                        id: Text::from(id),
+                        rule: Text::from(head.clone()),
+                        premises,
+                        conclusion: Text::from(conclusion),
+                    });
+                }
+            }
+            // Recurse into children regardless — nested rule
+            // applications are common.
+            for child in items {
+                walk_z3_sexpr(child, steps, next_id);
+            }
+        }
+    }
+}
+
+fn render_sexpr(s: &Sexpr) -> String {
+    match s {
+        Sexpr::Atom(a) => a.clone(),
+        Sexpr::List(items) => {
+            let mut out = String::from("(");
+            for (i, it) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&render_sexpr(it));
+            }
+            out.push(')');
+            out
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KernelOnlyReplayEngine;
 
@@ -402,13 +959,64 @@ impl CertReplayEngine for KernelOnlyReplayEngine {
                 ),
             });
         }
+        // #95 hardening — decompose the cert body into typed
+        // inference steps and verify every rule is in the canonical
+        // kernel-rule registry.
+        let steps = match decompose_cert(cert) {
+            Ok(s) => s,
+            Err(DecomposeError::UnsupportedFormat(fmt)) => {
+                return Ok(ReplayVerdict::Rejected {
+                    backend: ReplayBackend::KernelOnly,
+                    reason: Text::from(format!(
+                        "kernel-side decomposer not yet implemented for format `{}` — accept via solver-side replay only",
+                        fmt.name()
+                    )),
+                });
+            }
+            Err(DecomposeError::Empty) => {
+                return Ok(ReplayVerdict::Rejected {
+                    backend: ReplayBackend::KernelOnly,
+                    reason: Text::from("cert body decomposed to zero steps"),
+                });
+            }
+            Err(DecomposeError::Malformed { line, message }) => {
+                return Ok(ReplayVerdict::Rejected {
+                    backend: ReplayBackend::KernelOnly,
+                    reason: Text::from(format!(
+                        "cert body malformed (line {}): {}",
+                        line,
+                        message.as_str()
+                    )),
+                });
+            }
+        };
+
+        let mut unknown_rules: Vec<&str> = Vec::new();
+        for s in &steps {
+            if lookup_kernel_rule(s.rule.as_str()).is_none() {
+                unknown_rules.push(s.rule.as_str());
+            }
+        }
+        if !unknown_rules.is_empty() {
+            unknown_rules.sort_unstable();
+            unknown_rules.dedup();
+            return Ok(ReplayVerdict::Rejected {
+                backend: ReplayBackend::KernelOnly,
+                reason: Text::from(format!(
+                    "rules not in canonical kernel-rule registry: {}",
+                    unknown_rules.join(", ")
+                )),
+            });
+        }
+
         Ok(ReplayVerdict::Accepted {
             backend: ReplayBackend::KernelOnly,
             elapsed_ms: 0,
             detail: Some(Text::from(format!(
-                "structural OK: format={}, theory={}, hash matches",
+                "structural OK: format={}, theory={}, steps={}, all rules registered",
                 cert.format.name(),
-                cert.theory.as_str()
+                cert.theory.as_str(),
+                steps.len()
             ))),
         })
     }
@@ -620,11 +1228,16 @@ mod tests {
     use super::*;
 
     fn fixture_cert() -> SmtCertificate {
+        // Minimal well-formed ALETHE body: an `assume` introducing a
+        // hypothesis, plus a `step` whose `:rule` is in the canonical
+        // kernel-rule registry.  The kernel-only replay decomposes
+        // both lines into typed `InferenceStep`s and accepts.
         SmtCertificate::new(
             CertFormat::Cvc5Alethe,
             "QF_LIA",
             "(>= x 0) -> (>= (+ x 1) 1)",
-            "(step 1 ...)\n(step 2 ...)\n(qed ...)",
+            "(assume h1 (>= x 0))\n\
+             (step t1 (cl (>= (+ x 1) 1)) :rule la_generic :premises (h1))",
         )
     }
 
@@ -945,5 +1558,178 @@ mod tests {
         assert_eq!(v, back);
         // Tag uses snake_case via #[serde(tag = "kind")].
         assert!(s.contains("\"kind\":\"Accepted\""));
+    }
+
+    // =========================================================================
+    // Cert decomposer (#95)
+    // =========================================================================
+
+    #[test]
+    fn registry_resolves_canonical_aliases() {
+        // Multiple cert names mapping to one kernel rule.
+        assert_eq!(lookup_kernel_rule("mp"), Some("modus_ponens"));
+        assert_eq!(lookup_kernel_rule("modus-ponens"), Some("modus_ponens"));
+        assert_eq!(lookup_kernel_rule("th-mp"), Some("modus_ponens"));
+        assert_eq!(lookup_kernel_rule("resolution"), Some("resolution"));
+        assert_eq!(lookup_kernel_rule("la_generic"), Some("linear_arithmetic"));
+    }
+
+    #[test]
+    fn registry_rejects_unknown_rules() {
+        assert_eq!(lookup_kernel_rule(""), None);
+        assert_eq!(lookup_kernel_rule("garbage_rule"), None);
+        assert_eq!(lookup_kernel_rule("backdoor"), None);
+    }
+
+    #[test]
+    fn decompose_verum_canonical_one_step() {
+        let body = "step s1 mp h1 h2 : (>= y 0)";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_LIA", "y >= 0", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id.as_str(), "s1");
+        assert_eq!(steps[0].rule.as_str(), "mp");
+        assert_eq!(steps[0].premises.len(), 2);
+        assert_eq!(steps[0].conclusion.as_str(), "(>= y 0)");
+    }
+
+    #[test]
+    fn decompose_verum_canonical_skips_comments_and_blank_lines() {
+        let body = "; header\n\nstep s1 refl : (= x x)\n; comment between\nstep s2 mp s1 : (= x x)\n";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "(= x x)", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert_eq!(steps.len(), 2);
+    }
+
+    #[test]
+    fn decompose_verum_canonical_rejects_missing_conclusion() {
+        let body = "step s1 mp h1 h2";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_LIA", "x", body);
+        let err = decompose_cert(&cert).unwrap_err();
+        assert!(matches!(err, DecomposeError::Malformed { .. }));
+    }
+
+    #[test]
+    fn decompose_verum_canonical_rejects_empty() {
+        let body = "; only a comment\n\n";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_LIA", "x", body);
+        assert!(matches!(decompose_cert(&cert), Err(DecomposeError::Empty)));
+    }
+
+    #[test]
+    fn decompose_alethe_assume_and_step() {
+        let body = "(assume h1 (>= x 0))\n\
+                    (step t1 (cl (>= (+ x 1) 1)) :rule la_generic :premises (h1))";
+        let cert = SmtCertificate::new(CertFormat::Cvc5Alethe, "QF_LIA", "x", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].rule.as_str(), "assume");
+        assert_eq!(steps[1].rule.as_str(), "la_generic");
+        assert_eq!(steps[1].premises.len(), 1);
+        assert_eq!(steps[1].premises[0].as_str(), "h1");
+    }
+
+    #[test]
+    fn decompose_alethe_rejects_unparenthesised_line() {
+        let body = "step t1 (cl (>= x 0)) :rule la_generic";
+        let cert = SmtCertificate::new(CertFormat::Cvc5Alethe, "QF_LIA", "x", body);
+        let err = decompose_cert(&cert).unwrap_err();
+        assert!(matches!(err, DecomposeError::Malformed { .. }));
+    }
+
+    #[test]
+    fn decompose_z3_proof_finds_rule_applications() {
+        // Z3-style nested rule application.  `mp` is in the registry.
+        let body = "(mp (asserted (>= x 0)) (rewrite (= a b)) (>= y 0))";
+        let cert = SmtCertificate::new(CertFormat::Z3Proof, "QF_LIA", "(>= y 0)", body);
+        let steps = decompose_cert(&cert).unwrap();
+        assert!(!steps.is_empty(), "z3 decomposer must find at least one step");
+        assert!(steps.iter().any(|s| s.rule.as_str() == "mp"));
+    }
+
+    #[test]
+    fn decompose_z3_proof_rejects_empty_body() {
+        let cert = SmtCertificate::new(CertFormat::Z3Proof, "QF_LIA", "x", "   ");
+        assert!(matches!(decompose_cert(&cert), Err(DecomposeError::Empty)));
+    }
+
+    #[test]
+    fn decompose_lfsc_format_unsupported() {
+        let cert = SmtCertificate::new(CertFormat::LfscPattern, "QF_LIA", "x", "anything");
+        assert!(matches!(
+            decompose_cert(&cert),
+            Err(DecomposeError::UnsupportedFormat(CertFormat::LfscPattern))
+        ));
+    }
+
+    // ----- KernelOnlyReplayEngine — end-to-end with the decomposer -----
+
+    #[test]
+    fn kernel_only_rejects_unknown_rule_in_body() {
+        let body = "step s1 BACKDOOR_RULE h1 : (= x x)";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "(= x x)", body);
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        match v {
+            ReplayVerdict::Rejected { reason, .. } => {
+                assert!(reason.as_str().contains("BACKDOOR_RULE"));
+                assert!(reason.as_str().contains("registry"));
+            }
+            other => panic!("expected Rejected, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn kernel_only_rejects_malformed_canonical_body() {
+        let body = "step s1"; // missing rule, premises, conclusion
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "x", body);
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        match v {
+            ReplayVerdict::Rejected { reason, .. } => {
+                assert!(reason.as_str().contains("malformed"));
+            }
+            other => panic!("expected Rejected, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn kernel_only_unsupported_format_rejected_with_explanation() {
+        let cert = SmtCertificate::new(CertFormat::OpenSmt, "QF_LIA", "x", "anything");
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        match v {
+            ReplayVerdict::Rejected { reason, .. } => {
+                assert!(reason.as_str().contains("not yet implemented"));
+                assert!(reason.as_str().contains("open_smt"));
+            }
+            other => panic!("expected Rejected, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn kernel_only_accepts_well_formed_canonical_with_known_rules() {
+        let body = "; well-formed verum_canonical\n\
+                    step s1 refl : (= x x)\n\
+                    step s2 mp s1 : (>= x 0)";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "(>= x 0)", body);
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        match v {
+            ReplayVerdict::Accepted { detail, .. } => {
+                let d = detail.unwrap();
+                assert!(d.as_str().contains("steps=2"));
+                assert!(d.as_str().contains("all rules registered"));
+            }
+            other => panic!("expected Accepted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn task_95_decomposer_is_the_tcb_gate() {
+        // Pin: a hostile cert whose body is non-empty + hash-valid
+        // but whose rule is unknown is REJECTED by the kernel-only
+        // engine BEFORE any solver replay runs.  This is the
+        // structural guarantee that makes solvers external to the TCB.
+        let body = "step s1 fake_solver_rule : (false_claim)";
+        let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "false_claim", body);
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        assert!(matches!(v, ReplayVerdict::Rejected { .. }));
     }
 }

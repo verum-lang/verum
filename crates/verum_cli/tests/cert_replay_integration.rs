@@ -16,7 +16,10 @@ fn run(args: &[&str]) -> Output {
         .expect("CLI invocation must succeed")
 }
 
-const VALID_BODY: &str = "(step 1 ...) (qed)";
+// Well-formed ALETHE body — decomposes to one `assume` + one
+// `la_generic` step, both of which resolve in the canonical
+// kernel-rule registry.
+const VALID_BODY: &str = "(assume h1 (>= x 0))\n(step t1 (cl (>= (+ x 1) 1)) :rule la_generic :premises (h1))";
 const VALID_THEORY: &str = "QF_LIA";
 const VALID_CONCLUSION: &str = "(>= x 0)";
 
@@ -140,21 +143,17 @@ fn replay_markdown_format() {
 fn replay_loads_cert_from_file() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cert.json");
-    let body = format!(
-        r#"{{
-            "format": "cvc5_alethe",
-            "theory": "{}",
-            "conclusion": "{}",
-            "body": "{}",
-            "body_hash": "{}",
-            "source_solver": null
-        }}"#,
-        VALID_THEORY,
-        VALID_CONCLUSION,
-        VALID_BODY,
-        hex_blake3(VALID_BODY)
-    );
-    fs::write(&path, body).unwrap();
+    // Build the cert envelope via serde_json::Value so the multi-line
+    // ALETHE body's newlines are properly JSON-escaped.
+    let cert = serde_json::json!({
+        "format": "cvc5_alethe",
+        "theory": VALID_THEORY,
+        "conclusion": VALID_CONCLUSION,
+        "body": VALID_BODY,
+        "body_hash": hex_blake3(VALID_BODY),
+        "source_solver": serde_json::Value::Null,
+    });
+    fs::write(&path, serde_json::to_string_pretty(&cert).unwrap()).unwrap();
     let out = run(&[
         "cert-replay", "replay",
         "--backend", "kernel_only",
