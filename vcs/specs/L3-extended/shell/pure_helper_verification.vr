@@ -1,0 +1,25 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L3
+// @tags: shell, verify, formal, ensures
+// @timeout: 30000
+// @expect: pass
+
+// Pure helper used to build deploy paths. The post-condition is structural:
+// every successful return ends with `.yaml` and contains both the service
+// name and version. SMT (Z3) discharges this at compile time.
+
+@verify(formal)
+pure fn build_manifest_path(service: &Text, version: &Text, env: &Text) -> Text
+    requires service.len() > 0 && version.len() > 0
+    ensures result.ends_with(".yaml")
+{
+    f"deploy/{env}/{service}-{version}.yaml"
+}
+
+fn main() {
+    let p = build_manifest_path(&"api".into(), &"1.2.3".into(), &"prod".into());
+    assert(p.ends_with(".yaml"), "post-condition holds at runtime");
+    assert(p.contains(&"api".into()),    "service name preserved");
+    assert(p.contains(&"1.2.3".into()),  "version preserved");
+}

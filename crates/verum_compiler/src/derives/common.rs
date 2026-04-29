@@ -75,7 +75,7 @@ impl FieldInfo {
     /// True iff the field's declared type is `Bool`.
     pub fn is_bool(&self) -> bool {
         match &self.ty.kind {
-            verum_ast::ty::TypeKind::Named { path } =>
+            verum_ast::ty::TypeKind::Path(path) =>
                 path.last_segment_name() == "Bool",
             _ => false,
         }
@@ -84,7 +84,7 @@ impl FieldInfo {
     /// True iff the declared type is `List<...>`.
     pub fn is_list(&self) -> bool {
         match &self.ty.kind {
-            verum_ast::ty::TypeKind::Named { path } =>
+            verum_ast::ty::TypeKind::Path(path) =>
                 path.last_segment_name() == "List",
             _ => false,
         }
@@ -93,7 +93,7 @@ impl FieldInfo {
     /// True iff the declared type is `Maybe<...>`.
     pub fn is_maybe(&self) -> bool {
         match &self.ty.kind {
-            verum_ast::ty::TypeKind::Named { path } =>
+            verum_ast::ty::TypeKind::Path(path) =>
                 path.last_segment_name() == "Maybe",
             _ => false,
         }
@@ -170,6 +170,12 @@ impl VariantInfo {
                         is_public: false,
                         has_default: false,
                         default_value: verum_common::Maybe::None,
+                        // Synthesized positional fields carry no
+                        // user-written attributes — those only
+                        // apply to record fields with explicit
+                        // names. Pin the empty default so the
+                        // FieldInfo invariant is satisfied.
+                        attributes: List::new(),
                         span: variant.span,
                     })
                     .collect();
@@ -277,6 +283,10 @@ impl TypeInfo {
                     is_public: false,
                     has_default: false,
                     default_value: verum_common::Maybe::None,
+                    // Newtype's synthesized field has no attributes
+                    // — the type-level @derive applies to the
+                    // wrapper, not the wrapped field.
+                    attributes: List::new(),
                     span,
                 };
 
@@ -317,6 +327,9 @@ impl TypeInfo {
                         is_public: false,
                         has_default: false,
                         default_value: verum_common::Maybe::None,
+                        // Tuple types have positional fields with
+                        // no attribute syntax surface.
+                        attributes: List::new(),
                         span,
                     })
                     .collect();
@@ -354,6 +367,8 @@ impl TypeInfo {
                         is_public: false,
                         has_default: false,
                         default_value: verum_common::Maybe::None,
+                        // Same as Tuple — no attribute syntax surface.
+                        attributes: List::new(),
                         span,
                     })
                     .collect();

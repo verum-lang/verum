@@ -1,0 +1,29 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L3
+// @tags: shell, verify, decreases, termination
+// @timeout: 30000
+// @expect: pass
+
+// Retry loop with explicit `decreases` clause: SMT proves the recursion
+// terminates because `attempt` strictly decreases on every recursive call
+// and is bounded below by zero.
+
+@verify(formal)
+fn retry_until_zero(attempt: Int, accumulator: Int) -> Int
+    requires attempt >= 0
+    decreases attempt
+{
+    if attempt == 0 {
+        accumulator
+    } else {
+        retry_until_zero(attempt - 1, accumulator + 1)
+    }
+}
+
+fn main() {
+    let r = retry_until_zero(5, 0);
+    assert(r == 5, "structural induction: 5 calls accumulate to 5");
+    let r0 = retry_until_zero(0, 42);
+    assert(r0 == 42, "base case returns initial accumulator");
+}
