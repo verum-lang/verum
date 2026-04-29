@@ -100,9 +100,31 @@ impl IntrinsicValue {
 pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<IntrinsicValue> {
     match name {
         // -- Yoneda + ∞-Kan ----------------------------------------------
-        "kernel_yoneda_embedding" => Some(IntrinsicValue::Decision {
+        "kernel_yoneda_embedding" => {
+            // args: [source_level: Int, source_universe: Int].
+            // Reject when args missing or pathological: HTT 1.2.1 requires
+            // a *well-formed* ∞-category with non-negative level + at least
+            // one universe.  Bare-call (no args) returns None — caller must
+            // supply structural data to claim Yoneda discharge.
+            let level = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            let universe = args.get(1).and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: level >= 0 && universe >= 0,
+                reason: format!(
+                    "yoneda: HTT 1.2.1 requires level≥0 (got {}) and universe≥0 (got {})",
+                    level, universe
+                ),
+            })
+        }
+        // **Bare-arg form** preserved for back-compat callers that don't
+        // (yet) thread structural data; gated on a separate name.
+        "kernel_yoneda_embedding_bare" => Some(IntrinsicValue::Decision {
             holds: true,
-            reason: "yoneda::yoneda_embedding always returns is_fully_faithful=true (HTT 1.2.1)".into(),
+            reason: "yoneda::yoneda_embedding (bare-arg back-compat — prefer the parameterised form)".into(),
         }),
         "kernel_kan_extension" => {
             // args: [is_fully_faithful: Bool, target_has_colimits: Bool]
@@ -118,10 +140,36 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
         }
 
         // -- Cartesian fibration + Straightening -------------------------
-        "kernel_straightening_equivalence" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "cartesian_fibration::build_straightening_equivalence always succeeds (HTT 3.2.0.1)".into(),
-        }),
+        "kernel_straightening_equivalence" => {
+            // args: [base_level: Int].  HTT 3.2.0.1 requires the base
+            // ∞-category to live at level ≥ 1.
+            let level = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: level >= 1,
+                reason: format!(
+                    "straightening: base level={} must be >=1 (HTT 3.2.0.1)",
+                    level
+                ),
+            })
+        }
+        // Identity-is-equivalence — DIRECT discharge for the
+        // "id_X is (∞,n)-equivalence" step in Theorem 5.1.
+        // args: [level: Int].  Identity is always an equivalence at any
+        // non-negative ordinal level (HTT 1.2.13 / Whitehead corollary).
+        "kernel_identity_is_equivalence" => {
+            let level = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: level >= 0,
+                reason: format!(
+                    "identity_is_equivalence: level={} must be >=0 (kernel ALWAYS witnesses id_X)",
+                    level
+                ),
+            })
+        }
         "kernel_grothendieck_construction" => {
             // args: [num_fibres: Int]; passes when num_fibres > 0
             let n = args.first().and_then(|v| {
@@ -163,16 +211,43 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 ),
             })
         }
-        "kernel_reflective_subcategory_aft" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "reflective_subcategory::build_reflective_subcategory under SAFT preconditions (HTT 5.2.7)".into(),
-        }),
+        "kernel_reflective_subcategory_aft" => {
+            // args: [ff: Bool, src_pres: Bool, tgt_pres: Bool,
+            //        preserves_limits_acc: Bool]
+            // Reject if inclusion isn't fully faithful OR SAFT preconditions
+            // fail.  Required by HTT 5.2.7 + 5.5.2.9 dual.
+            let ff = args.first().and_then(|v| v.as_bool())?;
+            let src = args.get(1).and_then(|v| v.as_bool())?;
+            let tgt = args.get(2).and_then(|v| v.as_bool())?;
+            let lp = args.get(3).and_then(|v| v.as_bool())?;
+            Some(IntrinsicValue::Decision {
+                holds: ff && src && tgt && lp,
+                reason: format!(
+                    "reflective_subcategory: ff={}, src_pres={}, tgt_pres={}, lim_acc={}",
+                    ff, src, tgt, lp
+                ),
+            })
+        }
 
         // -- Whitehead promote -------------------------------------------
-        "kernel_whitehead_promote" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "whitehead::whitehead_promote always emits empty BridgeAudit on valid criterion".into(),
-        }),
+        "kernel_whitehead_promote" => {
+            // args: [num_levels: Int, all_levels_iso: Bool, levels_complete: Bool]
+            // Reject when no level data supplied OR any level fails iso OR
+            // the certificate is incomplete.  Per HTT 1.2.4.3 the criterion
+            // requires PER-LEVEL π_k iso witness for k ∈ [0, n].
+            let n = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            let all_iso = args.get(1).and_then(|v| v.as_bool())?;
+            let complete = args.get(2).and_then(|v| v.as_bool())?;
+            Some(IntrinsicValue::Decision {
+                holds: n > 0 && all_iso && complete,
+                reason: format!(
+                    "whitehead: n_levels={} (>0?) all_iso={} complete={}",
+                    n, all_iso, complete
+                ),
+            })
+        }
 
         // -- Limits / colimits -------------------------------------------
         "kernel_compute_colimit" => {
@@ -191,26 +266,69 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
                 ),
             })
         }
-        "kernel_specialised_limits" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "limits_colimits specialised builders (HTT 4.4) always succeed".into(),
-        }),
+        "kernel_specialised_limits" => {
+            // args: [diagram_size: Int].  Reject negative sizes; size=0
+            // is the empty (terminal) diagram, allowed.
+            let n = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: n >= 0,
+                reason: format!(
+                    "specialised_limits: diagram_size={} (must be >=0)",
+                    n
+                ),
+            })
+        }
 
         // -- Truncation --------------------------------------------------
-        "kernel_truncate_to_level" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "truncation::truncate_to_level always returns universal-property witness".into(),
-        }),
+        "kernel_truncate_to_level" => {
+            // args: [level: Int, source_level: Int].
+            // Reject negative level.  Truncation at level > source is the
+            // identity (allowed); at level < 0 is undefined (rejected).
+            let level = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            let _src = args.get(1).and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: level >= 0,
+                reason: format!(
+                    "truncate_to_level: level={} must be >=0 (HTT 5.5.6)",
+                    level
+                ),
+            })
+        }
 
         // -- Factorisation -----------------------------------------------
-        "kernel_epi_mono_factorisation" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "factorisation::build_epi_mono_factorisation is unconditional (HTT 5.2.8.4)".into(),
-        }),
-        "kernel_n_truncation_factorisation" => Some(IntrinsicValue::Decision {
-            holds: true,
-            reason: "factorisation::build_n_truncation_factorisation is unconditional (HTT 5.2.8.16)".into(),
-        }),
+        "kernel_epi_mono_factorisation" => {
+            // args: [category_level: Int].  Reject when category is below
+            // (∞,1)-level (epi/mono only meaningful at level ≥ 1).
+            let level = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: level >= 1,
+                reason: format!(
+                    "epi_mono: category level={} must be >=1 (HTT 5.2.8.4)",
+                    level
+                ),
+            })
+        }
+        "kernel_n_truncation_factorisation" => {
+            // args: [trunc_level: Int].  Reject negative trunc-level.
+            let level = args.first().and_then(|v| {
+                if let IntrinsicValue::Int(i) = v { Some(*i) } else { None }
+            })?;
+            Some(IntrinsicValue::Decision {
+                holds: level >= 0,
+                reason: format!(
+                    "n_truncation_factorisation: level={} must be >=0 (HTT 5.2.8.16)",
+                    level
+                ),
+            })
+        }
 
         // -- Pronk -------------------------------------------------------
         "kernel_pronk_bicat_fractions" => {
@@ -324,6 +442,8 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
 pub fn available_intrinsics() -> &'static [&'static str] {
     &[
         "kernel_yoneda_embedding",
+        "kernel_yoneda_embedding_bare",
+        "kernel_identity_is_equivalence",
         "kernel_kan_extension",
         "kernel_straightening_equivalence",
         "kernel_grothendieck_construction",
@@ -387,9 +507,75 @@ mod tests {
     // ----- Yoneda -----
 
     #[test]
-    fn yoneda_embedding_dispatch_returns_holding_decision() {
-        let r = dispatch_intrinsic("kernel_yoneda_embedding", &[]).unwrap();
+    fn yoneda_embedding_with_proper_args_holds() {
+        let r = dispatch_intrinsic(
+            "kernel_yoneda_embedding",
+            &[IntrinsicValue::Int(1), IntrinsicValue::Int(2)],
+        )
+        .unwrap();
         assert_eq!(r.as_bool(), Some(true));
+    }
+
+    #[test]
+    fn yoneda_embedding_rejects_negative_level() {
+        let r = dispatch_intrinsic(
+            "kernel_yoneda_embedding",
+            &[IntrinsicValue::Int(-1), IntrinsicValue::Int(0)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: negative level must be rejected");
+    }
+
+    #[test]
+    fn yoneda_embedding_rejects_negative_universe() {
+        let r = dispatch_intrinsic(
+            "kernel_yoneda_embedding",
+            &[IntrinsicValue::Int(1), IntrinsicValue::Int(-5)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: negative universe must be rejected");
+    }
+
+    #[test]
+    fn yoneda_embedding_no_args_returns_none() {
+        // Bare-call without args fails dispatch (caller must thread structural data).
+        assert!(dispatch_intrinsic("kernel_yoneda_embedding", &[]).is_none(),
+            "ATTACK: no-args call must fail dispatch (no silent-true)");
+    }
+
+    #[test]
+    fn yoneda_embedding_bare_back_compat() {
+        // The _bare form is documented back-compat.
+        let r = dispatch_intrinsic("kernel_yoneda_embedding_bare", &[]).unwrap();
+        assert_eq!(r.as_bool(), Some(true));
+    }
+
+    // ----- Identity-is-equivalence -----
+
+    #[test]
+    fn identity_is_equivalence_holds_at_non_negative_level() {
+        for n in 0..5 {
+            let r = dispatch_intrinsic(
+                "kernel_identity_is_equivalence",
+                &[IntrinsicValue::Int(n)],
+            )
+            .unwrap();
+            assert_eq!(r.as_bool(), Some(true),
+                "id_X must witness equivalence at level {}", n);
+        }
+    }
+
+    #[test]
+    fn identity_is_equivalence_rejects_negative_level() {
+        let r = dispatch_intrinsic(
+            "kernel_identity_is_equivalence",
+            &[IntrinsicValue::Int(-1)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: negative ordinal level must be rejected");
     }
 
     // ----- Kan extension preconditions -----
@@ -561,14 +747,358 @@ mod tests {
     // ----- Available intrinsics + missing dispatchers -----
 
     #[test]
-    fn available_intrinsics_covers_all_19_bridges() {
+    fn available_intrinsics_covers_all_bridges() {
         let names = available_intrinsics();
-        assert_eq!(names.len(), 19,
+        assert_eq!(names.len(), 21,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr must have a dispatcher");
         // Check uniqueness.
         let mut seen = std::collections::HashSet::new();
         for n in names {
             assert!(seen.insert(*n), "duplicate intrinsic name: {}", n);
+        }
+    }
+
+    // ===========================================================
+    // Adversarial-attack red-team suite — STRENGTHENED dispatchers
+    // must REJECT pathological inputs.  These tests are the
+    // contract that distinguishes Verum from "any system that
+    // accepts proofs": we PROVE the dispatcher catches malformed
+    // inputs at the boundary between bridge and kernel.
+    // ===========================================================
+
+    #[test]
+    fn attack_whitehead_no_args_rejected() {
+        // Bare call → dispatch returns None.
+        assert!(dispatch_intrinsic("kernel_whitehead_promote", &[]).is_none(),
+            "ATTACK: Whitehead with no args silently succeeds (must fail dispatch)");
+    }
+
+    #[test]
+    fn attack_whitehead_zero_levels_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_whitehead_promote",
+            &[
+                IntrinsicValue::Int(0),       // num_levels = 0
+                IntrinsicValue::Bool(true),
+                IntrinsicValue::Bool(true),
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: zero levels must defeat Whitehead promotion (per HTT 1.2.4.3)");
+    }
+
+    #[test]
+    fn attack_whitehead_one_level_failing_rejected() {
+        // Even with 7 levels, if any single level's iso fails, reject.
+        let r = dispatch_intrinsic(
+            "kernel_whitehead_promote",
+            &[
+                IntrinsicValue::Int(7),
+                IntrinsicValue::Bool(false),  // some level fails
+                IntrinsicValue::Bool(true),
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: single-level π_k iso failure must defeat Whitehead");
+    }
+
+    #[test]
+    fn attack_whitehead_incomplete_certificate_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_whitehead_promote",
+            &[
+                IntrinsicValue::Int(3),
+                IntrinsicValue::Bool(true),
+                IntrinsicValue::Bool(false),  // certificate incomplete
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: incomplete level coverage must defeat Whitehead");
+    }
+
+    #[test]
+    fn attack_reflective_no_ff_rejected() {
+        // Inclusion not fully faithful — must reject (HTT 5.2.7.2).
+        let r = dispatch_intrinsic(
+            "kernel_reflective_subcategory_aft",
+            &[
+                IntrinsicValue::Bool(false),  // not FF
+                IntrinsicValue::Bool(true),
+                IntrinsicValue::Bool(true),
+                IntrinsicValue::Bool(true),
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: non-FF inclusion must defeat reflective-subcategory AFT");
+    }
+
+    #[test]
+    fn attack_reflective_no_target_presentable_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_reflective_subcategory_aft",
+            &[
+                IntrinsicValue::Bool(true),
+                IntrinsicValue::Bool(true),
+                IntrinsicValue::Bool(false),  // target not presentable
+                IntrinsicValue::Bool(true),
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: non-presentable target must defeat AFT (HTT 5.5.2.9)");
+    }
+
+    #[test]
+    fn attack_truncate_negative_level_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_truncate_to_level",
+            &[
+                IntrinsicValue::Int(-1),     // negative truncation level
+                IntrinsicValue::Int(3),
+            ],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: negative truncation level must be rejected (HTT 5.5.6 requires k≥0)");
+    }
+
+    #[test]
+    fn attack_specialised_limits_negative_size_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_specialised_limits",
+            &[IntrinsicValue::Int(-3)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: negative diagram size is undefined (must be rejected)");
+    }
+
+    #[test]
+    fn attack_epi_mono_below_inf_1_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_epi_mono_factorisation",
+            &[IntrinsicValue::Int(0)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: epi/mono only meaningful at level≥1 (HTT 5.2.8.4)");
+    }
+
+    #[test]
+    fn attack_n_trunc_factorisation_negative_level_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_n_truncation_factorisation",
+            &[IntrinsicValue::Int(-1)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: negative truncation level for factorisation system");
+    }
+
+    #[test]
+    fn attack_straightening_below_inf_1_rejected() {
+        let r = dispatch_intrinsic(
+            "kernel_straightening_equivalence",
+            &[IntrinsicValue::Int(0)],
+        )
+        .unwrap();
+        assert_eq!(r.as_bool(), Some(false),
+            "ATTACK: straightening requires (∞,1)-base (HTT 3.2.0.1)");
+    }
+
+    #[test]
+    fn attack_no_args_universally_fails_for_strict_dispatchers() {
+        // Every STRICT dispatcher must return None when given no args.
+        let strict_names = [
+            "kernel_yoneda_embedding",
+            "kernel_kan_extension",
+            "kernel_straightening_equivalence",
+            "kernel_grothendieck_construction",
+            "kernel_saft_adjunction",
+            "kernel_reflective_subcategory_aft",
+            "kernel_whitehead_promote",
+            "kernel_compute_colimit",
+            "kernel_specialised_limits",
+            "kernel_truncate_to_level",
+            "kernel_epi_mono_factorisation",
+            "kernel_n_truncation_factorisation",
+            "kernel_pronk_bicat_fractions",
+            "kernel_infinity_topos",
+            "kernel_cross_format_gate",
+            "kernel_identity_is_equivalence",
+        ];
+        for name in &strict_names {
+            assert!(
+                dispatch_intrinsic(name, &[]).is_none(),
+                "ATTACK: {} must fail dispatch on bare-call (otherwise it's a silent-true patch)",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn attack_kernel_safety_via_bool_args_to_int_dispatchers() {
+        // Type-confusion attack: pass Bool where Int expected.
+        // Dispatcher should fail dispatch (None), not silently succeed.
+        let bool_attack = [IntrinsicValue::Bool(true), IntrinsicValue::Bool(true)];
+        assert!(dispatch_intrinsic("kernel_grothendieck_construction", &bool_attack).is_none());
+        assert!(dispatch_intrinsic("kernel_compute_colimit", &bool_attack).is_none());
+        assert!(dispatch_intrinsic("kernel_yoneda_embedding", &bool_attack).is_none());
+    }
+
+    /// **THE NON-VACUITY INVARIANT.**
+    ///
+    /// For every strict (parameterised) dispatcher, there must exist a
+    /// pathological input that defeats it.  This is the hard test
+    /// that distinguishes Verum from "any system that justifies":
+    /// every kernel-discharge step has a *witness of falsifiability*.
+    /// If a dispatcher cannot be defeated by any input, its `holds`
+    /// is vacuous and the discharge is silent-true.
+    #[test]
+    fn invariant_every_strict_dispatcher_has_a_falsifying_input() {
+        // (name, args_that_falsify) pairs.  Every entry MUST produce
+        // holds=false; if any returns holds=true, the dispatcher is
+        // vacuous and Verum's "error detection" guarantee is broken.
+        let falsifying_attacks: &[(&str, Vec<IntrinsicValue>)] = &[
+            (
+                "kernel_yoneda_embedding",
+                vec![IntrinsicValue::Int(-1), IntrinsicValue::Int(0)],
+            ),
+            (
+                "kernel_identity_is_equivalence",
+                vec![IntrinsicValue::Int(-1)],
+            ),
+            (
+                "kernel_kan_extension",
+                vec![IntrinsicValue::Bool(false), IntrinsicValue::Bool(true)],
+            ),
+            (
+                "kernel_straightening_equivalence",
+                vec![IntrinsicValue::Int(0)],
+            ),
+            (
+                "kernel_grothendieck_construction",
+                vec![IntrinsicValue::Int(0)],
+            ),
+            (
+                "kernel_saft_adjunction",
+                vec![
+                    IntrinsicValue::Bool(false),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                ],
+            ),
+            (
+                "kernel_reflective_subcategory_aft",
+                vec![
+                    IntrinsicValue::Bool(false),  // not FF
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                ],
+            ),
+            (
+                "kernel_whitehead_promote",
+                vec![
+                    IntrinsicValue::Int(0),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                ],
+            ),
+            (
+                "kernel_compute_colimit",
+                vec![IntrinsicValue::Int(0)],
+            ),
+            (
+                "kernel_specialised_limits",
+                vec![IntrinsicValue::Int(-1)],
+            ),
+            (
+                "kernel_truncate_to_level",
+                vec![IntrinsicValue::Int(-1), IntrinsicValue::Int(3)],
+            ),
+            (
+                "kernel_epi_mono_factorisation",
+                vec![IntrinsicValue::Int(0)],
+            ),
+            (
+                "kernel_n_truncation_factorisation",
+                vec![IntrinsicValue::Int(-1)],
+            ),
+            (
+                "kernel_pronk_bicat_fractions",
+                vec![
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(false),  // BF3 fails
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                ],
+            ),
+            (
+                "kernel_infinity_topos",
+                vec![
+                    IntrinsicValue::Bool(false),  // not presentable
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                ],
+            ),
+            (
+                "kernel_cross_format_gate",
+                vec![
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(true),
+                    IntrinsicValue::Bool(false),  // dedukti fails
+                ],
+            ),
+        ];
+
+        for (name, attack_args) in falsifying_attacks {
+            let r = dispatch_intrinsic(name, attack_args)
+                .unwrap_or_else(|| panic!("dispatcher {} returned None on falsifying input", name));
+            let holds = r.as_bool().unwrap_or(true);
+            assert!(
+                !holds,
+                "INVARIANT VIOLATION: dispatcher {} accepts pathological input {:?} \
+                 — Verum's error-detection guarantee is broken",
+                name, attack_args
+            );
+        }
+    }
+
+    #[test]
+    fn attack_kernel_safety_via_int_args_to_bool_dispatchers() {
+        // Type-confusion attack: pass Int where Bool expected.  The
+        // dispatcher must either FAIL DISPATCH (None) or return
+        // holds=false — must not silently succeed.  This is the
+        // "fail-closed under type confusion" invariant.
+        let int_attack = vec![IntrinsicValue::Int(1); 5];
+        for name in ["kernel_pronk_bicat_fractions", "kernel_reflective_subcategory_aft", "kernel_infinity_topos"] {
+            let args = if name == "kernel_pronk_bicat_fractions" {
+                &int_attack[..]
+            } else {
+                &int_attack[..4]
+            };
+            let r = dispatch_intrinsic(name, args);
+            // Either dispatch failed (None) OR returned holds=false.
+            // The forbidden state is Some(Decision { holds: true, ... }).
+            match r {
+                None => {} // OK — fail-closed dispatch
+                Some(IntrinsicValue::Decision { holds: false, .. }) => {} // OK — fail-closed result
+                Some(IntrinsicValue::Decision { holds: true, .. }) => {
+                    panic!("ATTACK SOUNDNESS VIOLATION: {} silently succeeds on Int-where-Bool inputs", name);
+                }
+                Some(other) => {
+                    panic!("ATTACK: {} returned unexpected variant {:?}", name, other);
+                }
+            }
         }
     }
 
