@@ -89,7 +89,11 @@ fn write_constant(out: &mut String, module: &VbcModule, c: &Constant) -> std::fm
         Constant::String(sid) => {
             let s = module.get_string(*sid).unwrap_or("?");
             if s.len() > 60 {
-                write!(out, "String(\"{}...\")", &s[..57])
+                // Truncate by char count, not byte count — `&s[..57]`
+                // panics if byte 57 lands inside a multi-byte UTF-8
+                // sequence (any non-ASCII string constant is at risk).
+                let preview: String = s.chars().take(57).collect();
+                write!(out, "String(\"{}...\")", preview)
             } else {
                 write!(out, "String({:?})", s)
             }
@@ -205,7 +209,9 @@ fn str_name(module: &VbcModule, str_id: u32) -> String {
         .get_string(crate::types::StringId(str_id))
         .map(|s| {
             if s.len() > 40 {
-                format!("{:?}...", &s[..37])
+                // Truncate by char count to avoid mid-codepoint slicing.
+                let preview: String = s.chars().take(37).collect();
+                format!("{:?}...", preview)
             } else {
                 format!("{:?}", s)
             }
