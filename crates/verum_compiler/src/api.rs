@@ -849,16 +849,36 @@ pub fn run_common_pipeline(
 
     let total_duration = start.elapsed();
 
-    let metrics = PipelineMetrics {
-        total_duration,
-        phase_metrics,
-        modules_processed: ast_modules.len(),
-        functions_processed: typed_modules.iter().map(|m| {
-            m.items.iter().filter(|item| matches!(item.kind, HirItemKind::Function(_))).count()
-        }).sum(),
-        types_processed: typed_modules.iter().map(|m| {
-            m.items.iter().filter(|item| matches!(item.kind, HirItemKind::Type(_) | HirItemKind::Protocol(_))).count()
-        }).sum(),
+    // `collect_metrics` was previously inert — the per-phase
+    // `phase_metrics.push(...)` calls always ran and were always
+    // returned to the caller, so toggling the flag had no effect.
+    // Honour it here at the result-assembly boundary: when the
+    // caller has opted out (`minimal()` preset, scripted CI,
+    // hot-path benches), strip the per-phase detail and the
+    // aggregate function/type counts from the returned metrics.
+    // The phases themselves still execute — we can't skip them —
+    // but the cost of walking typed modules to count items and
+    // shipping the per-phase list is paid only when asked.
+    let metrics = if config.collect_metrics {
+        PipelineMetrics {
+            total_duration,
+            phase_metrics,
+            modules_processed: ast_modules.len(),
+            functions_processed: typed_modules.iter().map(|m| {
+                m.items.iter().filter(|item| matches!(item.kind, HirItemKind::Function(_))).count()
+            }).sum(),
+            types_processed: typed_modules.iter().map(|m| {
+                m.items.iter().filter(|item| matches!(item.kind, HirItemKind::Type(_) | HirItemKind::Protocol(_))).count()
+            }).sum(),
+        }
+    } else {
+        PipelineMetrics {
+            total_duration,
+            phase_metrics: List::new(),
+            modules_processed: ast_modules.len(),
+            functions_processed: 0,
+            types_processed: 0,
+        }
     };
 
     let has_errors = all_diagnostics.iter().any(|d| d.severity() == verum_diagnostics::Severity::Error);
@@ -1054,5 +1074,27 @@ mod tests {
     fn test_compilation_error_display() {
         let err = CompilationError::parse_error("unexpected token");
         assert!(err.to_string().contains("ParseError"));
+    }
+
+    #[test]
+    fn test_common_pipeline_config_minimal_disables_metrics() {
+        // Pin the contract: minimal() opts out of detailed metrics.
+        // Pre-fix this assertion held vacuously (the flag was set
+        // but never read); the field-to-result wiring at the end of
+        // run_common_pipeline now actually honours it.
+        let config = CommonPipelineConfig::minimal();
+        assert!(!config.collect_metrics);
+    }
+
+    #[test]
+    fn test_common_pipeline_config_default_enables_metrics() {
+        let config = CommonPipelineConfig::default();
+        assert!(config.collect_metrics);
+    }
+
+    #[test]
+    fn test_common_pipeline_config_strict_enables_metrics() {
+        let config = CommonPipelineConfig::strict();
+        assert!(config.collect_metrics);
     }
 }
