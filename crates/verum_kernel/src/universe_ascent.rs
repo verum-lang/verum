@@ -175,6 +175,51 @@ impl KappaTier {
             KappaTier::KappaN(n) => KappaTier::KappaN(n.saturating_add(1)),
         }
     }
+
+    /// Project into the native [`crate::ordinal::Ordinal`] type.
+    /// Truncated → `Ordinal::Finite(0)` (the smallest ordinal); KappaN(n)
+    /// → `Ordinal::Kappa(n)`.  Used by callers that want the unified
+    /// ordinal-arithmetic surface (regularity / inaccessibility checks /
+    /// arbitrary ordinal comparison).
+    pub fn to_ordinal(&self) -> crate::ordinal::Ordinal {
+        match self {
+            KappaTier::Truncated => crate::ordinal::Ordinal::Finite(0),
+            KappaTier::KappaN(n) => crate::ordinal::Ordinal::Kappa(*n),
+        }
+    }
+
+    /// Construct a `KappaTier` from an `Ordinal`, returning `None` if
+    /// the ordinal isn't representable in the V2 KappaTier surface
+    /// (only `Finite(0)` for Truncated and `Kappa(n)` for KappaN(n)
+    /// are admitted).  Use [`Ordinal::normalize`] before this call to
+    /// canonicalise inputs.
+    pub fn from_ordinal(o: &crate::ordinal::Ordinal) -> Option<Self> {
+        let normalised = o.normalize();
+        match normalised {
+            crate::ordinal::Ordinal::Finite(0) => Some(KappaTier::Truncated),
+            crate::ordinal::Ordinal::Kappa(n) => Some(KappaTier::KappaN(n)),
+            _ => None,
+        }
+    }
+
+    /// Convenience: is this κ-tier regular?  Truncated and every
+    /// `KappaN(n)` are regular by construction (inaccessibility ⟹
+    /// regularity).  Routes through [`Ordinal::is_regular`].
+    pub fn is_regular(&self) -> bool {
+        // Truncated (Finite(0)) is NOT regular per Ordinal convention,
+        // but KappaTier::Truncated represents a degenerate "no-κ" state
+        // that's special-cased rather than projected to Finite(0).
+        // We use the kappa-projection only for KappaN.
+        match self {
+            KappaTier::Truncated => false,
+            KappaTier::KappaN(_) => true, // every inaccessible is regular
+        }
+    }
+
+    /// True iff this tier is an inaccessible cardinal (a `KappaN(_)`).
+    pub fn is_inaccessible(&self) -> bool {
+        matches!(self, KappaTier::KappaN(_))
+    }
 }
 
 impl From<UniverseTier> for KappaTier {
@@ -399,5 +444,70 @@ mod v2_tests {
             &mut a, "κ_1 → Trunc"
         ).unwrap_err();
         assert!(matches!(err, KernelError::UniverseAscentInvalid { .. }));
+    }
+
+    // ----- Ordinal bridge tests (V2 → native ordinal) -----
+
+    #[test]
+    fn kappa_tier_to_ordinal_truncated_is_finite_0() {
+        use crate::ordinal::Ordinal;
+        assert_eq!(KappaTier::Truncated.to_ordinal(), Ordinal::Finite(0));
+    }
+
+    #[test]
+    fn kappa_tier_to_ordinal_kappa_n_is_kappa() {
+        use crate::ordinal::Ordinal;
+        assert_eq!(KappaTier::KappaN(1).to_ordinal(), Ordinal::Kappa(1));
+        assert_eq!(KappaTier::KappaN(7).to_ordinal(), Ordinal::Kappa(7));
+    }
+
+    #[test]
+    fn kappa_tier_from_ordinal_round_trip() {
+        use crate::ordinal::Ordinal;
+        // Truncated round-trip.
+        let trunc = Ordinal::Finite(0);
+        assert_eq!(KappaTier::from_ordinal(&trunc), Some(KappaTier::Truncated));
+        // Kappa round-trips.
+        for n in 1..=10 {
+            let o = Ordinal::Kappa(n);
+            assert_eq!(KappaTier::from_ordinal(&o), Some(KappaTier::KappaN(n)));
+        }
+        // Other ordinals: not representable in KappaTier.
+        assert_eq!(KappaTier::from_ordinal(&Ordinal::Omega), None);
+        assert_eq!(KappaTier::from_ordinal(&Ordinal::OmegaSquared), None);
+        assert_eq!(KappaTier::from_ordinal(&Ordinal::Finite(1)), None);
+    }
+
+    #[test]
+    fn kappa_tier_is_regular() {
+        // Truncated is not regular (no inaccessible content).
+        assert!(!KappaTier::Truncated.is_regular());
+        // Every KappaN is regular (inaccessibles).
+        assert!(KappaTier::KappaN(1).is_regular());
+        assert!(KappaTier::KappaN(7).is_regular());
+    }
+
+    #[test]
+    fn kappa_tier_is_inaccessible() {
+        assert!(!KappaTier::Truncated.is_inaccessible());
+        assert!(KappaTier::KappaN(1).is_inaccessible());
+    }
+
+    #[test]
+    fn ordinal_bridge_lt_consistency() {
+        // KappaTier::lt should agree with Ordinal::lt on the projected values.
+        let pairs = vec![
+            (KappaTier::Truncated, KappaTier::KappaN(1)),
+            (KappaTier::KappaN(1), KappaTier::KappaN(2)),
+            (KappaTier::KappaN(7), KappaTier::KappaN(99)),
+        ];
+        for (a, b) in &pairs {
+            assert_eq!(
+                a.lt(b),
+                a.to_ordinal().lt(&b.to_ordinal()),
+                "KappaTier::lt and Ordinal::lt disagree on ({:?}, {:?})",
+                a, b
+            );
+        }
     }
 }

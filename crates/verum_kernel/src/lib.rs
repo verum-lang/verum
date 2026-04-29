@@ -217,6 +217,394 @@ pub use accessibility::{
     build_filtered_colimit, cofinality_bound_holds,
 };
 
+/// Yoneda embedding (HTT 1.2.1) + ∞-Kan extensions (HTT 4.3.3.7) —
+/// V0 algorithmic kernel rules.  Gates MSFS Definition 3.3 (S_S
+/// closure under Yoneda + Kan-extension along S-definable morphisms).
+///
+/// Pre-this-module the Yoneda closure was admitted via the host
+/// stdlib axiom `msfs_s_s_closed_under_yoneda` and Kan-extension
+/// closure routed through O1 of the same definition.  V0 ships:
+///
+///   * `Presheaf` / `YonedaEmbedding` / `YonedaLemma` — first-class
+///     ∞-categorical surface representations.
+///   * `yoneda_embedding(c)` — fully-faithful embedding witness with
+///     fullness-level certification (HTT 1.2.1).
+///   * `presheaf_category(c)` — `PSh(C)` builder with universe ascent
+///     (HTT 5.5).
+///   * `build_kan_extension(...)` — left Kan extension `Lan_f(p)`
+///     under fully-faithful-along-functor + target-has-colimits
+///     preconditions (HTT 4.3.3.7).
+///   * `kan_extension_unit_witness` — universal-property witness.
+///
+/// V1 promotion: full higher-cell content (associator + pentagonal
+/// coherence cells).
+pub mod yoneda;
+pub use yoneda::{
+    KanExtension, Presheaf, YonedaEmbedding, YonedaLemma,
+    build_kan_extension, kan_extension_unit_witness,
+    presheaf_category, yoneda_embedding, yoneda_lemma,
+};
+
+/// Cartesian fibrations (HTT 3.1) + Straightening/Unstraightening
+/// equivalence (HTT 3.2.0.1) — V0 algorithmic kernel rules.  Gates
+/// MSFS Theorem 9.3 Step 1 (currently admits via host-stdlib axiom
+/// `msfs_htt_3_2_straightening`) and §6 β-part Step 2.
+///
+/// Ships:
+///   * `CartesianFibration` / `CartesianMorphism` — first-class
+///     ∞-categorical surface representations.
+///   * `is_cartesian(p, f)` — decision predicate for p-Cartesian
+///     morphisms (HTT 3.1.1.1).
+///   * `StraighteningEquivalence` — witness for
+///     `St : coCart(C) ≃ Fun(C, ∞-Cat) : Un` (HTT 3.2.0.1).
+///   * `build_straightening_equivalence(c)` — algorithmic builder.
+///   * `unstraighten_to_grothendieck` — bridge identifying `Un`
+///     with `crate::grothendieck::build_grothendieck`.
+///   * `fibration_is_unstraightened` — recognise fibrations arising
+///     via unstraightening.
+///
+/// V1 promotion: full higher-cell coherence content (associator
+/// 2-cells + pentagonal coherence between St and Un).
+pub mod cartesian_fibration;
+pub use cartesian_fibration::{
+    CartesianFibration, CartesianMorphism, StraighteningEquivalence,
+    build_straightening_equivalence, fibration_is_unstraightened,
+    is_cartesian, unstraighten_to_grothendieck,
+};
+
+/// Adjoint Functor Theorem (HTT 5.5.2.9 / Special AFT) — V0
+/// algorithmic kernel rule.  Gates MSFS Lemma 10.3 (the (ι, r)
+/// reflective subcategory construction) and Diakrisis 16.3.
+///
+/// Ships:
+///   * `Adjunction` — first-class adjoint-pair representation with
+///     unit/counit/triangle-identities witnesses.
+///   * `SaftPreconditions` — HTT 5.5.2.9 input precondition record.
+///   * `left_adjoint_exists(pre)` / `right_adjoint_exists(pre)` —
+///     decidable predicates per HTT 5.5.2.9.
+///   * `build_adjunction(...)` — algorithmic builder under SAFT
+///     preconditions.
+///   * `compose_adjunctions(first, second)` — adjunction
+///     composition (the 2-categorical monoidal structure).
+///   * `triangle_identities_witness` — universal-property witness.
+///
+/// V1 promotion: explicit unit/counit natural-transformation cells
+/// with full pentagonal coherence between composition and identity.
+pub mod adjoint_functor;
+pub use adjoint_functor::{
+    Adjunction, AdjunctionDirection, SaftPreconditions,
+    build_adjunction, compose_adjunctions, left_adjoint_exists,
+    right_adjoint_exists, triangle_identities_witness,
+};
+
+/// Whitehead criterion for (∞, n)-equivalence (HTT 1.2.4.3
+/// generalised) — V0 algorithmic kernel rule.  The decidable
+/// characterisation of equivalence via per-level homotopy-group
+/// iso witnesses.  **Trusted-base-shrinkage primitive**:
+/// Whitehead-certified equivalences carry empty `BridgeAudit`,
+/// shrinking the surface visible to `verum audit --proof-honesty`.
+///
+/// Ships:
+///   * `PiLevelIso` — per-level `π_k` iso witness.
+///   * `WhiteheadCriterion` — full per-level certificate with
+///     `identity_at` constructor for trivial cases.
+///   * `is_equivalence_via_whitehead(criterion)` — bridge-free
+///     decision predicate.
+///   * `whitehead_promote(criterion, audit)` — promote to
+///     `InfinityEquivalence` with empty audit.
+///   * `KanComplexLift` + `weak_equivalence_lifts_in_kan_complex` —
+///     HTT 1.2.4.3 (weak ⟹ honest equivalence in a Kan complex).
+///
+/// V1 promotion: structural inspection of each iso witness instead
+/// of trust-then-verify on the witness flag.
+pub mod whitehead;
+pub use whitehead::{
+    KanComplexLift, PiLevelIso, WhiteheadCriterion,
+    is_equivalence_via_whitehead, weak_equivalence_lifts_in_kan_complex,
+    whitehead_promote,
+};
+
+/// Reflective subcategories (HTT 5.2.7) — V0 algorithmic kernel rule.
+/// Composes [`adjoint_functor`] (SAFT) with idempotency to formalise
+/// "reflective subcategory" as a first-class concept.  Gates MSFS
+/// Lemma 10.3 + Diakrisis 16.3 fully (host-stdlib `msfs_aft_iota_r`
+/// admit can be promoted to direct invocation).
+///
+/// Ships:
+///   * `ReflectiveSubcategory` — first-class record `(D, C, ι, r, η)`
+///     with fully-faithful + adjunction + idempotency witnesses.
+///   * `is_reflective(rs)` — decidable predicate per HTT 5.2.7.2.
+///   * `build_reflective_subcategory(...)` — algorithmic builder
+///     under HTT 5.2.7.4 preconditions.
+///   * `idempotency_witness` / `reflector_unit_is_localisation` —
+///     universal-property witnesses (HTT 5.2.7.4 (iii)/(iv)).
+///
+/// V1 promotion: explicit unit / idempotency natural-transformation
+/// cells with full pentagonal coherence.
+pub mod reflective_subcategory;
+pub use reflective_subcategory::{
+    ReflectiveSubcategory, build_reflective_subcategory,
+    idempotency_witness, is_reflective, reflector_unit_is_localisation,
+};
+
+/// Limits and colimits in (∞,1)-categories — V0 algorithmic kernel
+/// rule (HTT 1.2.13 + HTT 5.5.3 + HTT 4.4).  Gates MSFS Definition
+/// 3.3 closure under (co)limits (replaces `msfs_s_s_closed_under_colimits`
+/// host-stdlib admit).
+///
+/// Ships:
+///   * `LimitShape` — coarse shape classification (Terminal / Pullback
+///     / Equaliser / Filtered / Small).
+///   * `LimitDiagram` / `ColimitDiagram` — diagram input data.
+///   * `Limit` / `Colimit` — output records with universal-cone /
+///     -cocone witnesses.
+///   * `presheaf_admits_limits` / `presheaf_admits_colimits` —
+///     decision predicates per HTT 5.5.3.5.
+///   * `compute_limit_in_psh` / `compute_colimit_in_psh` —
+///     pointwise (HTT 5.1.2.3) algorithmic builders.
+///   * Specialised constructors: `build_pullback`, `build_pushout`,
+///     `build_equaliser`, `build_coequaliser`, `build_terminal`,
+///     `build_initial`.
+///   * `promote_limit_to_level` — level-monotonicity promotion.
+///   * `presheaf_is_bicomplete(c)` — HTT 5.5.3.5 witness.
+///
+/// V1 promotion: explicit universal-cone natural transformations
+/// with full pentagonal coherence cells.
+pub mod limits_colimits;
+pub use limits_colimits::{
+    Colimit, ColimitDiagram, Limit, LimitDiagram, LimitShape,
+    build_coequaliser, build_equaliser, build_initial, build_pullback,
+    build_pushout, build_terminal, colimit_universal_property,
+    compute_colimit_in_psh, compute_limit_in_psh,
+    limit_universal_property, presheaf_admits_colimits,
+    presheaf_admits_limits, presheaf_is_bicomplete,
+    promote_limit_to_level,
+};
+
+/// n-truncation operators for (∞,1)-categories — V0 algorithmic
+/// kernel rule (HTT 5.5.6).  The level-descent operator
+/// `τ_{≤n}: C → C_{≤n}` quotienting (n+1)-cells and higher.
+///
+/// Ships:
+///   * `Truncation` — the apex of `τ_{≤n}(x)` with universal-property
+///     witness.
+///   * `truncate_to_level(x, c, n)` — algorithmic builder.
+///   * `is_n_truncated` — decidable predicate per HTT 5.5.6.1.
+///   * `truncation_unit_witness` — universal-property cone for
+///     `η : x → τ_{≤n}(x)`.
+///   * `truncation_is_localisation` — HTT 5.5.6.18 witness.
+///   * `truncation_left_adjoint_to_inclusion` — HTT 5.5.6.21 witness.
+///   * `n_truncated_objects_closed_under_limits` — HTT 5.5.6.5
+///     unconditional theorem.
+///   * `compose_truncations(outer, inner)` — level-descent
+///     composition collapsing to `min(m, n)`.
+///
+/// V1 promotion: explicit unit / counit cells with structural
+/// level-descent traces.
+pub mod truncation;
+pub use truncation::{
+    Truncation, compose_truncations, is_n_truncated,
+    n_truncated_objects_closed_under_limits, truncate_to_level,
+    truncation_is_localisation, truncation_left_adjoint_to_inclusion,
+    truncation_unit_witness,
+};
+
+/// Factorisation systems on (∞,1)-categories — V0 algorithmic
+/// kernel rule (HTT 5.2.8).  Orthogonal `(L, R)` pairs where every
+/// morphism factors as `f = r ∘ l`.  Gates MSFS §6 β-part Step 5
+/// (replaces `msfs_epi_mono_factorisation` admit) and §9 Theorem 9.3
+/// Step 4 (replaces `msfs_n_truncation_factorisation` admit).
+///
+/// Ships:
+///   * `FactorisationSystem` — the `(L, R)` data with closure +
+///     orthogonality + factorisation witnesses.
+///   * `Factorisation` — concrete `f = r ∘ l` decomposition.
+///   * `is_orthogonal(fs)` — decision predicate per HTT 5.2.8.5.
+///   * `factorise(fs, f)` — algorithmic builder.
+///   * `factorisation_uniqueness` — HTT 5.2.8.4 uniqueness witness.
+///   * `closure_under_composition` — HTT 5.2.8.6 witness.
+///   * Specialised constructors:
+///     - `build_epi_mono_factorisation` (HTT 5.2.8.4).
+///     - `build_n_truncation_factorisation` (HTT 5.2.8.16) —
+///       composes with [`crate::truncation`].
+///     - `build_localisation_factorisation` (HTT 5.2.7.5) —
+///       composes with [`crate::reflective_subcategory`].
+///
+/// V1 promotion: explicit lifting cells with full pentagonal
+/// coherence between orthogonality and factorisation.
+pub mod factorisation;
+pub use factorisation::{
+    Factorisation, FactorisationSystem, build_epi_mono_factorisation,
+    build_localisation_factorisation, build_n_truncation_factorisation,
+    closure_under_composition, factorisation_uniqueness, factorise,
+    is_orthogonal,
+};
+
+/// Pronk's bicategory of fractions — V0 algorithmic kernel rule
+/// (Pronk 1996).  Constructs `C[W^{-1}]` as a bicategory under the
+/// BF1–BF5 axioms.  Gates Diakrisis 16.10 (the AC/OC duality
+/// classifier — currently admits via `diakrisis_pronk_bicat_fractions`)
+/// and MSFS Theorem 9.3 Step 3.
+///
+/// Ships:
+///   * `PronkAxioms` — BF1–BF5 axiom-witness record with
+///     `fully_satisfied()` constructor.
+///   * `Span` — span data carrier `X ←w Y' → Y` representing a
+///     morphism in `C[W^{-1}]`.
+///   * `BicatOfFractions` — the resulting bicategory with
+///     universal-functor witness.
+///   * `build_bicat_of_fractions(c, w, axioms)` — algorithmic builder.
+///   * `compose_spans(first, second)` — span composition via Ore-pullback.
+///   * `universal_2_functor(bicat)` — universal-property witness.
+///
+/// V1 promotion: explicit pentagonal coherence cells for span
+/// composition + full bicategorical 2-cell content.
+pub mod pronk_fractions;
+pub use pronk_fractions::{
+    BicatOfFractions, PronkAxioms, Span, build_bicat_of_fractions,
+    compose_spans, universal_2_functor,
+};
+
+/// (∞,1)-topos infrastructure — V0 algorithmic kernel rule
+/// (Lurie HTT 6.1).  An (∞,1)-topos is a left-exact localisation of
+/// a presheaf ∞-category satisfying Giraud's axioms (HTT 6.1.0.4).
+/// **Caps the foundational ∞-cat layer**: composes
+/// [`reflective_subcategory`] + [`limits_colimits`] +
+/// left-exactness witness.
+///
+/// Ships:
+///   * `GiraudAxioms` — the four Giraud-axiom witnesses
+///     (presentable, universal-colimits, disjoint-coproducts,
+///     effective-groupoids).
+///   * `InfinityTopos` — first-class topos record.
+///   * `is_infinity_topos(t)` — decidable predicate per
+///     HTT 6.1.0.4.
+///   * `build_infinity_topos(...)` — algorithmic builder under
+///     HTT 6.1.0.6 preconditions.
+///   * `presheaf_category_is_topos(c)` — HTT 6.1.0.6 (i):
+///     every `PSh(C)` is canonically an (∞,1)-topos.
+///   * `left_exact_localisation_witness` — HTT 6.1.0.6 (ii)
+///     witness flag.
+///
+/// Discharges MSFS §3 admit `msfs_s_s_is_infty_topos`.
+///
+/// V1 promotion: structural checking of effective-groupoid +
+/// universal-colimit content (the V0 surface trusts the witness flags).
+pub mod infinity_topos;
+pub use infinity_topos::{
+    GiraudAxioms, InfinityTopos, build_infinity_topos,
+    is_infinity_topos, left_exact_localisation_witness,
+    presheaf_category_is_topos,
+};
+
+/// Kernel self-recognition vs. ZFC + 2 inaccessibles — V0
+/// algorithmic kernel rule.  The relative-consistency surface that
+/// decomposes each of the seven kernel rules (K-Refine, K-Univ,
+/// K-Pos, K-Norm, K-FwAx, K-Adj-Unit, K-Adj-Counit) into the precise
+/// ZFC-axiom + Grothendieck-universe requirements needed to model it.
+///
+/// Ships:
+///   * `ZfcAxiom` enumeration (all 9 axioms incl. Choice).
+///   * `InaccessibleLevel` (Kappa1 / Kappa2).
+///   * `KernelRuleId` (the seven rules).
+///   * `MetaTheoryRequirements` — per-rule decomposition.
+///   * `required_meta_theory(rule)` — algorithmic decomposition.
+///   * `is_zfc_plus_2_inacc_provable(rule)` — decision predicate.
+///   * `SelfRecognitionAudit` — accumulator with `cite`/`report` and
+///     transitive ZFC-axiom + inaccessibles union queries.
+///
+/// **Self-recognition invariant**: every kernel rule is provable in
+/// ZFC + 2 inaccessibles.  Discharges VVA §16.5 Phase 5 audit
+/// surface.
+pub mod zfc_self_recognition;
+pub use zfc_self_recognition::{
+    InaccessibleLevel, KernelRuleId, MetaTheoryRequirements,
+    SelfRecognitionAudit, ZfcAxiom, is_zfc_plus_2_inacc_provable,
+    required_meta_theory,
+};
+
+/// Recursive functions + Gödel coding — V0 algorithmic kernel rule.
+/// Provides the decidable encoding-of-formulae machinery required for
+/// Gödel-style incompleteness arguments and Yanofsky 2003 diagonal
+/// paradox claims.
+///
+/// Ships:
+///   * `PrimitiveRecursive` — Kleene normal form (Zero / Succ / Proj
+///     / Comp / PrimRec) with totally-evaluating `eval`.
+///   * `MuRecursive` — extends primitive recursion with bounded
+///     `MuMin` minimisation.
+///   * `cantor_pair` / `cantor_unpair` — bijection ℕ × ℕ → ℕ.
+///   * `encode_list` / `decode_list` — list-of-symbols ↔ Gödel number.
+///   * `GodelEncoding` — recursive AST cell with `encode` to u64.
+///   * `is_primitive_recursive` / `is_mu_recursive` /
+///     `representable_in_pa` — class-membership predicates.
+///
+/// V1 promotion: full kernel-CoreTerm round-trip via [`encode_term`] /
+/// [`decode_term`] (V0 ships symbol-level cells).
+pub mod godel_coding;
+pub use godel_coding::{
+    GodelEncoding, MuRecursive, PrimitiveRecursive,
+    cantor_pair, cantor_unpair, decode_list, encode_list,
+    is_mu_recursive, is_primitive_recursive, representable_in_pa,
+};
+
+/// Industrial-grade tactic infrastructure — V0 algorithmic kernel
+/// rule.  Production tactics that close subgoals via deterministic
+/// decision procedures (no SMT delegation).  Five built-in tactics:
+///
+///   * `tactic_lia` — Linear Integer Arithmetic (V0 surface: trivial
+///     constraints; V1 promotes to Omega-test).
+///   * `tactic_decide` — boolean tautology decision via truth-table
+///     exhaustion (≤ 16 atoms; V1 promotes to BDD/SAT).
+///   * `tactic_induction` — ℕ-induction split (`P(0) ∧ ∀k. P(k) ⇒
+///     P(k+1)` ⇒ `∀n. P(n)`).
+///   * `tactic_congruence` — EUF equality closure via union-find.
+///   * `tactic_eauto` — bounded back-chaining over hint database.
+///
+/// Each returns a `TacticOutcome::{Closed, Open}` carrying a
+/// re-checkable witness; the kernel re-checks the witness in linear
+/// time relative to its size.
+pub mod tactics_industrial;
+pub use tactics_industrial::{
+    BoolFormula, CongruenceEquation, EautoHint, InductionSplit,
+    LinearConstraint, LinearRelation, TacticOutcome,
+    tactic_congruence, tactic_decide, tactic_eauto, tactic_induction,
+    tactic_lia,
+};
+
+/// Cross-format CI hard gate — V0 algorithmic kernel rule.  Decides
+/// whether a given proof artefact survives the round-trip through
+/// every required foreign proof-assistant backend (Coq, Lean 4,
+/// Isabelle/HOL, Dedukti).  Used by `verum audit --cross-format`.
+pub mod cross_format_gate;
+pub use cross_format_gate::{
+    CrossFormatReport, ExportFormat, FormatStatus,
+    evaluate_gate, format_replay_command, required_formats_for_msfs,
+};
+
+/// Mechanisation roadmap — V0 algorithmic kernel surface enumerating
+/// HTT (Lurie 2009) + Adámek-Rosický 1994 chapter-by-chapter
+/// mechanisation status.  Used by `verum audit --htt-roadmap` and
+/// `verum audit --adamek-rosicky-roadmap` for structured coverage
+/// queries comparable across releases.
+pub mod mechanisation_roadmap;
+pub use mechanisation_roadmap::{
+    CoverageReport, MechanisationStatus, RoadmapEntry,
+    adamek_rosicky_roadmap, htt_roadmap,
+};
+
+/// Kernel intrinsic dispatch — string-name → kernel-function bridge.
+/// The single uniform entry point that downstream callers (compiler
+/// elaborator, audit tooling, proof-body verifier) use to invoke a
+/// kernel intrinsic by its `kernel_*` name with a typed argument
+/// list.  Decouples the 15-module kernel surface from any one
+/// caller's invocation convention.
+pub mod intrinsic_dispatch;
+pub use intrinsic_dispatch::{
+    IntrinsicValue, available_intrinsics, dispatch_intrinsic,
+    is_known_intrinsic, missing_dispatchers,
+};
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
