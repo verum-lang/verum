@@ -45,11 +45,18 @@ pub struct SafetyPolicy {
 
 impl SafetyPolicy {
     /// All permissive defaults — no gate fires.
+    ///
+    /// Note: `ffi_boundary` is "lenient" in this constructor (not the
+    /// project-default "strict") so the name "permissive" remains
+    /// accurate — strict mode emits a warning on every extern fn
+    /// missing the `unsafe` modifier, which is documented gating
+    /// behaviour. Test scaffolds and ad-hoc constructions rely on
+    /// `permissive()` producing zero diagnostics on every input.
     pub fn permissive() -> Self {
         Self {
             unsafe_allowed: true,
             ffi: true,
-            ffi_boundary: verum_common::Text::from("strict"),
+            ffi_boundary: verum_common::Text::from("lenient"),
             capability_required: false,
             mls_level: verum_common::Text::from("public"),
             forbid_stdlib_extern: false,
@@ -74,9 +81,15 @@ impl SafetyPolicy {
 /// when the policy permits everything or no violations are present.
 pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic> {
     let mut diagnostics = List::new();
+    // Skip the walk only when EVERY gate is at its permissive
+    // default. The `ffi_boundary == "strict"` gate also fires when
+    // FFI is allowed (so the policy.ffi == true short-circuit isn't
+    // safe on its own); include it in the early-return condition so
+    // strict mode actually runs the walk.
     if policy.unsafe_allowed && policy.ffi
         && !policy.capability_required
         && !policy.forbid_stdlib_extern
+        && policy.ffi_boundary.as_str() != "strict"
     {
         return diagnostics;
     }
@@ -160,6 +173,42 @@ fn check_function_decl(
                     )
                     .build(),
             );
+        }
+    } else if policy.ffi_boundary.as_str() == "strict" {
+        // Honour `[safety].ffi_boundary = "strict"`: when FFI is
+        // allowed at the project level, require every extern
+        // function to carry the `unsafe` modifier so the call-site
+        // friction documents the trust boundary. "lenient" mode
+        // skips this check (Rust-like — extern fn is implicitly
+        // unsafe to call but the declaration itself can omit the
+        // modifier).
+        //
+        // Closes the inert-defense pattern around
+        // `SafetyPolicy.ffi_boundary`: pre-fix the field landed on
+        // the policy + flowed from manifest but no code path
+        // consulted it, so `[safety].ffi_boundary = "lenient"`
+        // had no observable effect (and "strict" was the documented
+        // default but unenforced).
+        if let verum_common::Maybe::Some(abi) = &func.extern_abi {
+            if !func.is_unsafe {
+                out.push(
+                    DiagnosticBuilder::warning()
+                        .message(format!(
+                            "extern function `{}` (abi \"{}\") should be marked \
+                             `unsafe` under `[safety].ffi_boundary = \"strict\"`: \
+                             FFI calls cross the trust boundary",
+                            func.name.name,
+                            abi.as_str()
+                        ))
+                        .span(super::ast_span_to_diagnostic_span(func.span, None))
+                        .help(
+                            "add the `unsafe` modifier to the declaration, or \
+                             relax `[safety].ffi_boundary` to `\"lenient\"` in \
+                             verum.toml",
+                        )
+                        .build(),
+                );
+            }
         }
     }
 }
@@ -452,5 +501,61 @@ mod tests {
         let mut policy = SafetyPolicy::permissive(); policy.unsafe_allowed = false; policy.ffi = false;
         let diags = check_safety(&[module], policy);
         assert_eq!(diags.len(), 2, "both gates should fire independently");
+    }
+
+    #[test]
+    fn ffi_strict_mode_warns_on_extern_without_unsafe() {
+        // Pin the inert-defense closure for `SafetyPolicy.ffi_boundary`.
+        // Pre-fix the field was set on the policy + flowed from manifest
+        // but no code path consulted it, so `[safety].ffi_boundary =
+        // "strict"` had no observable effect on the safety walk.
+        //
+        // With the wire-up, an extern function declared without `unsafe`
+        // surfaces a warning suggesting the modifier — pinning the
+        // strict-mode contract end-to-end.
+        let module = mk_module_with_function(
+            false,
+            Maybe::Some(verum_common::Text::from("C")),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.ffi_boundary = verum_common::Text::from("strict");
+        let diags = check_safety(&[module], policy);
+        assert_eq!(diags.len(), 1, "strict mode must warn on extern without unsafe");
+    }
+
+    #[test]
+    fn ffi_strict_mode_quiet_on_extern_with_unsafe() {
+        // Pin the inverse: extern function WITH `unsafe` modifier
+        // satisfies strict mode, no warning fires.
+        let module = mk_module_with_function(
+            true,
+            Maybe::Some(verum_common::Text::from("C")),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.ffi_boundary = verum_common::Text::from("strict");
+        let diags = check_safety(&[module], policy);
+        assert_eq!(
+            diags.len(),
+            0,
+            "strict mode + unsafe extern must produce no diagnostics"
+        );
+    }
+
+    #[test]
+    fn ffi_lenient_mode_quiet_on_extern_without_unsafe() {
+        // Pin the lenient mode: extern function without `unsafe`
+        // is allowed silently when ffi_boundary = "lenient".
+        let module = mk_module_with_function(
+            false,
+            Maybe::Some(verum_common::Text::from("C")),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.ffi_boundary = verum_common::Text::from("lenient");
+        let diags = check_safety(&[module], policy);
+        assert_eq!(
+            diags.len(),
+            0,
+            "lenient mode must allow extern without unsafe modifier"
+        );
     }
 }
