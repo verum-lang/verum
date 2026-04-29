@@ -585,3 +585,99 @@ fn test_buffer_size_refinement() {
     let buffer_size = Type::refined(Type::int(), predicate);
     assert!(matches!(buffer_size, Type::Refined { .. }));
 }
+
+// ============================================================================
+// SmtBackend timeout wire-up
+// ============================================================================
+
+#[test]
+fn smt_backend_set_timeout_ms_default_is_no_op() {
+    // Pin: the new `SmtBackend::set_timeout_ms` trait method has
+    // a no-op default impl. Legacy backends compile without
+    // modification; only backends that need the timeout override
+    // it. The trait extension is therefore source-compatible with
+    // every existing backend.
+    use verum_common::{Map, Maybe};
+    use verum_types::refinement::{
+        RefinementError, SmtBackend, SmtResult, VerificationResult,
+    };
+
+    /// Legacy-style backend that doesn't override `set_timeout_ms`.
+    /// Compiling this is the test — if the default impl were
+    /// removed or changed to a non-default-providing form, this
+    /// would fail to compile.
+    struct LegacyBackend;
+    impl SmtBackend for LegacyBackend {
+        fn check(&mut self, _expr: &Expr) -> Result<SmtResult, RefinementError> {
+            Ok(SmtResult::Unsat)
+        }
+        fn get_model(&mut self) -> Result<Map<Text, Text>, RefinementError> {
+            Ok(Map::new())
+        }
+        fn verify_refinement(
+            &mut self,
+            _predicate: &Expr,
+            _value: &Expr,
+            _assumptions: &[Expr],
+        ) -> Result<VerificationResult, RefinementError> {
+            Ok(VerificationResult::Valid)
+        }
+        // No `set_timeout_ms` override — relies on the trait default.
+    }
+
+    // Calling the default method should not panic and should not
+    // observably mutate anything (since the default impl is empty).
+    let mut backend = LegacyBackend;
+    backend.set_timeout_ms(12_345);
+    backend.set_timeout_ms(0);
+    backend.set_timeout_ms(u64::MAX);
+
+    // Sanity: regular method dispatch still works.
+    let dummy_expr = Expr::literal(Literal::int(0, Span::dummy()));
+    assert!(matches!(backend.check(&dummy_expr), Ok(SmtResult::Unsat)));
+}
+
+#[test]
+fn smt_backend_set_timeout_ms_can_be_overridden() {
+    // Pin: backends that need the timeout can override
+    // `set_timeout_ms` and observe the calls. This is how the
+    // production Z3 backend forwards the limit to the solver.
+    use std::sync::{Arc, Mutex};
+    use verum_common::{Map, Maybe};
+    use verum_types::refinement::{
+        RefinementError, SmtBackend, SmtResult, VerificationResult,
+    };
+
+    struct SpyBackend {
+        seen: Arc<Mutex<Vec<u64>>>,
+    }
+    impl SmtBackend for SpyBackend {
+        fn check(&mut self, _expr: &Expr) -> Result<SmtResult, RefinementError> {
+            Ok(SmtResult::Unsat)
+        }
+        fn get_model(&mut self) -> Result<Map<Text, Text>, RefinementError> {
+            Ok(Map::new())
+        }
+        fn verify_refinement(
+            &mut self,
+            _predicate: &Expr,
+            _value: &Expr,
+            _assumptions: &[Expr],
+        ) -> Result<VerificationResult, RefinementError> {
+            Ok(VerificationResult::Valid)
+        }
+        fn set_timeout_ms(&mut self, ms: u64) {
+            self.seen.lock().unwrap().push(ms);
+        }
+    }
+
+    let seen: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut backend = SpyBackend { seen: seen.clone() };
+
+    backend.set_timeout_ms(100);
+    backend.set_timeout_ms(500);
+    backend.set_timeout_ms(0);
+
+    let recorded = seen.lock().unwrap().clone();
+    assert_eq!(recorded, vec![100, 500, 0]);
+}
