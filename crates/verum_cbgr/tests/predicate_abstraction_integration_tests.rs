@@ -545,3 +545,38 @@ fn test_integration_clear_caches_during_analysis() {
         paths2.len()
     );
 }
+
+// ============================================================================
+// Wire-up Pin Tests
+// ============================================================================
+
+#[test]
+fn config_accessors_mirror_construction_values() {
+    // Pin: every public-config accessor on PredicateAbstractor
+    // returns the value the config was constructed with. Before
+    // the wire-up landed, four config fields (use_z3_equivalence,
+    // use_subsumption, use_widening, incremental_merging) had no
+    // public-facing read surface — external orchestrators couldn't
+    // tell which abstraction strategy the analyzer was running
+    // under.
+    for &z3 in &[true, false] {
+        for &sub in &[true, false] {
+            for &widen in &[true, false] {
+                for &incr in &[true, false] {
+                    let config = AbstractionConfig {
+                        use_z3_equivalence: z3,
+                        use_subsumption: sub,
+                        use_widening: widen,
+                        incremental_merging: incr,
+                        ..AbstractionConfig::default()
+                    };
+                    let abstractor = PredicateAbstractor::new(config);
+                    assert_eq!(abstractor.z3_equivalence_enabled(), z3);
+                    assert_eq!(abstractor.subsumption_enabled(), sub);
+                    assert_eq!(abstractor.widening_enabled(), widen);
+                    assert_eq!(abstractor.incremental_merging_enabled(), incr);
+                }
+            }
+        }
+    }
+}
