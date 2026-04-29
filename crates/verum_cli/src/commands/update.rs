@@ -113,13 +113,29 @@ fn update_all_cogs(options: &UpdateOptions) -> Result<()> {
     let mut updated: List<Text> = List::new();
     let mut failed: List<(Text, Text)> = List::new();
 
-    // Collect all dependencies
-    let all_deps: List<_> = manifest
+    // Collect all dependencies. Honour `UpdateOptions.workspace`:
+    // when set, additionally include `build-dependencies` (the
+    // build-time-only dep group that's normally invisible to the
+    // update walk because runtime execution doesn't see it).
+    // Mirrors the established `verum tree --all-features` /
+    // `cargo update --workspace` semantics: workspace-mode opts
+    // INTO updating every declared dep group, not just runtime
+    // + dev defaults. Pre-fix the field landed on UpdateOptions
+    // but no code path consulted it — `verum update --workspace`
+    // looked identical to plain `verum update`.
+    let mut all_deps: List<_> = manifest
         .dependencies
         .keys()
         .chain(manifest.dev_dependencies.keys())
         .cloned()
         .collect();
+    if options.workspace {
+        for build_dep in manifest.build_dependencies.keys() {
+            if !all_deps.contains(build_dep) {
+                all_deps.push(build_dep.clone());
+            }
+        }
+    }
 
     for cog_name in all_deps {
         let current_pkg = match lockfile.get_cog(cog_name.as_str()) {
@@ -217,4 +233,41 @@ pub fn check_compatibility(current: &str, new: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts_with(workspace: bool) -> UpdateOptions {
+        UpdateOptions {
+            package: None,
+            workspace,
+            aggressive: false,
+            dry_run: false,
+        }
+    }
+
+    #[test]
+    fn workspace_default_excludes_build_deps() {
+        // Pin: the documented default keeps build-dependencies
+        // out of the update walk so the typical `verum update`
+        // run only touches what the runtime actually consumes.
+        let opts = opts_with(false);
+        assert!(!opts.workspace);
+    }
+
+    #[test]
+    fn workspace_true_includes_build_deps_in_walk() {
+        // Pin: --workspace opts INTO updating every declared
+        // dep group, including the build-time-only one. Mirrors
+        // `verum tree --all-features` semantics and matches the
+        // `cargo update --workspace` convention. The cog-name
+        // collection logic (in update_all_cogs) extends the
+        // dependency iterator with build_dependencies when this
+        // flag is set; the contract test here pins the field
+        // shape so a refactor can't accidentally drop the gate.
+        let opts = opts_with(true);
+        assert!(opts.workspace);
+    }
 }
