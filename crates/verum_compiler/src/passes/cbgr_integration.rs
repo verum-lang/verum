@@ -199,7 +199,17 @@ impl CbgrOptimizationPass {
             match self.run_on_function(func) {
                 Ok(result) => {
                     all_warnings.extend(result.warnings.clone());
-                    function_results.insert(func.name.clone(), result);
+                    // Honour `detailed_stats`: when false, suppress
+                    // the per-function map and ship only the
+                    // aggregate `total_stats`.  Pre-fix the flag was
+                    // a config field with no readers — every caller
+                    // got the full per-function map regardless of
+                    // whether they asked for it, paying the
+                    // per-function entry cost in the returned Map
+                    // unconditionally.
+                    if self.config.detailed_stats {
+                        function_results.insert(func.name.clone(), result);
+                    }
                 }
                 Err(diagnostics) => {
                     // Continue with other functions even if one fails
