@@ -79,9 +79,92 @@ pub enum ComputationalProperty {
     /// Creates new thread or async task
     Spawns,
 
+    // -----------------------------------------------------------------------
+    // Resource-tagged variants — track *what* the function reads/writes/spawns.
+    //
+    // These exist so capability-audit (`@verify(static)` + `@permission(...)`)
+    // can compare a function's effect set against a declared allow-list:
+    //   property `Reads(FileSystem("/etc/*"))` matches `@permission(fs_read: ["/etc/*"])`.
+    //
+    // The plain `ReadsExternal` / `WritesExternal` / `Spawns` remain for
+    // back-compat — passes that don't care about the tagged distinction
+    // can use either form.
+    // -----------------------------------------------------------------------
+
+    /// Reads a tagged resource — FileSystem path / Network host / Env name / Stdin.
+    Reads(ResourceKind),
+
+    /// Writes a tagged resource — FileSystem path / Network host / Env name / Stdout / Stderr.
+    Writes(ResourceKind),
+
+    /// Spawns a tagged subordinate — process binary, async task, OS thread.
+    SpawnsKind(SpawnKind),
+
     /// Custom user-defined computational property
     /// For extensibility and domain-specific properties
     Custom(Text),
+}
+
+/// Kinds of resource a `Reads` / `Writes` property can refer to.
+///
+/// Each variant carries enough detail for capability-audit to match against
+/// a frontmatter `@permission(...)` allow-list. Glob patterns are kept as
+/// plain `Text` — the matcher in `core.shell.permissions` handles glob
+/// expansion.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceKind {
+    /// Filesystem path (literal or glob pattern).
+    FileSystem(Text),
+    /// Network endpoint — `host`, `host:port`, `*.example.com`, CIDR, etc.
+    Network(Text),
+    /// Environment variable name.
+    Env(Text),
+    /// Standard input stream.
+    Stdin,
+    /// Standard output stream.
+    Stdout,
+    /// Standard error stream.
+    Stderr,
+    /// User-defined / domain-specific resource.
+    Custom(Text),
+}
+
+impl fmt::Display for ResourceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResourceKind::FileSystem(p) => write!(f, "FileSystem({})", p),
+            ResourceKind::Network(h)    => write!(f, "Network({})", h),
+            ResourceKind::Env(n)        => write!(f, "Env({})", n),
+            ResourceKind::Stdin         => write!(f, "Stdin"),
+            ResourceKind::Stdout        => write!(f, "Stdout"),
+            ResourceKind::Stderr        => write!(f, "Stderr"),
+            ResourceKind::Custom(s)     => write!(f, "Custom({})", s),
+        }
+    }
+}
+
+/// Kinds of subordinate a `SpawnsKind` property can refer to.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SpawnKind {
+    /// External program — `program` is the basename or absolute path.
+    Process(Text),
+    /// Async task on the executor.
+    Task,
+    /// OS thread.
+    Thread,
+    /// User-defined.
+    Custom(Text),
+}
+
+impl fmt::Display for SpawnKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SpawnKind::Process(p) => write!(f, "Process({})", p),
+            SpawnKind::Task       => write!(f, "Task"),
+            SpawnKind::Thread     => write!(f, "Thread"),
+            SpawnKind::Custom(s)  => write!(f, "Custom({})", s),
+        }
+    }
 }
 
 /// Property set - collection of computational properties for a function or expression.
@@ -186,6 +269,61 @@ impl PropertySet {
     /// Check if this property set may diverge
     pub fn is_divergent(&self) -> bool {
         self.contains(&ComputationalProperty::Divergent)
+    }
+
+    // ─── Resource-tagged accessors ──────────────────────────────────────────
+
+    /// Iterate every `Reads(...)` resource in this set.
+    pub fn iter_reads(&self) -> impl Iterator<Item = &ResourceKind> {
+        self.properties.iter().filter_map(|p| match p {
+            ComputationalProperty::Reads(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// Iterate every `Writes(...)` resource.
+    pub fn iter_writes(&self) -> impl Iterator<Item = &ResourceKind> {
+        self.properties.iter().filter_map(|p| match p {
+            ComputationalProperty::Writes(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// Iterate every `Spawns(kind)` subordinate.
+    pub fn iter_spawns(&self) -> impl Iterator<Item = &SpawnKind> {
+        self.properties.iter().filter_map(|p| match p {
+            ComputationalProperty::SpawnsKind(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    /// True iff this set spawns any external process.
+    pub fn spawns_processes(&self) -> bool {
+        self.contains(&ComputationalProperty::Spawns)
+            || self.properties.iter().any(|p| matches!(p, ComputationalProperty::SpawnsKind(SpawnKind::Process(_))))
+    }
+
+    /// Add a `Reads(resource)` property and ensure `IO` is also present.
+    pub fn add_read(&mut self, resource: ResourceKind) {
+        self.properties.insert(ComputationalProperty::Reads(resource));
+        self.properties.insert(ComputationalProperty::IO);
+        self.properties.remove(&ComputationalProperty::Pure);
+    }
+
+    /// Add a `Writes(resource)` property and ensure `IO` is also present.
+    pub fn add_write(&mut self, resource: ResourceKind) {
+        self.properties.insert(ComputationalProperty::Writes(resource));
+        self.properties.insert(ComputationalProperty::IO);
+        self.properties.remove(&ComputationalProperty::Pure);
+    }
+
+    /// Add a `Spawns(kind)` property and ensure both `IO` and the legacy
+    /// `Spawns` are present.
+    pub fn add_spawn(&mut self, kind: SpawnKind) {
+        self.properties.insert(ComputationalProperty::SpawnsKind(kind));
+        self.properties.insert(ComputationalProperty::Spawns);
+        self.properties.insert(ComputationalProperty::IO);
+        self.properties.remove(&ComputationalProperty::Pure);
     }
 
     /// Union of two property sets
@@ -355,6 +493,9 @@ impl fmt::Display for ComputationalProperty {
             ComputationalProperty::WritesExternal => write!(f, "WritesExternal"),
             ComputationalProperty::FFI => write!(f, "FFI"),
             ComputationalProperty::Spawns => write!(f, "Spawns"),
+            ComputationalProperty::Reads(r)       => write!(f, "Reads({})", r),
+            ComputationalProperty::Writes(r)      => write!(f, "Writes({})", r),
+            ComputationalProperty::SpawnsKind(s)  => write!(f, "Spawns({})", s),
             ComputationalProperty::Custom(name) => write!(f, "Custom({})", name),
         }
     }

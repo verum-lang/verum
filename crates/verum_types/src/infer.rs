@@ -47222,6 +47222,22 @@ impl TypeChecker {
         if let Some(verum_ast::decl::ResourceModifier::Affine) = &type_decl.resource_modifier {
             self.affine_tracker.register_affine_type(type_name.clone());
         }
+        // Linear modifier — must consume exactly once.
+        if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
+            self.affine_tracker.register_linear_type(type_name.clone());
+        }
+        // `@must_consume` attribute — alias for `type linear`. Lets API
+        // authors mark must-consume types with attribute syntax (which
+        // survives derive expansion / macro re-export) instead of the
+        // prefix `linear` keyword. Same compile-time effect: drop without
+        // explicit consumption is a hard error.
+        let must_consume = type_decl
+            .attributes
+            .iter()
+            .any(|a| a.name.as_str() == "must_consume");
+        if must_consume {
+            self.affine_tracker.register_linear_type(type_name.clone());
+        }
 
         // Save type parameter names so we can clean them up later
         // This prevents type parameter pollution across different type declarations
