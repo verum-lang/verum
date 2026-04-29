@@ -4761,24 +4761,42 @@ impl ProofValidator {
                 Ok(expected.clone())
             }
 
-            // Lookup user-defined rule in registered rules
+            // Lookup user-defined rule in the inference-rule registry. Any
+            // rule name that doesn't match a hardcoded inference rule above
+            // MUST come from `register_inference_rule`. There is no
+            // "trust the user" fallback — validate_apply is the only soundness
+            // gate between a proof term and its claimed conclusion, so an
+            // unknown rule has to be a hard error, never a silent pass.
             _ => {
-                // Check if it's a registered user rule or lemma
-                if let Some(rule_conclusion) = self.lookup_registered_rule(rule) {
-                    // Instantiate the rule with the premises
-                    Ok(rule_conclusion)
-                } else {
-                    // Unknown rule - but if premises match expected pattern, accept
-                    // This allows for extensibility
-                    if premises.is_empty() {
-                        return Err(ValidationError::ValidationFailed {
-                            message: format!("unknown rule '{}' with no premises", rule).into(),
-                        });
-                    }
-                    // For unknown rules, we trust that the proof term was constructed correctly
-                    // This is safe because we've validated all premises
-                    Ok(expected.clone())
+                let (schema_premises, conclusion) = self.lookup_registered_rule(rule).ok_or_else(
+                    || ValidationError::ValidationFailed {
+                        message: format!(
+                            "unknown inference rule '{}'. Register it via \
+                             ProofValidator::register_inference_rule before \
+                             referencing it in a proof.",
+                            rule
+                        )
+                        .into(),
+                    },
+                )?;
+
+                // Arity check: caller must supply exactly the number of
+                // premises the rule schema declares. Unification with the
+                // schema's premise patterns happens in the outer
+                // validate_apply via expr_eq against the derived conclusion.
+                if premises.len() != schema_premises.len() {
+                    return Err(ValidationError::ValidationFailed {
+                        message: format!(
+                            "rule '{}' expects {} premises, got {}",
+                            rule,
+                            schema_premises.len(),
+                            premises.len()
+                        )
+                        .into(),
+                    });
                 }
+
+                Ok(conclusion)
             }
         }
     }
@@ -4824,11 +4842,20 @@ impl ProofValidator {
         }
     }
 
-    /// Lookup a registered user-defined rule
-    fn lookup_registered_rule(&self, _rule: &Text) -> Option<Expr> {
-        // In a full implementation, this would look up the rule in a database
-        // of user-defined lemmas and inference rules
-        None
+    /// Look up a user-defined inference rule by name.
+    ///
+    /// Returns the rule's schema as `(premise_patterns, conclusion)` so the
+    /// caller can do an arity check and obtain the conclusion that the rule
+    /// derives. Reads from `self.inference_rules`, which is populated via
+    /// `register_inference_rule`.
+    ///
+    /// Returns `None` when the name isn't registered — soundness depends on
+    /// the caller treating that as a hard error rather than falling back to
+    /// "trust the user". Pre-fix, this was an unconditional `None` (stub),
+    /// which forced the apply-rule branch to silently accept ANY unknown
+    /// rule with non-empty premises.
+    fn lookup_registered_rule(&self, rule: &Text) -> Option<(List<Expr>, Expr)> {
+        self.inference_rules.get(rule).cloned()
     }
 
     /// Validate SMT solver proof
