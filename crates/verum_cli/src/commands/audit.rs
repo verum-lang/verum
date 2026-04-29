@@ -73,7 +73,7 @@ pub fn audit(options: AuditOptions) -> Result<()> {
 
     // Check for vulnerabilities
     ui::info("Checking for vulnerabilities...");
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
 
     for package in &lockfile.packages {
         // Skip transitive dependencies if direct_only is set
@@ -175,7 +175,7 @@ pub fn audit(options: AuditOptions) -> Result<()> {
 /// Verify package signatures
 fn verify_signatures(lockfile: &Lockfile) -> Result<List<Text>> {
     let mut failures = List::new();
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let cache_dir = crate::registry::cache_dir()?;
 
     for package in &lockfile.packages {
@@ -213,7 +213,7 @@ fn verify_signatures(lockfile: &Lockfile) -> Result<List<Text>> {
 /// Analyze CBGR profiles
 fn analyze_cbgr_profiles(lockfile: &Lockfile) -> Result<List<(Text, Text)>> {
     let mut info: List<(Text, Text)> = List::new();
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
 
     for package in &lockfile.packages {
         let metadata = match client.get_metadata(package.name.as_str(), package.version.as_str()) {
@@ -325,7 +325,7 @@ fn fix_vulnerabilities(
         return Ok(());
     };
 
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let mut fixed_count = 0;
     let mut failed_fixes = List::new();
 

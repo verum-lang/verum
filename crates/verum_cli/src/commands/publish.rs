@@ -91,7 +91,7 @@ pub fn publish(options: PublishOptions) -> Result<()> {
 
     // Publish to registry
     ui::step("Uploading to registry");
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     client.publish(&metadata, &cog_file, token.as_str())?;
 
     ui::success(&format!(
@@ -1173,7 +1173,7 @@ pub fn publish_multi_platform(options: MultiPlatformPublishOptions) -> Result<()
     let token = get_auth_token()?;
     ui::step("Uploading to registry");
 
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     client.publish(&metadata, &cog_file, token.as_str())?;
 
     ui::success(&format!(

@@ -111,7 +111,7 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
 
     // Upload to registry
     ui::step("Uploading to registry");
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     client.publish(&metadata, &cog_file, token.as_str())?;
 
     // Clean up temp file
@@ -164,7 +164,7 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
 pub fn search(query: &str, limit: usize) -> Result<()> {
     ui::step(&format!("Searching for: {}", query.cyan()));
 
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let results = client.search(query, limit)?;
 
     if results.is_empty() {
@@ -236,7 +236,7 @@ pub fn install(name: &str, version: Option<Text>) -> Result<()> {
     let version_str = version.as_ref().map(|v| v.as_str()).unwrap_or("latest");
     ui::step(&format!("Installing {} {}", name.cyan(), version_str));
 
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
 
     // Resolve version
     let resolved_version = if let Some(ref v) = version {

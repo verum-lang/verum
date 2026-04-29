@@ -142,7 +142,7 @@ pub fn add(options: AddOptions) -> Result<()> {
 
 /// Create registry dependency
 fn create_registry_dependency(options: &AddOptions) -> Result<Dependency> {
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
 
     // Get version
     let version = if let Some(v) = &options.version {
@@ -250,7 +250,7 @@ fn download_and_cache(options: &AddOptions) -> Result<()> {
     }
 
     // Registry download
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let version = options
         .version
         .as_ref()
@@ -281,7 +281,7 @@ fn download_and_cache(options: &AddOptions) -> Result<()> {
 
 /// Verify package integrity
 fn verify_cog(name: &str, version: &str, cog_file: &PathBuf) -> Result<()> {
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let metadata = client.get_metadata(name, version)?;
 
     // Calculate checksum

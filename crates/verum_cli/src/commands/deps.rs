@@ -119,7 +119,7 @@ pub fn update(package: Option<Text>) -> Result<()> {
     let mut manifest = Manifest::from_file(&manifest_path)?;
 
     // Create registry client
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let mut updates = Vec::new();
 
     // Get dependencies to update
@@ -264,7 +264,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
         Lockfile::new(manifest.cog.name.clone())
     };
 
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let mut resolver = DependencyResolver::new();
 
     // Add root package
