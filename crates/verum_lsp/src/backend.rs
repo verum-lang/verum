@@ -746,10 +746,24 @@ impl LanguageServer for Backend {
         }
 
         // Fallback: in-LSP formatter for cases where the binary is
-        // unavailable (e.g. tests, sandboxes without PATH).
+        // unavailable (e.g. tests, sandboxes without PATH). Map the
+        // client's `FormattingOptions` (tab size from the editor's
+        // own settings) into our `VerumFormatConfig` so the fallback
+        // honours the user's preferences instead of hardcoding the
+        // 4-space default. `insert_spaces=false` means the editor
+        // expects tabs — we still emit spaces because Verum
+        // formatting is canonically space-indented; the contract
+        // is documented.
+        let mut format_cfg = formatting::VerumFormatConfig::default();
+        let tab_size = params.options.tab_size as usize;
+        if tab_size > 0 {
+            format_cfg.indent_size = tab_size;
+        }
         let edits = self
             .documents
-            .with_document(&uri, |doc| formatting::format_document(&doc.text))
+            .with_document(&uri, |doc| {
+                formatting::format_document_with_config(&doc.text, format_cfg.clone())
+            })
             .unwrap_or_default();
 
         if edits.is_empty() {

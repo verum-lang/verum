@@ -913,7 +913,24 @@ struct TriviaInfo {
 
 /// Format a document with full Verum formatting rules (with trivia preservation).
 pub fn format_document(text: &str) -> List<TextEdit> {
-    let config = VerumFormatConfig::default();
+    format_document_with_config(text, VerumFormatConfig::default())
+}
+
+/// Format a document honouring caller-supplied formatting config.
+///
+/// The LSP `formatting` request carries `FormattingOptions` (tab
+/// size, insert-spaces) that the editor sourced from the user's
+/// own settings. The fallback formatter previously hardcoded
+/// `VerumFormatConfig::default()`, ignoring those preferences —
+/// `indent_size` was always 4 even when the editor asked for 2.
+/// This entry point lets `Backend::formatting` translate the LSP
+/// options into a `VerumFormatConfig` and have them actually
+/// propagate through both the trivia-preserving and basic
+/// formatter paths.
+pub fn format_document_with_config(
+    text: &str,
+    config: VerumFormatConfig,
+) -> List<TextEdit> {
     let formatter = TriviaPreservingFormatter::new(config.clone());
 
     // Use trivia-preserving formatter for syntax tree-based formatting
@@ -1613,6 +1630,58 @@ mod tests {
         // Should return edits if formatting changes anything
         // Note: exact behavior depends on formatter implementation
         assert!(edits.len() <= 1);
+    }
+
+    #[test]
+    fn trivia_formatter_threads_config_indent_size() {
+        // Pin: `TriviaPreservingFormatter` actually consumes its
+        // `config.indent_size`. Two configs that differ only in
+        // `indent_size` must produce different output for any
+        // input the formatter re-indents.
+        //
+        // The check is on the lower-level formatter directly so
+        // this test isn't gated on the `format_document` /
+        // `format_document_with_config` choice of fallback path —
+        // we're proving the wire-up at the source, not at the
+        // outer entry point.
+        let input = "if x > 0 {\nreturn y;\n}";
+        let cfg2 = VerumFormatConfig {
+            indent_size: 2,
+            ..Default::default()
+        };
+        let cfg4 = VerumFormatConfig {
+            indent_size: 4,
+            ..Default::default()
+        };
+        let f2 = TriviaPreservingFormatter::new(cfg2);
+        let f4 = TriviaPreservingFormatter::new(cfg4);
+        let text2 = f2.format(input, FileId::new(0));
+        let text4 = f4.format(input, FileId::new(0));
+        // Both formatters produce the same structural shape but
+        // different per-level indentation. If `format_document`
+        // dropped the config, both would be identical.
+        if text2.is_empty() && text4.is_empty() {
+            // The trivia formatter punted on this input — fall
+            // back to the basic-format path to still pin the
+            // structural claim.
+            let basic2 = format_verum_source(
+                input,
+                &VerumFormatConfig { indent_size: 2, ..Default::default() },
+            );
+            let basic4 = format_verum_source(
+                input,
+                &VerumFormatConfig { indent_size: 4, ..Default::default() },
+            );
+            assert_ne!(
+                basic2, basic4,
+                "basic-format path: indent_size=2 vs indent_size=4 must differ"
+            );
+        } else {
+            assert_ne!(
+                text2, text4,
+                "trivia formatter: indent_size=2 vs indent_size=4 must differ"
+            );
+        }
     }
 
     #[test]
