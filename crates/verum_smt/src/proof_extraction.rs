@@ -54,7 +54,7 @@ use serde::{Deserialize, Serialize};
 use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::ToText;
 use z3::ast::{Ast, Dynamic};
-use z3::{Config, Goal, Tactic};
+use z3::{Config, Goal, Solver, Tactic};
 
 // ==================== Proof Generation Configuration ====================
 
@@ -163,6 +163,35 @@ impl ProofGenerationConfig {
         // needing to re-call `set_params({unsat_core: true})`
         // per query.
         cfg.set_bool_param_value("unsat_core", self.enable_unsat_cores);
+    }
+
+    /// Apply per-solver parameters that aren't available at the
+    /// Config level.
+    ///
+    /// Two of the documented `ProofGenerationConfig` fields are
+    /// Solver-level Z3 params, not Config-level — they have to
+    /// be set per-Solver via `Solver::set_params`:
+    ///
+    ///  * `minimize_unsat_cores` — Z3's `smt.core.minimize`
+    ///    parameter. When true, the solver runs additional
+    ///    minimization on the unsat core before returning it,
+    ///    producing tighter explanations at the cost of some
+    ///    extra solver work.
+    ///  * `extraction_timeout_ms` — when nonzero, sets Z3's
+    ///    `timeout` parameter so the solver itself bails before
+    ///    the extractor has to. Zero leaves the solver unbounded
+    ///    (matches the documented "0 = no timeout" semantics).
+    ///
+    /// Call this on every Solver involved in proof extraction so
+    /// the per-call resource budget actually reaches the solver.
+    pub fn apply_to_z3_solver(&self, solver: &Solver) {
+        let mut params = z3::Params::new();
+        params.set_bool("smt.core.minimize", self.minimize_unsat_cores);
+        if self.extraction_timeout_ms > 0 {
+            let clamped = self.extraction_timeout_ms.min(u32::MAX as u64) as u32;
+            params.set_u32("timeout", clamped);
+        }
+        solver.set_params(&params);
     }
 
     /// Execute code with this proof generation configuration
@@ -3785,6 +3814,69 @@ mod tests {
         assert!(
             !v_inconsistent.is_ok(),
             "is_valid=true with errors must NOT be ok",
+        );
+    }
+
+    #[test]
+    fn apply_to_z3_solver_threads_minimize_and_timeout() {
+        // Pin: `apply_to_z3_solver` reaches the Solver every time
+        // for both `minimize_unsat_cores` and `extraction_timeout_ms`.
+        // We can't observe the actual Z3 param state from outside
+        // the solver, but we can pin the call surface contract: the
+        // method runs to completion without panicking on any
+        // combination of (minimize, timeout) values, and the
+        // documented "0 = no timeout" semantic holds (no panic on 0).
+        let solver = Solver::new();
+
+        // Default: minimize=false, timeout_ms=0 (unbounded). The
+        // method must succeed without setting any timeout param.
+        let default_cfg = ProofGenerationConfig::default();
+        default_cfg.apply_to_z3_solver(&solver);
+
+        // minimize=true, timeout=10s — both must reach the solver.
+        let mut cfg2 = ProofGenerationConfig::default();
+        cfg2.minimize_unsat_cores = true;
+        cfg2.extraction_timeout_ms = 10_000;
+        cfg2.apply_to_z3_solver(&solver);
+
+        // Saturating clamp: u64::MAX must not panic during the
+        // u32 conversion — gets clamped to u32::MAX milliseconds
+        // (which is ~49 days, well past anything Z3 would honour).
+        let mut cfg3 = ProofGenerationConfig::default();
+        cfg3.extraction_timeout_ms = u64::MAX;
+        cfg3.apply_to_z3_solver(&solver);
+    }
+
+    #[test]
+    fn apply_to_z3_solver_respects_zero_timeout_semantic() {
+        // Pin: `extraction_timeout_ms = 0` means "no timeout".
+        // The method must NOT call `set_u32("timeout", 0)` because
+        // Z3 interprets timeout=0 as "fire immediately" (a zero-ms
+        // budget) on some param paths, defeating the documented
+        // semantic. The wiring is to OMIT the timeout param when
+        // the field is zero — pinned here by the success of the
+        // call (panic would surface a bug in the gate logic).
+        let solver = Solver::new();
+
+        let cfg = ProofGenerationConfig {
+            enable_proofs: true,
+            enable_unsat_cores: true,
+            minimize_unsat_cores: false,
+            max_proof_depth: 100,
+            simplify_proofs: false,
+            enable_proof_cache: false,
+            validate_on_extract: false,
+            extraction_timeout_ms: 0, // 0 = no timeout
+        };
+        cfg.apply_to_z3_solver(&solver);
+
+        // Solver should still respond to a trivial check — no
+        // hidden zero-timeout poisoning from the gate path.
+        let result = solver.check();
+        assert_eq!(
+            result,
+            z3::SatResult::Sat,
+            "empty solver under no-timeout config must check Sat",
         );
     }
 }
