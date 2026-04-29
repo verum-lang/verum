@@ -247,6 +247,27 @@ implement Display for DnsError {
     }
 }
 
+implement Eq for DnsError {
+    fn eq(&self, other: &DnsError) -> Bool {
+        match (self, other) {
+            (NotFound,         NotFound)         => true,
+            (HostNotFound,     HostNotFound)     => true,
+            (TryAgain,         TryAgain)         => true,
+            (NoRecovery,       NoRecovery)       => true,
+            (NoData,           NoData)           => true,
+            (Timeout,          Timeout)          => true,
+            (ServerError,      ServerError)      => true,
+            (InvalidName,      InvalidName)      => true,
+            (InvalidResponse,  InvalidResponse)  => true,
+            (NetworkError(a),  NetworkError(b))  => a == b,
+            (Truncated,        Truncated)        => true,
+            (Refused,          Refused)          => true,
+            (Other(a),         Other(b))         => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // DNS Wire Protocol Types
 // =============================================================================

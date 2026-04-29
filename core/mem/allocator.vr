@@ -161,6 +161,23 @@ implement Display for AllocError {
     }
 }
 
+implement Eq for AllocError {
+    fn eq(&self, other: &AllocError) -> Bool {
+        match (self, other) {
+            (OutOfMemory { requested: a },        OutOfMemory { requested: b })        => a == b,
+            (InvalidSize { size: a },             InvalidSize { size: b })             => a == b,
+            (InvalidAlignment { alignment: a },   InvalidAlignment { alignment: b })   => a == b,
+            (MmapFailed { code: a },              MmapFailed { code: b })              => a == b,
+            (MunmapFailed { code: a },            MunmapFailed { code: b })            => a == b,
+            (PageExhausted,                       PageExhausted)                       => true,
+            (InvalidPointer,                      InvalidPointer)                      => true,
+            (CapacityOverflow { requested: a },   CapacityOverflow { requested: b })   => a == b,
+            (UnsupportedOs { op: a },             UnsupportedOs { op: b })             => a == b,
+            _ => false,
+        }
+    }
+}
+
 // =============================================================================
 // Memory Layout
 // =============================================================================
