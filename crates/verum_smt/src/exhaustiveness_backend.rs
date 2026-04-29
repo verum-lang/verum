@@ -755,4 +755,104 @@ mod tests {
             value
         );
     }
+
+    #[test]
+    fn verify_guards_end_to_end_full_chain_int() {
+        // Integration test that exercises ALL FOUR layers of the
+        // SMT exhaustiveness chain together. A regression in any
+        // single layer surfaces here:
+        //   - guard Expr lift (matrix.rs) — without it, the
+        //     translator sees `Bool(true)` and returns
+        //     is_exhaustive=true (false positive).
+        //   - bound_vars population — without it, the translator
+        //     drops `n` references to None → unknown_guards.
+        //   - witness Var enumeration (collect_var_names) —
+        //     without it, the bindings map is empty (`_` in
+        //     diagnostics).
+        //   - witness sort dispatch — without it for Int, the
+        //     Int extraction never fires (here it actually does
+        //     work since Int is the default arm; this test
+        //     specifically locks the positive case for
+        //     completeness).
+        //
+        // Scenario: a single guard `n > 0` over Int — clearly NOT
+        // exhaustive (n = 0, n = -1, … all uncovered). The full
+        // chain must report:
+        //   - is_exhaustive: false
+        //   - uncovered_witnesses: at least one with `n` bound to
+        //     a concrete non-positive integer
+        //   - unknown_guards: empty (the guard MUST translate)
+        use verum_ast::expr::{BinOp, ExprKind};
+        use verum_ast::literal::Literal;
+        use verum_ast::span::Span;
+        use verum_ast::ty::{Ident, Path};
+        use std::sync::Arc;
+        use verum_types::exhaustiveness::PatternColumn;
+
+        // Build the AST for `n > 0`: Binary(Gt, Path(n), Literal(0))
+        let span = Span::dummy();
+        let n_ref = Expr::new(
+            ExprKind::Path(Path::single(Ident::new(Text::from("n"), span))),
+            span,
+        );
+        let zero = Expr::new(
+            ExprKind::Literal(Literal::int(0, span)),
+            span,
+        );
+        let guard_expr = Expr::new(
+            ExprKind::Binary {
+                op: BinOp::Gt,
+                left: verum_common::Heap::new(n_ref),
+                right: verum_common::Heap::new(zero),
+            },
+            span,
+        );
+
+        let mut bound_vars = HashMap::new();
+        bound_vars.insert(Text::from("n"), Type::Int);
+
+        let guarded = GuardedPattern {
+            pattern_index: 0,
+            base_pattern: PatternColumn::Wildcard,
+            guard: Arc::new(guard_expr),
+            bound_vars,
+        };
+
+        let verifier = SmtGuardVerifier::with_defaults();
+        let env = TypeEnv::new();
+        let result = verifier.verify_guards(&[guarded], &Type::Int, &env);
+
+        // is_exhaustive must be false — n > 0 doesn't cover n=0 etc.
+        assert!(
+            !result.is_exhaustive,
+            "guard `n > 0` is NOT exhaustive over Int — chain regressed back to false-positive"
+        );
+        // The guard must translate (no unknown_guards) — this is
+        // the load-bearing check for Steps 1+2 of the chain.
+        assert!(
+            result.unknown_guards.is_empty(),
+            "guard `n > 0` MUST translate; unknown_guards={:?} means the bound_vars or guard-Expr lift regressed",
+            result.unknown_guards
+        );
+        // Witness extraction must surface AT LEAST one uncovered
+        // case with a concrete `n` binding. This is the load-
+        // bearing check for Steps 3+4.
+        assert!(
+            !result.uncovered_witnesses.is_empty(),
+            "uncovered witnesses must be non-empty; empty list means witness extraction regressed"
+        );
+        let witness = result.uncovered_witnesses.first().unwrap();
+        let n_value = witness.bindings.get(&Text::from("n")).expect(
+            "witness must contain a binding for `n` — empty bindings mean Step 3 \
+             (collect_var_names) or Step 4 (sort dispatch) regressed",
+        );
+        match n_value {
+            SmtValue::Int(v) => assert!(
+                *v <= 0,
+                "the witness for `!(n > 0)` must be a non-positive integer, got {}",
+                v
+            ),
+            other => panic!("Int scrutinee must yield SmtValue::Int, got {:?}", other),
+        }
+    }
 }
