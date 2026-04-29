@@ -220,19 +220,27 @@ impl SuggestionEngine for DefaultSuggestionEngine {
         };
 
         let mut suggestions: Vec<TacticSuggestion> = Vec::new();
+        let prop = goal.proposition.as_str();
+        let prop_lower = prop.to_lowercase();
+        let goal_head = head_token(prop);
 
-        // 1) Lemma fuzzy-match.
-        let goal_text = goal.proposition.as_str().to_lowercase();
+        // 1) Lemma match.  Score = base structural overlap (Jaccard
+        //    over identifier tokens) + head-match bonus.  The head-
+        //    bonus rewards lemmas whose signature head is the same
+        //    head as the goal — a textual proxy for typed-head
+        //    unification.
         for lemma in &view.available_lemmas {
-            let score = similarity_score(&goal_text, &lemma.signature.as_str().to_lowercase());
+            let score =
+                lemma_score(prop, lemma.signature.as_str(), &goal_head);
             if score > 0.0 {
                 suggestions.push(TacticSuggestion {
                     snippet: Text::from(format!("apply {};", lemma.name.as_str())),
                     rationale: Text::from(format!(
-                        "lemma {} ({}) shares {:.0}% structural overlap with the goal",
+                        "lemma {} ({}) — score {:.2}, signature {}",
                         lemma.name.as_str(),
                         lemma.lineage.as_str(),
-                        score * 100.0
+                        score,
+                        lemma.signature.as_str()
                     )),
                     score,
                     category: SuggestionCategory::LemmaApplication,
@@ -240,25 +248,138 @@ impl SuggestionEngine for DefaultSuggestionEngine {
             }
         }
 
-        // 2) State navigation for Π-shaped goals.
-        let goal_text_lower = goal.proposition.as_str().to_lowercase();
-        if goal_text_lower.starts_with("forall")
-            || goal_text_lower.starts_with("∀")
-            || goal_text_lower.contains("->")
-            || goal_text_lower.contains("→")
-        {
+        // 2) Shape-aware tactics (#102 hardening).  Each fires only
+        //    when the proposition's textual shape suggests it; each
+        //    carries a structured `rationale` citing why.
+
+        // 2a) Hypothesis match — `assumption` / `apply h`.
+        for h in &goal.hypotheses {
+            if h.ty.as_str() == prop {
+                suggestions.push(TacticSuggestion {
+                    snippet: Text::from("assumption;"),
+                    rationale: Text::from(format!(
+                        "hypothesis `{}` matches the goal exactly",
+                        h.name.as_str()
+                    )),
+                    score: 0.95,
+                    category: SuggestionCategory::TacticInvocation,
+                });
+                break;
+            }
+        }
+        // 2b) Goal head matches a hypothesis head — `apply <h>`.
+        for h in &goal.hypotheses {
+            let h_head = head_token(h.ty.as_str());
+            if h_head == goal_head && !goal_head.is_empty() {
+                suggestions.push(TacticSuggestion {
+                    snippet: Text::from(format!("apply {};", h.name.as_str())),
+                    rationale: Text::from(format!(
+                        "hypothesis `{}` has the same head as the goal (`{}`)",
+                        h.name.as_str(),
+                        goal_head
+                    )),
+                    score: 0.78,
+                    category: SuggestionCategory::TacticInvocation,
+                });
+            }
+        }
+        // 2c) Reflexivity — `x = x` / `Path A x x` / `x ≡ x`.
+        if looks_like_reflexive(prop) {
+            suggestions.push(TacticSuggestion {
+                snippet: Text::from("refl;"),
+                rationale: Text::from(
+                    "goal has shape `t = t` / `Path A t t` — discharged by reflexivity",
+                ),
+                score: 0.92,
+                category: SuggestionCategory::TacticInvocation,
+            });
+        }
+        // 2d) False-elim — `False` / `⊥` goal with a hypothesis in scope.
+        if looks_like_false(&prop_lower) && !goal.hypotheses.is_empty() {
+            suggestions.push(TacticSuggestion {
+                snippet: Text::from("contradiction;"),
+                rationale: Text::from(
+                    "goal is `False`/`⊥` and the local context is non-empty — \
+                     try contradiction (ex falso quodlibet)",
+                ),
+                score: 0.88,
+                category: SuggestionCategory::TacticInvocation,
+            });
+        }
+        // 2e) Top-level conjunction — `split` / `constructor`.
+        if has_top_level(prop, &["/\\", "∧", "&&"]) {
+            suggestions.push(TacticSuggestion {
+                snippet: Text::from("split;"),
+                rationale: Text::from(
+                    "goal is a top-level conjunction — split into separate sub-goals",
+                ),
+                score: 0.80,
+                category: SuggestionCategory::StateNavigation,
+            });
+        }
+        // 2f) Top-level disjunction — `left` / `right`.
+        if has_top_level(prop, &["\\/", "∨", "||"]) {
+            for (snippet, rationale, score) in [
+                (
+                    "left;",
+                    "goal is a disjunction — try the left branch first",
+                    0.45,
+                ),
+                (
+                    "right;",
+                    "goal is a disjunction — try the right branch",
+                    0.40,
+                ),
+            ] {
+                suggestions.push(TacticSuggestion {
+                    snippet: Text::from(snippet),
+                    rationale: Text::from(rationale),
+                    score,
+                    category: SuggestionCategory::StateNavigation,
+                });
+            }
+        }
+        // 2g) Inductive hypothesis — `induction <name>` when the
+        //     hypothesis's type head looks like an inductive
+        //     (Nat / List / Tree).
+        for h in &goal.hypotheses {
+            let h_head = head_token(h.ty.as_str());
+            if matches!(
+                h_head.as_str(),
+                "Nat" | "Int" | "List" | "Tree" | "Vec" | "Maybe"
+            ) {
+                suggestions.push(TacticSuggestion {
+                    snippet: Text::from(format!("induction {};", h.name.as_str())),
+                    rationale: Text::from(format!(
+                        "hypothesis `{}` has inductive type `{}` — try structural induction",
+                        h.name.as_str(),
+                        h_head
+                    )),
+                    score: 0.55,
+                    category: SuggestionCategory::StateNavigation,
+                });
+            }
+        }
+
+        // 3) State navigation for Π-shaped goals.  Promote when the
+        //    arrow is at the *top level* (parenthesis-aware via the
+        //    `has_top_level` helper) so `(A -> B) -> C` ranks intro
+        //    over a structurally-internal arrow.
+        let is_universal = prop_lower.starts_with("forall")
+            || prop_lower.starts_with("∀");
+        if is_universal || has_top_level(prop, &["->", "→"]) {
             suggestions.push(TacticSuggestion {
                 snippet: Text::from("intro h;"),
                 rationale: Text::from(
                     "goal is a Π-type / implication — introduce the hypothesis as `h`",
                 ),
-                score: 0.6,
+                score: 0.60,
                 category: SuggestionCategory::StateNavigation,
             });
         }
 
-        // 3) Default tactic fallbacks (lower score so they trail
-        //    lemma-matches but always available).
+        // 4) Default tactic fallbacks (lower score so they trail
+        //    lemma-matches + shape-aware suggestions; always available).
         suggestions.push(TacticSuggestion {
             snippet: Text::from("apply auto;"),
             rationale: Text::from("portfolio SMT + tactic-registry auto-search (verify=formal)"),
@@ -283,26 +404,127 @@ impl SuggestionEngine for DefaultSuggestionEngine {
         });
 
         // Rank: descending score, stable; truncate to max_results.
-        suggestions.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        suggestions.sort_by(|a, b| {
+            b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+        });
         suggestions.truncate(max_results);
         suggestions
     }
 }
 
+// =============================================================================
+// Lemma scoring + textual shape predicates (#102 hardening)
+// =============================================================================
+
+/// Lemma similarity score combining structural-overlap (Jaccard
+/// over identifier tokens) with a head-match bonus.  Range:
+/// `[0.0, 1.0]`.
+fn lemma_score(goal: &str, lemma_sig: &str, goal_head: &str) -> f64 {
+    let base = similarity_score(&goal.to_lowercase(), &lemma_sig.to_lowercase());
+    if base == 0.0 {
+        return 0.0;
+    }
+    let lemma_head = head_token(lemma_sig);
+    let head_bonus = if !goal_head.is_empty()
+        && !lemma_head.is_empty()
+        && goal_head.eq_ignore_ascii_case(&lemma_head)
+    {
+        0.25
+    } else {
+        0.0
+    };
+    (base + head_bonus).min(1.0)
+}
+
 /// Crude similarity score: shared-token count / max-token-count.
-/// Returns a value in `[0.0, 1.0]`.  V1 promotion: typed unification
-/// score against the goal's proposition.
+/// Returns a value in `[0.0, 1.0]`.
 fn similarity_score(a: &str, b: &str) -> f64 {
-    let tokens_a: std::collections::HashSet<&str> =
-        a.split(|c: char| !c.is_alphanumeric() && c != '_').filter(|s| !s.is_empty()).collect();
-    let tokens_b: std::collections::HashSet<&str> =
-        b.split(|c: char| !c.is_alphanumeric() && c != '_').filter(|s| !s.is_empty()).collect();
+    let tokens_a: std::collections::HashSet<&str> = a
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let tokens_b: std::collections::HashSet<&str> = b
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty())
+        .collect();
     if tokens_a.is_empty() || tokens_b.is_empty() {
         return 0.0;
     }
     let shared = tokens_a.intersection(&tokens_b).count();
     let denom = tokens_a.len().max(tokens_b.len());
     shared as f64 / denom as f64
+}
+
+/// First identifier-shaped token of `s`.  Used as a textual proxy
+/// for the typed head of a proposition (`P x y` → `P`,
+/// `Path A x y` → `Path`, `forall n, ...` → `forall`).
+fn head_token(s: &str) -> String {
+    let trimmed = s.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_');
+    let end = trimmed
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .unwrap_or(trimmed.len());
+    trimmed[..end].to_string()
+}
+
+/// True iff the proposition is textually `False` / `⊥` / `false`.
+fn looks_like_false(prop_lower: &str) -> bool {
+    let t = prop_lower.trim();
+    t == "false" || t == "⊥" || t == "bot" || t == "⊥;"
+}
+
+/// True iff the proposition has shape `t = t` / `Path A t t` /
+/// `t ≡ t` — recognises `=`, `≡`, and `Path A t t` shapes.  Best-
+/// effort textual heuristic; the kernel still rechecks before the
+/// suggestion is acted on.
+fn looks_like_reflexive(prop: &str) -> bool {
+    let s = prop.trim();
+    // ASCII / Unicode equality: `lhs = rhs` or `lhs ≡ rhs`.
+    for sep in [" ≡ ", " = "] {
+        if let Some((lhs, rhs)) = s.split_once(sep) {
+            if lhs.trim() == rhs.trim() && !lhs.trim().is_empty() {
+                return true;
+            }
+        }
+    }
+    // Path shape: `Path A x y` or `Path<A>(x, y)`.  Match when the
+    // last two whitespace-separated identifiers coincide.
+    if s.starts_with("Path") {
+        let tokens: Vec<&str> = s
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|t| !t.is_empty())
+            .collect();
+        // `["Path", "A", "x", "y"]` — last two are the endpoints.
+        if tokens.len() >= 4 {
+            return tokens[tokens.len() - 1] == tokens[tokens.len() - 2];
+        }
+    }
+    false
+}
+
+/// True iff `s` contains any of `needles` at depth 0 (parenthesis-
+/// aware).  Used to recognise top-level `/\` / `∨` / `->` operators
+/// for shape-aware suggestions.  Byte-safe: needle comparison runs
+/// against `s.as_bytes()` so multi-byte UTF-8 (∧, ∨, →) doesn't
+/// panic on char-boundary slicing.
+fn has_top_level(s: &str, needles: &[&str]) -> bool {
+    let bytes = s.as_bytes();
+    let mut depth: i32 = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 {
+            for n in needles {
+                let nb = n.as_bytes();
+                if i + nb.len() <= bytes.len() && &bytes[i..i + nb.len()] == nb {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 // =============================================================================
@@ -502,5 +724,226 @@ mod tests {
         .map(|c| c.name())
         .collect();
         assert_eq!(names.len(), 5);
+    }
+
+    // =========================================================================
+    // Shape-aware suggestions (#102 hardening)
+    // =========================================================================
+
+    fn view_with(prop: &str, hyps: Vec<(&str, &str)>) -> ProofStateView {
+        ProofStateView {
+            theorem_name: Text::from("t"),
+            goals: vec![ProofGoalSummary {
+                goal_id: 0,
+                proposition: Text::from(prop),
+                hypotheses: hyps
+                    .into_iter()
+                    .map(|(n, ty)| HypothesisSummary {
+                        name: Text::from(n),
+                        ty: Text::from(ty),
+                    })
+                    .collect(),
+                is_focused: true,
+            }],
+            available_lemmas: Vec::new(),
+            history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn head_token_pulls_first_identifier() {
+        assert_eq!(head_token("P x y"), "P");
+        assert_eq!(head_token("Path A x y"), "Path");
+        assert_eq!(head_token("forall n, P n"), "forall");
+        assert_eq!(head_token("(P x)"), "P");
+        assert_eq!(head_token(""), "");
+    }
+
+    #[test]
+    fn looks_like_reflexive_recognises_equality() {
+        assert!(looks_like_reflexive("x = x"));
+        assert!(looks_like_reflexive("a + b = a + b"));
+        assert!(looks_like_reflexive("foo ≡ foo"));
+        assert!(looks_like_reflexive("Path A x x"));
+        assert!(!looks_like_reflexive("x = y"));
+        assert!(!looks_like_reflexive("Path A x y"));
+    }
+
+    #[test]
+    fn has_top_level_paren_aware() {
+        assert!(has_top_level("A -> B", &["->"]));
+        assert!(has_top_level("(P x) /\\ (Q y)", &["/\\"]));
+        // Nested arrow inside parens does NOT count as top-level.
+        assert!(!has_top_level("(A -> B)", &["->"]));
+    }
+
+    #[test]
+    fn suggests_assumption_when_hypothesis_matches_goal() {
+        let v = view_with("P x", vec![("h", "P x")]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "assumption;"));
+    }
+
+    #[test]
+    fn suggests_apply_h_when_hypothesis_head_matches_goal_head() {
+        let v = view_with("P x y", vec![("h", "P a b")]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "apply h;"));
+    }
+
+    #[test]
+    fn suggests_refl_when_goal_is_x_eq_x() {
+        let v = view_with("x = x", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "refl;"));
+    }
+
+    #[test]
+    fn suggests_refl_for_path_a_x_x() {
+        let v = view_with("Path Nat zero zero", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "refl;"));
+    }
+
+    #[test]
+    fn suggests_contradiction_when_false_with_hypothesis() {
+        let v = view_with("False", vec![("h", "P /\\ ~P")]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "contradiction;"));
+    }
+
+    #[test]
+    fn does_not_suggest_contradiction_when_no_hypothesis() {
+        let v = view_with("False", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(!s.iter().any(|x| x.snippet.as_str() == "contradiction;"));
+    }
+
+    #[test]
+    fn suggests_split_for_top_level_conjunction() {
+        let v = view_with("P /\\ Q", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "split;"));
+    }
+
+    #[test]
+    fn suggests_split_for_unicode_conjunction() {
+        let v = view_with("P ∧ Q", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "split;"));
+    }
+
+    #[test]
+    fn does_not_split_when_conjunction_is_inside_parens() {
+        let v = view_with("(P /\\ Q) -> R", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(!s.iter().any(|x| x.snippet.as_str() == "split;"));
+    }
+
+    #[test]
+    fn suggests_left_and_right_for_top_level_disjunction() {
+        let v = view_with("P \\/ Q", vec![]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "left;"));
+        assert!(s.iter().any(|x| x.snippet.as_str() == "right;"));
+    }
+
+    #[test]
+    fn suggests_induction_for_inductive_hypothesis() {
+        let v = view_with("P n", vec![("n", "Nat")]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(s.iter().any(|x| x.snippet.as_str() == "induction n;"));
+    }
+
+    #[test]
+    fn does_not_suggest_induction_for_non_inductive_hypothesis() {
+        let v = view_with("P x", vec![("x", "Bool")]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        assert!(!s
+            .iter()
+            .any(|x| x.snippet.as_str() == "induction x;"));
+    }
+
+    #[test]
+    fn assumption_outranks_default_tactics() {
+        // The exact-hypothesis match (score 0.95) must come before
+        // the auto/lia/decide fallbacks (score ≤ 0.20).
+        let v = view_with("P x", vec![("h", "P x")]);
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        let assume_pos = s
+            .iter()
+            .position(|x| x.snippet.as_str() == "assumption;")
+            .unwrap();
+        let auto_pos = s
+            .iter()
+            .position(|x| x.snippet.as_str().contains("auto"))
+            .unwrap();
+        assert!(
+            assume_pos < auto_pos,
+            "assumption ({}) must rank before auto ({})",
+            assume_pos,
+            auto_pos
+        );
+    }
+
+    #[test]
+    fn lemma_score_head_match_bonus_lifts_targeted_lemma() {
+        // Two lemmas with the same Jaccard overlap on shared tokens,
+        // but only one's head matches the goal head.  The head-match
+        // lemma must rank higher.
+        let v = ProofStateView {
+            theorem_name: Text::from("t"),
+            goals: vec![ProofGoalSummary {
+                goal_id: 0,
+                proposition: Text::from("P x y"),
+                hypotheses: vec![],
+                is_focused: true,
+            }],
+            available_lemmas: vec![
+                LemmaSummary {
+                    name: Text::from("p_intro"),
+                    signature: Text::from("P x y"),
+                    lineage: Text::from("core"),
+                },
+                LemmaSummary {
+                    name: Text::from("q_intro"),
+                    signature: Text::from("Q x y"),
+                    lineage: Text::from("core"),
+                },
+            ],
+            history: Vec::new(),
+        };
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        let p_pos = s
+            .iter()
+            .position(|x| x.snippet.as_str().contains("p_intro"))
+            .unwrap();
+        let q_pos = s
+            .iter()
+            .position(|x| x.snippet.as_str().contains("q_intro"))
+            .unwrap();
+        assert!(
+            p_pos < q_pos,
+            "head-match lemma must rank above non-head-match"
+        );
+    }
+
+    #[test]
+    fn task_102_shape_aware_suggestions_carry_structured_rationale() {
+        // Pin: every shape-aware suggestion carries a non-empty
+        // rationale that cites *why* it fired.  Empty rationales
+        // would defeat the IDE's hover-explanation panel.
+        let v = view_with(
+            "x = x",
+            vec![("h", "P x"), ("n", "Nat")],
+        );
+        let s = DefaultSuggestionEngine::new().suggest(&v, 20);
+        for sug in &s {
+            assert!(
+                !sug.rationale.as_str().is_empty(),
+                "every suggestion must carry a non-empty rationale: {:?}",
+                sug.snippet.as_str()
+            );
+        }
     }
 }
