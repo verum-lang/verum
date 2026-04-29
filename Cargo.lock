@@ -5135,6 +5135,7 @@ dependencies = [
  "verum_llvm",
  "verum_llvm_sys",
  "verum_lsp",
+ "verum_modules",
  "verum_parser",
  "verum_smt",
  "verum_types",
