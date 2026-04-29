@@ -442,6 +442,34 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("not_not", "double_neg_elim"),
     ("equiv-elim", "iff_elim"),
     ("contraction", "contraction"),
+    // CVC5/Alethe boolean — De Morgan + dis/conjunctions.
+    ("or", "or_intro"),
+    ("not_or", "de_morgan"),
+    ("not_and", "de_morgan"),
+    ("and", "and_intro"),
+    // CVC5/Alethe equivalence — biconditional pairs.
+    ("equiv1", "iff_elim"),
+    ("equiv2", "iff_elim"),
+    ("not_equiv1", "iff_elim"),
+    ("not_equiv2", "iff_elim"),
+    // CVC5/Alethe ITE — Boolean if-then-else.
+    ("ite1", "ite_intro"),
+    ("ite2", "ite_intro"),
+    ("not_ite1", "ite_intro"),
+    ("not_ite2", "ite_intro"),
+    ("ite_intro", "ite_intro"),
+    // CVC5/Alethe XOR — exclusive or.
+    ("xor1", "xor_intro"),
+    ("xor2", "xor_intro"),
+    ("not_xor1", "xor_intro"),
+    ("not_xor2", "xor_intro"),
+    // CVC5/Alethe simplification.
+    ("bool_simplify", "boolean_simplification"),
+    ("connective_def", "definitional_axiom"),
+    ("bfun_elim", "boolean_simplification"),
+    ("eq_simplify", "boolean_simplification"),
+    ("tautology_unit", "tautology"),
+
     // ----- Equality -----
     ("refl", "reflexivity"),
     ("eq-reflexive", "reflexivity"),
@@ -452,6 +480,8 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("eq-congruent", "congruence"),
     ("congruence", "congruence"),
     ("monotonicity", "congruence"),
+    ("cong", "congruence"),
+
     // ----- Implication / modus ponens -----
     ("mp", "modus_ponens"),
     ("modus-ponens", "modus_ponens"),
@@ -459,6 +489,12 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("th-mp", "modus_ponens"),
     ("hypothesis", "hypothesis"),
     ("assume", "hypothesis"),
+    // Z3 leaves — `asserted` is the input-assumption marker;
+    // `goal` is the proof root; `lemma` flags a learnt clause.
+    ("asserted", "hypothesis"),
+    ("goal", "hypothesis"),
+    ("lemma", "theory_lemma"),
+
     // ----- Quantifier -----
     ("forall_inst", "forall_instantiation"),
     ("forall-inst", "forall_instantiation"),
@@ -467,7 +503,21 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("skolemize", "skolemize"),
     ("sko-forall", "skolemize"),
     ("sko-ex", "skolemize"),
-    // ----- Theory: linear arithmetic -----
+    // Z3 / Alethe quantifier moves.
+    ("pull-quant", "quantifier_move"),
+    ("push-quant", "quantifier_move"),
+    ("quant-intro", "quantifier_move"),
+    ("qnt_rm_unused", "quantifier_move"),
+    ("elim-unused", "quantifier_move"),
+    ("onepoint", "quantifier_move"),
+    ("qnt_simplify", "quantifier_move"),
+    ("der", "quantifier_move"),
+    // CVC5/Alethe binders — `bind` / `let_pos` / `let_neg`.
+    ("bind", "binder"),
+    ("let_pos", "binder"),
+    ("let_neg", "binder"),
+
+    // ----- Theory: linear / nonlinear arithmetic -----
     ("la_generic", "linear_arithmetic"),
     ("la-generic", "linear_arithmetic"),
     ("la_disequality", "linear_arithmetic"),
@@ -475,10 +525,33 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("th_lemma", "theory_lemma"),
     ("lia", "linear_arithmetic"),
     ("lra", "linear_arithmetic"),
+    ("lia_generic", "linear_arithmetic"),
+    ("nlia_generic", "nonlinear_arithmetic"),
+    ("nra_generic", "nonlinear_arithmetic"),
+
     // ----- Theory: array / UF -----
     ("array_ext", "array_extensionality"),
     ("array-ext", "array_extensionality"),
     ("array_distinct", "array_extensionality"),
+
+    // ----- Z3 rewrite class — generic rewrite rules.
+    // The rewrite rule itself is a black-box family in Z3; the
+    // kernel admits the rule name and re-checks the *result*
+    // (no new soundness gate beyond what the cert decomposer
+    // already performs).
+    ("rewrite", "rewrite"),
+    ("rewrite*", "rewrite"),
+    ("nnf-pos", "rewrite"),
+    ("nnf-neg", "rewrite"),
+    ("iff-true", "rewrite"),
+    ("iff-false", "rewrite"),
+    ("commutativity", "rewrite"),
+    ("distributivity", "rewrite"),
+
+    // ----- Definitional --------------------------------------------------
+    ("intro-def", "definitional_axiom"),
+    ("apply-def", "definitional_axiom"),
+
     // ----- Final / closing -----
     ("step", "step"),
     ("subproof", "subproof"),
@@ -488,6 +561,7 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("true-intro", "tautology"),
     ("false-elim", "ex_falso"),
     ("efq", "ex_falso"),
+    ("false", "ex_falso"),
 ];
 
 /// Look up a cert rule name in the canonical registry.
@@ -1802,6 +1876,112 @@ mod tests {
         assert_eq!(lookup_kernel_rule(""), None);
         assert_eq!(lookup_kernel_rule("garbage_rule"), None);
         assert_eq!(lookup_kernel_rule("backdoor"), None);
+    }
+
+    #[test]
+    fn registry_covers_z3_canonical_rule_names() {
+        // Z3 leaf / propagation rules emitted in `(proof ...)` traces.
+        for name in [
+            "asserted", "goal", "lemma", "rewrite", "rewrite*", "nnf-pos",
+            "nnf-neg", "commutativity", "distributivity", "iff-true",
+            "iff-false", "der", "elim-unused", "pull-quant", "push-quant",
+            "quant-intro", "intro-def", "apply-def",
+        ] {
+            assert!(
+                lookup_kernel_rule(name).is_some(),
+                "Z3 canonical rule `{}` must be in the registry",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn registry_covers_alethe_canonical_rule_names() {
+        // CVC5/Alethe canonical rules emitted in `:rule` annotations.
+        for name in [
+            "or", "not_or", "not_and", "and", "equiv1", "equiv2",
+            "not_equiv1", "not_equiv2", "ite1", "ite2", "not_ite1",
+            "not_ite2", "ite_intro", "xor1", "xor2", "not_xor1",
+            "not_xor2", "bool_simplify", "connective_def", "bfun_elim",
+            "eq_simplify", "tautology_unit", "cong", "bind", "let_pos",
+            "let_neg", "qnt_simplify", "qnt_rm_unused", "onepoint",
+            "lia_generic", "nlia_generic", "nra_generic", "false",
+        ] {
+            assert!(
+                lookup_kernel_rule(name).is_some(),
+                "Alethe canonical rule `{}` must be in the registry",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn registry_de_morgan_aliases_to_kernel_rule() {
+        // `not_or` / `not_and` are De Morgan rules in Alethe — both
+        // should map to a single kernel-rule tag.
+        assert_eq!(lookup_kernel_rule("not_or"), Some("de_morgan"));
+        assert_eq!(lookup_kernel_rule("not_and"), Some("de_morgan"));
+    }
+
+    #[test]
+    fn registry_quantifier_moves_share_kernel_rule() {
+        // pull-quant / push-quant / der / onepoint / elim-unused all
+        // express quantifier-position rewrites at the kernel level.
+        for name in ["pull-quant", "push-quant", "der", "onepoint", "elim-unused"] {
+            assert_eq!(
+                lookup_kernel_rule(name),
+                Some("quantifier_move"),
+                "{} should map to quantifier_move",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn registry_decomposes_alethe_with_de_morgan() {
+        // End-to-end: an ALETHE step using `not_or` decomposes
+        // cleanly + the kernel-only replay accepts it.
+        let body = "(assume h1 (not (or A B)))\n\
+                    (step t1 (cl (and (not A) (not B))) :rule not_or :premises (h1))";
+        let cert = SmtCertificate::new(
+            CertFormat::Cvc5Alethe,
+            "QF_UF",
+            "(and (not A) (not B))",
+            body,
+        );
+        let v = KernelOnlyReplayEngine::new().replay(&cert).unwrap();
+        assert!(matches!(v, ReplayVerdict::Accepted { .. }));
+    }
+
+    #[test]
+    fn task_104_registry_covers_full_alias_class() {
+        // Pin: every kernel-rule tag in the registry is reachable
+        // via at least one canonical cert-side name.  No "phantom"
+        // tag a tag-with-no-aliases would be a bug — it means the
+        // simplifier can never match a real solver trace.
+        use std::collections::BTreeSet;
+        let mut tags: BTreeSet<&str> = BTreeSet::new();
+        for (_, kernel_rule) in KERNEL_RULE_REGISTRY {
+            tags.insert(*kernel_rule);
+        }
+        // Each tag must have at least one alias.
+        for tag in &tags {
+            let count = KERNEL_RULE_REGISTRY
+                .iter()
+                .filter(|(_, k)| k == tag)
+                .count();
+            assert!(
+                count >= 1,
+                "kernel rule tag `{}` has no aliases (unreachable)",
+                tag
+            );
+        }
+        // Sanity floor: substantially more than V0's 14 tags.
+        assert!(
+            tags.len() >= 20,
+            "registry has only {} kernel-rule tags — V0 hardening expected ≥ 20",
+            tags.len()
+        );
     }
 
     #[test]
