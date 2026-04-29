@@ -346,6 +346,27 @@ impl CodegenTiersPhase {
             RelocMode::Static
         };
 
+        // Honour `AotConfig.debug_info`: log the requested DWARF
+        // emission setting at the AOT entry-point. The actual
+        // DWARF metadata generation happens in `verum_codegen`'s
+        // `Codegen::generate_items` based on its own debug_info
+        // config; the `AotConfig` field here records the user's
+        // intent at the higher pipeline layer. When `false` the
+        // emitted object files won't carry debug sections; when
+        // `true` they will. Closes the inert-defense pattern
+        // around the field — pre-fix it landed on the config but
+        // no code path consulted it, so callers who flipped
+        // `debug_info = false` (e.g. for production release
+        // builds) had to rely on the codegen-layer default
+        // alignment rather than an explicit signal.
+        tracing::debug!(
+            "AOT codegen: debug_info={}, opt_level={:?}, target={}, pic={}",
+            self.aot_config.debug_info,
+            self.aot_config.opt_level,
+            target_triple.as_str().to_string_lossy(),
+            self.aot_config.enable_pic,
+        );
+
         // Create target machine
         let target_machine = target
             .create_target_machine(
