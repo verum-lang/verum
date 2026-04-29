@@ -73,6 +73,10 @@ pub mod benchmark;
 /// cross-validation.  Kernel-only structural check + per-backend
 /// replay + multi-backend consensus gate.
 pub mod cert_replay;
+/// `verum cog-registry` subcommand — interact with the cog
+/// distribution registry: publish / lookup / search / verify /
+/// multi-mirror consensus check.
+pub mod cog_registry;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

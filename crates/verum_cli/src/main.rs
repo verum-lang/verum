@@ -1031,6 +1031,26 @@ enum Commands {
         format: String,
     },
 
+    /// Cog distribution registry (#82) — publish, lookup, search,
+    /// verify reproducibility envelopes, and check multi-mirror
+    /// consensus.  Per-cog reproducibility hash chain (sources +
+    /// build env + output) plus per-cog attestation kinds
+    /// (verified_ci / honesty / coord / cross_format /
+    /// framework_soundness).  Immutable releases.
+    ///
+    /// Subcommands:
+    ///   verum cog-registry publish    --manifest FILE [--root DIR] [--registry-id ID] [--output ...]
+    ///   verum cog-registry lookup     --name N --version V [--root DIR] [--registry-id ID] [--output ...]
+    ///   verum cog-registry search     [--name SUB] [--paper-doi D] [--framework F] [--theorem T]
+    ///                                 [--require-attestation A] [--root DIR] [--registry-id ID] [--output ...]
+    ///   verum cog-registry verify     --name N --version V [--root DIR] [--registry-id ID] [--output ...]
+    ///   verum cog-registry consensus  --name N --version V --mirror DIR [--mirror DIR]… [--output ...]
+    ///   verum cog-registry seed-demo  [--output ...]
+    CogRegistry {
+        #[clap(subcommand)]
+        sub: CogRegistrySub,
+    },
+
     /// SMT certificate replay surface (#81) — multi-backend
     /// cross-validation with kernel-only structural baseline.
     /// The kernel-only check is what makes SMT solvers external
@@ -1562,6 +1582,79 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum CogRegistrySub {
+    Publish {
+        #[clap(long, value_name = "FILE")]
+        manifest: PathBuf,
+        #[clap(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        #[clap(long, value_name = "ID", default_value = "local")]
+        registry_id: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    Lookup {
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        version: String,
+        #[clap(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        #[clap(long, value_name = "ID", default_value = "local")]
+        registry_id: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    Search {
+        #[clap(long, value_name = "SUBSTRING")]
+        name: Option<String>,
+        #[clap(long, value_name = "DOI")]
+        paper_doi: Option<String>,
+        #[clap(long, value_name = "TAG")]
+        framework: Option<String>,
+        #[clap(long, value_name = "NAME")]
+        theorem: Option<String>,
+        #[clap(long, value_name = "KIND")]
+        require_attestation: Option<String>,
+        #[clap(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        #[clap(long, value_name = "ID", default_value = "local")]
+        registry_id: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    Verify {
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        version: String,
+        #[clap(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+        #[clap(long, value_name = "ID", default_value = "local")]
+        registry_id: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    Consensus {
+        #[clap(long)]
+        name: String,
+        #[clap(long)]
+        version: String,
+        /// Repeatable: each mirror is a separate registry root.
+        #[clap(long, value_name = "DIR")]
+        mirror: Vec<PathBuf>,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    /// Seed an in-process registry with a demo cog and dump its
+    /// metadata.  Useful for the docs generator + tutorial walks.
+    SeedDemo {
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum CertReplaySub {
     Replay {
@@ -3078,6 +3171,73 @@ fn run_command(cli: Cli) -> Result<()> {
             out,
             format,
         } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
+        Commands::CogRegistry { sub } => match sub {
+            CogRegistrySub::Publish {
+                manifest,
+                root,
+                registry_id,
+                output,
+            } => commands::cog_registry::run_publish(
+                &manifest,
+                root.as_ref(),
+                &registry_id,
+                &output,
+            ),
+            CogRegistrySub::Lookup {
+                name,
+                version,
+                root,
+                registry_id,
+                output,
+            } => commands::cog_registry::run_lookup(
+                &name,
+                &version,
+                root.as_ref(),
+                &registry_id,
+                &output,
+            ),
+            CogRegistrySub::Search {
+                name,
+                paper_doi,
+                framework,
+                theorem,
+                require_attestation,
+                root,
+                registry_id,
+                output,
+            } => commands::cog_registry::run_search(
+                name.as_deref(),
+                paper_doi.as_deref(),
+                framework.as_deref(),
+                theorem.as_deref(),
+                require_attestation.as_deref(),
+                root.as_ref(),
+                &registry_id,
+                &output,
+            ),
+            CogRegistrySub::Verify {
+                name,
+                version,
+                root,
+                registry_id,
+                output,
+            } => commands::cog_registry::run_verify(
+                &name,
+                &version,
+                root.as_ref(),
+                &registry_id,
+                &output,
+            ),
+            CogRegistrySub::Consensus {
+                name,
+                version,
+                mirror,
+                output,
+            } => commands::cog_registry::run_consensus(&name, &version, &mirror, &output),
+            CogRegistrySub::SeedDemo { output } => {
+                commands::cog_registry::run_seed_demo(&output)
+            }
+        },
         Commands::CertReplay { sub } => match sub {
             CertReplaySub::Replay {
                 backend,

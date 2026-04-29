@@ -132,6 +132,12 @@ pub mod benchmark;
 /// (the trust-boundary anchor that catches tampered certs without
 /// trusting external solvers) + mock-backed per-backend engines.
 pub mod cert_replay;
+/// Cog distribution registry (#82) — reproducibility chain +
+/// multi-mirror trust model.  Single trait boundary
+/// [`cog_registry::RegistryClient`] + memory-backed +
+/// filesystem-backed reference impls + `MultiMirrorClient`
+/// composite that requires consensus across mirrors.
+pub mod cog_registry;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
