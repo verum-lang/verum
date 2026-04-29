@@ -4820,26 +4820,62 @@ impl ProofValidator {
             }
 
             // Forall Elimination: ∀x. P(x) ⊢ P(t)
+            //
+            // Soundness gate: the premise MUST be syntactically a
+            // universal quantifier. Pre-fix the rule accepted any
+            // premise + any expected — `Ok(expected.clone())` made
+            // the downstream `expr_eq(derived, expected)` check
+            // trivially true, mirroring the trust-unknown-rules
+            // soundness leak fixed in 8429bd4e for the catch-all
+            // arm.
+            //
+            // Full instantiation checking (verifying expected = body[x := t]
+            // for some t) requires higher-order matching that this
+            // module does not implement; the unification check is
+            // tracked separately. The current gate catches the most
+            // common misuse (forall_elim called on a non-quantified
+            // premise) which the pass-through fallback masked.
             "forall_elim" | "univ_elim" => {
                 if premises.is_empty() {
                     return Err(ValidationError::ValidationFailed {
                         message: "forall_elim requires at least 1 premise".into(),
                     });
                 }
-                // The universal quantifier is the first premise
-                // The instantiation term is implicit from expected
-                // We accept the expected if it's a valid instantiation
+                if !matches!(premises[0].kind, ExprKind::Forall { .. }) {
+                    return Err(ValidationError::ValidationFailed {
+                        message: format!(
+                            "forall_elim requires a universally-quantified premise (∀x. P(x)); \
+                             got {:?}",
+                            std::mem::discriminant(&premises[0].kind)
+                        )
+                        .into(),
+                    });
+                }
                 Ok(expected.clone())
             }
 
             // Exists Introduction: P(t) ⊢ ∃x. P(x)
+            //
+            // Symmetric soundness gate to forall_elim above: the
+            // expected MUST be syntactically an existential
+            // quantifier. Without this gate the rule accepted any
+            // premise + any expected.
             "exists_intro" | "exist_intro" => {
                 if premises.is_empty() {
                     return Err(ValidationError::ValidationFailed {
                         message: "exists_intro requires at least 1 premise".into(),
                     });
                 }
-                // Accept expected if it's an existential containing the premise
+                if !matches!(expected.kind, ExprKind::Exists { .. }) {
+                    return Err(ValidationError::ValidationFailed {
+                        message: format!(
+                            "exists_intro requires an existentially-quantified expected (∃x. P(x)); \
+                             got {:?}",
+                            std::mem::discriminant(&expected.kind)
+                        )
+                        .into(),
+                    });
+                }
                 Ok(expected.clone())
             }
 
