@@ -359,6 +359,18 @@ struct ValidatorConfig {
     /// true) so users know which functions are dragging their
     /// editor latency.
     slow_threshold: Duration,
+    /// Mirror of `LspConfig::smt_solver` — the user-facing
+    /// `verum.lsp.smtSolver` setting flows through here so
+    /// every diagnostic produced by the validator carries the
+    /// configured solver tag in its `RefinementDiagnostic.smt_solver`
+    /// field. Pre-fix the LspConfig field was inert at the
+    /// validator boundary: clients that set
+    /// `verum.lsp.smtSolver = "cvc5"` saw `smt_solver: Z3` in
+    /// every diagnostic regardless. Auto is normalized to Z3
+    /// here (the validator's preferred default); a future
+    /// capability-router enhancement could route Auto through
+    /// `verum_smt::backend_switcher` for per-goal selection.
+    smt_solver: SmtSolver,
 }
 
 impl Default for ValidatorConfig {
@@ -372,6 +384,7 @@ impl Default for ValidatorConfig {
             cache_enabled: true,
             cost_warnings_enabled: true,
             slow_threshold: Duration::from_millis(5_000),
+            smt_solver: SmtSolver::Z3,
         }
     }
 }
@@ -403,6 +416,21 @@ impl RefinementValidator {
         guard.show_counterexamples = cfg.show_counterexamples;
         guard.max_counterexample_traces = cfg.max_counterexample_traces;
         guard.cache_enabled = cfg.cache_validation_results;
+        // Wire `LspConfig.smt_solver` (the user-facing
+        // verum.lsp.smtSolver setting) so every diagnostic
+        // produced by the validator carries the configured
+        // solver tag in its `RefinementDiagnostic.smt_solver`
+        // field. Pre-fix the choice was surfaced in the
+        // initialize handler's tracing log but never reached
+        // the validator — clients that set
+        // `verum.lsp.smtSolver = "cvc5"` saw `smt_solver: Z3`
+        // in every diagnostic regardless. Auto is normalized
+        // to Z3 here (validator's preferred default).
+        guard.smt_solver = match cfg.smt_solver {
+            crate::lsp_config::SmtSolverChoice::Z3 => SmtSolver::Z3,
+            crate::lsp_config::SmtSolverChoice::Cvc5 => SmtSolver::CVC5,
+            crate::lsp_config::SmtSolverChoice::Auto => SmtSolver::Z3,
+        };
         // Cost-warning gates were inert before this wire-up — the
         // LspConfig fields existed and were JSON-parseable from
         // initializationOptions, but no consumer ever read them.
@@ -1328,7 +1356,11 @@ impl RefinementValidator {
             quick_fixes,
             related_information: List::new(),
             validation_time_ms: elapsed.as_millis() as u64,
-            smt_solver: SmtSolver::Z3,
+            // Honour the configured solver choice so diagnostics
+            // tag the actual backend that produced the verdict.
+            // Pre-fix this was hardcoded to Z3 regardless of the
+            // user's `verum.lsp.smtSolver` setting.
+            smt_solver: self.config.read().smt_solver,
         }
     }
 
@@ -3222,5 +3254,50 @@ mod tests {
         let result = validator.infer_refinement(params).await;
         // File doesn't exist, so we expect an error
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn smt_solver_choice_z3_propagates_to_diagnostics() {
+        // Pin: when LspConfig.smt_solver = Z3, the validator's
+        // ValidatorConfig.smt_solver is set to Z3 — every diagnostic
+        // produced by the validator carries Z3 in its smt_solver
+        // field. Checked via the apply_config side-effect.
+        let validator = RefinementValidator::new();
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.smt_solver = crate::lsp_config::SmtSolverChoice::Z3;
+        validator.apply_config(&cfg);
+        let stance = validator.config.read().smt_solver;
+        assert_eq!(stance, SmtSolver::Z3);
+    }
+
+    #[test]
+    fn smt_solver_choice_cvc5_propagates_to_diagnostics() {
+        // Pin: when LspConfig.smt_solver = Cvc5, the validator's
+        // ValidatorConfig.smt_solver is set to CVC5. Closes the
+        // inert-defense pattern around verum.lsp.smtSolver — clients
+        // that set this in initialization options now see CVC5
+        // tagged on every diagnostic instead of the hardcoded Z3.
+        let validator = RefinementValidator::new();
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.smt_solver = crate::lsp_config::SmtSolverChoice::Cvc5;
+        validator.apply_config(&cfg);
+        let stance = validator.config.read().smt_solver;
+        assert_eq!(stance, SmtSolver::CVC5);
+    }
+
+    #[test]
+    fn smt_solver_choice_auto_normalizes_to_z3() {
+        // Pin: Auto is normalized to Z3 (the validator's preferred
+        // default when no explicit preference exists). A future
+        // capability-router enhancement could route Auto through
+        // verum_smt::backend_switcher for per-goal selection — the
+        // narrow Z3 normalization here is the explicit current
+        // semantic.
+        let validator = RefinementValidator::new();
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.smt_solver = crate::lsp_config::SmtSolverChoice::Auto;
+        validator.apply_config(&cfg);
+        let stance = validator.config.read().smt_solver;
+        assert_eq!(stance, SmtSolver::Z3);
     }
 }
