@@ -718,7 +718,18 @@ pub fn run_common_pipeline(
     // see the `verify_mode` rationale in the PhaseContext setup
     // above for why these two flags are sibling gates.
     if config.verify_contracts || config.check_refinements {
-        let mut contract_phase = contract_verification::ContractVerificationPhase::new();
+        // Forward `CommonPipelineConfig.smt_timeout_ms` to the
+        // contract-verification phase so the documented session-
+        // level SMT budget actually constrains every Z3 check
+        // during contract / refinement verification. Without this
+        // wiring the field was inert: the phase always defaulted
+        // to its own 30 000 ms cap regardless of caller intent.
+        let phase_config = contract_verification::VerificationConfig {
+            timeout_ms: config.smt_timeout_ms,
+            ..contract_verification::VerificationConfig::default()
+        };
+        let mut contract_phase =
+            contract_verification::ContractVerificationPhase::with_config(phase_config);
         if let Some(stats) = config.routing_stats.clone() {
             contract_phase = contract_phase.with_routing_stats(stats);
         }
