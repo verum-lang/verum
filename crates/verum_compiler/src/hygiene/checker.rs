@@ -890,14 +890,62 @@ impl HygieneChecker {
     // Utility Methods
     // ========================================================================
 
-    /// Get the accumulated violations
+    /// Get the accumulated violations (raw, no filtering)
     pub fn violations(&self) -> &HygieneViolations {
         &self.violations
     }
 
-    /// Take the violations out
+    /// Take the violations out (raw, no filtering)
     pub fn take_violations(&mut self) -> HygieneViolations {
         std::mem::take(&mut self.violations)
+    }
+
+    /// Get accumulated violations filtered per `config.include_warnings`.
+    ///
+    /// When `include_warnings = false`, recoverable (warning-class)
+    /// violations are dropped from the returned collection — only
+    /// fatal violations remain.  When `true` (the default), every
+    /// violation passes through unchanged.
+    ///
+    /// Pre-fix `include_warnings` was an inert config field — the
+    /// CheckerConfig declared it and presets toggled it, but no
+    /// production code path consulted it, leaving the documented
+    /// "include warning-level issues" contract a no-op regardless
+    /// of the flag's value.  This accessor closes that gap by
+    /// giving callers an explicit, contractually-honest filtered
+    /// view.
+    ///
+    /// "Recoverable" is defined by `HygieneViolation::is_recoverable()`
+    /// — currently `ShadowConflict` is recoverable; everything else
+    /// is fatal.  The recovery classification matches the existing
+    /// `is_fatal()` taxonomy and is the same predicate
+    /// `allow_shadow_recovery` keys on for in-flight handling.
+    pub fn filtered_violations(&self) -> Vec<HygieneViolation> {
+        if self.config.include_warnings {
+            self.violations.iter().cloned().collect()
+        } else {
+            self.violations
+                .iter()
+                .filter(|v| !v.is_recoverable())
+                .cloned()
+                .collect()
+        }
+    }
+
+    /// Take the violations out, filtered per `config.include_warnings`.
+    /// Same semantics as `filtered_violations` but consumes the
+    /// internal collection; the returned `Vec` is the filtered
+    /// subset, the rest is dropped.
+    pub fn take_filtered_violations(&mut self) -> Vec<HygieneViolation> {
+        let raw = std::mem::take(&mut self.violations);
+        if self.config.include_warnings {
+            raw.into_vec()
+        } else {
+            raw.into_vec()
+                .into_iter()
+                .filter(|v| !v.is_recoverable())
+                .collect()
+        }
     }
 
     /// Get the statistics
@@ -1025,5 +1073,86 @@ mod tests {
 
         assert!(!checker.config.strict_mode);
         assert!(checker.config.allow_shadow_recovery);
+    }
+
+    fn push_recoverable(checker: &mut HygieneChecker) {
+        let ident = super::super::scope::HygienicIdent::unhygienic(
+            Text::from("x"),
+            Span::default(),
+        );
+        checker.violations.push(HygieneViolation::ShadowConflict {
+            shadowed: ident,
+            introduced_at: Span::default(),
+        });
+    }
+
+    fn push_fatal(checker: &mut HygieneChecker) {
+        checker.violations.push(HygieneViolation::UnquoteOutsideQuote {
+            span: Span::default(),
+        });
+    }
+
+    #[test]
+    fn test_filtered_violations_drops_warnings_when_disabled() {
+        let context = HygieneContext::new();
+        let config = CheckerConfig {
+            strict_mode: false,
+            allow_shadow_recovery: true,
+            max_violations: 50,
+            include_warnings: false,
+        };
+        let mut checker = HygieneChecker::new(context, config);
+
+        push_recoverable(&mut checker);
+        push_fatal(&mut checker);
+
+        let filtered = checker.filtered_violations();
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(
+            filtered[0],
+            HygieneViolation::UnquoteOutsideQuote { .. }
+        ));
+        assert_eq!(checker.violations().iter().count(), 2);
+    }
+
+    #[test]
+    fn test_filtered_violations_passes_warnings_when_enabled() {
+        let context = HygieneContext::new();
+        let config = CheckerConfig {
+            strict_mode: false,
+            allow_shadow_recovery: true,
+            max_violations: 50,
+            include_warnings: true,
+        };
+        let mut checker = HygieneChecker::new(context, config);
+
+        push_recoverable(&mut checker);
+        push_fatal(&mut checker);
+
+        let filtered = checker.filtered_violations();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_take_filtered_violations_consumes_and_filters() {
+        let context = HygieneContext::new();
+        let config = CheckerConfig {
+            strict_mode: false,
+            allow_shadow_recovery: true,
+            max_violations: 50,
+            include_warnings: false,
+        };
+        let mut checker = HygieneChecker::new(context, config);
+
+        push_recoverable(&mut checker);
+        push_fatal(&mut checker);
+
+        let taken = checker.take_filtered_violations();
+        assert_eq!(taken.len(), 1);
+        assert!(matches!(
+            taken[0],
+            HygieneViolation::UnquoteOutsideQuote { .. }
+        ));
+        assert_eq!(checker.violations().iter().count(), 0);
     }
 }
