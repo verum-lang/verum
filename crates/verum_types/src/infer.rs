@@ -29168,6 +29168,12 @@ impl TypeChecker {
         registry: &verum_modules::ModuleRegistry,
         import_span: Option<Span>,
     ) -> Result<()> {
+        if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
+            eprintln!(
+                "[trace-import] inner entry: module='{}' item='{}' local='{:?}' span={}",
+                module_path.as_str(), item_name, local_name, import_span.is_some()
+            );
+        }
         // Circular import detection: check if we're already importing this item.
         // This prevents infinite recursion when module A imports from B and B imports from A.
         // Circular imports are allowed but warn the developer about the dependency structure.
@@ -29197,6 +29203,14 @@ impl TypeChecker {
 
         // Always remove the key when done
         self.imports_in_progress.remove(&import_key);
+
+        if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
+            let in_env = self.ctx.env.lookup(&Text::from(local_name.unwrap_or(item_name))).is_some();
+            eprintln!(
+                "[trace-import] inner exit: module='{}' item='{}' ok={} in_env={}",
+                module_path.as_str(), item_name, result.is_ok(), in_env
+            );
+        }
 
         result
     }
@@ -29306,21 +29320,37 @@ impl TypeChecker {
         // the body, remove at every clean exit.  The body is factored
         // into `import_item_from_module_body` so the remove sits at
         // exactly one site.
+        // Cycle-guard discipline: this function is the body of import
+        // resolution. `import_item_from_module_inner` (the public wrapper)
+        // already inserts `(module_path, item_name)` into
+        // `imports_in_progress` before calling us. Re-checking the same key
+        // here would always false-fire and skip the body entirely — that
+        // was the historic regression that made cross-cog `pub const X`
+        // imports silently no-op (the const arm at line ~29750 never
+        // ran, so the symbol never landed in `ctx.env`, surfacing as
+        // `unbound variable: X` at the use site even though the export
+        // table contained it).
+        //
+        // Direct callers below in `import_item_from_module_body`
+        // (the prelude / submodule fallback paths) intentionally re-enter
+        // `_impl` with a DIFFERENT (module_path, item_name) pair, so they
+        // get cycle-guarded by `_inner` for THEIR new key — never by ours.
+        //
+        // If a future caller is added that calls `_impl` directly with
+        // the same key as the outer entry, route it through
+        // `import_item_from_module_inner` instead so the cycle key is
+        // managed at exactly one site.
         let cycle_key: (Text, Text) = (module_path.clone(), item_name.to_string().into());
-        if self.imports_in_progress.contains(&cycle_key) {
-            tracing::debug!(
-                "Nested-import cycle on '{}.{}' — skipping inner resolution; \
-                 outer expansion will register the symbol",
-                module_path.as_str(),
-                item_name
-            );
-            return Ok(());
+        let we_own_cycle_key = !self.imports_in_progress.contains(&cycle_key);
+        if we_own_cycle_key {
+            self.imports_in_progress.insert(cycle_key.clone());
         }
-        self.imports_in_progress.insert(cycle_key.clone());
         let outcome = self.import_item_from_module_body(
             module_path, item_name, local_name, registry, import_span, register_name,
         );
-        self.imports_in_progress.remove(&cycle_key);
+        if we_own_cycle_key {
+            self.imports_in_progress.remove(&cycle_key);
+        }
         outcome
     }
 
@@ -29748,10 +29778,21 @@ impl TypeChecker {
                         } // closes if !registered_successfully
                     }
                     ExportKind::Const | ExportKind::Static => {
+                        if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
+                            eprintln!(
+                                "[trace-import] Const arm: module='{}' item='{}' register='{}'",
+                                resolved_module_path.as_str(), item_name, register_name
+                            );
+                        }
                         // For constants, look up the type from the module's AST
                         if let Some(const_type) =
                             self.extract_const_type_from_module(&module_info.ast, item_name)
                         {
+                            if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
+                                eprintln!(
+                                    "[trace-import] Const found in module AST, inserting '{}'", register_name
+                                );
+                            }
                             self.ctx.env.insert(register_name, TypeScheme::mono(const_type));
                         } else {
                             // Not found directly — follow re-export chain through submodules.
@@ -29763,7 +29804,16 @@ impl TypeChecker {
                                 registry,
                             );
                             if let Some(const_type) = found {
+                                if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
+                                    eprintln!(
+                                        "[trace-import] Const found in submodule, inserting '{}'", register_name
+                                    );
+                                }
                                 self.ctx.env.insert(register_name, TypeScheme::mono(const_type));
+                            } else if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
+                                eprintln!(
+                                    "[trace-import] Const NOT FOUND for '{}'", item_name
+                                );
                             }
                         }
                     }
