@@ -461,3 +461,200 @@ fn cbpv_alpha_eq_ctx(
         _ => false,
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for CbpvKind / CbpvTerm / CbpvStep
+// =============================================================================
+
+implement Eq for CbpvKind {
+    fn eq(&self, other: &CbpvKind) -> Bool {
+        match (self, other) {
+            (CbpvKind.Value,       CbpvKind.Value)       => true,
+            (CbpvKind.Computation, CbpvKind.Computation) => true,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CbpvKind {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CbpvKind.Value       => f.write_str("value"),
+            CbpvKind.Computation => f.write_str("computation"),
+        }
+    }
+}
+
+implement Debug for CbpvKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CbpvKind.Value       => f.write_str("Value"),
+            CbpvKind.Computation => f.write_str("Computation"),
+        }
+    }
+}
+
+implement Eq for CbpvTerm {
+    /// Syntactic equality on CBPV terms.  This is **not**
+    /// α-equivalence — for α-equivalence use `cbpv_alpha_eq` (or
+    /// `cbpv_alpha_eq_ctx` for the context-tracking variant).
+    /// Two terms with different bound-variable names compare
+    /// unequal under `==` even when they denote the same redex.
+    fn eq(&self, other: &CbpvTerm) -> Bool {
+        match (self, other) {
+            (CbpvTerm.Var { name: a },
+             CbpvTerm.Var { name: b }) => a == b,
+            (CbpvTerm.Lam { param: pa, body: ba },
+             CbpvTerm.Lam { param: pb, body: bb }) =>
+                pa == pb && **ba == **bb,
+            (CbpvTerm.Thunk { inner: ia },
+             CbpvTerm.Thunk { inner: ib }) =>
+                **ia == **ib,
+            (CbpvTerm.Return { value: va },
+             CbpvTerm.Return { value: vb }) =>
+                **va == **vb,
+            (CbpvTerm.SeqTo { producer: pa, binder: ba, body: ya },
+             CbpvTerm.SeqTo { producer: pb, binder: bb, body: yb }) =>
+                **pa == **pb && ba == bb && **ya == **yb,
+            (CbpvTerm.Force { value: va },
+             CbpvTerm.Force { value: vb }) =>
+                **va == **vb,
+            (CbpvTerm.App { func: fa, arg: aa },
+             CbpvTerm.App { func: fb, arg: ab }) =>
+                **fa == **fb && **aa == **ab,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CbpvTerm {
+    /// Renders in standard call-by-push-value notation:
+    ///   `Var { name }`                    → `x`
+    ///   `Lam { param, body }`             → `λparam. body`
+    ///   `Thunk { inner }`                 → `thunk C`
+    ///   `Return { value }`                → `return V`
+    ///   `SeqTo { producer, binder, body }`→ `producer to binder. body`
+    ///   `Force { value }`                 → `force V`
+    ///   `App { func, arg }`               → `func arg`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CbpvTerm.Var { name } =>
+                f.write_str(name.as_str()),
+            CbpvTerm.Lam { param, body } => {
+                f.write_str(f"λ{param}. ".as_str())?;
+                (**body).fmt(f)
+            },
+            CbpvTerm.Thunk { inner } => {
+                f.write_str("thunk ")?;
+                (**inner).fmt(f)
+            },
+            CbpvTerm.Return { value } => {
+                f.write_str("return ")?;
+                (**value).fmt(f)
+            },
+            CbpvTerm.SeqTo { producer, binder, body } => {
+                (**producer).fmt(f)?;
+                f.write_str(f" to {binder}. ".as_str())?;
+                (**body).fmt(f)
+            },
+            CbpvTerm.Force { value } => {
+                f.write_str("force ")?;
+                (**value).fmt(f)
+            },
+            CbpvTerm.App { func, arg } => {
+                f.write_str("(")?;
+                (**func).fmt(f)?;
+                f.write_str(" ")?;
+                (**arg).fmt(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
+
+implement Debug for CbpvTerm {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CbpvTerm.Var { name } =>
+                f.write_str(f"Var({name})".as_str()),
+            CbpvTerm.Lam { param, body } => {
+                f.write_str(f"Lam({param}, ".as_str())?;
+                (**body).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CbpvTerm.Thunk { inner } => {
+                f.write_str("Thunk(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CbpvTerm.Return { value } => {
+                f.write_str("Return(")?;
+                (**value).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CbpvTerm.SeqTo { producer, binder, body } => {
+                f.write_str("SeqTo(")?;
+                (**producer).fmt_debug(f)?;
+                f.write_str(f", {binder}, ".as_str())?;
+                (**body).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CbpvTerm.Force { value } => {
+                f.write_str("Force(")?;
+                (**value).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CbpvTerm.App { func, arg } => {
+                f.write_str("App(")?;
+                (**func).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**arg).fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
+
+implement Eq for CbpvStep {
+    fn eq(&self, other: &CbpvStep) -> Bool {
+        match (self, other) {
+            (CbpvStep.Stepped { next: a },
+             CbpvStep.Stepped { next: b }) => a == b,
+            (CbpvStep.Normal { term: a },
+             CbpvStep.Normal { term: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for CbpvStep {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CbpvStep.Stepped { next } => {
+                f.write_str("→ ")?;
+                next.fmt(f)
+            },
+            CbpvStep.Normal { term } => {
+                f.write_str("⊥ ")?;
+                term.fmt(f)
+            },
+        }
+    }
+}
+
+implement Debug for CbpvStep {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CbpvStep.Stepped { next } => {
+                f.write_str("Stepped(")?;
+                next.fmt_debug(f)?;
+                f.write_str(")")
+            },
+            CbpvStep.Normal { term } => {
+                f.write_str("Normal(")?;
+                term.fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
