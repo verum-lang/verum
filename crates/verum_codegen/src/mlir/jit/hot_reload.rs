@@ -593,7 +593,21 @@ impl HotReloader {
         signature_hash: u64,
         source_hash: [u8; 32],
     ) -> Result<()> {
-        let _lock = self.replacement_lock.write();
+        // Acquire the global replacement lock when atomic-replacement
+        // mode is configured (the default). Atomic mode serialises
+        // every replacement so concurrent callers always observe a
+        // consistent function pointer; non-atomic mode trades that
+        // guarantee for less head-of-line blocking when many
+        // independent functions reload in parallel. The per-function
+        // RwLock acquired below still serialises mutators of the
+        // same hot-fn, so non-atomic mode is safe for *distinct*
+        // function names — it only relaxes the cross-function
+        // ordering. Without this gate the field was inert.
+        let _atomic_guard = if self.config.atomic_replacement {
+            Some(self.replacement_lock.write())
+        } else {
+            None
+        };
         let start = instant::Instant::now();
 
         let name_text = Text::from(name);
@@ -624,8 +638,26 @@ impl HotReloader {
 
         // Record statistics
         let elapsed = start.elapsed();
+        let elapsed_us = elapsed.as_micros() as u64;
         self.stats.replacements.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_replacement_time_us.fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.stats.total_replacement_time_us.fetch_add(elapsed_us, Ordering::Relaxed);
+
+        // Honour `HotReloadConfig.max_replacement_time_us` budget:
+        // a replacement that exceeds the configured ceiling is
+        // surfaced as a warning (the replacement itself has already
+        // succeeded — we don't roll back, since the new code is
+        // already live and rolling back would mean swapping in
+        // a third version mid-call). Callers that want strict
+        // budget enforcement can react to the warning by calling
+        // `rollback`. Without this gate the field was inert.
+        if elapsed_us > self.config.max_replacement_time_us {
+            tracing::warn!(
+                "Hot-reload of '{}' took {}µs, exceeding configured budget {}µs",
+                name,
+                elapsed_us,
+                self.config.max_replacement_time_us
+            );
+        }
 
         if self.config.verbose {
             tracing::info!(
@@ -707,13 +739,28 @@ impl HotReloader {
     }
 
     /// Register a migration callback.
+    ///
+    /// Honours `HotReloadConfig.enable_migration`: when `false`,
+    /// the registration is rejected with a structured error so
+    /// callers can detect the policy and fall back to a different
+    /// upgrade strategy. Without this gate the field was inert —
+    /// migration callbacks would always register and fire on
+    /// upgrade regardless of configuration.
     pub fn register_migration(
         &self,
         name: impl Into<Text>,
         from_version: u64,
         to_version: u64,
         migrate: impl Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
-    ) {
+    ) -> Result<()> {
+        if !self.config.enable_migration {
+            return Err(MlirError::HotCodeError {
+                message: Text::from(
+                    "migration is disabled by HotReloadConfig.enable_migration = false",
+                ),
+            });
+        }
+
         let name = name.into();
         let config = MigrationConfig {
             from_version,
@@ -725,6 +772,8 @@ impl HotReloader {
             .entry(name)
             .or_insert_with(Vec::new)
             .push(config);
+
+        Ok(())
     }
 
     /// Call wrapper that tracks active calls.
@@ -820,6 +869,74 @@ mod tests {
         assert!(config.validate_signatures);
         assert!(config.atomic_replacement);
         assert!(config.version_history > 0);
+    }
+
+    /// Pin: `enable_migration` defaults to `true` and gates
+    /// `register_migration`. Closes the inert-defense pattern:
+    /// before this wire-up the field had no effect — migration
+    /// callbacks would always register regardless of policy.
+    #[test]
+    fn enable_migration_default_is_true() {
+        let config = HotReloadConfig::default();
+        assert!(config.enable_migration);
+    }
+
+    #[test]
+    fn register_migration_succeeds_when_enabled() {
+        let reloader = HotReloader::new(HotReloadConfig::default());
+        let result =
+            reloader.register_migration("fn1", 1, 2, |bytes| bytes.to_vec());
+        assert!(
+            result.is_ok(),
+            "registration should succeed under default enable_migration=true"
+        );
+    }
+
+    #[test]
+    fn register_migration_rejects_when_disabled() {
+        let mut config = HotReloadConfig::default();
+        config.enable_migration = false;
+        let reloader = HotReloader::new(config);
+
+        let result =
+            reloader.register_migration("fn1", 1, 2, |bytes| bytes.to_vec());
+        match result {
+            Err(MlirError::HotCodeError { message }) => {
+                assert!(
+                    message.as_str().contains("enable_migration"),
+                    "diagnostic should name the flag, got: {}",
+                    message
+                );
+            }
+            other => panic!(
+                "expected HotCodeError under enable_migration=false, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Pin: `max_replacement_time_us` defaults to 1 second
+    /// (1_000_000µs). Drift here would silently change the
+    /// budget for every caller relying on `Default::default()`.
+    #[test]
+    fn max_replacement_time_us_default_is_one_second() {
+        let config = HotReloadConfig::default();
+        assert_eq!(config.max_replacement_time_us, 1_000_000);
+    }
+
+    /// Pin: `atomic_replacement` defaults to `true`. The flag
+    /// gates the global cross-function replacement lock; with
+    /// `false`, distinct functions can reload concurrently.
+    #[test]
+    fn atomic_replacement_default_is_true() {
+        let config = HotReloadConfig::default();
+        assert!(config.atomic_replacement);
+
+        let mut relaxed = config.clone();
+        relaxed.atomic_replacement = false;
+        // Constructor must accept either configuration without
+        // panic — the flag is interpreted lazily inside `replace`.
+        let _reloader = HotReloader::new(relaxed);
     }
 
     #[test]
