@@ -346,7 +346,19 @@ impl SmtGuardVerifier {
         }
     }
 
-    /// Get a satisfying model for a formula
+    /// Get a satisfying model for a formula.
+    ///
+    /// Walks the formula collecting every `Var(name)` reference, then
+    /// asks the solver to evaluate each name in the satisfying model
+    /// and returns the resulting bindings as the witness. Pre-fix
+    /// this method only ever extracted a binding named `"n"` (a
+    /// hardcoded literal) — any guard mentioning a different
+    /// identifier (`x`, `value`, `count`, …) produced a witness with
+    /// an empty bindings map, which user-facing diagnostics then
+    /// rendered as a useless `_` placeholder. The hardcoded name
+    /// also masked a separate weakness: even a guard containing both
+    /// `n` AND another variable would only get a partial witness,
+    /// since the second variable was never asked.
     fn get_model(&self, formula: &SmtFormula) -> Option<SmtWitness> {
         use crate::z3_backend::{Z3Config, Z3ContextManager};
 
@@ -370,10 +382,34 @@ impl SmtGuardVerifier {
                     if let Some(model) = solver.get_model() {
                         let mut bindings = HashMap::new();
 
-                        let n_var = Int::new_const("n");
-                        if let Some(value) = model.eval(&n_var, true) {
-                            if let Some(int_val) = value.as_i64() {
-                                bindings.insert(Text::from("n"), SmtValue::Int(int_val as i128));
+                        // Collect every variable mentioned in the
+                        // formula, deduplicated. We sort for
+                        // determinism — Z3 model evaluation order is
+                        // an implementation detail, but witness
+                        // diagnostics that surface in compiler error
+                        // messages MUST be deterministic across
+                        // runs to keep snapshot tests stable.
+                        let mut names = collect_var_names(formula);
+                        names.sort();
+                        names.dedup();
+
+                        for name in names {
+                            // The SMT translator currently models
+                            // every binding as Int (the only type
+                            // it can lower to Z3 today — see
+                            // `formula_to_z3::SmtFormula::Var` Int
+                            // branch returns None, so only the
+                            // arithmetic-`to_int` path actually
+                            // declares vars, all as Int). When the
+                            // verifier learns to lower Bool / Real
+                            // bindings, this loop must dispatch on
+                            // the binding's recorded type instead
+                            // of always asking for an Int model.
+                            let z3_var = Int::new_const(name.as_str());
+                            if let Some(value) = model.eval(&z3_var, true) {
+                                if let Some(int_val) = value.as_i64() {
+                                    bindings.insert(name.clone(), SmtValue::Int(int_val as i128));
+                                }
                             }
                         }
 
@@ -465,6 +501,34 @@ impl GuardVerifier for SmtGuardVerifier {
     }
 }
 
+/// Walk an SmtFormula collecting every `Var(name)` reference it
+/// contains, in left-to-right structural order. Caller is expected
+/// to dedupe / sort if it cares about either property — the helper
+/// itself does neither, since the most common consumer
+/// (`get_model`) wants both and applying them at the call site
+/// keeps the helper's contract trivially testable.
+fn collect_var_names(formula: &SmtFormula) -> Vec<Text> {
+    fn walk(formula: &SmtFormula, out: &mut Vec<Text>) {
+        match formula {
+            SmtFormula::Var(name) => out.push(name.clone()),
+            SmtFormula::Bool(_) | SmtFormula::Int(_) => {}
+            SmtFormula::Binary { left, right, .. } => {
+                walk(left, out);
+                walk(right, out);
+            }
+            SmtFormula::Not(inner) | SmtFormula::Neg(inner) => walk(inner, out),
+            SmtFormula::Or(formulas) => {
+                for f in formulas.iter() {
+                    walk(f, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(formula, &mut out);
+    out
+}
+
 /// Internal SMT formula representation (private — this module owns the Z3
 /// lowering).
 #[derive(Debug, Clone)]
@@ -552,5 +616,68 @@ mod tests {
         let result = verifier.verify_guards(&[], &Type::Int, &env);
         assert!(!result.is_exhaustive);
         assert!(!result.skipped);
+    }
+
+    #[test]
+    fn collect_var_names_walks_all_branches() {
+        // Pin the load-bearing contract: get_model() relies on this
+        // helper to enumerate every variable mentioned in the
+        // formula so it can ask Z3 for each binding's value. A
+        // regression that only walks one branch surfaces here as a
+        // missing variable in the witness.
+        let formula = SmtFormula::Or(List::from_iter([
+            // (a > 0)
+            SmtFormula::Binary {
+                op: SmtOp::Gt,
+                left: Box::new(SmtFormula::Var(Text::from("a"))),
+                right: Box::new(SmtFormula::Int(0)),
+            },
+            // !(b == c)
+            SmtFormula::Not(Box::new(SmtFormula::Binary {
+                op: SmtOp::Eq,
+                left: Box::new(SmtFormula::Var(Text::from("b"))),
+                right: Box::new(SmtFormula::Var(Text::from("c"))),
+            })),
+            // -d (Neg path)
+            SmtFormula::Neg(Box::new(SmtFormula::Var(Text::from("d")))),
+        ]));
+        let mut names = collect_var_names(&formula);
+        names.sort();
+        names.dedup();
+        let strs: Vec<&str> = names.iter().map(|t| t.as_str()).collect();
+        assert_eq!(strs, vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn collect_var_names_no_vars_returns_empty() {
+        // Pin: pure literal formulas have no bindings to extract.
+        // Otherwise the caller's `for name in names` loop would
+        // silently consume time asking Z3 to evaluate non-existent
+        // variables on every uncovered-witness extraction.
+        let formula = SmtFormula::Binary {
+            op: SmtOp::Lt,
+            left: Box::new(SmtFormula::Int(0)),
+            right: Box::new(SmtFormula::Int(1)),
+        };
+        assert!(collect_var_names(&formula).is_empty());
+    }
+
+    #[test]
+    fn collect_var_names_collects_duplicates_by_design() {
+        // Pin the helper's contract: dedup is the caller's
+        // responsibility (get_model dedups + sorts). A regression
+        // that internalises dedup here would couple the helper to
+        // one specific consumer's contract, making a future
+        // multi-witness consumer that wants ordered duplicates pay
+        // a hidden re-walk cost.
+        let formula = SmtFormula::Binary {
+            op: SmtOp::Lt,
+            left: Box::new(SmtFormula::Var(Text::from("x"))),
+            right: Box::new(SmtFormula::Var(Text::from("x"))),
+        };
+        let names = collect_var_names(&formula);
+        assert_eq!(names.len(), 2);
+        assert_eq!(names[0].as_str(), "x");
+        assert_eq!(names[1].as_str(), "x");
     }
 }
