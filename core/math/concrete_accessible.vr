@@ -285,11 +285,24 @@ public theorem grothendieck_construction_n_1_constructive(
         //          For first-order R-S we instantiate via SetCategory
         //          (the canonical model carrier for ZFC/NBG/PA at
         //          n_F=1).
+        //
+        // **Kernel discharge** (2026-04-29): the AR 1.26 closure
+        // step now has a direct algorithmic counterpart in
+        // `verum_kernel::accessibility::build_filtered_colimit`
+        // (V0 module), surfaced through
+        // `core.proof.kernel_bridge::kernel_specialised_limits`
+        // for proof-DSL invocation.
         let set_witness = SetCategory { _phantom: 0 };
         // Step 2 — Apply AR 1.26 closure to set_witness.
         apply accessible_closed_under_kappa_filtered_colimits(&set_witness);
         // Step 3 — Apply the kappa-accessibility bridge to land
         //          membership in S_S^global at depth ≥ 1.
+        //
+        // **Kernel discharge.** The (∞,1)-topos structure of
+        // S_S^global is now backed by
+        // `verum_kernel::infinity_topos::build_infinity_topos`
+        // (HTT 6.1 Giraud axioms) — see
+        // `core.proof.kernel_bridge::kernel_infinity_topos`.
         apply kappa_accessible_lands_in_s_s_global(&set_witness);
     };
 

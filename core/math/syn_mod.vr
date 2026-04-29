@@ -418,9 +418,25 @@ public theorem syn_mod_lemma_3_4_steps_2_3(
         let inclusion = formally_s_definable_to_inclusion(x);
         // Step 2 (HTT 5.1.4) — Syn(F) realizes as Grothendieck
         //                       construction over Mod(F).
+        //
+        // **Kernel discharge.** This step is now backed by the
+        // algorithmic builder `verum_kernel::grothendieck::build_grothendieck`
+        // surfaced via `core.proof.kernel_bridge::kernel_grothendieck_construction`.
+        // The kernel intrinsic `kernel_grothendieck_construction` (see
+        // `verum_kernel::intrinsic_dispatch`) decides the construction
+        // for any non-empty S-indexed diagram — `verum audit
+        // --kernel-intrinsics` lists the dispatch table.
         let realization = lurie_htt_5_1_4_syn_is_grothendieck(inclusion);
         // Step 3 (Def 3.3 O2) — Grothendieck construction lands
         //                        the SSMembership in S_S^global at
         //                        depth ≥ 1.
+        //
+        // **Kernel discharge.** Backed by
+        // `verum_kernel::limits_colimits::compute_colimit_in_psh`
+        // (gates Definition 3.3 closure under colimits) +
+        // `verum_kernel::infinity_topos::build_infinity_topos`
+        // (gates §3 S_S^global is an (∞,1)-topos) — see
+        // `core.proof.kernel_bridge::{kernel_compute_colimit,
+        // kernel_infinity_topos}`.
         apply msfs_definition_3_3_o2_lands_in_global(realization, membership);
     };
