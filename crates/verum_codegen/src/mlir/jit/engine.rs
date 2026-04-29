@@ -977,6 +977,26 @@ impl JitEngine {
                 invocations: AtomicU64::new(0),
             });
 
+            // Honour `JitConfig.max_cache_size`: when the cache
+            // would exceed the configured cap, evict the oldest
+            // entry by `compiled_at` to make room. The bound is a
+            // soft cap (DashMap's per-shard locking means the
+            // size check + insert is not strictly atomic), but
+            // long-running sessions stay well below the
+            // documented ceiling instead of growing unboundedly.
+            // Without this gate the field was inert.
+            if self.function_cache.len() >= self.config.max_cache_size
+                && self.config.max_cache_size > 0
+            {
+                if let Some(oldest_key) = self
+                    .function_cache
+                    .iter()
+                    .min_by_key(|entry| entry.value().compiled_at)
+                    .map(|entry| entry.key().clone())
+                {
+                    self.function_cache.remove(&oldest_key);
+                }
+            }
             self.function_cache.insert(Text::from(name), func.clone());
             Some(func)
         } else {
