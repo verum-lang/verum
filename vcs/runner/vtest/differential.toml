@@ -1,0 +1,46 @@
+# Differential testing matrix configuration.
+#
+# Used by `vcs/runner/vtest/src/differential.rs` to drive multi-shell ×
+# multi-tier execution of `@test: differential` `.vr` files.
+#
+# Per-test overrides via `// @backends:` and `// @tiers:` directives in the
+# `.vr` source override entries here.
+
+# Default execution tiers — interpreter (0), JIT (1), AOT (2).
+tiers = ["Interpreter", "Aot"]
+
+# Backends to fan out across.  `skip_if_missing = true` makes a backend
+# silently no-op on hosts where the binary isn't installed.
+
+[[backends]]
+name = "bash"
+cmd  = "/bin/bash"
+flags = ["-eu"]
+skip_if_missing = true
+
+[[backends]]
+name = "zsh"
+cmd  = "/bin/zsh"
+flags = ["-e"]
+skip_if_missing = true
+
+[[backends]]
+name = "dash"
+cmd  = "/bin/dash"
+flags = ["-eu"]
+skip_if_missing = true
+
+[[backends]]
+name = "fish"
+cmd  = "/usr/bin/fish"
+flags = []
+skip_if_missing = true
+
+# Allowed-divergence list — pairs of (test path suffix, backend) where
+# divergence is expected and accepted with the supplied justification.
+#
+# Example:
+#   [[allowed_divergence]]
+#   test = "shell/extended_glob.vr"
+#   backends = ["dash"]
+#   reason = "POSIX dash does not support **-recursive globs"

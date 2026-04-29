@@ -65,6 +65,7 @@
 pub mod benchmark;
 pub mod cache;
 pub mod config;
+pub mod differential;
 pub mod directive;
 pub mod discovery;
 pub mod executor;
