@@ -195,12 +195,43 @@ impl Z3Optimizer {
     pub fn new(config: OptimizerConfig) -> Self {
         let opt = Optimize::new();
 
-        // Set parameters based on config
+        // Set parameters based on config. Both `timeout_ms` and
+        // `method` route through a single `Params` so we don't
+        // call `set_params` twice (which is destructive — second
+        // call replaces first).
+        //
+        // `method` maps to Z3's `:opt.priority` parameter:
+        //   Lexicographic → "lex"     (objectives ranked by add-order)
+        //   Pareto        → "pareto"  (find Pareto frontier across all)
+        //   Box           → "box"     (independent bounding boxes)
+        //   Independent   → "box"     (maps to Z3's box semantics —
+        //                              no separate Z3 priority)
+        //
+        // Closes the inert-defense pattern around
+        // `OptimizerConfig.method`: pre-fix the field landed on
+        // the optimizer but no code path consulted it, so callers
+        // that set `method = Pareto` for multi-objective frontier
+        // exploration silently got the lex default.
+        let mut params = z3::Params::new();
         if let Maybe::Some(timeout) = config.timeout_ms {
-            let mut params = z3::Params::new();
             params.set_u32("timeout", timeout as u32);
-            opt.set_params(&params);
         }
+        let priority_str = match config.method {
+            OptimizationMethod::Lexicographic => "lex",
+            OptimizationMethod::Pareto => "pareto",
+            OptimizationMethod::Box => "box",
+            // Z3's Optimize API has three priorities: lex (default),
+            // pareto, box. `Independent` is a Verum-side abstraction
+            // describing per-objective independent solving with no
+            // shared state — Z3's closest equivalent is `box` which
+            // also bounds objectives independently. The docstring on
+            // OptimizationMethod::Independent should track this
+            // mapping; a future Z3 API addition could route this
+            // distinctly.
+            OptimizationMethod::Independent => "box",
+        };
+        params.set_symbol("priority", Symbol::String(priority_str.to_string()));
+        opt.set_params(&params);
 
         Self {
             opt,
