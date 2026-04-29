@@ -428,9 +428,18 @@ impl RichRenderer {
     ) {
         output.push_str(indent);
 
-        // Line number
-        let num_str = format!("{:>width$}", line.line_number, width = gutter_width);
-        output.push_str(&self.config.color_scheme.line_number.wrap(&num_str));
+        // Line number — honoured by `config.show_line_numbers`.
+        // When `false`, the number is replaced with whitespace
+        // of the same width so the gutter glyph + alignment
+        // stay consistent for downstream parsers that key on
+        // the vertical-line separator. Before this wire-up the
+        // field was inert — line numbers always rendered.
+        if self.config.show_line_numbers {
+            let num_str = format!("{:>width$}", line.line_number, width = gutter_width);
+            output.push_str(&self.config.color_scheme.line_number.wrap(&num_str));
+        } else {
+            output.push_str(&" ".repeat(gutter_width));
+        }
         output.push(' ');
 
         // Gutter separator
@@ -443,10 +452,16 @@ impl RichRenderer {
         );
         output.push(' ');
 
-        // Source content (with optional truncation)
+        // Source content (with optional truncation).
+        // Truncation honours `config.max_line_width` and is
+        // UTF-8-safe — slices on char count rather than byte
+        // index so the ellipsis suffix never lands inside a
+        // multi-byte codepoint (the previous byte-index slice
+        // panicked on inputs like emoji-bearing source comments).
         let content: String = if let Some(max_width) = self.config.max_line_width {
-            if line.content.len() > max_width {
-                format!("{}...", &line.content[..max_width - 3])
+            if line.content.chars().count() > max_width && max_width >= 3 {
+                let head: String = line.content.chars().take(max_width - 3).collect();
+                format!("{head}...")
             } else {
                 line.content.to_string()
             }
@@ -542,7 +557,9 @@ impl RichRenderer {
         self.render_gutter_line(output, &indent_str, gutter_width, None);
     }
 
-    /// Render a gutter line (empty or with separator)
+    /// Render a gutter line (empty or with separator).
+    /// Honours `config.show_line_numbers` symmetrically with
+    /// `render_multi_span_source_line`.
     fn render_gutter_line(
         &self,
         output: &mut String,
@@ -553,8 +570,12 @@ impl RichRenderer {
         output.push_str(indent);
 
         if let Some(num) = line_num {
-            let num_str = format!("{:>width$}", num, width = width);
-            output.push_str(&self.config.color_scheme.line_number.wrap(&num_str));
+            if self.config.show_line_numbers {
+                let num_str = format!("{:>width$}", num, width = width);
+                output.push_str(&self.config.color_scheme.line_number.wrap(&num_str));
+            } else {
+                output.push_str(&" ".repeat(width));
+            }
         } else {
             output.push_str(&" ".repeat(width));
         }
@@ -580,9 +601,14 @@ impl RichRenderer {
     ) {
         output.push_str(indent);
 
-        // Line number
-        let num_str = format!("{:>width$}", line.line_number, width = gutter_width);
-        output.push_str(&self.config.color_scheme.line_number.wrap(&num_str));
+        // Line number — `config.show_line_numbers` gate (see
+        // `render_multi_span_source_line` for the contract).
+        if self.config.show_line_numbers {
+            let num_str = format!("{:>width$}", line.line_number, width = gutter_width);
+            output.push_str(&self.config.color_scheme.line_number.wrap(&num_str));
+        } else {
+            output.push_str(&" ".repeat(gutter_width));
+        }
         output.push(' ');
 
         // Gutter separator
@@ -1016,5 +1042,66 @@ mod tests {
         assert!(output.contains("error[E0312]"));
         // Should be more compact
         assert!(output.len() < 500);
+    }
+
+    #[test]
+    fn show_line_numbers_false_strips_numbers_from_gutter() {
+        // Pin: `RichRenderConfig.show_line_numbers = false`
+        // suppresses every line-number rendering in the gutter
+        // (snippet lines, gutter-only lines, source lines).
+        // Before the wire-up the field was inert — every render
+        // path printed numbers regardless. The pipe glyph
+        // (vertical line) must still appear so downstream
+        // parsers that key on it keep working.
+        let mut config = RichRenderConfig::no_color();
+        config.show_line_numbers = false;
+        let mut renderer = RichRenderer::new(config);
+        // The renderer needs in-memory file content to render
+        // the source-snippet block where the gutter lives.
+        renderer.add_test_content(
+            "test.vr",
+            "fn main() {\n    let x: Positive = -5;\n    println!(x);\n}\n",
+        );
+
+        let diagnostic = create_test_diagnostic();
+        let output = renderer.render(&diagnostic);
+
+        // Gutter pipe still appears so the visual structure is
+        // preserved — the output stays parseable by tools that
+        // key on the pipe separator.
+        assert!(
+            output.contains("|") || output.contains("│"),
+            "show_line_numbers=false must keep the gutter pipe: {output}"
+        );
+        // The error line (line 2) carries the only numeric
+        // content the gutter would otherwise print. Verify the
+        // numeric prefix is gone — pre-wire-up output contained
+        // " 2 │" (or the colorised equivalent); post-wire-up
+        // output contains "   │" (whitespace-padded).
+        assert!(
+            !output.contains(" 2 │") && !output.contains(" 2 |"),
+            "show_line_numbers=false must strip the numeric gutter prefix: {output}"
+        );
+    }
+
+    #[test]
+    fn show_line_numbers_true_keeps_numeric_gutter() {
+        // Pin: default behaviour preserves line numbers.
+        // Counterpart to the suppression test — proves the gate
+        // actually toggles output (not just always-off).
+        let mut renderer = RichRenderer::new(RichRenderConfig::no_color());
+        renderer.add_test_content(
+            "test.vr",
+            "fn main() {\n    let x: Positive = -5;\n    println!(x);\n}\n",
+        );
+
+        let diagnostic = create_test_diagnostic();
+        let output = renderer.render(&diagnostic);
+        // Line 2 is where the error sits — its number must
+        // appear in the gutter.
+        assert!(
+            output.contains("2 │") || output.contains("2 |"),
+            "show_line_numbers=true must keep the numeric gutter prefix: {output}"
+        );
     }
 }
