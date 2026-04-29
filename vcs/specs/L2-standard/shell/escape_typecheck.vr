@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, escape, posix, windows, typecheck
+// @timeout: 5000
+// @expect: pass
+
+// Verifies that Escaper / ShellEscape protocol typecheck across the
+// supported shell flavours and basic atoms (Text, Int, Bool, List, Maybe).
+
+mount core.shell.escape.{
+    Escaper, ShellFlavour, ShellEscape,
+    default_flavour, shell_join, validate_sh,
+};
+
+fn exercise_posix() {
+    let q1: Text = Escaper.posix(&"plain".into());
+    let q2: Text = Escaper.posix(&"has space".into());
+    let q3: Text = Escaper.posix(&"has 'quote'".into());
+    let q4: Text = Escaper.posix(&"".into());
+    let _: Bool = Escaper.posix_safe_unquoted(&"hello".into());
+    let _: Bool = Escaper.posix_safe_unquoted(&"has space".into());
+}
+
+fn exercise_fish() {
+    let _: Text = Escaper.fish(&"path/to/file".into());
+    let _: Text = Escaper.fish(&"with\\backslash".into());
+}
+
+fn exercise_cmd_exe() {
+    let _: Text = Escaper.cmd_exe(&"plain".into());
+    let _: Text = Escaper.cmd_exe(&"with \"quote\"".into());
+}
+
+fn exercise_powershell() {
+    let _: Text = Escaper.powershell(&"plain".into());
+    let _: Text = Escaper.powershell(&"with 'quote'".into());
+}
+
+fn exercise_dispatch() {
+    let _: Text = Escaper.quote_for(&"x".into(), ShellFlavour.Posix);
+    let _: Text = Escaper.quote_for(&"x".into(), ShellFlavour.Fish);
+    let _: Text = Escaper.quote_for(&"x".into(), ShellFlavour.Cmd);
+    let _: Text = Escaper.quote_for(&"x".into(), ShellFlavour.PowerShell);
+}
+
+fn exercise_protocol() {
+    // Built-in implementations must be reachable through the protocol.
+    let s: Text = "hello".into();
+    let _: Text = s.shell_quote(default_flavour());
+    let n: Int = 42;
+    let _: Text = n.shell_quote(default_flavour());
+    let b: Bool = true;
+    let _: Text = b.shell_quote(default_flavour());
+    let xs: List<Text> = ["a".into(), "b c".into()];
+    let _: Text = xs.shell_quote(default_flavour());
+    let m: Maybe<Text> = Some("v".into());
+    let _: Text = m.shell_quote(default_flavour());
+}
+
+fn exercise_validate() {
+    let _: Bool = validate_sh(&"echo hello".into());
+    let _: Bool = validate_sh(&"echo \"unbalanced".into());
+    let _: Bool = validate_sh(&"".into());
+}
+
+fn main() {
+    exercise_posix();
+    exercise_fish();
+    exercise_cmd_exe();
+    exercise_powershell();
+    exercise_dispatch();
+    exercise_protocol();
+    exercise_validate();
+}

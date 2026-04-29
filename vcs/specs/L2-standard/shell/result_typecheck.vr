@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, result, error, types, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.result.{ShellResult, ShellError};
+mount core.io.process.{ExitStatus};
+mount core.time.duration.{Duration};
+
+fn make_result() -> ShellResult {
+    ShellResult.new(
+        ExitStatus { raw: 0 },
+        "hello\nworld\n".into_bytes(),
+        [],
+        "echo hello".into(),
+        Duration.from_millis(10),
+    )
+}
+
+fn exercise_accessors() {
+    let r = make_result();
+    let _: Text = r.stdout();
+    let _: Text = r.text();
+    let _: List<Text> = r.lines();
+    let _: Text = r.stderr();
+    let _: Int = r.code();
+    let _: Bool = r.success();
+    let _: Bool = r.is_empty();
+    let _: Duration = r.elapsed();
+    let _: &Text = r.command_text();
+}
+
+fn exercise_iteration() {
+    let r = make_result();
+    let mut count = 0;
+    for _line in r {
+        count = count + 1;
+    }
+    let _ = count;
+}
+
+fn exercise_ok_unwrap() {
+    let r = make_result();
+    let outcome: Result<ShellResult, ShellError> = r.ok();
+    match outcome {
+        Ok(_)  => {}
+        Err(_) => {}
+    }
+}
+
+fn exercise_error_constructors() {
+    let nz = ShellError.NonZeroExit {
+        command: "false".into(),
+        status:  ExitStatus { raw: 1 << 8 },
+        stderr:  "".into(),
+    };
+    let _: Text = nz.to_string();
+    let _: &Text = nz.command();
+
+    let to = ShellError.Timeout { command: "sleep 1000".into(), after_ms: 5000 };
+    let _: Text = to.to_string();
+
+    let _ = ShellError.SpawnFailed { command: "x".into(), reason: "no such".into() };
+    let _ = ShellError.PermissionDenied { command: "rm".into(), kind: "run".into() };
+    let _ = ShellError.ParseError { command: "x".into(), format: "json".into(), cause: "bad".into() };
+    let _ = ShellError.Cancelled { command: "x".into(), reason: "user".into() };
+}
+
+fn exercise_from_error() {
+    let err = ShellError.SpawnFailed { command: "missing".into(), reason: "ENOENT".into() };
+    let r: ShellResult = ShellResult.from_error(err);
+    assert(!r.success(), "from_error result is non-success");
+}
+
+fn main() {
+    exercise_accessors();
+    exercise_iteration();
+    exercise_ok_unwrap();
+    exercise_error_constructors();
+    exercise_from_error();
+}

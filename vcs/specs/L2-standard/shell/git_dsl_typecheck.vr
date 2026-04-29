@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, dsl, git, refinements, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.dsl.git.{
+    GitCmd, GitUrl, GitRefspec, GitBranch,
+    ForceMode, GitLogFormat,
+};
+mount core.shell.result.{ShellError};
+mount core.io.path.{PathBuf};
+
+fn exercise_url_validation() {
+    let ok = GitUrl.parse("https://github.com/user/repo.git".into());
+    let _: Result<GitUrl, ShellError> = ok;
+    let bad = GitUrl.parse("'; rm -rf /".into());
+    let _: Result<GitUrl, ShellError> = bad;
+    let ssh = GitUrl.parse("git@github.com:user/repo.git".into());
+    let _: Result<GitUrl, ShellError> = ssh;
+}
+
+fn exercise_refspec_validation() {
+    let _: Result<GitRefspec, ShellError> = GitRefspec.parse("main".into());
+    let _: Result<GitRefspec, ShellError> = GitRefspec.parse("main:main".into());
+    let _: Result<GitRefspec, ShellError> = GitRefspec.parse("+refs/heads/main:refs/heads/main".into());
+    let _: Result<GitRefspec, ShellError> = GitRefspec.parse("invalid spec!".into());
+}
+
+fn exercise_clone_render() -> Result<(), ShellError> {
+    let url = GitUrl.parse("https://github.com/x/y.git".into())?;
+    let cmd = GitCmd.Clone {
+        url,
+        dest:               Some(PathBuf.from("/tmp/work")),
+        depth:              Some(1),
+        branch:             Some(GitBranch.parse("main".into())?),
+        recurse_submodules: false,
+    };
+    let _: Text = cmd.render();
+    Ok(())
+}
+
+fn exercise_commit_render() {
+    let cmd = GitCmd.Commit {
+        message: "feat: add shell scripting framework".into(),
+        amend:   false,
+        sign:    true,
+        files:   [],
+        all:     true,
+    };
+    let _: Text = cmd.render();
+}
+
+fn exercise_log_render() {
+    let cmd = GitCmd.Log {
+        format:    GitLogFormat.Oneline,
+        max_count: Some(20),
+        author:    Some("Alice".into()),
+        since:     Some("2 weeks ago".into()),
+        until:     None,
+        path:      None,
+    };
+    let _: Text = cmd.render();
+}
+
+fn exercise_push_render() -> Result<(), ShellError> {
+    let cmd = GitCmd.Push {
+        remote:  "origin".into(),
+        refspec: GitRefspec.parse("main:main".into())?,
+        force:   Some(ForceMode.ForceWithLease),
+        dry_run: false,
+    };
+    let _: Text = cmd.render();
+    Ok(())
+}
+
+fn exercise_status_render() {
+    let cmd = GitCmd.Status { short: true, porcelain: true };
+    let _: Text = cmd.render();
+}
+
+fn main() {
+    exercise_url_validation();
+    exercise_refspec_validation();
+    let _ = exercise_clone_render();
+    exercise_commit_render();
+    exercise_log_render();
+    let _ = exercise_push_render();
+    exercise_status_render();
+}

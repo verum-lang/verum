@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, interactive, progress, spinner, typecheck
+// @timeout: 5000
+// @expect: pass
+
+mount core.shell.interactive.{
+    input, input_opt, input_default, input_required, input_validated,
+    password, confirm, confirm_default_yes,
+    select, multi_select,
+};
+mount core.shell.progress.{Progress, ProgressStyle, Spinner};
+mount core.shell.signal.{
+    trap, on_interrupt, on_terminate, cleanup_on_exit,
+    with_trap, SignalGuard,
+};
+mount core.sys.signal.{Signal, SignalError};
+
+fn exercise_input_signatures() {
+    let _: Text = input(&"name: ".into());
+    let _: Maybe<Text> = input_opt(&"optional: ".into());
+    let _: Text = input_default(&"name".into(), &"alice".into());
+    let _: Text = input_required(&"required: ".into());
+    let _: Text = password(&"password: ".into());
+    let _: Bool = confirm(&"continue?".into());
+    let _: Bool = confirm_default_yes(&"continue?".into());
+    let _: Text = input_validated(&"age: ".into(), |s: &Text| {
+        s.parse::<Int>().map(|n| f"{n}").map_err(|_| "not a number".into())
+    });
+}
+
+fn exercise_select() {
+    let opts: List<(Text, Int)> = [
+        ("Small".into(),  1),
+        ("Medium".into(), 2),
+        ("Large".into(),  3),
+    ];
+    let _: Int = select(&"size: ".into(), &opts);
+    let labels: List<Text> = ["a".into(), "b".into(), "c".into()];
+    let _: List<Int> = multi_select(&"choose: ".into(), &labels);
+}
+
+fn exercise_progress() {
+    let mut p = Progress.new("Building".into(), 10).with_style(ProgressStyle.Bar);
+    p.advance();
+    p.set(5);
+    p.done("ok".into());
+}
+
+async fn exercise_spinner() {
+    let mut s = Spinner.new("Working".into());
+    s.start().await;
+    s.stop("done".into()).await;
+}
+
+fn exercise_signal() {
+    let _: Result<(), SignalError> = trap(Signal.Int, || {});
+    let _: Result<(), SignalError> = on_interrupt(|| {});
+    let _: Result<(), SignalError> = on_terminate(|| {});
+    let _: Result<(), SignalError> = cleanup_on_exit(|| {});
+    let _: Int = with_trap(Signal.Int, || {}, || 42);
+    let _: Result<SignalGuard, SignalError> = SignalGuard.install(Signal.Int, || {});
+}
+
+async fn main() {
+    exercise_input_signatures();
+    exercise_select();
+    exercise_progress();
+    exercise_spinner().await;
+    exercise_signal();
+}
