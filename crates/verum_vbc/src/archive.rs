@@ -828,6 +828,11 @@ const MAX_MODULE_NAME_BYTES: u32 = 1 << 14;         // 16 KB
 const MAX_DEPS_PER_MODULE: u32 = 1 << 12;           // 4 096
 const MAX_MODULE_DATA_BYTES: u64 = 1 << 30;         // 1 GB
 
+/// Read a VBC archive from `reader` and validate its header,
+/// magic bytes, and per-section bounds.  Hostile archives that
+/// claim out-of-range sizes are rejected before any allocation
+/// is performed (see the `MAX_*` consts above for the per-field
+/// upper bounds).
 pub fn read_archive<R: Read + Seek>(mut reader: R) -> io::Result<VbcArchive> {
     // Read header
     let mut magic = [0u8; 4];
