@@ -78,6 +78,8 @@ pub enum TacticOutcome {
 }
 
 impl TacticOutcome {
+    /// True iff the outcome closed the goal (any `Closed { .. }`
+    /// variant — independent of which tactic produced it).
     pub fn is_closed(&self) -> bool {
         matches!(self, TacticOutcome::Closed { .. })
     }
@@ -328,7 +330,9 @@ pub fn tactic_induction(
 /// Uninterpreted Functions) signature.  Term identifiers are u32.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CongruenceEquation {
+    /// Left-hand side term identifier.
     pub lhs: u32,
+    /// Right-hand side term identifier.
     pub rhs: u32,
 }
 

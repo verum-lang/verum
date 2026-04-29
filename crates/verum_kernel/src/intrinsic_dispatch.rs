@@ -65,12 +65,21 @@ pub enum IntrinsicValue {
     /// String text — used for diagnostic identifiers / replay commands.
     Text(String),
     /// Decision-predicate witness with explanation.
-    Decision { holds: bool, reason: String },
+    Decision {
+        /// The decision verdict (true ⇒ predicate holds).
+        holds: bool,
+        /// Human-readable rationale for the verdict (cited in audit
+        /// reports + cert-replay diagnostics).
+        reason: String,
+    },
     /// Unit / void.
     Unit,
 }
 
 impl IntrinsicValue {
+    /// Extract the decision verdict when the value carries one.
+    /// Returns `Some(b)` for `Bool(b)` and the `holds` field of
+    /// `Decision { holds, .. }`; `None` otherwise.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             IntrinsicValue::Bool(b) => Some(*b),
@@ -79,6 +88,9 @@ impl IntrinsicValue {
         }
     }
 
+    /// Extract the textual payload when the value carries one.
+    /// Returns `Some(s)` for `Text(s)`; `None` for every other
+    /// variant.
     pub fn as_text(&self) -> Option<&str> {
         match self {
             IntrinsicValue::Text(s) => Some(s.as_str()),

@@ -71,6 +71,7 @@ pub struct LambdaFilteredDiagram {
 }
 
 impl LambdaFilteredDiagram {
+    /// Construct a fresh λ-filtered diagram fixture.
     pub fn new(
         name: impl Into<Text>,
         index_category: impl Into<Text>,
