@@ -30,6 +30,8 @@ module core.net.h3.qpack.instructions;
 mount core.*;
 mount core.collections.List;
 mount core.net.h3.qpack.huffman as huff;
+mount core.net.h3.qpack.huffman.HuffError;
+mount core.net.h3.qpack.integer.IntError;
 mount core.net.h3.qpack.integer.{encode as int_encode, decode as int_decode};
 
 // =============================================================================
@@ -78,10 +80,10 @@ implement Eq for InstrError {
     }
 }
 
-fn iferr<T>(_: core.net.h3.qpack.integer.IntError) -> Result<T, InstrError> {
+fn iferr<T>(_: IntError) -> Result<T, InstrError> {
     Err(InstrError.IntegerError)
 }
-fn hferr<T>(_: huff.HuffError) -> Result<T, InstrError> {
+fn hferr<T>(_: HuffError) -> Result<T, InstrError> {
     Err(InstrError.HuffmanError)
 }
 

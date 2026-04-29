@@ -207,8 +207,7 @@ public fn build_server_retry(
     pseudo.extend_from_slice(retry_scid.as_slice());
     pseudo.extend_from_slice(token);
 
-    let tag = compute_retry_integrity_tag(pseudo.as_slice())
-        .map_err(|_| RetryError.KeyDeriveFailed)?;
+    let tag = compute_retry_integrity_tag(pseudo.as_slice());
 
     // Final wire format = pseudo-bytes-minus-ODCID-prefix || tag.
     // Strip the leading ODCID length + bytes (they're pseudo-only).

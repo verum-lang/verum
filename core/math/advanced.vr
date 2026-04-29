@@ -44,7 +44,7 @@ mount super.tensor.{
 mount super.autodiff.{GradientTape, GradientScope, checkpoint, stop_gradient, with_no_grad};
 mount super.gpu.{
     ComputeDevice, GPUBackend, GPUKernel, LaunchConfig, Dim3,
-    Stream, Event, CudaGraph,
+    Stream, GpuEvent, CudaGraph,
 };
 mount super.nn.{Module, Parameter, Trainable};
 mount super.linalg.Numeric;
@@ -594,12 +594,12 @@ public fn with_stream<T, F: Fn() -> T>(stream: &Stream, f: F) -> T
 }
 
 // Record an event on the current stream
-public fn record_event(event: &mut Event) using [ComputeDevice] {
+public fn record_event(event: &mut GpuEvent) using [ComputeDevice] {
     @vbc(EVENT_RECORD, event)
 }
 
 // Wait for an event to complete
-public fn wait_event(event: &Event) using [ComputeDevice] {
+public fn wait_event(event: &GpuEvent) using [ComputeDevice] {
     @vbc(EVENT_WAIT, event)
 }
 
