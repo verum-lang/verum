@@ -892,6 +892,21 @@ implement<T: Ord> Extend<T> for BinaryHeap<T> {
     }
 }
 
+implement<T: Ord + Hash + Clone> Hash for BinaryHeap<T> {
+    /// Hash a heap by its SORTED contents — matches `Eq`'s
+    /// order-independent semantics (line 819) so the contract
+    /// `a == b → hash(a) == hash(b)` holds across different internal
+    /// heap arrangements of the same multiset of elements.
+    fn hash(&self, hasher: &mut Hasher) {
+        let mut sorted = self.data.clone();
+        sorted.sort();
+        hasher.write_int(sorted.len());
+        for item in sorted.iter() {
+            item.hash(hasher);
+        }
+    }
+}
+
 implement<T: Ord> BinaryHeap<T> {
     /// Fallible counterpart to `extend`.  Stops at the first allocation
     /// failure and returns `Err(AllocError.OutOfMemory)`; elements
