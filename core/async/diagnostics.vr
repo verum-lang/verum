@@ -70,6 +70,34 @@ implement Display for TaskLifecycleState {
     }
 }
 
+implement Debug for TaskLifecycleState {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Pending   => "Pending",
+            Running   => "Running",
+            Parked    => "Parked",
+            Completed => "Completed",
+            Cancelled => "Cancelled",
+            Failed    => "Failed",
+        };
+        f.write_str(s)
+    }
+}
+
+fn task_lifecycle_state_tag(s: &TaskLifecycleState) -> Int {
+    match s {
+        Pending   => 0, Running   => 1,
+        Parked    => 2, Completed => 3,
+        Cancelled => 4, Failed    => 5,
+    }
+}
+
+implement Eq for TaskLifecycleState {
+    fn eq(&self, other: &TaskLifecycleState) -> Bool {
+        task_lifecycle_state_tag(self) == task_lifecycle_state_tag(other)
+    }
+}
+
 // =============================================================================
 // TaskInfo — snapshot of a single live task
 // =============================================================================

@@ -92,6 +92,34 @@ implement Display for CapEventKind {
     }
 }
 
+implement Debug for CapEventKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let s = match self {
+            Revoke       => "Revoke",
+            Attenuate    => "Attenuate",
+            RefIncr      => "RefIncr",
+            RefDecr      => "RefDecr",
+            GenBump      => "GenBump",
+            EpochAdvance => "EpochAdvance",
+        };
+        f.write_str(s)
+    }
+}
+
+fn cap_event_kind_tag(k: &CapEventKind) -> Int {
+    match k {
+        Revoke       => 0, Attenuate    => 1,
+        RefIncr      => 2, RefDecr      => 3,
+        GenBump      => 4, EpochAdvance => 5,
+    }
+}
+
+implement Eq for CapEventKind {
+    fn eq(&self, other: &CapEventKind) -> Bool {
+        cap_event_kind_tag(self) == cap_event_kind_tag(other)
+    }
+}
+
 // =============================================================================
 // CapEvent — single auditable CBGR state transition
 // =============================================================================
