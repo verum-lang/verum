@@ -3218,7 +3218,19 @@ impl TacticEvaluator {
 
         // Check if we made progress
         if self.exprs_match(&normalized, &original_prop) {
-            // No syntactic progress - try Z3 simplification
+            // No syntactic progress — fall back to Z3 simplification
+            // when `config.aggressive_simplification` is on. The
+            // gate exists so callers that want bounded
+            // simplification cost (e.g. fast-path tactics in
+            // interactive mode) can skip the Z3 round-trip and
+            // surface "no progress" immediately. Before this
+            // wire-up the field was inert — the Z3 fallback
+            // always ran regardless of caller configuration.
+            if !self.config.aggressive_simplification {
+                return Err(TacticError::Failed(Text::from(
+                    "compute made no syntactic progress; aggressive_simplification disabled",
+                )));
+            }
             let z3_simplified = self.try_z3_simplify(&original_prop)?;
 
             if self.is_trivially_true(&z3_simplified) {
@@ -5814,6 +5826,52 @@ mod tests {
             evaluator.state.is_complete(),
             "compute should prove 2 + 3 == 5"
         );
+    }
+
+    #[test]
+    fn aggressive_simplification_false_skips_z3_fallback() {
+        // Pin: with `aggressive_simplification = false`, the
+        // compute tactic refuses to round-trip through Z3 when
+        // syntactic normalisation makes no progress. Before the
+        // wire-up the field was inert — every compute call took
+        // the Z3 fallback regardless of caller config.
+        //
+        // Build a goal that the syntactic normaliser doesn't
+        // touch: `f(x) == f(x)` where `f` is an opaque path —
+        // syntactic equality reduces it to `true`, but if the
+        // symmetry isn't recognised, the Z3 fallback would.
+        // We pick a less trivial shape: a non-foldable opaque
+        // call equality that the normaliser leaves alone.
+        let f_path = verum_ast::ty::Path::from_ident(Ident::new(Text::from("f"), Span::dummy()));
+        let f_expr = Expr::new(ExprKind::Path(f_path), Span::dummy());
+        let arg = make_int_expr(7);
+        let call = Expr::new(
+            ExprKind::Call {
+                func: Heap::new(f_expr),
+                args: List::from_iter([arg.clone()]),
+                type_args: List::new(),
+            },
+            Span::dummy(),
+        );
+        // f(7) > 100 — opaque to the normaliser; default config
+        // would route this to the Z3 fallback. With aggressive
+        // off the tactic must fail without invoking Z3.
+        let goal = make_binary_expr(BinOp::Gt, call, make_int_expr(100));
+
+        let mut evaluator = TacticEvaluator::with_goal(goal);
+        evaluator.config.aggressive_simplification = false;
+        let result = evaluator.apply_tactic(&TacticExpr::Compute);
+        match result {
+            Err(TacticError::Failed(msg)) => {
+                assert!(
+                    msg.as_str().contains("aggressive_simplification disabled"),
+                    "failure must name the disabled gate: {msg}"
+                );
+            }
+            other => panic!(
+                "aggressive_simplification=false must yield TacticError::Failed naming the gate: {other:?}"
+            ),
+        }
     }
 
     #[test]
