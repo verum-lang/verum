@@ -927,3 +927,119 @@ fn test_wand_elimination_failure() {
     let result = sl.apply_wand_elimination(&have, &wand_left, &wand_right);
     assert!(result.is_err());
 }
+
+// =============================================================================
+// UnfoldingConfig wiring tests
+// =============================================================================
+//
+// Pin: every `UnfoldingConfig` field reaches a meaningful
+// consumer at the `UnfoldingState` API. Pre-fix all four fields
+// were stored on state but no code read them — the public
+// `can_unfold` API took `max_depth` as a manual parameter,
+// `lazy_unfolding` and `generate_lemmas` were entirely orphaned,
+// and `add_lemma` always pushed regardless of the
+// `generate_lemmas` flag.
+
+mod unfolding_config_wiring {
+    use super::*;
+    use verum_smt::separation_logic::{UnfoldingConfig, UnfoldingState};
+
+    #[test]
+    fn unfolding_config_default_values_pinned() {
+        // Pin documented defaults; drift here would silently change
+        // the unfolding-budget semantics for every caller relying on
+        // `Default::default()`.
+        let cfg = UnfoldingConfig::default();
+        assert_eq!(cfg.max_lseg_depth, 10);
+        assert_eq!(cfg.max_tree_depth, 5);
+        assert!(cfg.lazy_unfolding);
+        assert!(cfg.generate_lemmas);
+    }
+
+    #[test]
+    fn can_unfold_lseg_uses_max_lseg_depth() {
+        // Pin: `can_unfold_lseg` consults config.max_lseg_depth
+        // automatically — embedders no longer need to pass the
+        // cap. max_tree_depth is set high so a regression that
+        // silently swapped the two fields would surface here.
+        let cfg = UnfoldingConfig {
+            max_lseg_depth: 3,
+            max_tree_depth: 99,
+            lazy_unfolding: true,
+            generate_lemmas: true,
+        };
+        let mut state = UnfoldingState::new(cfg);
+
+        assert!(state.can_unfold_lseg("lseg_p"));
+        state.increment_depth("lseg_p");
+        assert!(state.can_unfold_lseg("lseg_p"));
+        state.increment_depth("lseg_p");
+        state.increment_depth("lseg_p");
+        assert!(!state.can_unfold_lseg("lseg_p"));
+    }
+
+    #[test]
+    fn can_unfold_tree_uses_max_tree_depth() {
+        // Pin: `can_unfold_tree` consults config.max_tree_depth —
+        // independently from max_lseg_depth.
+        let cfg = UnfoldingConfig {
+            max_lseg_depth: 99,
+            max_tree_depth: 2,
+            lazy_unfolding: true,
+            generate_lemmas: true,
+        };
+        let mut state = UnfoldingState::new(cfg);
+
+        assert!(state.can_unfold_tree("tree_p"));
+        state.increment_depth("tree_p");
+        assert!(state.can_unfold_tree("tree_p"));
+        state.increment_depth("tree_p");
+        assert!(!state.can_unfold_tree("tree_p"));
+    }
+
+    #[test]
+    fn lazy_unfolding_enabled_round_trips() {
+        let mut cfg = UnfoldingConfig::default();
+        cfg.lazy_unfolding = false;
+        let state = UnfoldingState::new(cfg);
+        assert!(!state.lazy_unfolding_enabled());
+    }
+
+    #[test]
+    fn lemma_generation_enabled_round_trips() {
+        let mut cfg = UnfoldingConfig::default();
+        cfg.generate_lemmas = false;
+        let state = UnfoldingState::new(cfg);
+        assert!(!state.lemma_generation_enabled());
+    }
+
+    #[test]
+    fn add_lemma_skipped_when_generation_disabled() {
+        // Pin the wire-up at the only producer site: when
+        // `generate_lemmas = false`, add_lemma must NOT push to
+        // the lemma list. Pre-wire the field was stored but the
+        // method always pushed regardless.
+        let cfg = UnfoldingConfig {
+            max_lseg_depth: 10,
+            max_tree_depth: 5,
+            lazy_unfolding: true,
+            generate_lemmas: false,
+        };
+        let mut state = UnfoldingState::new(cfg);
+        state.add_lemma(SepAssertion::emp());
+        assert!(
+            state.lemmas.is_empty(),
+            "add_lemma must skip when generate_lemmas = false"
+        );
+    }
+
+    #[test]
+    fn add_lemma_pushed_when_generation_enabled() {
+        // Pin the inverse: when `generate_lemmas = true`, add_lemma
+        // pushes as before — no regression on the default path.
+        let cfg = UnfoldingConfig::default();
+        let mut state = UnfoldingState::new(cfg);
+        state.add_lemma(SepAssertion::emp());
+        assert_eq!(state.lemmas.len(), 1);
+    }
+}
