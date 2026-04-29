@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, transducer, laws, properties, typecheck
+// @timeout: 10000
+// @expect: pass
+
+// Equational laws that the Transducer compose / identity API must satisfy.
+// These are property tests — driven against curated input lists; the same
+// predicates run against random inputs in fuzz harness.
+
+mount core.shell.transducer.{
+    Transducer, mapping, filtering, taking, compose, identity,
+    transduce_list,
+};
+
+// =============================================================================
+// Law: identity is the unit of compose.
+//   compose(identity(), t) == t  (and symmetrically)
+// =============================================================================
+
+fn law_identity_left_unit(xs: List<Int>) -> Bool {
+    let m: Transducer<Int, Int> = mapping(|x| x + 1);
+    let lhs: List<Int> = transduce_list(xs.clone(), compose(identity(), m.clone()));
+    let rhs: List<Int> = transduce_list(xs, m);
+    lhs == rhs
+}
+
+fn law_identity_right_unit(xs: List<Int>) -> Bool {
+    let m: Transducer<Int, Int> = mapping(|x| x * 2);
+    let lhs: List<Int> = transduce_list(xs.clone(), compose(m.clone(), identity()));
+    let rhs: List<Int> = transduce_list(xs, m);
+    lhs == rhs
+}
+
+// =============================================================================
+// Law: compose is associative.
+//   transduce(xs, compose(a, compose(b, c))) ==
+//   transduce(xs, compose(compose(a, b), c))
+// =============================================================================
+
+fn law_compose_associative(xs: List<Int>) -> Bool {
+    let a: Transducer<Int, Int> = mapping(|x| x + 1);
+    let b: Transducer<Int, Int> = filtering(|x| *x > 0);
+    let c: Transducer<Int, Int> = mapping(|x| x * 3);
+    let left:  List<Int> = transduce_list(xs.clone(), compose(a.clone(), compose(b.clone(), c.clone())));
+    let right: List<Int> = transduce_list(xs, compose(compose(a, b), c));
+    left == right
+}
+
+// =============================================================================
+// Law: filtering(p) == filtering(p) ∘ filtering(p) (idempotence).
+// =============================================================================
+
+fn law_filter_idempotent(xs: List<Int>) -> Bool {
+    let p: fn(&Int) -> Bool = |x| *x % 2 == 0;
+    let single: Transducer<Int, Int> = filtering(p);
+    let double: Transducer<Int, Int> = compose(filtering(p), filtering(p));
+    transduce_list(xs.clone(), single) == transduce_list(xs, double)
+}
+
+// =============================================================================
+// Law: taking(n) bounds the result length to ≤ n.
+// =============================================================================
+
+fn law_taking_bounded(xs: List<Int>, n: Int) -> Bool {
+    let t: Transducer<Int, Int> = taking(n);
+    let result = transduce_list(xs, t);
+    (result.len() as Int) <= n
+}
+
+// =============================================================================
+// Driver
+// =============================================================================
+
+fn corpus() -> List<List<Int>> {
+    [
+        [],
+        [1],
+        [1, 2, 3, 4, 5],
+        [-3, -1, 0, 1, 3],
+        [10, 10, 10, 10],
+    ]
+}
+
+fn main() {
+    for xs in corpus().iter() {
+        assert(law_identity_left_unit(xs.clone()),  "identity left unit failed");
+        assert(law_identity_right_unit(xs.clone()), "identity right unit failed");
+        assert(law_compose_associative(xs.clone()), "compose associativity failed");
+        assert(law_filter_idempotent(xs.clone()),   "filter idempotence failed");
+    }
+    let big: List<Int> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    assert(law_taking_bounded(big.clone(), 3), "taking(3) bound failed");
+    assert(law_taking_bounded(big.clone(), 0), "taking(0) bound failed");
+    assert(law_taking_bounded(big.clone(), 100), "taking(100) bound failed");
+}

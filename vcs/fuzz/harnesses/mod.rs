@@ -18,6 +18,11 @@ pub mod lexer_harness;
 pub mod parser_harness;
 pub mod typecheck_harness;
 pub mod codegen_harness;
+pub mod escape_harness;
+
+pub use escape_harness::{
+    EscapeHarness, EscapeResult, EscapeError, EscapeStats,
+};
 
 pub use lexer_harness::{
     LexerHarness, LexerHarnessConfig, LexerResult, LexerError, LexerStats, ErrorSeverity,

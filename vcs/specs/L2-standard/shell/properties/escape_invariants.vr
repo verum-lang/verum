@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: shell, escape, properties, invariants, typecheck
+// @timeout: 10000
+// @expect: pass
+
+// Property-based invariants for `core.shell.escape.Escaper`. Each function
+// here states a property that must hold for *any* input — the tests below
+// check the property over a curated corpus of crafted strings. A separate
+// fuzz harness (vcs/fuzz/escape_harness.vr) drives the same predicates
+// against randomly-generated inputs.
+
+mount core.shell.escape.{Escaper, ShellFlavour};
+
+// =============================================================================
+// Property: posix() output is enclosed in single quotes (or returned bare
+// if and only if the string is in the safe-unquoted character class).
+// =============================================================================
+
+fn prop_posix_quoted_or_safe(s: &Text) -> Bool {
+    let escaped = Escaper.posix(s);
+    if Escaper.posix_safe_unquoted(s) {
+        return escaped == *s;
+    }
+    escaped.starts_with("'") && escaped.ends_with("'")
+}
+
+// =============================================================================
+// Property: an embedded single quote always becomes the canonical
+// '\'' close/escape/reopen sequence — never an unescaped '.
+// =============================================================================
+
+fn prop_no_lone_single_quote_in_quoted_form(s: &Text) -> Bool {
+    let escaped = Escaper.posix(s);
+    if !escaped.starts_with("'") { return true; }
+    // The interior of the escaped string is escaped[1..len-1]; every
+    // remaining ' must be part of the close/escape/reopen idiom.
+    let inner = escaped.slice(1, escaped.len() - 1);
+    let bytes = inner.into_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == ('\'' as Byte) {
+            // Must be followed by \, ', '
+            if i + 3 >= bytes.len() { return false; }
+            if bytes[i + 1] != ('\\' as Byte) { return false; }
+            if bytes[i + 2] != ('\'' as Byte) { return false; }
+            if bytes[i + 3] != ('\'' as Byte) { return false; }
+            i = i + 4;
+        } else {
+            i = i + 1;
+        }
+    }
+    true
+}
+
+// =============================================================================
+// Property: idempotence under construction — escaping a string once, then
+// again as if it were a fresh string, doubles the wrapping but never
+// produces structural corruption.
+// =============================================================================
+
+fn prop_double_escape_well_formed(s: &Text) -> Bool {
+    let once = Escaper.posix(s);
+    let twice = Escaper.posix(&once);
+    twice.starts_with("'") && twice.ends_with("'") && twice.len() >= once.len() + 2
+}
+
+// =============================================================================
+// Property: cmd.exe-flavoured output never contains a stray quote outside
+// the canonical wrapping for inputs requiring quoting.
+// =============================================================================
+
+fn prop_cmd_exe_balanced(s: &Text) -> Bool {
+    let escaped = Escaper.cmd_exe(s);
+    let mut quotes: Int = 0;
+    for ch in escaped.chars() {
+        if ch == '"' { quotes = quotes + 1; }
+    }
+    // Even number of unescaped quotes — wrapping is balanced.
+    quotes % 2 == 0
+}
+
+// =============================================================================
+// Driver — exercises each property over a corpus of adversarial samples.
+// =============================================================================
+
+fn corpus() -> List<Text> {
+    [
+        "".into(),
+        "plain".into(),
+        "with space".into(),
+        "with'single".into(),
+        "with\"double".into(),
+        "with\\backslash".into(),
+        "evil; rm -rf /".into(),
+        "$(echo INJECTED)".into(),
+        "`backtick`".into(),
+        "newline\nhere".into(),
+        "tab\there".into(),
+        "unicode-α-β".into(),
+        "emoji-🚀".into(),
+        "'quoted'".into(),
+        "''empty quotes''".into(),
+        "\\\\\\\\".into(),
+        "  leading and trailing  ".into(),
+    ]
+}
+
+fn main() {
+    for s in corpus().iter() {
+        assert(prop_posix_quoted_or_safe(s), &f"prop_posix_quoted_or_safe failed for: {s:?}");
+        assert(prop_no_lone_single_quote_in_quoted_form(s),
+               &f"prop_no_lone_single_quote_in_quoted_form failed for: {s:?}");
+        assert(prop_double_escape_well_formed(s),
+               &f"prop_double_escape_well_formed failed for: {s:?}");
+        assert(prop_cmd_exe_balanced(s),
+               &f"prop_cmd_exe_balanced failed for: {s:?}");
+    }
+}
