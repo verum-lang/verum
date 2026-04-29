@@ -1300,29 +1300,26 @@ impl TypeChecker {
         use crate::ty::Type;
         use verum_common::span::Span;
 
-        // Register types from metadata.
-        // Sort with well-known types FIRST to ensure their variant constructors
-        // (Ok, Err, Some, None, Less, Equal, Greater) are registered before any
-        // other types that share the same variant names (e.g., CheckedResult also
-        // has an Ok variant). The variant_type_names registry uses first-registered-wins,
-        // so Result must register before CheckedResult, etc.
-        let mut sorted_types: Vec<_> = metadata.types.iter().collect();
-        sorted_types.sort_by(|a, b| {
-            // Priority types that must be registered first
-            fn priority(name: &str) -> u8 {
-                match name {
-                    "Result" => 0,
-                    "Maybe" => 0,
-                    "Ordering" => 0,
-                    "Bool" => 0,
-                    _ => 1,
-                }
-            }
-            let pa = priority(a.0.as_str());
-            let pb = priority(b.0.as_str());
-            pa.cmp(&pb).then_with(|| a.0.as_str().cmp(b.0.as_str()))
-        });
-        for (name, type_desc) in sorted_types {
+        // Register types from metadata in source declaration order.
+        //
+        // The variant_type_names registry uses first-registered-wins semantics,
+        // so the order types are registered determines which type owns each
+        // variant signature when names overlap (e.g., Result.Ok vs CheckedResult.Ok).
+        //
+        // Iteration walks `type_declaration_order`, which records insertion order
+        // through the metadata pipeline:
+        //   archive layer order (Core → Text → Collections → …)
+        //     → per-module .vr file declaration order
+        //
+        // This means stdlib's `Maybe`/`Result`/`Ordering` register before any
+        // sibling cog's variant aliases naturally — no hardcoded priority list,
+        // no compiler-side stdlib type knowledge.
+        //
+        // Trailing tail: any type present in `metadata.types` but missing from
+        // the order list (defensive — should never happen in practice) is
+        // appended in alphabetical order so we still register every type.
+        let ordered_types = Self::stdlib_iteration_order(metadata);
+        for (name, type_desc) in ordered_types {
             // Convert core_metadata::TypeDescriptor to Type
             let ty = self.type_descriptor_to_type(type_desc);
             self.ctx.define_type(name.clone(), ty.clone());
@@ -1369,10 +1366,10 @@ impl TypeChecker {
 
                 let variant_type = Type::Variant(variant_map.clone());
                 if let Some(sig) = Self::variant_type_signature(&variant_type) {
-                    self.register_variant_type_name_prioritized(sig.clone(), name.clone());
+                    self.register_variant_type_name_first_wins(sig.clone(), name.clone());
                     if let Some(relaxed_sig) = Self::variant_type_signature_relaxed(&variant_type) {
                         if relaxed_sig != sig {
-                            self.register_variant_type_name_prioritized(relaxed_sig, name.clone());
+                            self.register_variant_type_name_first_wins(relaxed_sig, name.clone());
                         }
                     }
                 }
@@ -1576,6 +1573,44 @@ impl TypeChecker {
         Path::single(ident)
     }
 
+    /// Walk metadata types in stdlib source declaration order.
+    ///
+    /// Returns `(name, descriptor)` pairs ordered first by `type_declaration_order`
+    /// (which records insertion order: archive layer → .vr declaration order),
+    /// then any orphan types not present in that list appended in alphabetical
+    /// (BTreeMap) order. The orphan tail is defensive — every type inserted via
+    /// `core_loader::extract_module_metadata` or `pipeline::cached → metadata`
+    /// is already pushed to `type_declaration_order`.
+    ///
+    /// First-registered-wins iteration is the architectural alternative to
+    /// hardcoded priority lists like `["Result", "Maybe", "Ordering", "Bool"]`.
+    /// Compiler stays stdlib-agnostic; correctness comes from source order.
+    fn stdlib_iteration_order(
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> Vec<(&Text, &crate::core_metadata::TypeDescriptor)> {
+        let mut seen: std::collections::HashSet<&Text> =
+            std::collections::HashSet::with_capacity(metadata.types.len());
+        let mut out: Vec<(&Text, &crate::core_metadata::TypeDescriptor)> =
+            Vec::with_capacity(metadata.types.len());
+
+        for name in metadata.type_declaration_order.iter() {
+            if let Some(desc) = metadata.types.get(name) {
+                if seen.insert(name) {
+                    out.push((name, desc));
+                }
+            }
+        }
+
+        for (name, desc) in metadata.types.iter() {
+            if !seen.contains(name) {
+                seen.insert(name);
+                out.push((name, desc));
+            }
+        }
+
+        out
+    }
+
     /// Convert a core_metadata::TypeDescriptor to a Type.
     fn type_descriptor_to_type(&self, desc: &crate::core_metadata::TypeDescriptor) -> Type {
         use crate::core_metadata::TypeDescriptorKind;
@@ -1622,20 +1657,11 @@ impl TypeChecker {
         use crate::core_metadata::{TypeDescriptorKind, VariantPayload};
         use crate::ty::{InductiveConstructor, Type};
 
-        // Sort with well-known types first (same priority as load_stdlib_from_metadata).
-        let mut sorted_types: Vec<_> = metadata.types.iter().collect();
-        sorted_types.sort_by(|a, b| {
-            fn priority(name: &str) -> u8 {
-                match name {
-                    "Result" | "Maybe" | "Ordering" | "Bool" => 0,
-                    _ => 1,
-                }
-            }
-            let pa = priority(a.0.as_str());
-            let pb = priority(b.0.as_str());
-            pa.cmp(&pb).then_with(|| a.0.as_str().cmp(b.0.as_str()))
-        });
-        for (type_name, type_desc) in sorted_types {
+        // Walk types in source declaration order (stdlib layer order →
+        // .vr declaration order). Same rationale as `load_stdlib_from_metadata`:
+        // first-registered-wins for inductive constructor lookup, no hardcoded
+        // priority list, no compiler-side knowledge of stdlib type names.
+        for (type_name, type_desc) in Self::stdlib_iteration_order(metadata) {
             if let TypeDescriptorKind::Variant { cases } = &type_desc.kind {
                 let mut constructors = verum_common::List::new();
 
@@ -37140,31 +37166,22 @@ impl TypeChecker {
 
 
 
-    /// Register a variant type name mapping with well-known type priority.
+    /// Register a variant type name mapping with first-registered-wins semantics.
     ///
-    /// Well-known types (Result, Maybe, Ordering) always win variant name registration
-    /// regardless of registration order. This prevents non-deterministic failures when
-    /// types like CheckedResult (which also has `Ok`) are registered before Result.
-    fn register_variant_type_name_prioritized(&mut self, sig: Text, type_name: Text) {
-        const PRIORITY_TYPES: &[&str] = &["Result", "Maybe", "Ordering", "Bool"];
-        let is_priority = PRIORITY_TYPES.contains(&type_name.as_str());
-
-        if is_priority {
-            // Priority type always wins — overwrite any existing entry
-            self.variant_type_names.insert(sig.clone(), type_name.clone());
-        } else if let Some(existing) = self.variant_type_names.get(&sig) {
-            // Non-priority type: only insert if no existing entry, or existing is
-            // also non-priority (first-registered-wins among non-priority types)
-            if !PRIORITY_TYPES.contains(&existing.as_str()) {
-                // Keep first-registered-wins for non-priority types
-                // (entry already exists, don't overwrite)
-            }
-            // Otherwise the existing entry is a priority type — keep it
-        } else {
-            // No existing entry — insert
-            self.variant_type_names.insert(sig.clone(), type_name.clone());
-        }
-        // Always register with protocol checker and unifier (they handle their own dedup)
+    /// The compiler holds NO knowledge of which stdlib type names "should" win
+    /// when variant signatures collide (e.g., `Result.Ok|Err` vs an arbitrary
+    /// downstream cog's `MyResult.Ok|Err`). Correctness comes from registration
+    /// order: stdlib types register first during bootstrap (driven by
+    /// `stdlib_iteration_order` + `type_declaration_order`), so they naturally
+    /// own each signature they declare.
+    ///
+    /// Mirrors the same `entry().or_insert()` semantics used by the protocol
+    /// checker (`protocol.rs`) and the unifier (`unify.rs`) — three layers, one
+    /// rule, no hardcoded type names.
+    fn register_variant_type_name_first_wins(&mut self, sig: Text, type_name: Text) {
+        self.variant_type_names
+            .entry(sig.clone())
+            .or_insert_with(|| type_name.clone());
         self.protocol_checker.write().register_variant_type_name(sig.clone(), type_name.clone());
         self.unifier.register_variant_type_name(sig, type_name);
     }
@@ -47631,10 +47648,10 @@ impl TypeChecker {
                 // CRITICAL: Register variant type to name mapping for instance method lookup
                 // This allows err.error_code() to find methods defined on RegistryError
                 if let Some(sig) = Self::variant_type_signature(&variant_type) {
-                    self.register_variant_type_name_prioritized(sig.clone(), type_name.clone());
+                    self.register_variant_type_name_first_wins(sig.clone(), type_name.clone());
                     if let Some(relaxed_sig) = Self::variant_type_signature_relaxed(&variant_type) {
                         if relaxed_sig != sig {
-                            self.register_variant_type_name_prioritized(relaxed_sig, type_name.clone());
+                            self.register_variant_type_name_first_wins(relaxed_sig, type_name.clone());
                         }
                     }
 
@@ -49315,10 +49332,10 @@ impl TypeChecker {
 
                 // CRITICAL: Register variant type to name mapping for instance method lookup
                 if let Some(sig) = Self::variant_type_signature(&variant_type) {
-                    self.register_variant_type_name_prioritized(sig.clone(), type_name.clone());
+                    self.register_variant_type_name_first_wins(sig.clone(), type_name.clone());
                     if let Some(relaxed_sig) = Self::variant_type_signature_relaxed(&variant_type) {
                         if relaxed_sig != sig {
-                            self.register_variant_type_name_prioritized(relaxed_sig, type_name.clone());
+                            self.register_variant_type_name_first_wins(relaxed_sig, type_name.clone());
                         }
                     }
 

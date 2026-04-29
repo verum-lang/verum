@@ -19,7 +19,26 @@ use verum_common::{List, Maybe, OrderedMap, Text};
 #[derive(Debug, Clone, Default)]
 pub struct CoreMetadata {
     /// Type definitions (List<T>, Map<K,V>, Maybe<T>, etc.)
+    ///
+    /// Storage is `OrderedMap` (BTreeMap-backed) for O(log n) lookup by name.
+    /// Iteration order from this map is alphabetical and MUST NOT be used for
+    /// any operation where source declaration order matters — see
+    /// `type_declaration_order` for that.
     pub types: OrderedMap<Text, TypeDescriptor>,
+
+    /// Type names in source declaration order (load order across the archive).
+    ///
+    /// Recorded as types are inserted into `types`. Provides a stable iteration
+    /// order that reflects stdlib layer ordering (Core → Text → Collections → …)
+    /// and per-module .vr file declaration order.
+    ///
+    /// Critical for: variant-name registration (Maybe must register `None|Some`
+    /// before any sibling cog's variant aliases), inductive-constructor
+    /// registration (Result must beat CheckedResult to the `Ok|Err` signature),
+    /// and any other first-registered-wins resolution. Without this list, sites
+    /// would hardcode stdlib type names (Result/Maybe/Ordering/Bool) to force
+    /// priority — a violation of the no-stdlib-knowledge-in-compiler rule.
+    pub type_declaration_order: List<Text>,
 
     /// Protocol definitions (Eq, Ord, Clone, Iterator, etc.)
     pub protocols: OrderedMap<Text, ProtocolDescriptor>,
