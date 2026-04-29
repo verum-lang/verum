@@ -123,6 +123,38 @@ impl MlirConfig {
         self.shared_library_paths.push(path.into());
         self
     }
+
+    /// Project this MLIR codegen config into a `jit::JitConfig` for callers
+    /// that bridge an MLIR module into the JIT engine. Forwards the fields
+    /// the JIT engine actually consumes:
+    /// `optimization_level` (clamped to 0..=3), `verbose`,
+    /// `enable_debug_info` (from `debug_info`), and the
+    /// `shared_library_paths` registered via `with_shared_library` /
+    /// the field directly.
+    ///
+    /// Closes the inert-defense gap around `MlirConfig.shared_library_paths`:
+    /// the field had a builder but no consumer in the AOT codegen path
+    /// (which is GPU-targeted and runs through `optimize_gpu` /
+    /// `GpuBinaryEmitter`, neither of which load runtime libraries).
+    /// Until a caller invokes this projection, the paths sit on the config
+    /// inert; once invoked, they reach `engine::JitConfig` and propagate to
+    /// `ExecutionEngine` symbol resolution at line ~646 of jit/engine.rs.
+    pub fn to_jit_config(&self) -> crate::mlir::jit::JitConfig {
+        crate::mlir::jit::JitConfig {
+            optimization_level: (self.optimization_level as usize).min(3),
+            enable_object_cache: true,
+            shared_library_paths: self
+                .shared_library_paths
+                .iter()
+                .map(|p| p.to_string())
+                .collect(),
+            verbose: self.verbose,
+            enable_debug_info: self.debug_info,
+            max_cache_size: 1024,
+            enable_multithreading: true,
+            object_dump_dir: None,
+        }
+    }
 }
 
 /// MLIR context wrapper with Verum dialect support.
@@ -277,6 +309,16 @@ impl<'ctx> MlirCodegen<'ctx> {
     pub fn new(mlir_ctx: &'ctx MlirContext, config: MlirConfig) -> Result<Self> {
         let location = mlir_ctx.unknown_location();
         let module = Module::new(location);
+
+        if !config.shared_library_paths.is_empty() {
+            tracing::debug!(
+                "MlirConfig.shared_library_paths has {} entries — these reach \
+                 ExecutionEngine symbol resolution only via `to_jit_config()`. \
+                 The AOT GPU path (optimize_gpu / GpuBinaryEmitter) does not \
+                 load runtime libraries, so paths are ignored here.",
+                config.shared_library_paths.len()
+            );
+        }
 
         Ok(Self {
             config,
@@ -552,5 +594,37 @@ mod tests {
         assert_eq!(config.optimization_level, 3);
         assert!(config.enable_cbgr_optimization);
         assert!(config.debug_info);
+    }
+
+    #[test]
+    fn to_jit_config_forwards_shared_library_paths() {
+        let config = MlirConfig::new("m")
+            .with_optimization_level(2)
+            .with_debug_info(true)
+            .with_verbose(true)
+            .with_shared_library("/opt/lib/foo.so")
+            .with_shared_library("/opt/lib/bar.so");
+
+        let jit = config.to_jit_config();
+        assert_eq!(jit.optimization_level, 2);
+        assert!(jit.verbose);
+        assert!(jit.enable_debug_info);
+        assert_eq!(jit.shared_library_paths.len(), 2);
+        assert_eq!(jit.shared_library_paths[0], "/opt/lib/foo.so");
+        assert_eq!(jit.shared_library_paths[1], "/opt/lib/bar.so");
+    }
+
+    #[test]
+    fn to_jit_config_clamps_optimization_level() {
+        let mut config = MlirConfig::new("m");
+        config.optimization_level = 9;
+        let jit = config.to_jit_config();
+        assert_eq!(jit.optimization_level, 3);
+    }
+
+    #[test]
+    fn to_jit_config_empty_when_no_paths_added() {
+        let jit = MlirConfig::new("m").to_jit_config();
+        assert!(jit.shared_library_paths.is_empty());
     }
 }
