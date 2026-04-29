@@ -1176,6 +1176,17 @@ impl SmtBackendSwitcher {
 
     /// Solve with portfolio approach (parallel execution)
     fn solve_portfolio(&mut self, assertions: &List<Expr>) -> SolveResult {
+        // Honour `PortfolioConfig.enabled`: when the user
+        // selected `BackendChoice::Portfolio` but disabled the
+        // portfolio at config level, fall back to single-backend
+        // auto-routing. The flag is the kill-switch for the
+        // expensive multi-thread path; without this gate the
+        // documented toggle had no effect — `BackendChoice` was
+        // the only way to disable portfolio.
+        if !self.config.portfolio.enabled {
+            return self.solve_auto(assertions);
+        }
+
         let (tx, rx) = mpsc::channel();
 
         // Clone assertions for both threads
