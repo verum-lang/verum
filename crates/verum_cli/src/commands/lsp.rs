@@ -98,6 +98,46 @@ pub enum Transport {
 pub fn execute(transport: Transport) -> Result<()> {
     ui::info("Starting Verum Language Server");
 
+    // Surface inert manifest [lsp] section. The CLI's LspConfig
+    // (in config.rs) carries `enable_cost_hints`, `validation_mode`,
+    // `auto_import`, `format_on_save` from the [lsp] table in
+    // verum.toml — but `verum_lsp` operates with its own
+    // `verum_lsp::LspConfig` populated from `initializationOptions`
+    // sent by the editor via LSP. The CLI's manifest [lsp] table
+    // doesn't propagate to the running server today; embedders
+    // setting `[lsp].format_on_save = true` in verum.toml saw zero
+    // observable effect because format_on_save is an editor-side
+    // preference in standard LSP clients.
+    //
+    // Surface the values via tracing::debug! at command entry,
+    // gated on any non-default value, so the request is audible
+    // until manifest [lsp] → verum_lsp::LspConfig integration
+    // lands. A missing manifest is not an error — `verum lsp` can
+    // run outside a Verum project for stand-alone IDE use.
+    if let Ok(dir) = crate::config::Manifest::find_manifest_dir() {
+        let path = crate::config::Manifest::manifest_path(&dir);
+        if let Ok(manifest) = crate::config::Manifest::from_file(&path) {
+            let cli_lsp = &manifest.lsp;
+            if !cli_lsp.enable_cost_hints
+                || cli_lsp.validation_mode.as_str() != "incremental"
+                || !cli_lsp.auto_import
+                || cli_lsp.format_on_save
+            {
+                tracing::debug!(
+                    "manifest [lsp]: enable_cost_hints={}, validation_mode={:?}, \
+                     auto_import={}, format_on_save={} — these fields land on the \
+                     manifest but verum_lsp consults its own LspConfig populated \
+                     from editor-sent initializationOptions; manifest → server \
+                     propagation is forward-looking",
+                    cli_lsp.enable_cost_hints,
+                    cli_lsp.validation_mode.as_str(),
+                    cli_lsp.auto_import,
+                    cli_lsp.format_on_save,
+                );
+            }
+        }
+    }
+
     match transport {
         Transport::Stdio => {
             ui::debug("Using stdio transport");
