@@ -439,6 +439,77 @@ impl Default for VerificationConfig {
     }
 }
 
+impl VerificationMode {
+    /// SMT solver timeout for this mode. Mirrors
+    /// `config.timeout`. `None` means "no per-query timeout".
+    /// Surfaced via accessor so downstream verifiers don't have
+    /// to drill into `mode.config.timeout` directly — the
+    /// accessor is the documented read surface and shields
+    /// callers from future field reorganisation.
+    #[must_use]
+    pub fn timeout(&self) -> Option<Duration> {
+        self.config.timeout
+    }
+
+    /// SMT solver choice for this mode. Mirrors
+    /// `config.solver`.
+    #[must_use]
+    pub fn solver(&self) -> SolverChoice {
+        self.config.solver
+    }
+
+    /// Whether this mode emits a proof certificate. Mirrors
+    /// `config.emit_certificate`. Used by orchestrators that
+    /// route certificate-bearing results into the proof
+    /// archive.
+    #[must_use]
+    pub fn emits_certificate(&self) -> bool {
+        self.config.emit_certificate
+    }
+
+    /// Whether aggressive optimisation is enabled. Mirrors
+    /// `config.aggressive_optimization`.
+    #[must_use]
+    pub fn aggressive_optimization_enabled(&self) -> bool {
+        self.config.aggressive_optimization
+    }
+
+    /// Whether this mode allows runtime fallback when static
+    /// verification can't prove an obligation. Mirrors
+    /// `config.allow_runtime_fallback`. Strict modes (Proof,
+    /// Certified) clear it; gradual modes (Runtime, Static)
+    /// set it.
+    #[must_use]
+    pub fn allows_runtime_fallback(&self) -> bool {
+        self.config.allow_runtime_fallback
+    }
+
+    /// Maximum SMT queries permitted per verification.
+    /// Mirrors `config.max_smt_queries`. `None` means
+    /// "no cap".
+    #[must_use]
+    pub fn max_smt_queries(&self) -> Option<usize> {
+        self.config.max_smt_queries
+    }
+
+    /// Whether verification result caching is enabled. Mirrors
+    /// `config.enable_caching`.
+    #[must_use]
+    pub fn caching_enabled(&self) -> bool {
+        self.config.enable_caching
+    }
+
+    /// Cost budget in milliseconds. Mirrors
+    /// `config.cost_budget_ms`. Returns `None` for unbounded
+    /// modes (Runtime). Orchestrators that drive verification
+    /// in batches consult this to decide whether to bail when
+    /// the cumulative cost crosses the budget.
+    #[must_use]
+    pub fn cost_budget_ms(&self) -> Option<u64> {
+        self.config.cost_budget_ms
+    }
+}
+
 /// Choice of SMT solver
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SolverChoice {
@@ -654,5 +725,52 @@ mod attempt_tests {
         assert!(VerificationLevel::Static.allows_runtime_fallback());
         assert!(!VerificationLevel::Proof.allows_runtime_fallback());
         assert!(VerificationLevel::Runtime.allows_runtime_fallback());
+    }
+
+    #[test]
+    fn verification_mode_accessors_mirror_config_for_every_level() {
+        // Pin: every accessor on VerificationMode returns the
+        // value the underlying config carries for the given
+        // level. Before the wire-up landed, the eight config
+        // fields had no public read surface — downstream
+        // verifiers had to drill into `mode.config.<field>`
+        // directly, exposing them to internal layout changes.
+        for level in [
+            VerificationLevel::Runtime,
+            VerificationLevel::Static,
+            VerificationLevel::Proof,
+        ] {
+            let mode = VerificationMode::new(level);
+            assert_eq!(mode.timeout(), mode.config.timeout);
+            assert_eq!(mode.solver(), mode.config.solver);
+            assert_eq!(mode.emits_certificate(), mode.config.emit_certificate);
+            assert_eq!(
+                mode.aggressive_optimization_enabled(),
+                mode.config.aggressive_optimization
+            );
+            assert_eq!(
+                mode.allows_runtime_fallback(),
+                mode.config.allow_runtime_fallback
+            );
+            assert_eq!(mode.max_smt_queries(), mode.config.max_smt_queries);
+            assert_eq!(mode.caching_enabled(), mode.config.enable_caching);
+            assert_eq!(mode.cost_budget_ms(), mode.config.cost_budget_ms);
+        }
+
+        // Per-level expectations beyond the field-mirror check.
+        let runtime = VerificationMode::runtime();
+        assert!(runtime.allows_runtime_fallback());
+        assert_eq!(runtime.solver(), SolverChoice::None);
+        assert!(!runtime.caching_enabled());
+
+        let static_mode = VerificationMode::static_mode();
+        assert!(static_mode.allows_runtime_fallback());
+        assert!(static_mode.aggressive_optimization_enabled());
+        assert!(static_mode.caching_enabled());
+        assert_eq!(static_mode.solver(), SolverChoice::Auto);
+
+        let proof = VerificationMode::proof();
+        assert!(!proof.allows_runtime_fallback());
+        assert!(proof.emits_certificate());
     }
 }
