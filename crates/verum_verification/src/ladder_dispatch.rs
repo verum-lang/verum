@@ -604,24 +604,71 @@ impl LadderDispatcher for DefaultLadderDispatcher {
                     }
                 }
             }
-            LadderStrategy::CoherentStatic => LadderVerdict::DispatchPending {
-                strategy: LadderStrategy::CoherentStatic,
-                note: Text::from(
-                    "V1: α-cert + symbolic ε-claim (Coherent verification weak)",
-                ),
-            },
-            LadderStrategy::CoherentRuntime => LadderVerdict::DispatchPending {
-                strategy: LadderStrategy::CoherentRuntime,
-                note: Text::from(
-                    "V1: α-cert + runtime ε-monitor via core.action.coherence_monitor",
-                ),
-            },
-            LadderStrategy::Coherent => LadderVerdict::DispatchPending {
-                strategy: LadderStrategy::Coherent,
-                note: Text::from(
-                    "V1: α/ε bidirectional check (kernel re-checks both certs)",
-                ),
-            },
+            LadderStrategy::CoherentStatic => {
+                // #112 hardening — Coherent strategies require α-cert
+                // + ε-cert, but trivial tautologies live in the
+                // kernel's structural fragment — neither cite
+                // α-axioms nor traverse ε-monitors, so both gates
+                // are vacuously satisfied.
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
+                {
+                    LadderVerdict::Closed {
+                        strategy: LadderStrategy::CoherentStatic,
+                        witness: Text::from(format!(
+                            "coherent-static-trivial-tautology: {} (vacuous α-cert; symbolic ε-claim trivial)",
+                            rule
+                        )),
+                        elapsed_ms: 0,
+                    }
+                } else {
+                    LadderVerdict::DispatchPending {
+                        strategy: LadderStrategy::CoherentStatic,
+                        note: Text::from(
+                            "V1: α-cert + symbolic ε-claim (Coherent verification weak)",
+                        ),
+                    }
+                }
+            }
+            LadderStrategy::CoherentRuntime => {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
+                {
+                    LadderVerdict::Closed {
+                        strategy: LadderStrategy::CoherentRuntime,
+                        witness: Text::from(format!(
+                            "coherent-runtime-trivial-tautology: {} (vacuous α-cert; ε-monitor obligation trivial)",
+                            rule
+                        )),
+                        elapsed_ms: 0,
+                    }
+                } else {
+                    LadderVerdict::DispatchPending {
+                        strategy: LadderStrategy::CoherentRuntime,
+                        note: Text::from(
+                            "V1: α-cert + runtime ε-monitor via core.action.coherence_monitor",
+                        ),
+                    }
+                }
+            }
+            LadderStrategy::Coherent => {
+                if let Some(rule) = trivial_tautology_rule(obligation.obligation_text.as_str())
+                {
+                    LadderVerdict::Closed {
+                        strategy: LadderStrategy::Coherent,
+                        witness: Text::from(format!(
+                            "coherent-trivial-tautology: {} (vacuous α/ε bidirectional check; no certs to bind)",
+                            rule
+                        )),
+                        elapsed_ms: 0,
+                    }
+                } else {
+                    LadderVerdict::DispatchPending {
+                        strategy: LadderStrategy::Coherent,
+                        note: Text::from(
+                            "V1: α/ε bidirectional check (kernel re-checks both certs)",
+                        ),
+                    }
+                }
+            }
             LadderStrategy::Synthesize => LadderVerdict::DispatchPending {
                 strategy: LadderStrategy::Synthesize,
                 note: Text::from(
@@ -642,9 +689,9 @@ impl LadderDispatcher for DefaultLadderDispatcher {
             LadderStrategy::Thorough        => LadderImplStatus::Implemented,
             LadderStrategy::Reliable        => LadderImplStatus::Implemented,
             LadderStrategy::Certified       => LadderImplStatus::Implemented,
-            LadderStrategy::CoherentStatic  => LadderImplStatus::Pending,
-            LadderStrategy::CoherentRuntime => LadderImplStatus::Pending,
-            LadderStrategy::Coherent        => LadderImplStatus::Pending,
+            LadderStrategy::CoherentStatic  => LadderImplStatus::Implemented,
+            LadderStrategy::CoherentRuntime => LadderImplStatus::Implemented,
+            LadderStrategy::Coherent        => LadderImplStatus::Implemented,
             LadderStrategy::Synthesize      => LadderImplStatus::Pending,
         }
     }
@@ -1106,22 +1153,103 @@ mod tests {
 
     #[test]
     fn task_111_implementation_status_now_covers_first_nine_strata() {
-        // Pin: the Implemented set covers Runtime / Static / Fast /
-        // ComplexityTyped / Formal / Proof / Thorough / Reliable /
-        // Certified (9 of the 12 backbone strategies).  Coherent
-        // triplet + Synthesize remain Pending — those need real
-        // α/ε-cert + inverse-search infrastructure.
+        // Pin (post-#112 update): trivial-decider extends to the
+        // full 12-strategy backbone.
         let d = DefaultLadderDispatcher::new();
         verify_monotonicity(&d).expect("monotonicity must hold");
-        let mut implemented = 0;
-        for s in LadderStrategy::all() {
-            if matches!(d.implementation_status(s), LadderImplStatus::Implemented) {
-                implemented += 1;
+    }
+
+    // -- Coherent triplet extension (#112) ------------------------------
+
+    #[test]
+    fn coherent_static_admits_trivial_tautology() {
+        let d = DefaultLadderDispatcher::new();
+        let v = d.dispatch(&obligation_with_text(
+            LadderStrategy::CoherentStatic,
+            "x = x",
+        ));
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::CoherentStatic);
+                assert!(witness.as_str().contains("textual-reflexivity"));
+                assert!(witness.as_str().contains("vacuous α-cert"));
             }
+            other => panic!("expected Closed, got {:?}", other),
         }
-        assert_eq!(
-            implemented, 9,
-            "9 of 13 ladder strategies should be Implemented after #111"
+    }
+
+    #[test]
+    fn coherent_runtime_admits_trivial_tautology() {
+        let d = DefaultLadderDispatcher::new();
+        let v = d.dispatch(&obligation_with_text(
+            LadderStrategy::CoherentRuntime,
+            "True",
+        ));
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::CoherentRuntime);
+                assert!(witness.as_str().contains("ε-monitor"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_admits_trivial_tautology() {
+        let d = DefaultLadderDispatcher::new();
+        let v = d.dispatch(&obligation_with_text(
+            LadderStrategy::Coherent,
+            "Path A x x",
+        ));
+        match v {
+            LadderVerdict::Closed { strategy, witness, .. } => {
+                assert_eq!(strategy, LadderStrategy::Coherent);
+                assert!(witness.as_str().contains("reflexive-path"));
+                assert!(witness.as_str().contains("α/ε bidirectional"));
+            }
+            other => panic!("expected Closed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coherent_triplet_dispatch_pending_for_non_trivial() {
+        let d = DefaultLadderDispatcher::new();
+        for strategy in [
+            LadderStrategy::CoherentStatic,
+            LadderStrategy::CoherentRuntime,
+            LadderStrategy::Coherent,
+        ] {
+            let v = d.dispatch(&obligation_with_text(strategy, "α(x) ⊓ ε(y) ≡ ⊤"));
+            assert!(
+                matches!(v, LadderVerdict::DispatchPending { .. }),
+                "{:?} should DispatchPending on non-trivial Coherent obligation; got {:?}",
+                strategy,
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn task_112_full_backbone_covered_for_trivial_subset() {
+        // Pin: every backbone strategy (12 of 13; Synthesize is the
+        // off-backbone orthogonal slot) Implements the trivial-
+        // tautology subset.  Synthesize stays Pending — it's the
+        // inverse-search slot, not a verification dispatcher.
+        let d = DefaultLadderDispatcher::new();
+        verify_monotonicity(&d).expect("monotonicity must hold");
+        for s in LadderStrategy::backbone() {
+            assert!(
+                matches!(d.implementation_status(s), LadderImplStatus::Implemented),
+                "backbone strategy {:?} should be Implemented after #112",
+                s
+            );
+        }
+        assert!(
+            matches!(
+                d.implementation_status(LadderStrategy::Synthesize),
+                LadderImplStatus::Pending
+            ),
+            "Synthesize is off-backbone and stays Pending"
         );
     }
 }
