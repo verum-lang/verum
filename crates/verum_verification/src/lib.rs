@@ -126,6 +126,12 @@ pub mod proof_repl;
 /// [`benchmark::BenchmarkRunner`] + per-system mock + reference
 /// landscape values + `ComparisonMatrix` aggregator.
 pub mod benchmark;
+/// SMT certificate replay (#81) — backend-independent cert format
+/// + multi-backend cross-check.  Single trait boundary
+/// [`cert_replay::CertReplayEngine`] + `KernelOnlyReplayEngine`
+/// (the trust-boundary anchor that catches tampered certs without
+/// trusting external solvers) + mock-backed per-backend engines.
+pub mod cert_replay;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;

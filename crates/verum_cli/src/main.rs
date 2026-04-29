@@ -1031,6 +1031,24 @@ enum Commands {
         format: String,
     },
 
+    /// SMT certificate replay surface (#81) — multi-backend
+    /// cross-validation with kernel-only structural baseline.
+    /// The kernel-only check is what makes SMT solvers external
+    /// to the trusted computing base: even if Z3 / CVC5 emit a
+    /// fake cert, the kernel catches it before commit.
+    ///
+    /// Subcommands:
+    ///   verum cert-replay replay --backend <B> [--cert FILE | --format F --theory T --conclusion C --body B]
+    ///                            [--output plain|json|markdown]
+    ///   verum cert-replay cross-check [--backend B]… [--cert FILE | --format F …]
+    ///                            [--require-consensus] [--output ...]
+    ///   verum cert-replay formats [--output ...]
+    ///   verum cert-replay backends [--output ...]
+    CertReplay {
+        #[clap(subcommand)]
+        sub: CertReplaySub,
+    },
+
     /// Continuous benchmarking surface (#83) — head-to-head vs
     /// Coq / Lean4 / Isabelle / Agda.  Emits a typed comparison
     /// matrix across the seven canonical metrics: kernel LOC,
@@ -1544,6 +1562,66 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum CertReplaySub {
+    Replay {
+        #[clap(long)]
+        backend: String,
+        /// Read the cert from a JSON file (preferred for real
+        /// proofs).  Mutually exclusive with `--format` /
+        /// `--theory` / `--conclusion` / `--body`.
+        #[clap(long, value_name = "FILE")]
+        cert: Option<PathBuf>,
+        /// Inline cert: format tag.
+        #[clap(long, default_value = "")]
+        format: String,
+        /// Inline cert: SMT-LIB theory.
+        #[clap(long, default_value = "")]
+        theory: String,
+        /// Inline cert: theorem-shaped conclusion.
+        #[clap(long, default_value = "")]
+        conclusion: String,
+        /// Inline cert: raw cert body.
+        #[clap(long, default_value = "")]
+        body: String,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    CrossCheck {
+        /// Backend to invoke.  Repeatable.  When omitted, runs
+        /// every external backend (Z3 / CVC5 / Verit / OpenSmt /
+        /// Mathsat) plus the always-on kernel-only baseline.
+        #[clap(long, value_name = "NAME")]
+        backend: Vec<String>,
+        #[clap(long, value_name = "FILE")]
+        cert: Option<PathBuf>,
+        #[clap(long, default_value = "")]
+        format: String,
+        #[clap(long, default_value = "")]
+        theory: String,
+        #[clap(long, default_value = "")]
+        conclusion: String,
+        #[clap(long, default_value = "")]
+        body: String,
+        /// Fail with non-zero exit when any available backend
+        /// disagrees with the others.  This is the
+        /// `@verify(certified)` semantics: every available solver
+        /// must accept.
+        #[clap(long)]
+        require_consensus: bool,
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    Formats {
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+    Backends {
+        #[clap(long, default_value = "plain")]
+        output: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum BenchmarkSub {
     /// Run the suite against a single system and emit raw results.
@@ -3000,6 +3078,50 @@ fn run_command(cli: Cli) -> Result<()> {
             out,
             format,
         } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
+        Commands::CertReplay { sub } => match sub {
+            CertReplaySub::Replay {
+                backend,
+                cert,
+                format,
+                theory,
+                conclusion,
+                body,
+                output,
+            } => commands::cert_replay::run_replay(
+                &backend,
+                cert.as_ref(),
+                &format,
+                &theory,
+                &conclusion,
+                &body,
+                &output,
+            ),
+            CertReplaySub::CrossCheck {
+                backend,
+                cert,
+                format,
+                theory,
+                conclusion,
+                body,
+                require_consensus,
+                output,
+            } => commands::cert_replay::run_cross_check(
+                &backend,
+                cert.as_ref(),
+                &format,
+                &theory,
+                &conclusion,
+                &body,
+                require_consensus,
+                &output,
+            ),
+            CertReplaySub::Formats { output } => {
+                commands::cert_replay::run_formats(&output)
+            }
+            CertReplaySub::Backends { output } => {
+                commands::cert_replay::run_backends(&output)
+            }
+        },
         Commands::Benchmark { sub } => match sub {
             BenchmarkSub::Run {
                 system,

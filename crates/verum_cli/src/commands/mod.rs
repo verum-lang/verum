@@ -69,6 +69,10 @@ pub mod proof_repl;
 /// (Verum / Coq / Lean4 / Isabelle / Agda) and emits a typed
 /// comparison matrix.
 pub mod benchmark;
+/// `verum cert-replay` subcommand — multi-backend SMT certificate
+/// cross-validation.  Kernel-only structural check + per-backend
+/// replay + multi-backend consensus gate.
+pub mod cert_replay;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
