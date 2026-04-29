@@ -32,34 +32,90 @@ use std::path::PathBuf;
 use verum_ast::decl::ItemKind;
 use verum_common::Text;
 use verum_verification::doc_render::{
-    DefaultDocRenderer, DocCorpus, DocItem, DocItemKind, DocRenderer, RenderFormat,
+    build_citation_allowlist, collect_proof_citations, DefaultDocRenderer, DocCorpus,
+    DocItem, DocItemKind, DocRenderer, RenderFormat,
 };
 
 use super::audit::{discover_vr_files, parse_file_for_audit};
 
 /// Walk every `.vr` file under the manifest dir and project each
 /// declaration to a typed `DocItem`.
+///
+/// Citation resolution is two-pass: pass 1 builds the corpus's
+/// name allowlist (every Theorem / Lemma / Corollary / Axiom);
+/// pass 2 walks each proof body's AST via
+/// [`collect_proof_citations`] and filters references against that
+/// allowlist (#92 hardening).  Replaces the previous
+/// `Debug`-formatted-string heuristic that produced both false
+/// positives (struct-debug noise from `format!("{:?}", body)`) and
+/// false negatives (citations whose names didn't end in `_lemma` /
+/// `_thm`).
 fn collect_corpus(only_public: bool) -> Result<DocCorpus> {
     let manifest_dir = crate::config::Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
-    let mut items: Vec<DocItem> = Vec::new();
+
+    // Parse every file once.
+    let mut modules: Vec<(verum_ast::Module, PathBuf)> = Vec::new();
     for abs_path in &vr_files {
         let rel_path = abs_path
             .strip_prefix(&manifest_dir)
             .unwrap_or(abs_path)
             .to_path_buf();
-        let module = match parse_file_for_audit(abs_path) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        for item in &module.items {
-            if let Some(doc) = project_item(item, &rel_path, only_public) {
-                items.push(doc);
+        if let Ok(m) = parse_file_for_audit(abs_path) {
+            modules.push((m, rel_path));
+        }
+    }
+
+    // Pass 1: project items with empty citations; remember each
+    // item's location so pass 2 can re-resolve.
+    let mut pending: Vec<(DocItem, usize, usize)> = Vec::new();
+    for (mi, (module, rel_path)) in modules.iter().enumerate() {
+        for (ii, item) in module.items.iter().enumerate() {
+            if let Some(doc) = project_item(item, rel_path, only_public) {
+                pending.push((doc, mi, ii));
             }
         }
     }
+
+    // Build the corpus-wide allowlist from every projected name.
+    let docs_only: Vec<DocItem> = pending.iter().map(|(d, _, _)| d.clone()).collect();
+    let allowlist = build_citation_allowlist(&docs_only);
+
+    // Pass 2: re-resolve citations using the AST visitor.
+    let mut items: Vec<DocItem> = Vec::with_capacity(pending.len());
+    for (mut doc, mi, ii) in pending {
+        let module = &modules[mi].0;
+        let item = &module.items[ii];
+        if let Some(proof) = proof_body_of(item) {
+            let cites = collect_proof_citations(proof, &allowlist);
+            // Don't cite yourself — the proof body sometimes contains
+            // recursive references (`induction n; case S => apply
+            // foo`); the self-cite is structural noise.
+            let self_name = doc.name.as_str().to_string();
+            doc.citations = cites
+                .into_iter()
+                .filter(|c| c.as_str() != self_name)
+                .collect();
+        }
+        items.push(doc);
+    }
     items.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     Ok(DocCorpus::new(items))
+}
+
+/// Borrow the proof body of a theorem-shaped item, if any.
+fn proof_body_of(item: &verum_ast::decl::Item) -> Option<&verum_ast::decl::ProofBody> {
+    use verum_common::Maybe;
+    let proof = match &item.kind {
+        ItemKind::Theorem(t) => &t.proof,
+        ItemKind::Lemma(t) => &t.proof,
+        ItemKind::Corollary(t) => &t.proof,
+        _ => return None,
+    };
+    match proof {
+        Maybe::Some(b) => Some(b),
+        Maybe::None => None,
+    }
 }
 
 /// Project one AST item to a `DocItem` if it's a renderable kind.
@@ -131,29 +187,33 @@ fn project_item(
     }
 
     let signature = format!("{} {}(...)", kind.name(), name.as_str());
-    let (requires_rendered, ensures_rendered, proof_steps, citations) = match shape {
-        Shape::Theoremish {
-            requires,
-            ensures,
-            proof,
-        } => {
-            let req: Vec<Text> = requires
-                .iter()
-                .map(|e| Text::from(format!("{:?}", e)))
-                .collect();
-            let ens: Vec<Text> = ensures
-                .iter()
-                .map(|e| Text::from(format!("{:?}", e)))
-                .collect();
-            let steps = match proof {
-                Some(body) => render_proof_steps(body),
-                None => Vec::new(),
-            };
-            let cites = collect_citations(proof);
-            (req, ens, steps, cites)
-        }
-        Shape::Axiomatic => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-    };
+    let (requires_rendered, ensures_rendered, proof_steps): (Vec<Text>, Vec<Text>, Vec<Text>) =
+        match shape {
+            Shape::Theoremish {
+                requires,
+                ensures,
+                proof,
+            } => {
+                let req: Vec<Text> = requires
+                    .iter()
+                    .map(|e| Text::from(format!("{:?}", e)))
+                    .collect();
+                let ens: Vec<Text> = ensures
+                    .iter()
+                    .map(|e| Text::from(format!("{:?}", e)))
+                    .collect();
+                let steps = match proof {
+                    Some(body) => render_proof_steps(body),
+                    None => Vec::new(),
+                };
+                (req, ens, steps)
+            }
+            Shape::Axiomatic => (Vec::new(), Vec::new(), Vec::new()),
+        };
+    // Citations are resolved in `collect_corpus` pass 2 against the
+    // corpus-wide allowlist; here we leave them empty and let the
+    // outer loop fill them in.
+    let citations: Vec<Text> = Vec::new();
     let mut framework_markers: Vec<(Text, Text)> = Vec::new();
     for attr in attrs.iter() {
         if !attr.is_named("framework") {
@@ -203,45 +263,6 @@ fn render_proof_steps(body: &verum_ast::decl::ProofBody) -> Vec<Text> {
         .collect()
 }
 
-/// Collect cited names from a proof body.  Heuristic: identifiers
-/// matching `*_lemma` / `*_thm` / `*_theorem` / `*_axiom` /
-/// `lemma_*` / `thm_*` are likely citations.  False positives
-/// surface as broken-refs in the validator.  V1 will replace with
-/// a proper AST visitor.
-fn collect_citations(body: Option<&verum_ast::decl::ProofBody>) -> Vec<Text> {
-    let body = match body {
-        Some(b) => b,
-        None => return Vec::new(),
-    };
-    let raw = format!("{:?}", body);
-    citations_from_text(&raw)
-}
-
-fn citations_from_text(raw: &str) -> Vec<Text> {
-    let mut out: Vec<Text> = Vec::new();
-    let mut seen: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
-    for token in raw.split_whitespace() {
-        let token = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
-        if token.is_empty() || token.len() > 80 {
-            continue;
-        }
-        let lower = token.to_lowercase();
-        if lower.ends_with("_lemma")
-            || lower.ends_with("_thm")
-            || lower.ends_with("_theorem")
-            || lower.ends_with("_axiom")
-            || lower.starts_with("lemma_")
-            || lower.starts_with("thm_")
-        {
-            if seen.insert(token.to_string()) {
-                out.push(Text::from(token.to_string()));
-            }
-        }
-    }
-    out.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    out
-}
 
 // =============================================================================
 // validate format helpers
@@ -460,34 +481,18 @@ mod tests {
         ));
     }
 
-    // ----- citations_from_text heuristic -----
-
-    #[test]
-    fn citations_picks_lemma_suffix() {
-        let text = "ProofBody { steps: [apply add_comm_lemma, apply foo_thm, intro] }";
-        let cites = citations_from_text(text);
-        let names: Vec<&str> = cites.iter().map(|t| t.as_str()).collect();
-        assert!(names.contains(&"add_comm_lemma"));
-        assert!(names.contains(&"foo_thm"));
-        assert!(!names.contains(&"intro"));
-    }
-
-    #[test]
-    fn citations_dedups_repeats() {
-        let text = "apply foo_lemma apply foo_lemma";
-        let cites = citations_from_text(text);
-        assert_eq!(cites.len(), 1);
-        assert_eq!(cites[0].as_str(), "foo_lemma");
-    }
-
-    #[test]
-    fn citations_skips_short_junk() {
-        let cites = citations_from_text("a_lemma _lemma   ");
-        // `a_lemma` matches; bare `_lemma` (after trimming) is just
-        // `lemma` which doesn't match the suffix-of-X-lemma pattern.
-        let names: Vec<&str> = cites.iter().map(|t| t.as_str()).collect();
-        assert!(names.contains(&"a_lemma"));
-    }
+    // ----- citations: AST-based path (collect_proof_citations) -----
+    //
+    // The earlier test set covered a `citations_from_text` text-
+    // search heuristic that used a free-form "find tokens
+    // ending in `_lemma`" walk. That heuristic was replaced by
+    // the AST-based `collect_proof_citations` walk
+    // (verum_compiler::derives) which is more principled — it
+    // operates on the proof's parsed AST rather than guessing
+    // from source text. The heuristic was removed but the
+    // tests were left orphaned, breaking the lib-test build.
+    // Removed here; the production path is now exercised by
+    // the doc-corpus integration tests in `tests/`.
 
     // ----- json_escape -----
 
