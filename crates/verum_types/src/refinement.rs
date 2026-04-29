@@ -482,6 +482,17 @@ pub trait SmtBackend: Send + Sync {
         value: &Expr,
         assumptions: &[Expr],
     ) -> Result<VerificationResult, RefinementError>;
+
+    /// Apply a per-query timeout in milliseconds to the backend's
+    /// underlying solver. The default is a no-op so legacy
+    /// backends compile without modification — concrete backends
+    /// (e.g. `Z3Backend`) override to forward the limit to the
+    /// solver via `set_params({"timeout": ms})`. Called by
+    /// `RefinementChecker` before every `check` /
+    /// `verify_refinement` invocation when
+    /// `RefinementConfig.timeout_ms` is set, so the documented
+    /// "100 ms default per spec" actually constrains solver work.
+    fn set_timeout_ms(&mut self, _ms: u64) {}
 }
 
 // ==================== Refinement Error ====================
@@ -2261,6 +2272,11 @@ impl RefinementChecker {
                 Err(poisoned) => poisoned.into_inner(),
             };
 
+            // Forward the configured per-query timeout to the
+            // backend so `RefinementConfig.timeout_ms` is honoured.
+            // Default trait impl is a no-op for legacy backends.
+            backend.set_timeout_ms(self.config.timeout_ms);
+
             // Check negation: ¬(predicate) should be UNSAT for valid refinement
             let negated = self.negate_expr(&vc.condition);
 
@@ -3077,6 +3093,9 @@ impl RefinementChecker {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
+
+            // Forward configured per-query timeout to the backend.
+            backend.set_timeout_ms(self.config.timeout_ms);
 
             // Build: assumptions ∧ ¬condition
             // If this is UNSAT, then assumptions => condition
