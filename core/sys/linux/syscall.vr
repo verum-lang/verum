@@ -291,6 +291,137 @@ public fn close(fd: FileDesc) -> Result<(), OSError> {
     }
 }
 
+// =============================================================================
+// Process control — fork / pipe / dup / wait / kill / exec
+// =============================================================================
+//
+// Process syscalls are arch-conditional:
+//   x86_64: legacy SYS_FORK / SYS_PIPE / SYS_DUP2 are available.
+//   aarch64: must use SYS_CLONE(SIGCHLD) / SYS_PIPE2(0) / SYS_DUP3(0).
+//
+// Each safe wrapper hides the arch difference behind a uniform Verum API.
+
+/// CLONE_VM | CLONE_VFORK | SIGCHLD — flags equivalent to a `vfork()` call,
+/// useful when the child is going to immediately exec.  Not used by the
+/// default `fork` wrapper — kept here for completeness.
+public const CLONE_VFORK_FLAGS: Int = 0x4000 | 0x100 | 17;
+/// SIGCHLD = 17 on Linux/x86_64 and aarch64 — matches glibc fork() behaviour.
+public const FORK_FLAGS: Int = 17;
+
+/// fork(2): create a child process.  Returns the child's pid in the
+/// parent and 0 in the child.  Negative on error.
+public fn fork() -> Result<Int, OSError> {
+    @cfg(target_arch = "x86_64")
+    {
+        let r = unsafe { syscall_raw(SYS_FORK, 0, 0, 0, 0, 0, 0) };
+        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    }
+    @cfg(target_arch = "aarch64")
+    {
+        // aarch64 has no SYS_FORK; use clone(SIGCHLD).
+        let r = unsafe { syscall_raw(SYS_CLONE, FORK_FLAGS, 0, 0, 0, 0, 0) };
+        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    }
+}
+
+/// pipe(2) / pipe2(2): create a pipe pair.  Writes the read- and
+/// write-end fds into `fds[0]` and `fds[1]` respectively.
+public fn pipe(fds: &mut [Int32; 2]) -> Result<(), OSError> {
+    @cfg(target_arch = "x86_64")
+    {
+        let r = unsafe { syscall_raw(SYS_PIPE, fds.as_ptr() as Int, 0, 0, 0, 0, 0) };
+        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+    }
+    @cfg(target_arch = "aarch64")
+    {
+        // aarch64 has no SYS_PIPE; use pipe2(flags=0).
+        let r = unsafe { syscall_raw(SYS_PIPE2, fds.as_ptr() as Int, 0, 0, 0, 0, 0) };
+        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+    }
+}
+
+/// pipe2(2): like pipe but with optional O_CLOEXEC / O_NONBLOCK flags.
+public fn pipe2(fds: &mut [Int32; 2], flags: Int) -> Result<(), OSError> {
+    let r = unsafe { syscall_raw(SYS_PIPE2, fds.as_ptr() as Int, flags, 0, 0, 0, 0) };
+    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+}
+
+/// dup2(oldfd, newfd): duplicate a file descriptor.  Closes newfd first
+/// if it is open.  Returns newfd on success.
+public fn dup2(oldfd: FileDesc, newfd: FileDesc) -> Result<Int, OSError> {
+    @cfg(target_arch = "x86_64")
+    {
+        let r = unsafe {
+            syscall_raw(SYS_DUP2, oldfd.as_raw(), newfd.as_raw(), 0, 0, 0, 0)
+        };
+        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    }
+    @cfg(target_arch = "aarch64")
+    {
+        // aarch64: dup3(oldfd, newfd, 0) is the equivalent.
+        let r = unsafe {
+            syscall_raw(SYS_DUP3, oldfd.as_raw(), newfd.as_raw(), 0, 0, 0, 0)
+        };
+        if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+    }
+}
+
+/// dup3(oldfd, newfd, flags): like dup2 with optional O_CLOEXEC.
+public fn dup3(oldfd: FileDesc, newfd: FileDesc, flags: Int) -> Result<Int, OSError> {
+    let r = unsafe {
+        syscall_raw(SYS_DUP3, oldfd.as_raw(), newfd.as_raw(), flags, 0, 0, 0)
+    };
+    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+}
+
+/// execve(path, argv, envp): replace the current process image.
+/// Only returns on error (with `Err`).  Both `argv` and `envp` are
+/// NULL-terminated arrays of NUL-terminated byte strings.
+public fn execve(path: &Byte, argv: Int, envp: Int) -> Result<!, OSError> {
+    let r = unsafe {
+        syscall_raw(SYS_EXECVE, path as Int, argv, envp, 0, 0, 0)
+    };
+    // Only reached on error.
+    Err(OSError.from_code(-r as Int))
+}
+
+/// wait4(pid, status, options, rusage): wait for a child to change state.
+/// Returns the pid of the child whose status is reported, or 0 if no
+/// child has changed state and `options` includes WNOHANG.
+public fn wait4(pid: Int, status: &mut Int32, options: Int) -> Result<Int, OSError> {
+    let r = unsafe {
+        syscall_raw(SYS_WAIT4, pid, status as Int, options, 0, 0, 0)
+    };
+    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+}
+
+/// kill(pid, sig): send a signal.  pid > 0 — to that process; pid == 0 —
+/// to the process group of the caller; pid == -1 — broadcast.
+public fn kill(pid: Int, sig: Int) -> Result<(), OSError> {
+    let r = unsafe { syscall_raw(SYS_KILL, pid, sig, 0, 0, 0, 0) };
+    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(()) }
+}
+
+/// fcntl(fd, cmd, arg): file-descriptor control.  Used to set FD_CLOEXEC
+/// or O_NONBLOCK on pipe ends after creation.
+public fn fcntl(fd: FileDesc, cmd: Int, arg: Int) -> Result<Int, OSError> {
+    let r = unsafe { syscall_raw(SYS_FCNTL, fd.as_raw(), cmd, arg, 0, 0, 0) };
+    if r < 0 { Err(OSError.from_code(-r as Int)) } else { Ok(r) }
+}
+
+// fcntl commands
+public const F_GETFD: Int = 1;
+public const F_SETFD: Int = 2;
+public const F_GETFL: Int = 3;
+public const F_SETFL: Int = 4;
+public const FD_CLOEXEC: Int = 1;
+public const O_NONBLOCK: Int = 0o4000;
+
+// Wait options
+public const WNOHANG:    Int = 1;
+public const WUNTRACED:  Int = 2;
+public const WCONTINUED: Int = 8;
+
 /// Memory map a region.
 public fn mmap(
     addr: Int,

@@ -254,6 +254,16 @@ public module net;
 public module diagnostics;
 
 // =============================================================================
+// Layer 5: Shell scripting (Depends on: io.process, async.{cancellation,
+// nursery, channel, generator, backoff}, time, text, base.env)
+// =============================================================================
+
+// Verum Shell Scripting Framework — sh#"..." executor, type-safe escape,
+// streaming, structured concurrency, typed command DSLs, CBGR resources.
+// Spec: internal/specs/shell-scripting.md
+public module shell;
+
+// =============================================================================
 // Layer 5.5: Service mesh (Depends on: core.net.http2, core.protobuf, core.net.tls)
 // =============================================================================
 

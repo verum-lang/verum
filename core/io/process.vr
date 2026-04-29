@@ -26,6 +26,8 @@ mount sys.windows.kernel32.{
     SetHandleInformation,
     CloseHandle,
     ReadFile,
+    WriteFile,
+    TerminateProcess,
     WaitForSingleObject,
     GetExitCodeProcess,
     GetLastError,
@@ -292,9 +294,58 @@ type Child is {
 };
 
 implement Child {
+    /// Returns the OS process id (PID on Unix, handle-as-int on Windows).
+    fn id(&self) -> Int { self.pid }
+
     /// Waits for the child to finish and returns its exit status.
     fn wait(&self) -> Result<ExitStatus, Text> {
         wait_for_child(self.pid)
+    }
+
+    /// Writes bytes to the child's stdin. Returns the number of bytes written.
+    /// Returns Err if stdin was not configured as Piped during spawn.
+    fn write_stdin(&self, data: &[Byte]) -> Result<Int, Text> {
+        match self.stdin_fd {
+            Some(fd) => write_all_to_fd(fd, data),
+            None => Err("child was not spawned with piped stdin"),
+        }
+    }
+
+    /// Closes the child's stdin pipe. Required to signal EOF to programs
+    /// that read until EOF (cat, sort, jq, …).
+    fn close_stdin(&mut self) {
+        match self.stdin_fd {
+            Some(fd) => {
+                close_fd(fd);
+                self.stdin_fd = None;
+            }
+            None => {}
+        }
+    }
+
+    /// Sends a signal to the child process. On Unix translates to kill(2);
+    /// on Windows uses TerminateProcess for SIGKILL/SIGTERM, ignores others.
+    fn signal(&self, sig: Int) -> Result<(), Text> {
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        { native_kill(self.pid, sig) }
+        @cfg(target_os = "windows")
+        {
+            let r = __process_kill_raw_impl(self.pid, sig);
+            if r == 0 { Ok(()) } else { Err("TerminateProcess failed".into()) }
+        }
+    }
+
+    /// Sends SIGKILL (Unix) / TerminateProcess (Windows) — unconditional.
+    fn kill(&self) -> Result<(), Text> {
+        // SIGKILL = 9 on POSIX. On Windows, the kill bridge maps any non-zero
+        // signal to TerminateProcess(handle, signal as exit code).
+        self.signal(9)
+    }
+
+    /// Sends SIGTERM — graceful termination request.
+    fn terminate(&self) -> Result<(), Text> {
+        // SIGTERM = 15 on POSIX.
+        self.signal(15)
     }
 
     /// Waits and collects all output.
@@ -336,36 +387,22 @@ implement Child {
 // interpreter path. In AOT, the LLVM lowering replaces the Call with a
 // direct call to the C runtime function.
 
-/// Low-level exec: run program with args, wait, return exit code.
-/// In AOT: calls verum_process_exec(program, args_list_ptr).
-/// Returns exit code (0-255), or -1 on error.
-fn __process_exec_raw(program: Text, args: List<Text>) -> Int {
-    -1
-}
+// Legacy C-runtime entrypoints (verum_process_spawn_cmd / verum_fd_read_all /
+// verum_process_wait / verum_fd_close) are no longer used. The Unix path
+// dispatches through `core.sys.process_native` (direct syscalls / libSystem
+// bindings); the Windows path goes through CreateProcessA in this file.
 
-/// Low-level wait: returns raw waitpid status, or -1 on error.
-/// In AOT: calls verum_process_wait(pid).
-fn __process_wait_raw(pid: Int) -> Int {
-    -1
-}
-
-/// Low-level fd read: returns bytes read from fd until EOF.
-/// In AOT: calls verum_fd_read_all(fd).
-fn __fd_read_all_raw(fd: Int) -> List<Byte> {
-    []
-}
-
-/// Low-level fd close.
-/// In AOT: calls verum_fd_close(fd).
-fn __fd_close_raw(fd: Int) {
-}
-
-/// Low-level spawn (no wait): fork+exec.
-/// Returns pointer to [pid, stdout_fd, stderr_fd] (3 x Int), or 0 on error.
-/// In AOT: calls verum_process_spawn_cmd in C runtime.
-fn __process_spawn_raw(program: Text, args: List<Text>, capture_stdout: Int, capture_stderr: Int) -> Int {
-    -1
-}
+// Native spawn / kill / fd-IO go through `core.sys.process_native`, which
+// dispatches to the platform's syscall surface (Linux syscall table /
+// macOS libSystem.B.dylib / Windows kernel32). No C runtime involvement.
+@cfg(any(target_os = "linux", target_os = "macos"))
+mount core.sys.process_native.{
+    native_spawn,
+    native_kill,
+    native_fd_write_all,
+    native_fd_read_chunk,
+    SpawnResult,
+};
 
 /// Read an Int from a raw pointer at a given index (i64 array indexing).
 /// In AOT: emits GEP + load. Used to extract fields from C-allocated structs.
@@ -384,81 +421,110 @@ fn __ptr_free(ptr: Int) -> Int {
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn spawn_child(cmd: &Command) -> Result<Child, Text> {
+    let stdin_val:  Stdio = cmd.stdin_cfg;
     let stdout_val: Stdio = cmd.stdout_cfg;
     let stderr_val: Stdio = cmd.stderr_cfg;
-    let cap_stdout = if stdout_val is Piped { 1 } else { 0 };
-    let cap_stderr = if stderr_val is Piped { 1 } else { 0 };
+    let cap_stdin  = stdin_val is Piped;
+    let cap_stdout = stdout_val is Piped;
+    let cap_stderr = stderr_val is Piped;
 
-    let result_ptr = __process_spawn_raw(cmd.program, cmd.args, cap_stdout, cap_stderr);
-
-    if (result_ptr == 0) {
-        return Err("failed to spawn child process");
-    }
-
-    let pid = __ptr_read_i64(result_ptr, 0);
-    let stdout_fd_raw = __ptr_read_i64(result_ptr, 1);
-    let stderr_fd_raw = __ptr_read_i64(result_ptr, 2);
-    __ptr_free(result_ptr);
-
-    let stdout_fd = if (stdout_fd_raw >= 0) { Some(stdout_fd_raw) } else { None };
-    let stderr_fd = if (stderr_fd_raw >= 0) { Some(stderr_fd_raw) } else { None };
-
+    let r = native_spawn(&cmd.program, &cmd.args, cap_stdin, cap_stdout, cap_stderr)?;
     Ok(Child {
-        pid: pid,
-        stdout_fd: stdout_fd,
-        stderr_fd: stderr_fd,
-        stdin_fd: None,
+        pid:       r.pid,
+        stdin_fd:  if r.stdin_fd  >= 0 { Some(r.stdin_fd)  } else { None },
+        stdout_fd: if r.stdout_fd >= 0 { Some(r.stdout_fd) } else { None },
+        stderr_fd: if r.stderr_fd >= 0 { Some(r.stderr_fd) } else { None },
     })
+}
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn write_all_to_fd(fd: Int, data: &[Byte]) -> Result<Int, Text> {
+    native_fd_write_all(fd, data)
+}
+
+@cfg(target_os = "windows")
+fn write_all_to_fd(handle_raw: Int, data: &[Byte]) -> Int {
+    let handle = Handle.from_raw(handle_raw as UInt64);
+    let mut total: Int = 0;
+    let mut i = 0;
+    let len = data.len();
+    while i < len {
+        let mut bytes_written: UInt32 = 0;
+        let chunk_len = if (len - i) > 4096 { 4096 } else { len - i };
+        // Build a contiguous chunk slice
+        let mut chunk: List<Byte> = List.with_capacity(chunk_len);
+        let mut j = 0;
+        while j < chunk_len { chunk.push(data[i + j]); j = j + 1; }
+        let ok = WriteFile(
+            handle,
+            chunk.as_ptr() as &unsafe Byte,
+            chunk_len as UInt32,
+            &mut bytes_written,
+            0 as &unsafe Byte,
+        );
+        if !ok || bytes_written == 0 { return -1; }
+        total = total + bytes_written as Int;
+        i = i + bytes_written as Int;
+    }
+    total
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn spawn_child_with_output(cmd: &Command) -> Result<Output, Text> {
-    let result_ptr = __process_spawn_raw(cmd.program, cmd.args, 1, 1);
+    // Force capture so we can collect output, irrespective of caller's
+    // original stdio config.
+    let r = native_spawn(&cmd.program, &cmd.args, false, true, true)?;
 
-    if (result_ptr == 0) {
-        return Err("failed to spawn child process");
-    }
+    let stdout_bytes = if r.stdout_fd >= 0 { read_all_from_fd(r.stdout_fd) } else { [] };
+    let stderr_bytes = if r.stderr_fd >= 0 { read_all_from_fd(r.stderr_fd) } else { [] };
+    if r.stdout_fd >= 0 { close_fd(r.stdout_fd); }
+    if r.stderr_fd >= 0 { close_fd(r.stderr_fd); }
 
-    let pid = __ptr_read_i64(result_ptr, 0);
-    let stdout_fd = __ptr_read_i64(result_ptr, 1);
-    let stderr_fd = __ptr_read_i64(result_ptr, 2);
-    __ptr_free(result_ptr);
-
-    let stdout_bytes = if (stdout_fd >= 0) { read_all_from_fd(stdout_fd) } else { [] };
-    let stderr_bytes = if (stderr_fd >= 0) { read_all_from_fd(stderr_fd) } else { [] };
-
-    if (stdout_fd >= 0) { close_fd(stdout_fd); }
-    if (stderr_fd >= 0) { close_fd(stderr_fd); }
-
-    let raw_status = __process_wait_raw(pid);
-    if (raw_status < 0) {
-        return Err("failed to wait for child process");
-    }
-
-    Ok(Output {
-        status: ExitStatus { raw: raw_status },
-        stdout_bytes: stdout_bytes,
-        stderr_bytes: stderr_bytes,
-    })
+    let status = wait_for_child(r.pid)?;
+    Ok(Output { status, stdout_bytes, stderr_bytes })
 }
 
-@cfg(any(target_os = "linux", target_os = "macos"))
+@cfg(target_os = "linux")
 fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
-    let raw_status = __process_wait_raw(pid);
-    if (raw_status < 0) {
-        return Err("failed to wait for child process");
+    let mut status: Int32 = 0;
+    match core.sys.linux.syscall.wait4(pid, &mut status, 0) {
+        Ok(_)  => Ok(ExitStatus { raw: status as Int }),
+        Err(_) => Err("wait4 failed".into()),
     }
-    Ok(ExitStatus { raw: raw_status })
+}
+
+@cfg(target_os = "macos")
+fn wait_for_child(pid: Int) -> Result<ExitStatus, Text> {
+    let mut status: Int32 = 0;
+    let r = core.sys.darwin.libsystem.waitpid(pid as Int32, &mut status, 0 as Int32);
+    if r < 0 { Err("waitpid failed".into()) }
+    else     { Ok(ExitStatus { raw: status as Int }) }
 }
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn read_all_from_fd(fd: Int) -> List<Byte> {
-    __fd_read_all_raw(fd)
+    // Drain the fd by reading 4 KiB chunks until EOF.
+    let mut out: List<Byte> = [];
+    loop {
+        match native_fd_read_chunk(fd, 4096) {
+            Ok(chunk) => {
+                if chunk.is_empty() { break; }
+                for b in chunk.iter() { out.push(*b); }
+            }
+            Err(_) => break,
+        }
+    }
+    out
 }
 
-@cfg(any(target_os = "linux", target_os = "macos"))
+@cfg(target_os = "linux")
 fn close_fd(fd: Int) {
-    __fd_close_raw(fd);
+    let _ = core.sys.linux.syscall.close(core.sys.common.FileDesc::from_raw(fd as Int32));
+}
+
+@cfg(target_os = "macos")
+fn close_fd(fd: Int) {
+    let _ = core.sys.darwin.libsystem.close(fd as Int32);
 }
 
 // =============================================================================
@@ -663,6 +729,18 @@ fn read_all_from_fd(handle_raw: Int) -> List<Byte> {
 fn close_fd(handle_raw: Int) {
     let handle = Handle.from_raw(handle_raw as UInt64);
     CloseHandle(handle);
+}
+
+// Windows kill: TerminateProcess for any signal (best approximation of POSIX kill).
+// We accept the POSIX signal number for API symmetry but the only operation we
+// can perform is unconditional termination — Windows has no concept of catchable
+// process signals from outside the target process.
+@cfg(target_os = "windows")
+fn __process_kill_raw_impl(handle_raw: Int, sig: Int) -> Int {
+    let handle = Handle.from_raw(handle_raw as UInt64);
+    // Map signal → exit code so the target's wait() reflects the cause.
+    let exit_code = (128 + sig) as UInt32;
+    if TerminateProcess(handle, exit_code) { 0 } else { 1 }
 }
 
 /// Build a Windows command line string from program and arguments.

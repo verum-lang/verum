@@ -264,6 +264,61 @@ public fn CreateFileW(
     template_file: Handle,
 ) -> Handle;
 
+/// Create or open a file (ANSI variant — used by FsWatcher).
+@extern("kernel32.dll")
+public fn CreateFileA(
+    file_name: &Byte,
+    desired_access: UInt32,
+    share_mode: UInt32,
+    security_attributes: &SecurityAttributes,
+    creation_disposition: UInt32,
+    flags_and_attributes: UInt32,
+    template_file: Handle,
+) -> Handle;
+
+/// Watch a directory for changes. Used by `core.sys.fs_watch` Windows backend.
+/// C: `BOOL ReadDirectoryChangesW(HANDLE hDirectory, LPVOID lpBuffer, DWORD nBufferLength,
+///                                BOOL bWatchSubtree, DWORD dwNotifyFilter,
+///                                LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped,
+///                                LPOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);`
+@extern("kernel32.dll")
+public fn ReadDirectoryChangesW(
+    directory: Handle,
+    buffer: &unsafe mut Byte,
+    buffer_length: UInt32,
+    watch_subtree: Int32,
+    notify_filter: UInt32,
+    bytes_returned: &mut UInt32,
+    overlapped: &mut Overlapped,
+    completion_routine: &unsafe Byte,    // NULL for synchronous use
+) -> Int32;
+
+/// Wait on multiple objects with timeout. Used to honour wait timeouts.
+@extern("kernel32.dll")
+public fn WaitForMultipleObjects(
+    count: UInt32,
+    handles: &Handle,
+    wait_all: Int32,
+    timeout_ms: UInt32,
+) -> UInt32;
+
+// FILE_NOTIFY_CHANGE_* filter flags for ReadDirectoryChangesW
+public const FILE_NOTIFY_CHANGE_FILE_NAME:    UInt32 = 0x00000001;
+public const FILE_NOTIFY_CHANGE_DIR_NAME:     UInt32 = 0x00000002;
+public const FILE_NOTIFY_CHANGE_ATTRIBUTES:   UInt32 = 0x00000004;
+public const FILE_NOTIFY_CHANGE_SIZE:         UInt32 = 0x00000008;
+public const FILE_NOTIFY_CHANGE_LAST_WRITE:   UInt32 = 0x00000010;
+public const FILE_NOTIFY_CHANGE_LAST_ACCESS:  UInt32 = 0x00000020;
+public const FILE_NOTIFY_CHANGE_CREATION:     UInt32 = 0x00000040;
+public const FILE_NOTIFY_CHANGE_SECURITY:     UInt32 = 0x00000100;
+
+// FILE_ACTION_* values inside FILE_NOTIFY_INFORMATION records
+public const FILE_ACTION_ADDED:            UInt32 = 0x00000001;
+public const FILE_ACTION_REMOVED:          UInt32 = 0x00000002;
+public const FILE_ACTION_MODIFIED:         UInt32 = 0x00000003;
+public const FILE_ACTION_RENAMED_OLD_NAME: UInt32 = 0x00000004;
+public const FILE_ACTION_RENAMED_NEW_NAME: UInt32 = 0x00000005;
+
 // Win32 BOOL is `typedef int BOOL;` (Int32). Verum's `Bool` lowers to
 // LLVM `i1`; an i1 truncation of i32 BOOL takes bit 0 only — correct
 // for canonical 0/1 BOOL values but silent-failure for non-canonical

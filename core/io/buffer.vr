@@ -196,6 +196,141 @@ implement<R: Read> BufRead for BufReader<R> {
 }
 
 // =============================================================================
+// FdReader — Read impl over a raw OS file descriptor
+// =============================================================================
+//
+// Wraps an integer fd / handle. The shell layer (`core.shell.stream`) needs
+// to read from process stdout pipes; without a Read impl over raw fds it
+// would have to use the synchronous `wait_with_output` blocking aggregator,
+// which can't yield streams.
+//
+// This is a thin adapter — the actual read syscall is funnelled through
+// `__fd_read_chunk_raw` which is intercepted by the runtime. Owns the fd
+// only when constructed via `from_owned_fd`; the borrowed form leaves
+// closing to the caller.
+
+public type FdReader is {
+    fd: Int,
+    owned: Bool,
+}
+
+implement FdReader {
+    /// Wrap a fd without taking ownership. Caller closes.
+    public fn from_borrowed_fd(fd: Int) -> FdReader {
+        FdReader { fd, owned: false }
+    }
+
+    /// Wrap a fd and take ownership — drop closes the fd.
+    public fn from_owned_fd(fd: Int) -> FdReader {
+        FdReader { fd, owned: true }
+    }
+
+    public fn raw_fd(&self) -> Int { self.fd }
+}
+
+implement Read for FdReader {
+    fn read(&mut self, buf: &mut [Byte]) -> IoResult<Int> {
+        if self.fd < 0 {
+            return Err(IoError.new(IoErrorKind.InvalidInput));
+        }
+        let n = __fd_read_chunk_raw(self.fd, buf.len() as Int);
+        if n.len() == 0 { return Ok(0); }  // EOF
+        let take = if n.len() > buf.len() { buf.len() } else { n.len() };
+        let mut i = 0;
+        while i < take { buf[i] = n[i]; i = i + 1; }
+        Ok(take)
+    }
+}
+
+implement Drop for FdReader {
+    fn drop(&mut self) {
+        if self.owned && self.fd >= 0 {
+            __fd_close_raw_buf(self.fd);
+        }
+    }
+}
+
+/// Read up to `max` bytes from the fd. Returns an empty list on EOF.
+/// In AOT: bridges to `verum_fd_read_chunk` in the C runtime, which
+/// honours EINTR retries internally.
+fn __fd_read_chunk_raw(fd: Int, max: Int) -> List<Byte> {
+    []
+}
+
+fn __fd_close_raw_buf(fd: Int) {
+    // Bridges to the same close used by core.io.process.
+}
+
+// -----------------------------------------------------------------------------
+// BufReader::from_fd — convenience constructor
+// -----------------------------------------------------------------------------
+
+implement BufReader<FdReader> {
+    /// Construct a BufReader directly over a raw fd (borrowed).
+    public fn from_fd(fd: Int, capacity: Int) -> BufReader<FdReader> {
+        BufReader.with_capacity(capacity, FdReader.from_borrowed_fd(fd))
+    }
+
+    /// Like `from_fd`, but takes ownership of the fd — the BufReader's
+    /// drop closes the fd.
+    public fn from_owned_fd(fd: Int, capacity: Int) -> BufReader<FdReader> {
+        BufReader.with_capacity(capacity, FdReader.from_owned_fd(fd))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// read_line — convenience for line-oriented streaming
+// -----------------------------------------------------------------------------
+
+implement<R: Read> BufReader<R> {
+    /// Read a single line (up to and including '\n'), returning `None` at EOF.
+    /// The returned `Text` includes the trailing newline; callers strip it
+    /// if they need to (`core.shell.stream::strip_trailing_newline`).
+    public fn read_line(&mut self) -> IoResult<Maybe<Text>> {
+        let mut bytes: List<Byte> = [];
+        loop {
+            // Ensure buffer has data
+            if self.buffer_len() == 0 {
+                let n = self.fill_buf_internal()?;
+                if n == 0 {
+                    if bytes.is_empty() { return Ok(None); }
+                    return match Text.from_utf8(bytes) {
+                        Ok(t)  => Ok(Some(t)),
+                        Err(_) => Err(IoError.new(IoErrorKind.InvalidData)),
+                    };
+                }
+            }
+            // Scan buffer for newline
+            let start = self.pos;
+            let end = self.filled;
+            let mut i = start;
+            let mut found = false;
+            while i < end {
+                bytes.push(self.buf[i]);
+                if self.buf[i] == ('\n' as Byte) { found = true; i = i + 1; break; }
+                i = i + 1;
+            }
+            self.pos = i;
+            if found {
+                return match Text.from_utf8(bytes) {
+                    Ok(t)  => Ok(Some(t)),
+                    Err(_) => Err(IoError.new(IoErrorKind.InvalidData)),
+                };
+            }
+            // No newline yet — loop to refill
+        }
+    }
+
+    /// Async variant. Currently sync-under-async (matching `AsyncFile.read`)
+    /// — the runtime keeps blocking syscalls on a worker thread so the
+    /// async executor stays responsive. Future iteration will dispatch
+    /// through `core.io.engine` (io_uring / kqueue / IOCP).
+    public async fn read_line_async(&mut self) -> IoResult<Maybe<Text>> {
+        self.read_line()
+    }
+}
+
+// =============================================================================
 // BufWriter - Buffered Writer
 // =============================================================================
 

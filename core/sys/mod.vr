@@ -39,6 +39,8 @@ public module time_ops;     // Time operations (pure Verum)
 public module net_ops;      // TCP/UDP operations (pure Verum)
 public module context_ops;  // Context system & TLS (pure Verum)
 public module process_ops;  // Process management (pure Verum)
+public module process_native; // Native pipe+fork+exec (no C runtime)
+public module fs_watch;       // Native FS watch (kqueue/inotify/RDCW)
 public module locking;      // Byte-range advisory file locking (SQLite Gap 1)
 public module durability;   // Crash-safe persistence primitives (SQLite Gap 2)
 
