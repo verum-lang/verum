@@ -48946,6 +48946,20 @@ impl TypeChecker {
         if let Some(verum_ast::decl::ResourceModifier::Affine) = &type_decl.resource_modifier {
             self.affine_tracker.register_affine_type(type_name.clone());
         }
+        if let Some(verum_ast::decl::ResourceModifier::Linear) = &type_decl.resource_modifier {
+            self.affine_tracker.register_linear_type(type_name.clone());
+        }
+        // `@must_consume` attribute — synonym for `type linear`, must be
+        // registered in BOTH the primary and the resolution-loop pass to
+        // avoid drift when types are visited recursively. See companion
+        // primary-pass registration in register_type_declaration_body.
+        let must_consume_2 = type_decl
+            .attributes
+            .iter()
+            .any(|a| a.name.as_str() == "must_consume");
+        if must_consume_2 {
+            self.affine_tracker.register_linear_type(type_name.clone());
+        }
 
         // Check for cycles: are we already resolving this type?
         if resolution_stack.iter().any(|t| t == &type_name) {

@@ -1,0 +1,24 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L3
+// @tags: shell, refinement, verify, must-fail
+// @timeout: 5000
+// @expect: fail
+// @expected-error: E_REFINEMENT
+
+// DeployConfig refines version to a SemVer string. Constructing it with a
+// malformed version must fail at the constructor's call site.
+
+mount core.shell.verify.{DeployConfig};
+mount core.shell.result.{ShellError};
+
+fn main() -> Result<(), ShellError> {
+    let _ = DeployConfig.parse(
+        "myservice".into(),
+        "not-a-semver".into(),    // refinement violation
+        "production".into(),
+        "manifest.yaml".into(),
+        300,
+    )?;
+    Ok(())
+}

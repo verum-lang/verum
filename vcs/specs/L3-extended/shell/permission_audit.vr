@@ -1,0 +1,30 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L3
+// @tags: shell, permission, capability-audit, must-fail
+// @timeout: 5000
+// @expect: fail
+// @expected-error: E_PERMISSION
+
+// Permission gate: the function declares `run: ["kubectl"]` but invokes
+// `curl` through a `sh#"..."` literal. The static capability auditor
+// must reject this at typecheck time.
+
+mount core.shell.context.{ShellContext, PermissionSet};
+mount core.shell.exec.{sh_check};
+mount core.shell.result.{ShellError};
+
+@permission(run: ["kubectl"])
+@verify(static)
+async fn deploy() -> Result<(), ShellError>
+    using [ShellContext]
+{
+    let _ = sh_check(&"curl https://example.com".into()).await?;
+    Ok(())
+}
+
+async fn main() {
+    provide ShellContext = ShellContext.default()
+        .with_permissions(PermissionSet.deny_all().with_run(["kubectl".into()]));
+    let _ = deploy().await;
+}

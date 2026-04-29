@@ -44,6 +44,7 @@ pub mod display;
 pub mod error;
 pub mod partial_eq;
 pub mod serialize;
+pub mod shell_render;
 
 mod common;
 
@@ -92,6 +93,8 @@ impl DeriveRegistry {
         registry.register("Error", Box::new(DeriveErrorMacro));
         // Builder pattern derive for fluent construction APIs
         registry.register("Builder", Box::new(DeriveBuilder));
+        // ShellRender — auto-generate `render()` for typed command DSLs
+        registry.register("ShellRender", Box::new(self::shell_render::DeriveShellRender));
 
         registry
     }
