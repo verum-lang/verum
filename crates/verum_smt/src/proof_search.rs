@@ -5886,18 +5886,29 @@ impl ProofSearchEngine {
                 Ok(List::from_iter(vec![goal_true, goal_false]))
             }
 
-            // Case analysis on Maybe/Option type
-            ExprKind::Call { func, .. } if self.is_maybe_constructor(func) => {
-                // Case 1: None
-                let mut goal_none = goal.clone();
-                goal_none.label = Maybe::Some(format!("case_none_{}", hypothesis).into());
+            // Case analysis on a variant constructor: split into one subgoal
+            // per constructor of the same variant type. Constructor → type
+            // resolution comes from `variant_map`, which is populated externally
+            // from `type T is A | B | ...;` declarations (see
+            // `register_variant_type`). The proof engine itself holds no
+            // hardcoded knowledge of stdlib type names — splitting Maybe.None /
+            // Maybe.Some, Result.Ok / Result.Err, or any user variant type
+            // (Color = Red | Green | Blue) all flow through the same path.
+            ExprKind::Call { func, .. } if self.find_variant_for_constructor(func).is_some() => {
+                let ctors = self
+                    .find_variant_for_constructor(func)
+                    .expect("guarded by the match arm above")
+                    .clone();
 
-                // Case 2: Some(x)
-                let mut goal_some = goal.clone();
-                // Add the unwrapped value as a hypothesis
-                goal_some.label = Maybe::Some(format!("case_some_{}", hypothesis).into());
-
-                Ok(List::from_iter(vec![goal_none, goal_some]))
+                let mut subgoals: Vec<ProofGoal> = Vec::with_capacity(ctors.len());
+                for ctor in ctors.iter() {
+                    let mut sub = goal.clone();
+                    sub.label = Maybe::Some(
+                        format!("case_{}_{}", ctor.as_str().to_lowercase(), hypothesis).into(),
+                    );
+                    subgoals.push(sub);
+                }
+                Ok(List::from_iter(subgoals))
             }
 
             // Case analysis on equality: either use rewrite or derive contradiction
@@ -6049,16 +6060,30 @@ impl ProofSearchEngine {
         false
     }
 
-    /// Check if expression is a Maybe/Option constructor
-    fn is_maybe_constructor(&self, func: &Expr) -> bool {
-        if let ExprKind::Path(p) = &func.kind
-            && let Maybe::Some(ident) = p.as_ident()
-        {
-            let name = ident.as_str();
-            // Check if it's a Maybe constructor (Some/None)
-            return matches!(name, "Some" | "None");
+    /// Resolve a constructor expression to the constructor list of its variant
+    /// type. Returns `None` if the expression isn't a path-typed call head, or
+    /// if the head's name is not registered as a constructor of any variant
+    /// type in `variant_map`.
+    ///
+    /// `variant_map` is the single source of truth for which names are variant
+    /// constructors and what type they belong to. Populated externally from
+    /// `type T is A | B | ...;` declarations via `register_variant_type`. No
+    /// hardcoded stdlib type names live in this engine — Maybe, Result, and
+    /// user-defined variant types all flow through the same lookup.
+    fn find_variant_for_constructor(&self, func: &Expr) -> Option<&Vec<Text>> {
+        let ExprKind::Path(p) = &func.kind else {
+            return None;
+        };
+        let Maybe::Some(ident) = p.as_ident() else {
+            return None;
+        };
+        let ctor_name = ident.as_str();
+        for ctors in self.variant_map.values() {
+            if ctors.iter().any(|c| c.as_str() == ctor_name) {
+                return Some(ctors);
+            }
         }
-        false
+        None
     }
 
     /// Try exact proof term
