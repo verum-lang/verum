@@ -891,6 +891,29 @@ impl CompilationPhase for CodegenTiersPhase {
             inline_depth: self.inline_depth,
         };
 
+        // Surface the four inert JitConfig fields that don't yet
+        // reach a consumer in the two-tier model (only
+        // `parallel_threads` is wired, into LtoConfig.num_jobs).
+        // The remaining fields belong to a JIT execution tier
+        // that doesn't exist in the current architecture (Tier 0
+        // interpreter + Tier 1 AOT only — see CLAUDE.md).
+        // Embedders that set these via Verum.toml or builder
+        // calls will see their setting echoed in the log so the
+        // discrepancy is audible rather than silent. Closes the
+        // inert-defense pattern at the only construction site.
+        tracing::debug!(
+            "JitConfig surface: lazy_compilation={}, lazy_threshold={}B, \
+             use_cbgr_memory_manager={}, enable_function_cache={}, \
+             parallel_threads={} (only parallel_threads reaches the \
+             current two-tier execution model — Tier 0 interpreter / \
+             Tier 1 AOT)",
+            phase.jit_config.lazy_compilation,
+            phase.jit_config.lazy_threshold,
+            phase.jit_config.use_cbgr_memory_manager,
+            phase.jit_config.enable_function_cache,
+            phase.jit_config.parallel_threads,
+        );
+
         // PERF: Create LLVM Context ONCE and reuse for fallback.
         // Previously each tier created its own Context (~800KB each), and during
         // fallback (AOT -> Interpreter) multiple Contexts leaked.
