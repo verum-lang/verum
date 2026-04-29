@@ -809,6 +809,75 @@ impl HotReloader {
         self.functions.clear();
         self.migrations.clear();
     }
+
+    /// Apply registered state-migration callbacks to transform
+    /// `state` from `from_version` to `to_version`. Closes the
+    /// inert-defense pattern around `MigrationConfig.migrate`:
+    /// pre-fix the callback was registered via
+    /// `register_migration` but no production code path ever
+    /// invoked it, so the field was a write-only side channel.
+    ///
+    /// The function chains callbacks: if the user registered
+    /// `1 → 2` and `2 → 3` migrations, calling `migrate_state(name, 1, 3, state)`
+    /// applies them in order. When no chain reaches the target
+    /// version, returns `None` so callers can fall back to a
+    /// fresh-start strategy. Honours `enable_migration` — when
+    /// `false` the lookup returns `None` even for registered
+    /// callbacks (matching the registration-time gate).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — the hot function the migrations were
+    ///   registered for
+    /// * `from_version` — the version stamp on the input `state`
+    /// * `to_version` — the version stamp the caller wants to
+    ///   reach (must be ≥ `from_version`; descending chains are
+    ///   not supported)
+    /// * `state` — the serialised state to transform
+    ///
+    /// Returns `Some(transformed)` when a contiguous chain of
+    /// callbacks from `from_version` to `to_version` exists,
+    /// `None` otherwise.
+    pub fn migrate_state(
+        &self,
+        name: &str,
+        from_version: u64,
+        to_version: u64,
+        mut state: Vec<u8>,
+    ) -> Option<Vec<u8>> {
+        if !self.config.enable_migration {
+            return None;
+        }
+        if from_version == to_version {
+            // Identity migration — no callbacks needed.
+            return Some(state);
+        }
+        if from_version > to_version {
+            // Downgrade not supported by the chained-forward
+            // model; callers that need rollback should keep the
+            // pre-replacement bytes themselves.
+            return None;
+        }
+
+        let migrations = self.migrations.get(&Text::from(name))?;
+        let mut current = from_version;
+        // Chain forward: at each step, find the migration whose
+        // `from_version` matches the current version. Linear scan
+        // — the migration list is bounded by `version_history` so
+        // O(N²) is acceptable for the typical N ≤ 5.
+        while current < to_version {
+            let next = migrations
+                .iter()
+                .find(|m| m.from_version == current)?;
+            state = (next.migrate)(&state);
+            current = next.to_version;
+        }
+        if current != to_version {
+            // Chain over-shot or under-shot — no exact path.
+            return None;
+        }
+        Some(state)
+    }
 }
 
 // ============================================================================
@@ -1003,5 +1072,101 @@ mod tests {
         assert_eq!(version.version, 1);
         assert_eq!(version.signature_hash, 12345);
         assert!(!version.active);
+    }
+
+    // =========================================================================
+    // MigrationConfig.migrate wiring tests
+    // =========================================================================
+    //
+    // Pin: `MigrationConfig.migrate` reaches a public consumer via
+    // `migrate_state`. Pre-wire the callback was registered via
+    // `register_migration` but no production code path ever invoked
+    // it — the field was a write-only side channel.
+
+    #[test]
+    fn migrate_state_identity_returns_unchanged() {
+        // Pin: from == to is a valid no-op. The chain-forward
+        // model returns the input unchanged without consulting
+        // any registered migration.
+        let reloader = HotReloader::new(HotReloadConfig::development());
+        let state = vec![1, 2, 3, 4];
+        let result = reloader.migrate_state("any_fn", 5, 5, state.clone());
+        assert_eq!(result, Some(state));
+    }
+
+    #[test]
+    fn migrate_state_chains_forward_through_registered_callbacks() {
+        // Pin: registered callbacks chain in version order.
+        // 1 → 2 doubles the bytes; 2 → 3 appends [99].
+        // migrate_state(name, 1, 3, [10]) → callback chain → [10, 10, 99].
+        let reloader = HotReloader::new(HotReloadConfig::development());
+        reloader
+            .register_migration("f", 1, 2, |state: &[u8]| {
+                let mut out = state.to_vec();
+                out.extend_from_slice(state);
+                out
+            })
+            .expect("register 1→2");
+        reloader
+            .register_migration("f", 2, 3, |state: &[u8]| {
+                let mut out = state.to_vec();
+                out.push(99);
+                out
+            })
+            .expect("register 2→3");
+        let state = vec![10];
+        let result = reloader.migrate_state("f", 1, 3, state);
+        assert_eq!(result, Some(vec![10, 10, 99]));
+    }
+
+    #[test]
+    fn migrate_state_returns_none_when_chain_breaks() {
+        // Pin: gap in the chain → None. 1 → 2 is registered but
+        // 2 → 3 is missing, so reaching 3 from 1 fails.
+        let reloader = HotReloader::new(HotReloadConfig::development());
+        reloader
+            .register_migration("f", 1, 2, |s: &[u8]| s.to_vec())
+            .expect("register 1→2");
+        let result = reloader.migrate_state("f", 1, 3, vec![1, 2, 3]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn migrate_state_returns_none_for_downgrade() {
+        // Pin: from > to is unsupported (no descending chains).
+        // Callers that want rollback should keep the pre-
+        // replacement bytes themselves.
+        let reloader = HotReloader::new(HotReloadConfig::development());
+        reloader
+            .register_migration("f", 1, 2, |s: &[u8]| s.to_vec())
+            .expect("register 1→2");
+        let result = reloader.migrate_state("f", 2, 1, vec![1, 2, 3]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn migrate_state_returns_none_when_migration_disabled() {
+        // Pin: `enable_migration = false` short-circuits to None
+        // even for would-be-valid chains. Mirrors the
+        // registration-time gate at `register_migration`.
+        let cfg = HotReloadConfig::new()
+            .enable_migration(false);
+        let reloader = HotReloader::new(cfg);
+        // register_migration would itself error here, but pin
+        // the chain-application gate independently by calling
+        // migrate_state with an empty migration table — the
+        // disabled gate fires before the lookup.
+        let result = reloader.migrate_state("f", 1, 2, vec![]);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn migrate_state_returns_none_when_no_migrations_registered() {
+        // Pin: no migrations registered → None for any non-
+        // identity chain. Identity (from == to) still returns
+        // Some(state) per the dedicated test above.
+        let reloader = HotReloader::new(HotReloadConfig::development());
+        let result = reloader.migrate_state("f", 1, 2, vec![1, 2, 3]);
+        assert_eq!(result, None);
     }
 }
