@@ -293,11 +293,23 @@ impl<'ctx> WpEngine<'ctx> {
                 self.wp(defer_expr, postcondition)
             }
 
-            StmtKind::Errdefer(errdefer_expr) => {
-                // Errdefer only executes on error path
-                // For verification, we model this similarly to defer but only on error
-                // For now, treat as a no-op for normal path verification
-                self.wp(errdefer_expr, postcondition)
+            StmtKind::Errdefer(_errdefer_expr) => {
+                // Errdefer registers a cleanup that runs ONLY on the error
+                // exit path. For normal-path WP this statement is a no-op,
+                // so the precondition just propagates the postcondition
+                // unchanged.
+                //
+                // Pre-fix this called `wp(errdefer_expr, postcondition)`,
+                // which is the semantics of `defer` (always runs) — that
+                // wrongly threaded the cleanup's effects through every
+                // normal exit, e.g. `errdefer free(buf)` made WP look as
+                // if `buf` was freed on success too.
+                //
+                // Error-path WP — what postcondition the cleanup must
+                // establish IF the function exits abnormally — is a
+                // separate phase that needs split normal/error path
+                // tracking; not modeled here.
+                Ok(postcondition.clone())
             }
 
             StmtKind::Provide { value, .. } => {
