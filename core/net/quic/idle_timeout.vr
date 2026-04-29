@@ -85,11 +85,11 @@ implement Debug for IdleTimeoutError {
 }
 
 implement Eq for IdleTimeoutError {
-    fn eq(&self, other: &IdleTimeoutError) -> Bool {
-        match (self, other) {
-            (AlreadyExpired, AlreadyExpired) => true,
-        }
-    }
+    // Single-variant type: two values are always equal.  Avoids
+    // a `match (AlreadyExpired, AlreadyExpired)` form that confuses
+    // the type checker into reading bare `AlreadyExpired` as a
+    // path-type.
+    fn eq(&self, _other: &IdleTimeoutError) -> Bool { true }
 }
 
 public type TickResult is
