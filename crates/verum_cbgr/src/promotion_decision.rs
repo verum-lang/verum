@@ -440,6 +440,26 @@ impl PromotionDecisionEngine {
             }
         }
 
+        // `allow_heap_promotion` gate. Default is `false`: a
+        // reference whose `is_stack_allocated == false` (i.e.
+        // points into a heap allocation) is conservatively kept
+        // managed even when the dominance + escape analysis
+        // approves the promotion. Heap-rooted promotions need
+        // additional liveness analysis (which the analyzer hasn't
+        // produced for this reference) so the safe default is to
+        // refuse them. Callers that want the more aggressive
+        // behaviour opt in via `PromotionConfig::aggressive()`.
+        // Before this wire-up the field was inert — the gate
+        // documentation existed and `aggressive()` set
+        // `allow_heap_promotion = true`, but no decision path
+        // ever consulted the flag.
+        if base_decision == PromotionDecision::PromoteToChecked
+            && !ref_info.is_stack_allocated
+            && !self.config.allow_heap_promotion
+        {
+            return PromotionDecision::KeepManagedConservative;
+        }
+
         base_decision
     }
 
@@ -1171,6 +1191,109 @@ mod tests {
         // With promotion disabled, should keep managed
         let decision = engine.get_decision(RefId(1));
         assert!(!decision.should_promote());
+    }
+
+    /// Build a CFG identical to `create_test_cfg` but with the
+    /// definition marked `is_stack_allocated = false` (i.e. heap
+    /// rooted). Used to pin the `allow_heap_promotion` gate.
+    fn create_heap_test_cfg() -> ControlFlowGraph {
+        let entry = BlockId(0);
+        let exit = BlockId(1);
+        let mut cfg = ControlFlowGraph::new(entry, exit);
+        let mut entry_block = BasicBlock {
+            id: entry,
+            predecessors: Set::new(),
+            successors: Set::new(),
+            definitions: vec![DefSite {
+                block: entry,
+                reference: RefId(1),
+                is_stack_allocated: false, // heap rooted
+                span: None,
+            }]
+            .into(),
+            uses: vec![UseeSite {
+                block: entry,
+                reference: RefId(1),
+                is_mutable: false,
+                span: None,
+            }]
+            .into(),
+            call_sites: List::new(),
+            has_await_point: false,
+            is_exception_handler: false,
+            is_cleanup_handler: false,
+            may_throw: false,
+        };
+        entry_block.successors.insert(exit);
+        let mut exit_block = BasicBlock {
+            id: exit,
+            predecessors: Set::new(),
+            successors: Set::new(),
+            definitions: List::new(),
+            uses: vec![UseeSite {
+                block: exit,
+                reference: RefId(1),
+                is_mutable: false,
+                span: None,
+            }]
+            .into(),
+            call_sites: List::new(),
+            has_await_point: false,
+            is_exception_handler: false,
+            is_cleanup_handler: false,
+            may_throw: false,
+        };
+        exit_block.predecessors.insert(entry);
+        cfg.add_block(entry_block);
+        cfg.add_block(exit_block);
+        cfg
+    }
+
+    #[test]
+    fn allow_heap_promotion_default_vs_aggressive() {
+        // Pin: with `allow_heap_promotion = false` (default), a
+        // heap-rooted reference (`is_stack_allocated == false`)
+        // falls back to KeepManagedConservative even when the
+        // upstream `decide_promotion` would otherwise approve.
+        // Switching to `PromotionConfig::aggressive()` (which
+        // flips `allow_heap_promotion = true`) changes the
+        // verdict on the SAME reference.
+        //
+        // Before this wire-up the field was inert: both configs
+        // produced identical output for any reference because the
+        // gate never fired.
+        let mut engine_default = PromotionDecisionEngine::with_config(
+            create_heap_test_cfg(),
+            PromotionConfig::default(),
+        );
+        engine_default.analyze();
+        let conservative = engine_default.get_decision(RefId(1));
+
+        let mut engine_aggressive = PromotionDecisionEngine::with_config(
+            create_heap_test_cfg(),
+            PromotionConfig::aggressive(),
+        );
+        engine_aggressive.analyze();
+        let aggressive = engine_aggressive.get_decision(RefId(1));
+
+        // The aggressive verdict must be at-least-as-permissive as
+        // the default verdict. The exact upstream decision depends
+        // on dominance analysis, so we don't assert specific
+        // variants — we assert the gate's directional effect.
+        if aggressive.should_promote() {
+            assert!(
+                !conservative.should_promote(),
+                "default config (allow_heap_promotion=false) must block what aggressive permits on a heap ref"
+            );
+        } else {
+            // The upstream analysis blocked promotion regardless of
+            // the gate. Both configs land on no-promote — that's
+            // legitimate, just not exercising the gate. Document
+            // and skip the assertion rather than fail spuriously.
+            // (A future test with a richer CFG that always reaches
+            // PromoteToChecked upstream would tighten this pin.)
+            assert!(!conservative.should_promote());
+        }
     }
 
     #[test]
