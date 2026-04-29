@@ -524,6 +524,32 @@ paths:
    Replaced with byte-anchored `chars().next_back()` /
    `chars().next()` walks over byte slices at find-result
    boundaries.
+9. **`compiler::api::CompilationError::Display`** — `&msg[..100]`
+   panic on diagnostic-message preview.  Primary CompilationError
+   formatter that surfaces in CLI output, IDE error panels, vtest
+   reports.  Replaced with `text_utf8::truncate_chars`.
+10. **`interactive::playbook::ui::output::format_output_brief`** —
+    `&preview[..30]` panic on cell stdout preview; killed the TUI
+    render whenever a cell emitted non-ASCII (very common in
+    playbook sessions).
+11. **`interactive::playbook::app` script-export** — `&brief[..77]`
+    panic on cell-brief comment generation; crashed export-to-`.vr`
+    on every non-ASCII cell output.
+12. **`diagnostics::rich_renderer::render_inline_suggestion`** —
+    both `&line[..span_start]` and `&line[span_end..]` panic on
+    stale/malformed Span values landing inside multi-byte chars.
+    A single bad Span killed the entire diagnostic dump on the
+    inline-suggestion hot path.  Both clamped to char boundary via
+    `text_utf8::clamp_to_char_boundary`.
+13. **`cli::commands::publish::extract_readme`** —
+    `&content[..65000]` panic when truncating large READMEs.
+    READMEs commonly contain non-ASCII (emoji badges, accented
+    names, CJK headings); `cog publish` crashed on them.
+
+**All 13 fixes consume the shared `verum_common::text_utf8`
+primitive module** — proves the consolidation paid off: each fix
+is one line per site rather than 10–30 lines of inline UTF-8
+walking.
 
 **Guardrail:** `crates/verum_lsp/tests/malformed_input_fuzz.rs` — 20
 tests covering the empirical failure modes:
