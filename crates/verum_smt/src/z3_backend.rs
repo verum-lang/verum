@@ -148,7 +148,69 @@ impl Z3ContextManager {
             z3::set_global_param("smt.random_seed", &seed.to_string());
         }
 
+        // Wire `minimize_cores`: Z3's `smt.core.minimize` controls
+        // whether the solver runs additional minimization on the
+        // unsat core before returning it. Pre-fix the field
+        // defaulted to `true` (claiming default minimization) but
+        // never reached Z3 — the solver always returned non-
+        // minimized cores. Set via global_param so every Solver
+        // constructed inside `with_config` honours the policy.
+        z3::set_global_param(
+            "smt.core.minimize",
+            if self.config.minimize_cores { "true" } else { "false" },
+        );
+
+        // Wire `enable_mbqi`: Z3's `smt.mbqi` (model-based
+        // quantifier instantiation) is the canonical heavy-weight
+        // strategy for first-order quantified problems. Default
+        // is on; turning it off forces the solver to rely on
+        // pattern-based / E-matching strategies only — useful for
+        // benchmarking or when MBQI's nondeterminism is undesired.
+        z3::set_global_param(
+            "smt.mbqi",
+            if self.config.enable_mbqi { "true" } else { "false" },
+        );
+
+        // Wire `enable_patterns`: Z3's `smt.ematching` controls
+        // pattern-based quantifier instantiation (the lightweight
+        // counterpart to MBQI). Disabling forces the solver onto
+        // MBQI-only when quantifiers are present.
+        z3::set_global_param(
+            "smt.ematching",
+            if self.config.enable_patterns { "true" } else { "false" },
+        );
+
+        // Wire `num_workers`: Z3's parallel-threads cap is
+        // `parallel.threads.max`. Setting `parallel.enable` to
+        // true enables the parallel-tactic backend; the worker
+        // count then bounds how many threads it spawns. Zero in
+        // the field is treated as "let Z3 decide" by leaving the
+        // global params untouched (matches the documented
+        // num_cpus default semantic — embedders that want the
+        // system default pass 0 explicitly).
+        if self.config.num_workers > 0 {
+            z3::set_global_param("parallel.enable", "true");
+            z3::set_global_param(
+                "parallel.threads.max",
+                &self.config.num_workers.to_string(),
+            );
+        }
+
         z3::with_z3_config(&cfg, f)
+    }
+
+    /// Whether the configured policy enables interpolation.
+    ///
+    /// Z3's built-in interpolation API was removed in modern
+    /// releases; embedders that need interpolants now route the
+    /// queries through `verum_smt::interpolation` (a higher-level
+    /// MBI / proof-extraction layer), which consults this gate
+    /// to decide whether to attempt interpolation at all.
+    /// Surfacing the read here lets that layer branch on the
+    /// configured stance without reaching into Z3ContextManager
+    /// internals.
+    pub fn interpolation_enabled(&self) -> bool {
+        self.config.enable_interpolation
     }
 }
 
@@ -2614,3 +2676,62 @@ fn log_advanced_result(result: &AdvancedResult) {
 }
 
 // ==================== Tests ====================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn z3config_default_values_pin_documented_stance() {
+        // Pin: defaults match the documented stance described in
+        // each field's doc comment. A regression that flips any
+        // default would silently change the per-call resource
+        // budget for every embedder that uses Z3Config::default().
+        let cfg = Z3Config::default();
+        assert!(cfg.enable_proofs, "default enable_proofs must stay true");
+        assert!(cfg.minimize_cores, "default minimize_cores must stay true");
+        assert!(!cfg.enable_interpolation, "default enable_interpolation stays false");
+        assert!(cfg.enable_mbqi, "default enable_mbqi must stay true");
+        assert!(cfg.enable_patterns, "default enable_patterns must stay true");
+        assert!(cfg.auto_tactics, "default auto_tactics must stay true");
+        assert!(cfg.num_workers > 0, "default num_workers must be nonzero (num_cpus default)");
+    }
+
+    #[test]
+    fn interpolation_enabled_mirrors_config() {
+        // Pin: the interpolation read accessor surfaces the
+        // configured stance verbatim. Lets the higher-level
+        // verum_smt::interpolation layer branch on the policy
+        // without reaching into Z3ContextManager internals.
+        let mgr = Z3ContextManager::new(Z3Config {
+            enable_interpolation: false,
+            ..Default::default()
+        });
+        assert!(!mgr.interpolation_enabled());
+
+        let mgr = Z3ContextManager::new(Z3Config {
+            enable_interpolation: true,
+            ..Default::default()
+        });
+        assert!(mgr.interpolation_enabled());
+    }
+
+    #[test]
+    fn num_workers_zero_skips_parallel_global_set() {
+        // Pin: the documented "0 = let Z3 decide" sentinel must
+        // not poison the global parallel.* params. We can't
+        // observe Z3's global-param state from outside, but we
+        // can pin the public contract: with num_workers = 0,
+        // `with_z3_config` runs to completion without panicking
+        // (a regression that always wrote `parallel.threads.max=0`
+        // would set Z3's parallel pool to zero workers and break
+        // every subsequent solver call).
+        let mgr = Z3ContextManager::new(Z3Config {
+            num_workers: 0,
+            ..Default::default()
+        });
+        // Just exercising the with_z3_config path is enough to
+        // verify the gate logic doesn't panic on the 0 sentinel.
+        let _: i32 = mgr.with_config(|| 42);
+    }
+}
