@@ -1,0 +1,46 @@
+// core.proof.tactics.forward — Lean / SSReflect-style forward
+// reasoning.
+//
+// Backward chaining (intro / split / apply) drives the goal
+// towards atoms; forward chaining (`have` / `apply_with`)
+// introduces new facts into the hypothesis context, letting
+// later tactics cite them directly. The two styles compose
+// naturally — most real proofs alternate.
+//
+// Catalogue: `verum tactic list --category forward`.
+
+// Forward-style hypothesis introduction.
+//
+// `have(name, ty, proof)` proves `ty` via `proof`, binds the
+// resulting term as `name` in the hypothesis context, and
+// continues with the original goal.
+//
+// Surface syntax (compiled by the parser):
+//
+//     have h : x > 0 := { norm_num };
+//     rewrite_with(h)
+//
+// Fails if `proof` does not discharge `ty` — the bound name
+// only enters scope on success. Catalogue id: `have`. See
+// `verum tactic explain have` for the full doc.
+tactic have(name: Text, ty: Type, proof: Tactic) {
+    forward_have(name, ty, proof)
+}
+
+// Apply a lemma with an explicit argument list.
+//
+// `apply_with(lemma, [a1, a2, ...])` is the verbose form of
+// `apply(lemma)` — used when type inference can't pick the
+// instantiation arguments unambiguously. The arguments are
+// substituted into `lemma`'s type variables in declaration
+// order; mismatched arity fails immediately.
+//
+// Surface syntax:
+//
+//     apply add_comm with [a, b]
+//
+// Catalogue id: `apply_with`. See `verum tactic explain
+// apply_with` for the full doc.
+tactic apply_with(lemma: Text, args: List<Expr>) {
+    apply(lemma, args)
+}
