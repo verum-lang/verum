@@ -51,6 +51,11 @@ pub mod cache_closure;
 /// @axiom to typed `DocItem`s, and renders Markdown / LaTeX / HTML
 /// via `verum_verification::doc_render::DefaultDocRenderer`.
 pub mod doc_render;
+/// `verum foreign-import` subcommand — read Coq / Lean4 / Mizar /
+/// Isabelle source files and emit a Verum `.vr` skeleton with one
+/// `@axiom`-bodied declaration per imported theorem, attributed
+/// back to the source via `@framework(<system>, "<source>:<line>")`.
+pub mod foreign_import;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

@@ -101,6 +101,16 @@ pub mod closure_cache;
 /// [`doc_render::DocRenderer`] trait.  Single source of truth for
 /// the corpus → paper-draft pipeline.
 pub mod doc_render;
+/// Foreign-system theorem import (#85) — inverse of cross-format
+/// export.  Reads Coq / Lean4 / Mizar / Isabelle source files and
+/// projects each declaration into a typed
+/// [`foreign_import::ForeignTheorem`] which renders to a Verum
+/// skeleton with `@framework(<system>, "<source>:<line>")`
+/// attribution.  Single trait boundary
+/// [`foreign_import::ForeignSystemImporter`] + per-system reference
+/// impls (`CoqImporter` / `Lean4Importer` / `MizarImporter` /
+/// `IsabelleImporter`).
+pub mod foreign_import;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
