@@ -66,18 +66,24 @@ fn requires_kernel_recheck(strategy: LadderStrategy) -> bool {
 /// item and project the result list to a single dispatcher-facing
 /// `KernelRecheckOutcome`.
 ///
-/// Returns `None` when the item isn't theorem-shaped (the
-/// dispatcher then routes through other paths).
+/// Recognises:
+///   * Theorem / Lemma / Corollary → `recheck_theorem` (#118)
+///   * Axiom                        → `recheck_axiom`   (#119)
+///
+/// Returns `None` for kinds that don't carry refinement-type
+/// leakage at this layer (definitions / functions / types are
+/// covered by other verification phases).
 fn run_kernel_recheck(
     item_kind: &ItemKind,
     item_name: &Text,
 ) -> Option<KernelRecheckOutcome> {
-    use verum_ast::decl::TheoremDecl;
-    let theorem: &TheoremDecl = match item_kind {
-        ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => t,
+    let results = match item_kind {
+        ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => {
+            KernelRecheck::recheck_theorem(t)
+        }
+        ItemKind::Axiom(a) => KernelRecheck::recheck_axiom(a),
         _ => return None,
     };
-    let results = KernelRecheck::recheck_theorem(theorem);
     let errors: Vec<&verum_verification::kernel_recheck::KernelRecheckError> = results
         .iter()
         .filter_map(|(_, r)| r.as_ref().err())
@@ -178,6 +184,11 @@ pub fn run_verify_ladder(format: &str) -> Result<()> {
                 ItemKind::Corollary(decl) => {
                     ("corollary", decl.name.name.clone(), &decl.attributes)
                 }
+                // #119 — axioms carry refinement-type leakage in their
+                // params + return type + proposition; surface them to
+                // the dispatcher so the kernel-recheck bridge fires
+                // on `@verify(proof)` axiom declarations too.
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
                 _ => continue,
             };
 
