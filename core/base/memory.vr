@@ -503,6 +503,16 @@ implement<T: Default> Default for Heap<T> {
     }
 }
 
+// Display if T is Display — transparent to the inner value.  Box-style
+// pointers in Verum are conceptually invisible to user-facing output:
+// `print(Heap.new(42))` should render `42`, not `Heap(42)`.  Mirrors
+// Rust's `Display for Box<T>`.
+implement<T: Display> Display for Heap<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        (**self).fmt(f)
+    }
+}
+
 // =============================================================================
 // Shared<T> - Reference-counted shared ownership
 // =============================================================================
@@ -800,6 +810,16 @@ implement<T: Hash> Hash for Shared<T> {
 implement<T: Default> Default for Shared<T> {
     fn default() -> Shared<T> {
         Shared.new(T.default())
+    }
+}
+
+// Display if T is Display — transparent to the inner value.  RC
+// pointers in Verum are conceptually invisible to user-facing output:
+// `print(Shared.new(42))` renders `42`, not `Shared(42)`.  Matches
+// the Heap<T> convention above and mirrors Rust's `Display for Rc<T>`.
+implement<T: Display> Display for Shared<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        (**self).fmt(f)
     }
 }
 
@@ -1297,6 +1317,15 @@ implement<T: Clone + Hash> Hash for Cow<T> {
 implement<T: Clone + Default> Default for Cow<T> {
     fn default() -> Cow<T> {
         Owned(T.default())
+    }
+}
+
+// Display if T is Display — transparent to the inner value.  Cow
+// transparently delegates user-facing output to its current
+// representation regardless of Borrowed / Owned state.
+implement<T: Clone + Display> Display for Cow<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.as_ref().fmt(f)
     }
 }
 
