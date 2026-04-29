@@ -171,11 +171,29 @@ impl ExhaustivenessCache {
         }
     }
 
-    /// Get a cached result if available and valid
+    /// Get a cached result if available and valid.
+    ///
+    /// Honours the `enable_structural_cache` config gate: when
+    /// `false`, the cache behaves as a permanent miss-only
+    /// surface — every `get` returns `None` and stats record the
+    /// miss. Used by callers that want exhaustiveness analysis
+    /// to recompute on every query (e.g. when correctness pinning
+    /// is more important than throughput, or when debugging cache
+    /// invariants). Before this wire-up the field was inert —
+    /// disabling the cache had no effect on lookup behaviour.
     ///
     /// Performance: Uses read lock first to check existence, only upgrades to
     /// write lock when necessary for updates.
     pub fn get(&self, key: &CacheKey) -> Option<ExhaustivenessResult> {
+        // Master gate — when disabled the cache surface stays
+        // miss-only. Stats still record so callers can observe
+        // the bypass.
+        if !self.config.enable_structural_cache {
+            if let Ok(mut stats) = self.stats.write() {
+                stats.misses += 1;
+            }
+            return None;
+        }
         // First, check with read lock (fast path for cache misses)
         {
             let entries = self.entries.read().ok()?;
@@ -236,8 +254,14 @@ impl ExhaustivenessCache {
         None
     }
 
-    /// Store a result in the cache
+    /// Store a result in the cache. When the
+    /// `enable_structural_cache` master gate is `false` the
+    /// store is a no-op — `get` would always return `None` so
+    /// inserting would only waste memory.
     pub fn put(&self, key: CacheKey, result: ExhaustivenessResult) {
+        if !self.config.enable_structural_cache {
+            return;
+        }
         let mut entries = match self.entries.write() {
             Ok(e) => e,
             Err(_) => return,
@@ -631,5 +655,42 @@ mod tests {
 
         cache.clear();
         assert!(cache.get(&key).is_none());
+    }
+
+    #[test]
+    fn enable_structural_cache_false_keeps_cache_miss_only() {
+        // Pin: `CacheConfig.enable_structural_cache = false` is
+        // honoured by both `put` (no-op) and `get` (always miss).
+        // Before the wire-up the field was inert — disabling
+        // it had zero effect on cache behaviour.
+        let cache = ExhaustivenessCache::with_config(CacheConfig {
+            enable_structural_cache: false,
+            ..CacheConfig::default()
+        });
+        let key = CacheKey {
+            patterns_hash: 1,
+            type_hash: 2,
+            env_hash: 3,
+        };
+        let result = ExhaustivenessResult {
+            is_exhaustive: true,
+            uncovered_witnesses: List::new(),
+            redundant_patterns: List::new(),
+            all_guarded: false,
+            range_overlaps: None,
+            warnings: List::new(),
+        };
+
+        // put + get on a disabled cache must miss.
+        cache.put(key.clone(), result);
+        assert!(
+            cache.get(&key).is_none(),
+            "disabled cache must return None even after a put"
+        );
+
+        // Stats should record the miss.
+        let stats = cache.stats().unwrap();
+        assert_eq!(stats.hits, 0);
+        assert!(stats.misses >= 1);
     }
 }
