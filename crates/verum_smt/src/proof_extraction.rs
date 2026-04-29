@@ -2317,6 +2317,33 @@ impl ProofExtractor {
                 }
                 result
             }
+
+            TacticCombinator::Try(inner) => {
+                // `Try(t) ≡ OrElse(t, skip)` — soft-fail at the
+                // Z3 tactic level. Mirror the semantic from the
+                // executor's apply_combinator path.
+                let inner_tactic = self.combinator_to_tactic(inner);
+                let skip = Tactic::new("skip");
+                inner_tactic.or_else(&skip)
+            }
+
+            TacticCombinator::FirstOf(branches) => {
+                // First-success choice — left-fold via or_else,
+                // mirroring the ParOr lowering. Empty list ⇒ skip
+                // (no-op success), single element ⇒ the element.
+                if branches.is_empty() {
+                    return Tactic::new("skip");
+                }
+                if branches.len() == 1 {
+                    return self.combinator_to_tactic(&branches[0]);
+                }
+                let mut result = self.combinator_to_tactic(&branches[0]);
+                for branch in branches.iter().skip(1) {
+                    let next = self.combinator_to_tactic(branch);
+                    result = result.or_else(&next);
+                }
+                result
+            }
         }
     }
 

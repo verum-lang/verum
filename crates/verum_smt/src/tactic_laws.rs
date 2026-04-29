@@ -320,6 +320,8 @@ pub const SIMPLIFIER_APPLIES: &[LawId] = &[
     LawId::OrelseAssociative,
     LawId::RepeatZeroIsSkip,
     LawId::RepeatOneIsBody,
+    LawId::TryEqualsOrelseSkip,
+    LawId::FirstOfSingletonCollapses,
 ];
 
 /// Normalise a combinator to its canonical form by applying every
@@ -454,6 +456,49 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
                 norm_branches.push(normalize_once(b));
             }
             TacticCombinator::ParOr(norm_branches)
+        }
+
+        TacticCombinator::Try(inner) => {
+            // LawId::TryEqualsOrelseSkip — `try { t } ↪ t || skip`.
+            // The catalogue rewrite desugars Try away into OrElse,
+            // which is then subject to all OrElse simplifications.
+            let inner_norm = normalize_once(*inner);
+            normalize_once(TacticCombinator::OrElse(
+                Box::new(inner_norm),
+                Box::new(skip()),
+            ))
+        }
+
+        TacticCombinator::FirstOf(branches) => {
+            // LawId::FirstOfSingletonCollapses — `first_of([t]) ↪ t`.
+            // Multi-element FirstOf reduces to a left-folded OrElse
+            // chain (which the existing OrelseAssociative rule then
+            // right-associates).  Empty FirstOf ↪ fail.
+            let mut norm_branches: Vec<TacticCombinator> = Vec::new();
+            for b in branches {
+                norm_branches.push(normalize_once(b));
+            }
+            match norm_branches.len() {
+                0 => fail(),
+                1 => norm_branches.into_iter().next().unwrap(),
+                _ => {
+                    let mut iter = norm_branches.into_iter();
+                    let first = iter.next().unwrap();
+                    let rest = iter.collect::<Vec<_>>();
+                    let mut acc = TacticCombinator::FirstOf({
+                        let mut tail = verum_common::List::new();
+                        for r in rest {
+                            tail.push(r);
+                        }
+                        tail
+                    });
+                    acc = normalize_once(acc); // recursively reduce tail
+                    normalize_once(TacticCombinator::OrElse(
+                        Box::new(first),
+                        Box::new(acc),
+                    ))
+                }
+            }
         }
     }
 }
@@ -639,6 +684,99 @@ mod tests {
         // OrelseAssociative — the catalogue ↔ simplifier
         // single-source-of-truth invariant must continue to hold.
         assert!(SIMPLIFIER_APPLIES.contains(&LawId::OrelseAssociative));
+    }
+
+    // -- Try / FirstOf desugaring (#107) --------------------------------
+
+    #[test]
+    fn try_desugars_to_orelse_with_skip() {
+        // catalogue rule `try-equals-orelse-skip`:
+        // `try { t } ↪ t || skip`
+        let t = TacticCombinator::Try(Box::new(smt()));
+        let n = normalize(t);
+        let want = normalize(TacticCombinator::OrElse(
+            Box::new(smt()),
+            Box::new(skip()),
+        ));
+        assert_eq!(format!("{:?}", n), format!("{:?}", want));
+    }
+
+    #[test]
+    fn try_followed_by_skip_simplification_collapses() {
+        // try { t } where the catalogue desugar produces `t || skip`,
+        // and `t || skip` is NOT a fail-eliminating shape — we
+        // expect the post-desugar form to remain `t || skip`.
+        // (skip is the right identity of AndThen, NOT OrElse — so
+        // the OrElse(t, skip) form is canonical.)
+        let t = TacticCombinator::Try(Box::new(simp()));
+        let n = normalize(t);
+        // After normalisation, expect OrElse(simp, skip).
+        match n {
+            TacticCombinator::OrElse(_, _) => {}
+            other => panic!("expected OrElse(_, _), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn first_of_singleton_collapses_to_inner() {
+        // catalogue rule `first-of-singleton-collapses`:
+        // `first_of([t]) ↪ t`
+        let mut single = verum_common::List::new();
+        single.push(smt());
+        let n = normalize(TacticCombinator::FirstOf(single));
+        assert_eq!(format!("{:?}", n), format!("{:?}", smt()));
+    }
+
+    #[test]
+    fn first_of_empty_reduces_to_fail() {
+        let n = normalize(TacticCombinator::FirstOf(verum_common::List::new()));
+        assert!(is_fail(&n));
+    }
+
+    #[test]
+    fn first_of_two_arg_reduces_to_orelse_chain() {
+        let mut branches = verum_common::List::new();
+        branches.push(simp());
+        branches.push(smt());
+        let n = normalize(TacticCombinator::FirstOf(branches));
+        let want = normalize(TacticCombinator::OrElse(
+            Box::new(simp()),
+            Box::new(smt()),
+        ));
+        assert_eq!(format!("{:?}", n), format!("{:?}", want));
+    }
+
+    #[test]
+    fn first_of_three_arg_right_associates_via_orelse_assoc() {
+        // FirstOf([a, b, c]) ↪ OrElse(a, OrElse(b, c)).
+        let mut branches = verum_common::List::new();
+        branches.push(simp());
+        branches.push(smt());
+        branches.push(lia());
+        let n = normalize(TacticCombinator::FirstOf(branches));
+        let want = normalize(TacticCombinator::OrElse(
+            Box::new(simp()),
+            Box::new(TacticCombinator::OrElse(
+                Box::new(smt()),
+                Box::new(lia()),
+            )),
+        ));
+        assert_eq!(format!("{:?}", n), format!("{:?}", want));
+    }
+
+    #[test]
+    fn simplifier_applies_includes_try_and_first_of() {
+        assert!(SIMPLIFIER_APPLIES.contains(&LawId::TryEqualsOrelseSkip));
+        assert!(SIMPLIFIER_APPLIES.contains(&LawId::FirstOfSingletonCollapses));
+    }
+
+    #[test]
+    fn task_107_canonical_law_count_now_ten_of_twelve() {
+        // Pin: 10 of 12 catalogue laws are now wired (was 7 in V0,
+        // 8 after #103 OrelseAssociative).  The remaining two
+        // (solve-of-skip-fails-when-open, all-goals-of-skip-is-skip)
+        // need executor-side bookkeeping that's a separate task.
+        assert_eq!(SIMPLIFIER_APPLIES.len(), 10);
     }
 
     #[test]

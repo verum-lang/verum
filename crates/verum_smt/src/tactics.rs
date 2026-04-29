@@ -139,6 +139,19 @@ pub enum TacticCombinator {
 
     /// Parallel execution (portfolio)
     ParOr(List<TacticCombinator>),
+
+    /// Soft-fail: try `t`; if it fails, succeed silently (leave the
+    /// goal unchanged).  Equivalent to `OrElse(t, skip)` — the
+    /// simplifier desugars accordingly per
+    /// `verum_verification::tactic_combinator::canonical_laws`'s
+    /// `try-equals-orelse-skip` rule.
+    Try(Box<TacticCombinator>),
+
+    /// First-success choice over `n` alternatives.  `FirstOf([t])`
+    /// reduces to `t`; `FirstOf([t1, t2, ...])` reduces to a
+    /// left-folded `OrElse` chain (which the simplifier then
+    /// right-associates per `OrelseAssociative`).
+    FirstOf(List<TacticCombinator>),
 }
 
 /// Probe kinds for conditional tactics
@@ -487,6 +500,32 @@ impl TacticExecutor {
                 // Returns the result from the first successful tactic
                 self.apply_parallel_portfolio(goal, tactics)
             }
+            TacticCombinator::Try(inner) => {
+                // Soft-fail: try `inner`; if it fails (empty result
+                // or `succeeded=false`), the goal is unchanged.
+                // Mirrors the catalogue's `try-equals-orelse-skip`
+                // rule semantically — `Try(t) ≡ OrElse(t, skip)`.
+                let goals = self.apply_combinator(goal, inner);
+                if !goals.is_empty() && self.stats.succeeded {
+                    goals
+                } else {
+                    let mut singleton = List::new();
+                    singleton.push(goal.clone());
+                    singleton
+                }
+            }
+            TacticCombinator::FirstOf(branches) => {
+                // First-success choice.  Iterate through branches in
+                // order; return the first non-empty + succeeded
+                // result.  Empty branches list ⇒ fail (empty result).
+                for branch in branches.iter() {
+                    let goals = self.apply_combinator(goal, branch);
+                    if !goals.is_empty() && self.stats.succeeded {
+                        return goals;
+                    }
+                }
+                List::new()
+            }
         }
     }
 
@@ -689,6 +728,39 @@ impl TacticExecutor {
             TacticCombinator::ParOr(tactics) => {
                 // Parallel portfolio with timeout enforcement
                 self.apply_parallel_portfolio_with_timeout(goal, tactics, timeout, start)
+            }
+            TacticCombinator::Try(inner) => {
+                // Soft-fail: try `inner`; if it fails (empty result
+                // or `succeeded=false`), the goal is unchanged.
+                // Same semantic as apply_combinator path; the
+                // timeout-tracking variant routes inner through
+                // the same timeout budget.
+                let goals = self.apply_combinator_with_timeout_tracking(
+                    goal, inner, timeout, start,
+                );
+                if !goals.is_empty() && self.stats.succeeded {
+                    goals
+                } else {
+                    let mut singleton = List::new();
+                    singleton.push(goal.clone());
+                    singleton
+                }
+            }
+            TacticCombinator::FirstOf(branches) => {
+                // First-success choice with timeout tracking.
+                for branch in branches.iter() {
+                    if start.elapsed() >= timeout {
+                        break;
+                    }
+                    let goals = self.apply_combinator_with_timeout_tracking(
+                        goal, branch, timeout, start,
+                    );
+                    if !goals.is_empty() && self.stats.succeeded {
+                        return goals;
+                    }
+                }
+                // All branches failed (or timeout exhausted) — fail
+                List::new()
             }
         }
     }
@@ -985,6 +1057,29 @@ impl TacticExecutor {
             TacticCombinator::ParOr(tactics) => {
                 // Parallel portfolio with parameters
                 self.apply_parallel_portfolio_with_params(goal, tactics, params)
+            }
+            TacticCombinator::Try(inner) => {
+                // Soft-fail with params: try `inner` under params;
+                // restore the goal on failure.
+                let goals = self.apply_combinator_with_params(goal, inner, params);
+                if !goals.is_empty() && self.stats.succeeded {
+                    goals
+                } else {
+                    let mut singleton = List::new();
+                    singleton.push(goal.clone());
+                    singleton
+                }
+            }
+            TacticCombinator::FirstOf(branches) => {
+                // First-success choice with params propagated to
+                // each branch.
+                for branch in branches.iter() {
+                    let goals = self.apply_combinator_with_params(goal, branch, params);
+                    if !goals.is_empty() && self.stats.succeeded {
+                        return goals;
+                    }
+                }
+                List::new()
             }
         }
     }
