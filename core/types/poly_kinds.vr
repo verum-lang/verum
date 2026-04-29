@@ -333,3 +333,71 @@ fn free_vars_into(k: Kind, out: &mut Set<Text>) {
         },
     }
 }
+
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for Kind
+// =============================================================================
+
+implement Eq for Kind {
+    fn eq(&self, other: &Kind) -> Bool {
+        match (self, other) {
+            (Kind.KType, Kind.KType) => true,
+            (Kind.KConstraint, Kind.KConstraint) => true,
+            (Kind.KVar { name: a }, Kind.KVar { name: b }) => a == b,
+            (Kind.KArrow { domain: da, codomain: ca },
+             Kind.KArrow { domain: db, codomain: cb }) =>
+                **da == **db && **ca == **cb,
+            _ => false,
+        }
+    }
+}
+
+implement Display for Kind {
+    /// Renders kinds in the standard kind-algebra notation:
+    /// `Type`, `Constraint`, `K₁ → K₂` (right-associated), `κ`.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Kind.KType        => f.write_str("Type"),
+            Kind.KConstraint  => f.write_str("Constraint"),
+            Kind.KVar { name } => f.write_str(name.as_str()),
+            Kind.KArrow { domain, codomain } => {
+                // Parenthesise the LHS when it itself is an arrow,
+                // so `(K1 -> K2) -> K3` is unambiguous and the
+                // default right-association of `->` survives the
+                // round-trip.
+                let lhs_is_arrow = match **domain {
+                    Kind.KArrow { .. } => true,
+                    _                  => false,
+                };
+                if lhs_is_arrow {
+                    f.write_str("(")?;
+                    (**domain).fmt(f)?;
+                    f.write_str(") -> ")?;
+                } else {
+                    (**domain).fmt(f)?;
+                    f.write_str(" -> ")?;
+                }
+                (**codomain).fmt(f)
+            },
+        }
+    }
+}
+
+implement Debug for Kind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Kind.KType        => f.write_str("KType"),
+            Kind.KConstraint  => f.write_str("KConstraint"),
+            Kind.KVar { name } =>
+                f.write_str(f"KVar({name})".as_str()),
+            Kind.KArrow { domain, codomain } => {
+                f.write_str("KArrow(")?;
+                (**domain).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**codomain).fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
