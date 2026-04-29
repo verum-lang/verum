@@ -247,6 +247,33 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         ));
     }
 
+    // Surface inert TestConfig fields. `differential` (VBC vs LLVM
+    // AOT result agreement), `property_testing` (proptest! macro),
+    // `proptest_cases` (default case count), and `fuzzing` (cargo
+    // fuzz integration) all flow from the manifest [test] section
+    // but no current `verum test` path consults them — the harness
+    // runs each test once and asserts the expected outcome without
+    // the differential/property/fuzz expansion. Closes the
+    // inert-defense pattern by routing the values through tracing
+    // so embedders writing `[test].differential = true` see the
+    // setting was observed at the runner entry, even when the
+    // associated phase isn't realised yet.
+    if manifest.test.differential
+        || !manifest.test.property_testing
+        || manifest.test.proptest_cases != 256
+        || manifest.test.fuzzing
+    {
+        tracing::debug!(
+            "test runner: differential={}, property_testing={}, proptest_cases={}, \
+             fuzzing={} — these fields are forward-looking; the current `verum test` \
+             harness runs each test once without differential/property/fuzz expansion",
+            manifest.test.differential,
+            manifest.test.property_testing,
+            manifest.test.proptest_cases,
+            manifest.test.fuzzing,
+        );
+    }
+
     let test_target_dir = manifest_dir.join("target").join("test");
     std::fs::create_dir_all(&test_target_dir).ok();
 
