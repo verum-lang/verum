@@ -835,6 +835,23 @@ enum Commands {
         diff: Option<Text>,
         #[clap(long)]
         function: Option<Text>,
+        /// Enable the per-theorem closure-hash incremental
+        /// verification cache (#79).  When set, theorem proofs whose
+        /// closure hash is in the cache and whose cached verdict was
+        /// Ok are skipped without invoking the SMT / kernel re-check.
+        /// Cache root defaults to
+        /// `<input.parent>/target/.verum_cache/closure-hashes/`;
+        /// override with `--closure-cache-root <PATH>`.
+        #[clap(long)]
+        closure_cache: bool,
+
+        /// Override the closure-cache root directory.  Implies
+        /// `--closure-cache` if set.  Standard CI use is to point
+        /// this at a shared NFS path so multiple agents reuse cached
+        /// verdicts.
+        #[clap(long, value_name = "PATH")]
+        closure_cache_root: Option<PathBuf>,
+
         /// Route every `@verify(strategy)` obligation through the
         /// typed 13-strategy ladder dispatcher
         /// (`verum_verification::ladder_dispatch::DefaultLadderDispatcher`)
@@ -2470,6 +2487,8 @@ fn run_command(cli: Cli) -> Result<()> {
             solver_protocol,
             ladder,
             ladder_format,
+            closure_cache,
+            closure_cache_root,
         } => {
             // --ladder short-circuits the standard verify pipeline:
             // route every @verify(strategy) annotation through the
@@ -2605,6 +2624,8 @@ fn run_command(cli: Cli) -> Result<()> {
                     distributed_cache: distributed_cache.map(|t| t.to_string()),
                     profile_name: verify_profile.map(|t| t.to_string()),
                     profile_obligation,
+                    closure_cache_enabled: closure_cache,
+                    closure_cache_root,
                 };
                 // Verify project
                 commands::verify::execute(

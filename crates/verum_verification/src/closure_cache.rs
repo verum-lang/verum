@@ -56,6 +56,11 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
 
+/// The kernel version stamped into every cache fingerprint.  Re-export
+/// so consumer crates that don't depend on `verum_kernel` directly can
+/// still reach the canonical value through the verification crate.
+pub use verum_kernel::VVA_VERSION as KERNEL_VERSION;
+
 // =============================================================================
 // ClosureFingerprint — the cache key
 // =============================================================================
@@ -277,6 +282,112 @@ pub fn decide(
     }
 
     CacheDecision::Skip { cached }
+}
+
+// =============================================================================
+// cached_check — high-level orchestration helper
+// =============================================================================
+
+/// Outcome reported by [`cached_check`].  Distinguishes the cache-hit
+/// path (cached verdict served verbatim) from the cache-miss path
+/// (verdict freshly computed AND persisted).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CachedCheckOutcome {
+    /// The cache had a valid Ok-entry for this fingerprint; the
+    /// stored verdict is authoritative for this run.
+    Hit {
+        cached: CacheEntry,
+        /// What the decision said before serving (for telemetry).
+        reason_skipped: Text,
+    },
+    /// The cache did not skip — the verify closure ran and the new
+    /// verdict was persisted (best-effort: storage I/O failures are
+    /// reported in `persist_error` but DO NOT shadow the verdict).
+    Miss {
+        verdict: CachedVerdict,
+        /// Why the cache missed (NoCacheEntry / FingerprintMismatch /
+        /// KernelVersionChanged / PreviousVerdictFailed).
+        recheck_reason: RecheckReason,
+        /// Storage write error, if any.  `None` means the new verdict
+        /// was persisted successfully.
+        persist_error: Option<Text>,
+    },
+}
+
+impl CachedCheckOutcome {
+    /// True iff the cache served the verdict (no kernel work was done).
+    pub fn was_hit(&self) -> bool {
+        matches!(self, CachedCheckOutcome::Hit { .. })
+    }
+
+    /// The verdict — either the cached one (Hit) or the freshly
+    /// computed one (Miss).
+    pub fn verdict(&self) -> &CachedVerdict {
+        match self {
+            CachedCheckOutcome::Hit { cached, .. } => &cached.verdict,
+            CachedCheckOutcome::Miss { verdict, .. } => verdict,
+        }
+    }
+}
+
+/// Cache-aware verification orchestration.
+///
+/// Glues `decide` + the user's verify closure + `put` into a single
+/// call.  The verify closure is invoked **only when the cache misses**
+/// (NoCacheEntry / FingerprintMismatch / KernelVersionChanged /
+/// PreviousVerdictFailed).  On miss, the freshly-computed verdict is
+/// persisted to the store before returning.
+///
+/// This is the pipeline-side entry point: production callers
+/// (`verum_compiler::pipeline::verify_theorem_proofs`) hand the cache
+/// + a closure that runs the actual kernel re-check, and get back a
+/// typed [`CachedCheckOutcome`].  Hit → skip the kernel call entirely;
+/// Miss → the kernel ran and the result is now cached for next time.
+///
+/// **Persist failures do not poison the verdict**: a cache write
+/// error is recorded in `Miss::persist_error` but the verify-closure's
+/// verdict is still returned authoritatively.  This matches the
+/// "cache is optimisation, not source of truth" contract.
+pub fn cached_check<F>(
+    store: &dyn IncrementalCacheStore,
+    theorem_name: &str,
+    fingerprint: &ClosureFingerprint,
+    verify: F,
+) -> CachedCheckOutcome
+where
+    F: FnOnce() -> CachedVerdict,
+{
+    match decide(store, theorem_name, fingerprint) {
+        CacheDecision::Skip { cached } => CachedCheckOutcome::Hit {
+            cached,
+            reason_skipped: Text::from("cache-hit"),
+        },
+        CacheDecision::Recheck { reason } => {
+            let verdict = verify();
+            let entry = CacheEntry {
+                theorem_name: Text::from(theorem_name),
+                fingerprint: fingerprint.clone(),
+                verdict: verdict.clone(),
+                recorded_at: now_secs(),
+            };
+            let persist_error = match store.put(&entry) {
+                Ok(()) => None,
+                Err(e) => Some(Text::from(format!("{}", e))),
+            };
+            CachedCheckOutcome::Miss {
+                verdict,
+                recheck_reason: reason,
+                persist_error,
+            }
+        }
+    }
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 // =============================================================================
@@ -976,6 +1087,161 @@ mod tests {
                 reason: RecheckReason::KernelVersionChanged { .. }
             }
         ));
+    }
+
+    // ----- cached_check helper -----
+
+    #[test]
+    fn cached_check_first_call_runs_verify_closure() {
+        let s = MemoryCacheStore::new();
+        let fp = fp_v("2.6.0");
+        let calls = std::cell::Cell::new(0);
+        let outcome = cached_check(&s, "thm.x", &fp, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Ok { elapsed_ms: 7 }
+        });
+        assert_eq!(calls.get(), 1, "verify closure must run on miss");
+        assert!(!outcome.was_hit());
+        match &outcome {
+            CachedCheckOutcome::Miss {
+                recheck_reason,
+                verdict,
+                persist_error,
+            } => {
+                assert!(matches!(recheck_reason, RecheckReason::NoCacheEntry));
+                assert!(verdict.is_ok());
+                assert!(persist_error.is_none());
+            }
+            _ => panic!("expected Miss, got {:?}", outcome),
+        }
+        // Verdict is now persisted.
+        assert!(s.get("thm.x").is_some());
+    }
+
+    #[test]
+    fn cached_check_second_call_serves_from_cache() {
+        let s = MemoryCacheStore::new();
+        let fp = fp_v("2.6.0");
+        let calls = std::cell::Cell::new(0);
+        // Warm the cache.
+        cached_check(&s, "thm.x", &fp, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Ok { elapsed_ms: 7 }
+        });
+        // Second call must hit cache.
+        let outcome = cached_check(&s, "thm.x", &fp, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Ok { elapsed_ms: 99 }
+        });
+        assert_eq!(calls.get(), 1, "verify closure must NOT run on hit");
+        assert!(outcome.was_hit());
+        // The hit's verdict is the *cached* one (elapsed_ms=7), not
+        // whatever the (un-run) closure would have returned.
+        if let CachedVerdict::Ok { elapsed_ms } = outcome.verdict() {
+            assert_eq!(*elapsed_ms, 7);
+        } else {
+            panic!("expected Ok verdict");
+        }
+    }
+
+    #[test]
+    fn cached_check_kernel_version_change_triggers_rerun() {
+        let s = MemoryCacheStore::new();
+        let fp_old = fp_v("2.6.0");
+        let calls = std::cell::Cell::new(0);
+        cached_check(&s, "thm.x", &fp_old, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Ok { elapsed_ms: 1 }
+        });
+        // Bump kernel version → must miss with KernelVersionChanged.
+        let fp_new = fp_v("2.7.0");
+        let outcome = cached_check(&s, "thm.x", &fp_new, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Ok { elapsed_ms: 2 }
+        });
+        assert_eq!(calls.get(), 2, "kernel-version drift must re-run");
+        match outcome {
+            CachedCheckOutcome::Miss {
+                recheck_reason: RecheckReason::KernelVersionChanged { .. },
+                ..
+            } => {}
+            other => panic!("expected KernelVersionChanged, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cached_check_persists_failed_verdict_so_subsequent_calls_skip_kernel_when_unchanged() {
+        // Failed verdicts MUST trigger a re-run on the next call (the
+        // PreviousVerdictFailed reason).  Pin that contract through
+        // the helper.
+        let s = MemoryCacheStore::new();
+        let fp = fp_v("2.6.0");
+        let calls = std::cell::Cell::new(0);
+        cached_check(&s, "thm.x", &fp, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Failed {
+                reason: Text::from("z3 timeout"),
+            }
+        });
+        let outcome = cached_check(&s, "thm.x", &fp, || {
+            calls.set(calls.get() + 1);
+            CachedVerdict::Ok { elapsed_ms: 1 }
+        });
+        assert_eq!(
+            calls.get(),
+            2,
+            "failed cached verdict must re-run on next call"
+        );
+        match outcome {
+            CachedCheckOutcome::Miss {
+                recheck_reason: RecheckReason::PreviousVerdictFailed { .. },
+                ..
+            } => {}
+            other => panic!("expected PreviousVerdictFailed miss, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cached_check_persist_error_does_not_poison_verdict() {
+        // Cache backend that always fails on put.
+        #[derive(Debug)]
+        struct FailingStore;
+        impl IncrementalCacheStore for FailingStore {
+            fn get(&self, _: &str) -> Option<CacheEntry> {
+                None
+            }
+            fn put(&self, _: &CacheEntry) -> Result<(), CacheError> {
+                Err(CacheError::Io(Text::from("disk full")))
+            }
+            fn clear(&self) -> Result<usize, CacheError> {
+                Ok(0)
+            }
+            fn stats(&self) -> CacheStats {
+                CacheStats::default()
+            }
+            fn names(&self) -> Vec<Text> {
+                Vec::new()
+            }
+        }
+        let s = FailingStore;
+        let fp = fp_v("2.6.0");
+        let outcome = cached_check(&s, "thm.x", &fp, || CachedVerdict::Ok {
+            elapsed_ms: 5,
+        });
+        match outcome {
+            CachedCheckOutcome::Miss {
+                verdict,
+                persist_error,
+                ..
+            } => {
+                // Verdict survives — caller still gets the truth.
+                assert!(verdict.is_ok());
+                // Persist error is reported.
+                let e = persist_error.expect("persist_error must be set");
+                assert!(e.as_str().contains("disk full"));
+            }
+            other => panic!("expected Miss with persist_error, got {:?}", other),
+        }
     }
 
     #[test]

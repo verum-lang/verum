@@ -150,6 +150,27 @@ pub struct CompilerOptions {
     /// verification cache layer; the option here is the CLI handle.
     pub distributed_cache_url: Option<String>,
 
+    /// Enable per-theorem closure-hash incremental verification cache
+    /// (`verum_verification::closure_cache`).  When true, theorem
+    /// proofs whose closure-hash is in the cache and whose cached
+    /// verdict was Ok are skipped without invoking the SMT / kernel
+    /// re-check.  Cache root defaults to
+    /// `<input.parent>/target/.verum_cache/closure-hashes/`; override
+    /// via `closure_cache_root`.
+    ///
+    /// Cache key = blake3(verum_kernel::VVA_VERSION + signature +
+    /// proof body + sorted+deduped @framework citations); kernel
+    /// version drift invalidates ALL entries unconditionally.
+    ///
+    /// Off by default — opt-in via `verum verify --closure-cache`.
+    pub closure_cache_enabled: bool,
+
+    /// Override the closure-cache root directory.  When `None`, the
+    /// default location under `target/.verum_cache/` is used.  Setting
+    /// this to a fixed path is the standard way to share a cache
+    /// across CI agents (e.g. `--closure-cache-root /nfs/verify/`).
+    pub closure_cache_root: Option<std::path::PathBuf>,
+
     // Profiling Options (P0!)
     /// Enable CBGR memory profiling
     pub profile_memory: bool,
@@ -331,6 +352,8 @@ impl Default for CompilerOptions {
             profile_verification: false,
             profile_obligation: false,
             distributed_cache_url: None,
+            closure_cache_enabled: false,
+            closure_cache_root: None,
             profile_memory: false,
             hot_path_threshold: 5.0,
             optimization_level: 0,
