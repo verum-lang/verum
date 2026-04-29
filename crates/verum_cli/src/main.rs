@@ -1031,6 +1031,23 @@ enum Commands {
         format: String,
     },
 
+    /// Live proof REPL — stepwise tactic feedback + proof-tree
+    /// visualisation (#75).  Non-interactive batch driver: apply
+    /// tactics, navigate with undo / redo, request hints, render
+    /// the proof tree as Graphviz DOT.  Interactive TUI is a
+    /// separate `verum_interactive` integration; the protocol
+    /// shape lives in this command.
+    ///
+    /// Subcommands:
+    ///   verum proof-repl batch --theorem T --goal G [--lemma ...] \
+    ///         [--commands FILE] [--cmd LINE]… [--format plain|json]
+    ///   verum proof-repl tree  --theorem T --goal G [--lemma ...] \
+    ///         [--apply STEP]…
+    ProofRepl {
+        #[clap(subcommand)]
+        sub: ProofReplSub,
+    },
+
     /// LCF-style fail-closed LLM tactic proposer (#77).  An LLM may
     /// propose tactic sequences but the kernel re-checks every step
     /// before committing.  Any rejection discards the proposal.
@@ -1509,6 +1526,55 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum ProofReplSub {
+    /// Run a batch of REPL commands non-interactively.  Commands
+    /// can come from a file (`--commands`) and / or repeated
+    /// `--cmd` flags; both are concatenated in CLI order.
+    ///
+    /// Command-script syntax (one per line):
+    ///   - `apply <tactic>` — apply a tactic.  Bare lines are
+    ///     also treated as `apply <line>`.
+    ///   - `undo` / `redo` / `status` / `show-goals` /
+    ///     `show-context` / `visualise` — REPL navigation.
+    ///   - `hint` (default 5) / `hint <N>` — proposed next steps.
+    ///   - `# comment` — skipped.
+    ///   - blank line — skipped.
+    Batch {
+        #[clap(long)]
+        theorem: String,
+        #[clap(long)]
+        goal: String,
+        /// Lemmas in scope (`name:::signature[:::lineage]`,
+        /// repeatable).
+        #[clap(long, value_name = "NAME:::SIGNATURE[:::LINEAGE]")]
+        lemma: Vec<String>,
+        /// Read commands from a file.
+        #[clap(long, value_name = "FILE")]
+        commands: Option<PathBuf>,
+        /// Inline command.  Repeatable — concatenated after
+        /// `--commands` content.
+        #[clap(long = "cmd", value_name = "LINE")]
+        cmd: Vec<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// Apply a sequence of tactics and emit the resulting proof
+    /// tree as Graphviz DOT (suitable for `dot -Tsvg`).  Non-zero
+    /// exit on any kernel rejection.
+    Tree {
+        #[clap(long)]
+        theorem: String,
+        #[clap(long)]
+        goal: String,
+        #[clap(long, value_name = "NAME:::SIGNATURE[:::LINEAGE]")]
+        lemma: Vec<String>,
+        /// Tactic to apply.  Repeatable; ordered as on the CLI.
+        #[clap(long, value_name = "TACTIC")]
+        apply: Vec<String>,
+    },
+}
+
 #[derive(Subcommand)]
 enum LlmTacticSub {
     Propose {
@@ -2882,6 +2948,29 @@ fn run_command(cli: Cli) -> Result<()> {
             out,
             format,
         } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
+        Commands::ProofRepl { sub } => match sub {
+            ProofReplSub::Batch {
+                theorem,
+                goal,
+                lemma,
+                commands,
+                cmd,
+                format,
+            } => commands::proof_repl::run_batch_cli(
+                &theorem,
+                &goal,
+                &lemma,
+                commands.as_ref(),
+                &cmd,
+                &format,
+            ),
+            ProofReplSub::Tree {
+                theorem,
+                goal,
+                lemma,
+                apply,
+            } => commands::proof_repl::run_tree_cli(&theorem, &goal, &lemma, &apply),
+        },
         Commands::LlmTactic { sub } => match sub {
             LlmTacticSub::Propose {
                 theorem,

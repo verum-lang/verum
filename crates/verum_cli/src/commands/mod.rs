@@ -60,6 +60,10 @@ pub mod foreign_import;
 /// proposer.  The LLM may propose tactic sequences but the kernel
 /// re-checks every step before committing.
 pub mod llm_tactic;
+/// `verum proof-repl` subcommand — non-interactive batch driver
+/// for the proof REPL state machine.  Apply tactics, undo / redo,
+/// hint, visualise the proof tree.
+pub mod proof_repl;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
