@@ -355,3 +355,166 @@ public fn lin_atom_count(f: LinForm) -> Int {
         LinForm.Dual { inner } => lin_atom_count(*inner),
     }
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for LinForm
+// =============================================================================
+
+implement Eq for LinForm {
+    /// Structural (syntactic) equality on linear-logic formulas.
+    /// Not provability — `A ⊗ B` and `B ⊗ A` compare unequal under
+    /// `==` even though they are linearly equivalent up to
+    /// commutativity of `⊗`.  Callers needing semantic equivalence
+    /// should reduce to a canonical normal form first.
+    fn eq(&self, other: &LinForm) -> Bool {
+        match (self, other) {
+            (LinForm.Atom { name: a },
+             LinForm.Atom { name: b }) => a == b,
+            (LinForm.MTensor { left: la, right: ra },
+             LinForm.MTensor { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (LinForm.Par { left: la, right: ra },
+             LinForm.Par { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (LinForm.With { left: la, right: ra },
+             LinForm.With { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (LinForm.Plus { left: la, right: ra },
+             LinForm.Plus { left: lb, right: rb }) =>
+                **la == **lb && **ra == **rb,
+            (LinForm.OfCourse { inner: a },
+             LinForm.OfCourse { inner: b }) =>
+                **a == **b,
+            (LinForm.WhyNot { inner: a },
+             LinForm.WhyNot { inner: b }) =>
+                **a == **b,
+            (LinForm.One,    LinForm.One)    => true,
+            (LinForm.Bottom, LinForm.Bottom) => true,
+            (LinForm.Top,    LinForm.Top)    => true,
+            (LinForm.Zero,   LinForm.Zero)   => true,
+            (LinForm.Dual { inner: a },
+             LinForm.Dual { inner: b }) =>
+                **a == **b,
+            _ => false,
+        }
+    }
+}
+
+implement Display for LinForm {
+    /// Renders a linear-logic formula in standard notation:
+    ///   `Atom { p }`             → `p`
+    ///   `MTensor { L, R }`       → `(L ⊗ R)`   (multiplicative conjunction)
+    ///   `Par { L, R }`           → `(L ⅋ R)`   (multiplicative disjunction)
+    ///   `With { L, R }`          → `(L & R)`   (additive conjunction)
+    ///   `Plus { L, R }`          → `(L ⊕ R)`   (additive disjunction)
+    ///   `OfCourse { φ }`         → `!φ`        (unrestricted use)
+    ///   `WhyNot { φ }`           → `?φ`        (weakenable)
+    ///   `One / Bottom / Top / Zero` → `1 / ⊥ / ⊤ / 0`
+    ///   `Dual { φ }`             → `φ^⊥`       (linear negation)
+    /// Parens around binary connectives preserve precedence.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LinForm.Atom { name } => f.write_str(name.as_str()),
+            LinForm.MTensor { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" ⊗ ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            LinForm.Par { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" ⅋ ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            LinForm.With { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" & ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            LinForm.Plus { left, right } => {
+                f.write_str("(")?;
+                (**left).fmt(f)?;
+                f.write_str(" ⊕ ")?;
+                (**right).fmt(f)?;
+                f.write_str(")")
+            },
+            LinForm.OfCourse { inner } => {
+                f.write_str("!")?;
+                (**inner).fmt(f)
+            },
+            LinForm.WhyNot { inner } => {
+                f.write_str("?")?;
+                (**inner).fmt(f)
+            },
+            LinForm.One    => f.write_str("1"),
+            LinForm.Bottom => f.write_str("⊥"),
+            LinForm.Top    => f.write_str("⊤"),
+            LinForm.Zero   => f.write_str("0"),
+            LinForm.Dual { inner } => {
+                (**inner).fmt(f)?;
+                f.write_str("^⊥")
+            },
+        }
+    }
+}
+
+implement Debug for LinForm {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            LinForm.Atom { name } =>
+                f.write_str(f"Atom({name})".as_str()),
+            LinForm.MTensor { left, right } => {
+                f.write_str("MTensor(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            LinForm.Par { left, right } => {
+                f.write_str("Par(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            LinForm.With { left, right } => {
+                f.write_str("With(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            LinForm.Plus { left, right } => {
+                f.write_str("Plus(")?;
+                (**left).fmt_debug(f)?;
+                f.write_str(", ")?;
+                (**right).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            LinForm.OfCourse { inner } => {
+                f.write_str("OfCourse(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            LinForm.WhyNot { inner } => {
+                f.write_str("WhyNot(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+            LinForm.One    => f.write_str("One"),
+            LinForm.Bottom => f.write_str("Bottom"),
+            LinForm.Top    => f.write_str("Top"),
+            LinForm.Zero   => f.write_str("Zero"),
+            LinForm.Dual { inner } => {
+                f.write_str("Dual(")?;
+                (**inner).fmt_debug(f)?;
+                f.write_str(")")
+            },
+        }
+    }
+}
