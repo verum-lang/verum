@@ -1031,6 +1031,17 @@ enum Commands {
         format: String,
     },
 
+    /// LCF-style fail-closed LLM tactic proposer (#77).  An LLM may
+    /// propose tactic sequences but the kernel re-checks every step
+    /// before committing.  Any rejection discards the proposal.
+    /// Every invocation is captured in an append-only audit trail
+    /// keyed by model id + prompt hash + completion hash so the
+    /// proof is reproducible from the log.
+    LlmTactic {
+        #[clap(subcommand)]
+        sub: LlmTacticSub,
+    },
+
     /// Auto-paper documentation generator (#84).  Walks every
     /// `.vr` file in the project, projects every public @theorem /
     /// @lemma / @corollary / @axiom into a typed `DocItem`, and
@@ -1498,6 +1509,42 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum LlmTacticSub {
+    Propose {
+        #[clap(long)]
+        theorem: String,
+        #[clap(long)]
+        goal: String,
+        #[clap(long, value_name = "NAME:::SIGNATURE")]
+        lemma: Vec<String>,
+        #[clap(long, value_name = "NAME:TYPE")]
+        hyp: Vec<String>,
+        #[clap(long, value_name = "STEP")]
+        history: Vec<String>,
+        #[clap(long, default_value = "mock")]
+        model: String,
+        #[clap(long)]
+        hint: Option<String>,
+        #[clap(long)]
+        persist: bool,
+        #[clap(long, value_name = "PATH")]
+        audit: Option<PathBuf>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    AuditTrail {
+        #[clap(long, value_name = "PATH")]
+        audit: Option<PathBuf>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    Models {
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum DocRenderSub {
     /// Render the corpus as a single document.
@@ -2835,6 +2882,35 @@ fn run_command(cli: Cli) -> Result<()> {
             out,
             format,
         } => commands::foreign_import::run_import(&from, &file, out.as_ref(), &format),
+        Commands::LlmTactic { sub } => match sub {
+            LlmTacticSub::Propose {
+                theorem,
+                goal,
+                lemma,
+                hyp,
+                history,
+                model,
+                hint,
+                persist,
+                audit,
+                format,
+            } => commands::llm_tactic::run_propose(
+                &theorem,
+                &goal,
+                &lemma,
+                &hyp,
+                &history,
+                &model,
+                hint.as_deref(),
+                audit.as_ref(),
+                persist,
+                &format,
+            ),
+            LlmTacticSub::AuditTrail { audit, format } => {
+                commands::llm_tactic::run_audit_trail(audit.as_ref(), &format)
+            }
+            LlmTacticSub::Models { format } => commands::llm_tactic::run_models(&format),
+        },
         Commands::DocRender { sub } => match sub {
             DocRenderSub::Render {
                 format,
