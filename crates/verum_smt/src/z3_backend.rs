@@ -120,6 +120,34 @@ impl Z3ContextManager {
             cfg.set_timeout_msec(timeout);
         }
 
+        // Wire `auto_tactics`: Z3's `auto_config` parameter
+        // controls whether the solver auto-detects logic and
+        // selects tactics. Default is `true`; passing `false`
+        // disables the heuristic. Closes the inert-defense
+        // pattern: prior to wiring, `Z3Config.auto_tactics` had
+        // no effect on Z3 — toggling it changed nothing about
+        // how the context was built.
+        cfg.set_bool_param_value("auto_config", self.config.auto_tactics);
+
+        // Wire `memory_limit_mb`: Z3's `memory_max_size` is a
+        // global parameter (process-wide, accepted via
+        // `Z3_global_param_set`). Setting it on `Config` is
+        // silently ignored (Z3 prints its help dump and the key
+        // is not honoured), confirmed empirically by
+        // `static_verification`'s wiring of the same key. Apply
+        // at the global scope so the limit is in force for
+        // every Z3 query routed through this manager.
+        if let Maybe::Some(mb) = self.config.memory_limit_mb {
+            z3::set_global_param("memory_max_size", &mb.to_string());
+        }
+
+        // Wire `random_seed`: forward to Z3's `smt.random_seed`
+        // global param so the solver's randomized choices are
+        // reproducible across runs. None means "let Z3 pick".
+        if let Maybe::Some(seed) = self.config.random_seed {
+            z3::set_global_param("smt.random_seed", &seed.to_string());
+        }
+
         z3::with_z3_config(&cfg, f)
     }
 }
