@@ -323,3 +323,66 @@ public fn parallel_coherent(kinds: List<EffectKind>) -> Bool {
     }
     true
 }
+
+// =============================================================================
+// Foundation Protocol Impls — Display + Debug + Eq for EffectKind
+// =============================================================================
+
+implement Eq for EffectKind {
+    fn eq(&self, other: &EffectKind) -> Bool {
+        match (self, other) {
+            (EffectKind.PureEffect,        EffectKind.PureEffect)        => true,
+            (EffectKind.ReaderEffect,      EffectKind.ReaderEffect)      => true,
+            (EffectKind.WriterEffect,      EffectKind.WriterEffect)      => true,
+            (EffectKind.ProbabilityEffect, EffectKind.ProbabilityEffect) => true,
+            (EffectKind.ListEffect,        EffectKind.ListEffect)        => true,
+            (EffectKind.StateEffect,       EffectKind.StateEffect)       => true,
+            (EffectKind.ExceptionEffect,   EffectKind.ExceptionEffect)   => true,
+            (EffectKind.IoEffect,          EffectKind.IoEffect)          => true,
+            _ => false,
+        }
+    }
+}
+
+implement Copy for EffectKind {}
+
+implement Display for EffectKind {
+    /// Renders the effect with its algebraic family name in
+    /// lowercase, suitable for audit logs and verify(coherent)
+    /// diagnostic surfaces:
+    ///   `PureEffect`        → `pure`
+    ///   `ReaderEffect`      → `reader`
+    ///   `WriterEffect`      → `writer`
+    ///   `ProbabilityEffect` → `probability`
+    ///   `ListEffect`        → `list`
+    ///   `StateEffect`       → `state`
+    ///   `ExceptionEffect`   → `exception`
+    ///   `IoEffect`          → `io`
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EffectKind.PureEffect        => f.write_str("pure"),
+            EffectKind.ReaderEffect      => f.write_str("reader"),
+            EffectKind.WriterEffect      => f.write_str("writer"),
+            EffectKind.ProbabilityEffect => f.write_str("probability"),
+            EffectKind.ListEffect        => f.write_str("list"),
+            EffectKind.StateEffect       => f.write_str("state"),
+            EffectKind.ExceptionEffect   => f.write_str("exception"),
+            EffectKind.IoEffect          => f.write_str("io"),
+        }
+    }
+}
+
+implement Debug for EffectKind {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            EffectKind.PureEffect        => f.write_str("PureEffect"),
+            EffectKind.ReaderEffect      => f.write_str("ReaderEffect"),
+            EffectKind.WriterEffect      => f.write_str("WriterEffect"),
+            EffectKind.ProbabilityEffect => f.write_str("ProbabilityEffect"),
+            EffectKind.ListEffect        => f.write_str("ListEffect"),
+            EffectKind.StateEffect       => f.write_str("StateEffect"),
+            EffectKind.ExceptionEffect   => f.write_str("ExceptionEffect"),
+            EffectKind.IoEffect          => f.write_str("IoEffect"),
+        }
+    }
+}
