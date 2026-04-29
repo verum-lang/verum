@@ -264,6 +264,27 @@ impl LiteralRegistry {
             }
             "sh" => self.parse_sh(content, span, source_file),
             _ => {
+                // Custom handler — surface inert TaggedLiteralHandler
+                // fields. `handler_fn` (the fully-qualified Verum
+                // function this tag dispatches to) and `handler.runtime`
+                // (whether runtime validation is supported) are stored
+                // on the handler from `register_handler` but the
+                // compile-time parser doesn't yet route through to the
+                // user-defined Verum function — every custom tag
+                // produces a generic `ParsedLiteral::Custom` regardless.
+                // Closes the inert-defense pattern by routing the
+                // values through tracing so embedders registering
+                // `TaggedLiteralHandler { handler_fn: "my.parser.parse",
+                // runtime: true, ... }` see the request was observed.
+                tracing::debug!(
+                    "literal_registry: custom tag {:?} dispatching to \
+                     ParsedLiteral::Custom (handler_fn={:?}, runtime={}) \
+                     — full Verum-function dispatch is forward-looking; \
+                     compile_time is gated above",
+                    tag.as_str(),
+                    handler.handler_fn.as_str(),
+                    handler.runtime,
+                );
                 // Custom handler - return generic custom literal
                 Ok(ParsedLiteral::Custom {
                     tag: tag.clone(),
