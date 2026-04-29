@@ -19,7 +19,7 @@ module core.database.sqlite.native.l5_sql.resolver;
 //
 // Multi-table SELECT, subqueries, CTEs, and JOIN column resolution
 // land with the planner enhancement; the resolver signature accepts
-// a `Vec<ColumnScope>` for that forward-compatibility.
+// a `List<ColumnScope>` for that forward-compatibility.
 // =============================================================================
 
 mount core.*;

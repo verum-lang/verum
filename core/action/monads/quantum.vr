@@ -39,7 +39,7 @@
 /// strong-monad operations (`pure / bind / strength`).
 @derive(Clone)
 public type Quantum<A> is {
-    /// V0 placeholder — V1 will replace with `Vec<Complex>` indexed
+    /// V0 placeholder — V1 will replace with `List<Complex>` indexed
     /// by computational-basis states (or a sparse alternative for
     /// large register sizes).
     state_tag: Text,

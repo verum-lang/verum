@@ -13,7 +13,7 @@ module core.database.sqlite.native.l4_vdbe.program;
 //
 // Shape:
 //
-//   * `instructions`    — Vec<Opcode>
+//   * `instructions`    — List<Opcode>
 //   * `constants`       — shared pool for large Int64 / Float64 / Text / Blob
 //                          literals referenced by opcodes (keeps Opcode small)
 //   * `result_columns`  — for SELECT: names + expected types per column
