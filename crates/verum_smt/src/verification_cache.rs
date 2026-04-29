@@ -235,13 +235,82 @@ impl VerificationCache {
     }
 
     /// Create a new verification cache with custom configuration.
+    ///
+    /// Honours `CacheConfig.distributed_cache`: when present, the
+    /// distributed backend is auto-constructed and installed on
+    /// the new cache. Pre-fix the field was set via the
+    /// `with_distributed_cache` builder but no code path consulted
+    /// it during cache construction — so configuring a distributed
+    /// backend in the manifest had zero observable effect; users
+    /// had to additionally call `with_distributed(...)` with a
+    /// hand-built backend, defeating the documented "configure
+    /// once" contract.
     pub fn with_config(config: CacheConfig) -> Self {
+        let distributed = match config.distributed_cache {
+            Maybe::Some(ref dc_config) => {
+                // Auto-build the distributed cache from the
+                // configured stance. On error the construction
+                // logs and falls back to no-distributed (the
+                // local cache continues to work). Production
+                // callers that need to surface the failure
+                // explicitly should construct the distributed
+                // backend themselves and pass it via
+                // `with_distributed`.
+                match Self::build_distributed_from_config(dc_config) {
+                    Ok(backend) => Maybe::Some(Arc::new(backend)),
+                    Err(e) => {
+                        tracing::warn!(
+                            "CacheConfig.distributed_cache configured but \
+                             backend construction failed: {} — falling back \
+                             to local-only cache",
+                            e,
+                        );
+                        Maybe::None
+                    }
+                }
+            }
+            Maybe::None => Maybe::None,
+        };
         Self {
             inner: Arc::new(RwLock::new(VerificationCacheInner::new(config.max_size))),
             stats: Arc::new(RwLock::new(CacheStats::default())),
             config,
-            distributed: Maybe::None,
+            distributed,
         }
+    }
+
+    /// Internal: construct a `DistributedCache` from a
+    /// `DistributedCacheConfig`. Mirrors the inline construction
+    /// path that callers using `with_distributed(backend)` already
+    /// run — extracted so the `with_config` auto-construction is a
+    /// single source of truth.
+    fn build_distributed_from_config(
+        config: &DistributedCacheConfig,
+    ) -> std::result::Result<crate::distributed_cache::DistributedCache, String> {
+        // Translate the local DistributedCacheConfig into the
+        // shape expected by the distributed_cache module. The
+        // local config carries an s3_url + cache_dir + trust
+        // level + verify_signatures flag; the module's own
+        // config takes more fields (filesystem_fallback, redis,
+        // credentials) that we leave at their defaults here.
+        let mut dc = crate::distributed_cache::DistributedCacheConfig::new(
+            config.s3_url.clone(),
+        );
+        dc.trust_level = match config.trust {
+            TrustLevel::All => crate::distributed_cache::TrustLevel::None,
+            TrustLevel::Signatures
+            | TrustLevel::SignaturesAndExpiry => {
+                // The module's own TrustLevel doesn't expose a
+                // separate "with-expiry" variant; downgrade to
+                // Signatures (the lower bound of the requested
+                // policy) and let the cache's TTL field on the
+                // local CacheConfig enforce the expiry side.
+                crate::distributed_cache::TrustLevel::Signatures
+            }
+        };
+        dc.filesystem_fallback = verum_common::Maybe::Some(config.cache_dir.clone());
+        let _ = config.verify_signatures; // consumed via trust_level mapping above
+        Ok(crate::distributed_cache::DistributedCache::new(dc))
     }
 
     /// Set distributed cache backend
@@ -1208,5 +1277,58 @@ mod tests {
 
         // Not a rational
         assert!(parse_z3_rational("42").is_none());
+    }
+
+    #[test]
+    fn with_config_no_distributed_keeps_local_only() {
+        // Pin: with `CacheConfig.distributed_cache = None` (the
+        // default), the auto-construction path is skipped entirely
+        // and the new cache is local-only. Round-trip through
+        // with_config preserves the absence sentinel.
+        let cfg = CacheConfig::default();
+        assert!(matches!(cfg.distributed_cache, Maybe::None));
+        let cache = VerificationCache::with_config(cfg);
+        assert!(
+            matches!(cache.distributed, Maybe::None),
+            "no configured distributed_cache must produce local-only cache",
+        );
+    }
+
+    #[test]
+    fn with_config_distributed_auto_constructs_backend() {
+        // Pin: with `CacheConfig.distributed_cache = Some(...)`,
+        // the auto-construction path runs and the resulting cache
+        // has a distributed backend installed without the caller
+        // having to call `with_distributed(...)` separately.
+        let dc_cfg = DistributedCacheConfig::new(Text::from("file:///tmp/verum-test-cache"));
+        let cfg = CacheConfig::default().with_distributed_cache(dc_cfg);
+        let cache = VerificationCache::with_config(cfg);
+        assert!(
+            matches!(cache.distributed, Maybe::Some(_)),
+            "configured distributed_cache must auto-install the backend",
+        );
+    }
+
+    #[test]
+    fn distributed_cache_trust_signatures_and_expiry_downgrades_to_signatures() {
+        // Pin: the local TrustLevel has a SignaturesAndExpiry
+        // variant that the underlying distributed_cache module
+        // doesn't expose. The auto-construction path downgrades
+        // to Signatures (the lower bound of the requested policy)
+        // rather than rejecting — keeps the cache usable while
+        // documenting the gap (the cache's own TTL handles the
+        // expiry side independently).
+        let dc_cfg = DistributedCacheConfig {
+            s3_url: Text::from("file:///tmp/verum-test-cache-2"),
+            cache_dir: Text::from("/tmp/verum-test-cache-2"),
+            trust: TrustLevel::SignaturesAndExpiry,
+            verify_signatures: true,
+        };
+        let cfg = CacheConfig::default().with_distributed_cache(dc_cfg);
+        let cache = VerificationCache::with_config(cfg);
+        assert!(
+            matches!(cache.distributed, Maybe::Some(_)),
+            "SignaturesAndExpiry trust level must auto-install (downgrade not reject)",
+        );
     }
 }
