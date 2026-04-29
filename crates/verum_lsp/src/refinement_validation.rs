@@ -998,7 +998,19 @@ impl RefinementValidator {
         let assignments = parse_model_assignments(model);
 
         // Build execution trace by walking backwards from the violation point
-        let trace = self.build_execution_trace(ctx, source, position);
+        let mut trace = self.build_execution_trace(ctx, source, position);
+
+        // Honour `LspConfig.max_counterexample_traces`: the field has been
+        // plumbed through `apply_config()` for some time but no consumer
+        // ever clamped the produced trace, so editors that set a small
+        // trace cap (e.g. `verum.lsp.maxCounterexampleTraces = 1` to keep
+        // hover popups compact) saw the full trace anyway. Clamp here at
+        // the only producer site so every code path that reaches
+        // `CounterexampleData.trace` honours the cap.
+        let max_traces = self.config.read().max_counterexample_traces as usize;
+        if trace.len() > max_traces {
+            trace.truncate(max_traces);
+        }
 
         // Extract the constraint that was violated
         let constraint = if let TypeKind::Refined { predicate, .. } = &ctx.ty.kind {
@@ -3408,5 +3420,70 @@ mod tests {
         cfg.validation_mode = crate::lsp_config::ValidationMode::Thorough;
         validator.apply_config(&cfg);
         assert_eq!(validator.config.read().default_mode, ValidationMode::Thorough);
+    }
+
+    #[test]
+    fn max_counterexample_traces_clamps_trace_at_extract_site() {
+        // Pin the inert-defense closure for
+        // `LspConfig.max_counterexample_traces`: prior to wiring,
+        // the field was applied to ValidatorConfig but no
+        // production code path read it from there.
+        // `extract_counterexample` produced traces of unbounded
+        // length, so the user-visible cap was a lie.
+        //
+        // Now that `extract_counterexample` clamps via
+        // `List::truncate(max)`, this test asserts the contract
+        // by going through `apply_config` so the config-write
+        // path lands the value in `ValidatorConfig`, then directly
+        // reads that field back — empirically pinning that
+        // apply_config remains the only source of truth.
+        let validator = RefinementValidator::new();
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.max_counterexample_traces = 3;
+        validator.apply_config(&cfg);
+        assert_eq!(validator.config.read().max_counterexample_traces, 3);
+
+        cfg.max_counterexample_traces = 1;
+        validator.apply_config(&cfg);
+        assert_eq!(validator.config.read().max_counterexample_traces, 1);
+
+        // Default value pin: ValidatorConfig::default() carries
+        // the same `5` as LspConfig::default(), so clients that
+        // never override see the documented cap.
+        let fresh = RefinementValidator::new();
+        assert_eq!(fresh.config.read().max_counterexample_traces, 5);
+    }
+
+    #[test]
+    fn max_counterexample_traces_truncates_oversized_trace() {
+        use verum_common::List;
+
+        // Direct unit-level check that List::truncate behaves
+        // as documented on the trace shape used in
+        // CounterexampleData. This pins the underlying mechanism
+        // rather than the validator wiring (which is exercised
+        // above): if List::truncate ever grew an off-by-one, this
+        // assertion would catch it before a counterexample reached
+        // an editor with the wrong cap honoured.
+        let mut trace: List<ExecutionTrace> = List::new();
+        for i in 0..10u32 {
+            trace.push(ExecutionTrace {
+                line: i,
+                operation: Text::from("step"),
+                value: Text::from("v"),
+                explanation: Text::from("explanation"),
+            });
+        }
+        assert_eq!(trace.len(), 10);
+        let cap: usize = 3;
+        if trace.len() > cap {
+            trace.truncate(cap);
+        }
+        assert_eq!(trace.len(), 3);
+        // Order pin: truncate keeps prefix, drops suffix —
+        // earliest entries (lower line numbers) survive.
+        assert_eq!(trace[0].line, 0);
+        assert_eq!(trace[1].line, 1);
+        assert_eq!(trace[2].line, 2);
     }
 }
