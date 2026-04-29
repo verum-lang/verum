@@ -225,6 +225,14 @@ const MAX_TYPE_REF_INSTANTIATION_ARGS: usize = 64;
 const MAX_FN_TYPE_REF_PARAMS: usize = 256;
 const MAX_FN_TYPE_REF_CONTEXTS: usize = 32;
 
+/// Constant-pool / specialization / source-map bounds.  Each
+/// driver is a varint that, post the cf1cff4c canonicality fix,
+/// can decode to `u64::MAX`.
+const MAX_CONSTANT_ARRAY_LEN: usize = 1 << 20;          // 1 048 576
+const MAX_SPECIALIZATION_TYPE_ARGS: usize = 64;
+const MAX_SOURCE_MAP_FILES: usize = 1 << 16;            // 65 536
+const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22;          // 4 194 304
+
 /// Maximum decompressed bytecode size for a single module.
 ///
 /// Adversarial bytecode can claim a near-`u32::MAX` decompressed
@@ -960,15 +968,33 @@ impl<'a> Deserializer<'a> {
         let register_count = decode_u16(self.data, &mut self.offset)?;
         let max_stack = decode_u16(self.data, &mut self.offset)?;
 
-        // Type parameters
+        // Type parameters — same bound as type-descriptor's
+        // type_params, since both describe the same generic
+        // signature shape.
         let type_params_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if type_params_count > MAX_TYPE_PARAMS_PER_DESCRIPTOR {
+            return Err(VbcError::TableTooLarge {
+                field: "fn_type_params_count",
+                count: type_params_count.min(u32::MAX as usize) as u32,
+                max: MAX_TYPE_PARAMS_PER_DESCRIPTOR as u32,
+            });
+        }
         let mut type_params = SmallVec::with_capacity(type_params_count);
         for _ in 0..type_params_count {
             type_params.push(self.parse_type_param()?);
         }
 
-        // Parameters
+        // Parameters — reuses MAX_FN_TYPE_REF_PARAMS since a
+        // function descriptor and a function-type ref describe
+        // the same parameter-list shape.
         let params_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if params_count > MAX_FN_TYPE_REF_PARAMS {
+            return Err(VbcError::TableTooLarge {
+                field: "fn_params_count",
+                count: params_count.min(u32::MAX as usize) as u32,
+                max: MAX_FN_TYPE_REF_PARAMS as u32,
+            });
+        }
         let mut params = SmallVec::with_capacity(params_count);
         for _ in 0..params_count {
             let param_name = StringId(decode_u32(self.data, &mut self.offset)?);
@@ -986,8 +1012,15 @@ impl<'a> Deserializer<'a> {
         // Return type
         let return_type = self.parse_type_ref()?;
 
-        // Contexts
+        // Contexts — same bound as fn-type-ref contexts.
         let ctx_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if ctx_count > MAX_FN_TYPE_REF_CONTEXTS {
+            return Err(VbcError::TableTooLarge {
+                field: "fn_contexts_count",
+                count: ctx_count.min(u32::MAX as usize) as u32,
+                max: MAX_FN_TYPE_REF_CONTEXTS as u32,
+            });
+        }
         let mut contexts = SmallVec::with_capacity(ctx_count);
         for _ in 0..ctx_count {
             contexts.push(ContextRef(decode_u32(self.data, &mut self.offset)?));
@@ -1048,6 +1081,13 @@ impl<'a> Deserializer<'a> {
             0x06 => Ok(Constant::Protocol(ProtocolId(decode_u32(self.data, &mut self.offset)?))),
             0x07 => {
                 let count = decode_varint(self.data, &mut self.offset)? as usize;
+                if count > MAX_CONSTANT_ARRAY_LEN {
+                    return Err(VbcError::TableTooLarge {
+                        field: "constant_array_count",
+                        count: count.min(u32::MAX as usize) as u32,
+                        max: MAX_CONSTANT_ARRAY_LEN as u32,
+                    });
+                }
                 let mut items = Vec::with_capacity(count);
                 for _ in 0..count {
                     items.push(ConstId(decode_u32(self.data, &mut self.offset)?));
@@ -1071,6 +1111,13 @@ impl<'a> Deserializer<'a> {
         let register_count = decode_u16(self.data, &mut self.offset)?;
 
         let type_args_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if type_args_count > MAX_SPECIALIZATION_TYPE_ARGS {
+            return Err(VbcError::TableTooLarge {
+                field: "specialization_type_args",
+                count: type_args_count.min(u32::MAX as usize) as u32,
+                max: MAX_SPECIALIZATION_TYPE_ARGS as u32,
+            });
+        }
         let mut type_args = Vec::with_capacity(type_args_count);
         for _ in 0..type_args_count {
             type_args.push(self.parse_type_ref()?);
@@ -1089,12 +1136,26 @@ impl<'a> Deserializer<'a> {
     /// Parses a source map.
     fn parse_source_map(&mut self) -> VbcResult<SourceMap> {
         let files_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if files_count > MAX_SOURCE_MAP_FILES {
+            return Err(VbcError::TableTooLarge {
+                field: "source_map_files_count",
+                count: files_count.min(u32::MAX as usize) as u32,
+                max: MAX_SOURCE_MAP_FILES as u32,
+            });
+        }
         let mut files = Vec::with_capacity(files_count);
         for _ in 0..files_count {
             files.push(StringId(decode_u32(self.data, &mut self.offset)?));
         }
 
         let entries_count = decode_varint(self.data, &mut self.offset)? as usize;
+        if entries_count > MAX_SOURCE_MAP_ENTRIES {
+            return Err(VbcError::TableTooLarge {
+                field: "source_map_entries_count",
+                count: entries_count.min(u32::MAX as usize) as u32,
+                max: MAX_SOURCE_MAP_ENTRIES as u32,
+            });
+        }
         let mut entries = Vec::with_capacity(entries_count);
         for _ in 0..entries_count {
             let bytecode_offset = decode_u32(self.data, &mut self.offset)?;
