@@ -1241,15 +1241,37 @@ impl SmtBackendSwitcher {
             return self.solve_auto(assertions);
         }
 
+        // Honour `PortfolioConfig.max_threads`: bounds how many
+        // solver threads the portfolio is allowed to spawn.
+        // Closes the inert-defense pattern around max_threads —
+        // pre-fix the field was TOML-parseable + asserted in
+        // tests but no dispatch path consulted it. With the
+        // current two-backend topology (Z3 + CVC5) the field
+        // has natural ceiling 2; useful settings are:
+        //   max_threads = 0 → skip portfolio entirely (fall
+        //                     back to auto-routing — same effect
+        //                     as `enabled = false` but distinct
+        //                     so callers can keep portfolio
+        //                     "configured but quiet")
+        //   max_threads = 1 → spawn Z3 only (CVC5 thread skipped)
+        //   max_threads ≥ 2 → spawn both (default behaviour)
+        if self.config.portfolio.max_threads == 0 {
+            return self.solve_auto(assertions);
+        }
+
         let (tx, rx) = mpsc::channel();
 
         // Clone assertions for both threads
         let z3_assertions = List::clone(assertions);
         let cvc5_assertions = List::clone(assertions);
 
-        // Clone backend instances for parallel execution
+        // Clone backend instances for parallel execution.
+        // `max_threads` reduces parallelism by suppressing the
+        // CVC5 spawn when the cap is 1 — Z3 stays primary
+        // because the configured `default_backend` is Z3.
         let z3_available = self.z3.is_some();
-        let cvc5_available = self.cvc5.is_some();
+        let cvc5_available =
+            self.cvc5.is_some() && self.config.portfolio.max_threads >= 2;
 
         // Spawn Z3 thread if available
         let z3_handle = if z3_available {
@@ -1389,6 +1411,40 @@ impl SmtBackendSwitcher {
                 if let Ok((_solver, result)) = rx.recv() {
                     if self.config.verbose {
                         eprintln!("[PORTFOLIO] First result received");
+                    }
+                    // Honour `PortfolioConfig.kill_on_first`:
+                    // when `false`, the dispatch waits for the
+                    // losing solver to finish before returning
+                    // — so the caller sees the wall-clock time
+                    // of the slower backend rather than the
+                    // faster one. When `true` (default), drop
+                    // the handles and return: the losing
+                    // thread continues running detached but the
+                    // caller sees the fast-path latency.
+                    //
+                    // Closes the inert-defense pattern around
+                    // `kill_on_first`: pre-fix the field was
+                    // TOML-parseable + asserted in tests but no
+                    // dispatch path consulted it, so a manifest
+                    // setting `kill_on_first = false` to wait for
+                    // both solvers (e.g. for a deterministic
+                    // benchmark) had no observable effect — the
+                    // dispatch always returned eagerly.
+                    //
+                    // True thread cancellation isn't supported
+                    // in safe Rust without a dedicated
+                    // cancellation primitive, so we honour the
+                    // field's documented semantic indirectly:
+                    // `true` = "don't wait for the loser",
+                    // `false` = "wait for everyone", which is
+                    // the implementable inverse.
+                    if !self.config.portfolio.kill_on_first {
+                        if let Some(h) = z3_handle {
+                            let _ = h.join();
+                        }
+                        if let Some(h) = cvc5_handle {
+                            let _ = h.join();
+                        }
                     }
                     result
                 } else {
