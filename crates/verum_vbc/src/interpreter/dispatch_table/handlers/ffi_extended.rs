@@ -2535,8 +2535,24 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             }
             let size = raw_size as usize;
             let align: usize = (raw_align as usize).next_power_of_two().max(8);
-            let layout = std::alloc::Layout::from_size_align(size, align)
-                .unwrap_or_else(|_| std::alloc::Layout::from_size_align(size, 8).unwrap());
+            // `Layout::from_size_align` rejects size+align combinations
+            // that overflow isize::MAX — possible with adversarial
+            // bytecode requesting a near-max size.  The previous
+            // implementation chained two attempts, the second of which
+            // unwrapped — meaning a hostile size could still panic the
+            // interpreter (DoS via crafted CbgrAlloc operand).  Treat
+            // any unrepresentable layout as an OOM-equivalent: return
+            // nil so the caller's `Err(e) => ...` arm fires, matching
+            // the existing pattern at the null-pointer branch below.
+            let layout = match std::alloc::Layout::from_size_align(size, align)
+                .or_else(|_| std::alloc::Layout::from_size_align(size, 8))
+            {
+                Ok(layout) => layout,
+                Err(_) => {
+                    state.set_reg(dst, Value::nil());
+                    return Ok(DispatchResult::Continue);
+                }
+            };
             // SAFETY: layout has non-zero size and valid alignment by
             // construction. The allocator contract requires matching the
             // layout on dealloc; callers are expected to route through
