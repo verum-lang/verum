@@ -933,11 +933,24 @@ impl<'a> QuickFixGenerator<'a> {
     /// 2. Analyzing the AST to find the exact type at that location
     /// 3. Handling various reference forms: &T, &mut T, &checked T, &unsafe T
     fn extract_reference_type_from_diagnostic(&self, diagnostic: &Diagnostic) -> String {
-        // First, try to read the actual code at the diagnostic range
+        // First, try to read the actual code at the diagnostic range.
+        // LSP `character` is a byte offset for our negotiated encoding,
+        // but a malformed (or stale) diagnostic range can land its
+        // start/end inside a multi-byte UTF-8 sequence.  Clamp both
+        // ends DOWN to char boundaries before slicing — the worst case
+        // is we read a slightly shorter or empty fragment, which is
+        // strictly better than panicking the LSP worker.
         if let Some(line) = self.document.get_line(diagnostic.range.start.line) {
-            let start = diagnostic.range.start.character as usize;
-            let end = diagnostic.range.end.character as usize;
-            if start < line.len() && end <= line.len() {
+            let line_len = line.len();
+            let mut start = (diagnostic.range.start.character as usize).min(line_len);
+            let mut end = (diagnostic.range.end.character as usize).min(line_len);
+            while start > 0 && !line.is_char_boundary(start) {
+                start -= 1;
+            }
+            while end > 0 && !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            if start < end {
                 let code_fragment = &line[start..end];
                 // Validate it's a reference type
                 if code_fragment.starts_with('&') {

@@ -408,39 +408,65 @@ multi-reader stress test pending.
 
 ### 8.1 LSP responses to malformed source — DEFENSE CONFIRMED 2026-04-29
 
-**Status:** DEFENSE CONFIRMED + 2 real panic paths closed.
+**Status:** DEFENSE CONFIRMED + 4 real panic paths closed across the
+LSP entry-point surface.
 
-**Audit:** Wrote 16 adversarial-input cases against
-`completion::complete_at_position` (the user-reachable LSP entry
-point that ingests arbitrary document text + cursor position).  The
-sweep found and closed two real panic paths:
+**Audit:** Wrote 20 adversarial-input cases against
+`completion::complete_at_position` and `rename::prepare_rename` (the
+user-reachable LSP entry points that ingest arbitrary document text
++ cursor position).  The sweep found and closed four real panic
+paths:
 
-1. **`get_trigger_context` byte-vs-char-boundary panic** — naive
-   `&line[..character.min(line.len()) as usize]` panics with
+1. **`completion::get_trigger_context` byte-vs-char-boundary panic** —
+   naive `&line[..character.min(line.len()) as usize]` panics with
    "byte index N is not a char boundary" when `character` (the LSP
    cursor position) falls inside a multi-byte UTF-8 sequence.
    Repro: a combining accent (`U+0301`, 2 bytes) at position 4 in
    `"fn ́foo()..."`.  Fix: extracted `safe_prefix_at` helper that
    rounds the cursor offset DOWN to the nearest char boundary —
    showing completions for the already-typed prefix is always safe.
-2. **`get_receiver_name` char-index-as-byte-offset bug** — the
-   identifier extractor walked `before_dot.chars().rev().enumerate()`
+2. **`completion::get_receiver_name` char-index-as-byte-offset bug** —
+   the identifier extractor walked `before_dot.chars().rev().enumerate()`
    and used the char-index `i` as if it were a byte offset:
    `start = before_dot.len() - i`.  For ASCII-only code this happens
    to coincide with the byte offset; the moment a multi-byte char
    appears in the line the slice panics.  Fix: walk via
    `char_indices().rev()` so `byte_idx` is always a real byte offset.
+3. **`diagnostics::generate_error_message` byte-truncated preview** —
+   `&text[..20]` panics when byte 20 lands inside a multi-byte char.
+   Adversarial source with a Unicode literal near a syntax error
+   triggered this.  Fix: truncate by *characters* via
+   `chars().take(20).collect()`, append "..." only when more content
+   followed (also fixes a UX bug — the previous truncation cut Cyrillic
+   identifiers in half visually).
+4. **`rename::find_word_range` mixed byte/char index** — the function
+   read `position.character as usize` (byte offset), then walked
+   `line.chars().nth(start - 1)` (char index), then sliced by
+   `chars().skip(start).take(end - start)`.  Three different
+   interpretations of the same `start`/`end` variables.  ASCII
+   coincidentally produces correct results; Unicode identifiers
+   silently mis-rename or panic.  Rewrote to walk
+   `char_indices()` consistently so byte_idx is always a real UTF-8
+   byte offset; clamps cursor to nearest char boundary up-front.
+5. **`quick_fixes::extract_reference_type_from_diagnostic`
+   diagnostic-range slice** — `&line[start..end]` with `start`/`end`
+   from raw diagnostic-range character values.  Stale or malformed
+   diagnostic ranges could land inside a multi-byte char.  Fix: clamp
+   both ends DOWN to char boundaries before slicing; degrade to empty
+   fragment rather than panic.
 
-**Guardrail:** `crates/verum_lsp/tests/malformed_input_fuzz.rs` —
-16 tests covering the empirical failure modes:
+**Guardrail:** `crates/verum_lsp/tests/malformed_input_fuzz.rs` — 20
+tests covering the empirical failure modes:
 empty doc / mid-token EOF / unbalanced bracket pyramid / deep
 generic angle spam / non-UTF-8 bytes / position past EOF / position
 at u32::MAX / zero-position trigger chars / 64KB single line /
 embedded NUL bytes / combining unicode / 4-byte emoji as receiver /
 multi-byte identifier before dot / 10K short lines / malformed
-attribute / malformed import.  Every case asserts no-panic;
-emoji-receiver case sweeps every byte offset in the line so at
-least one always lands mid-codepoint.
+attribute / malformed import / **prepare-rename multibyte line /
+prepare-rename emoji / prepare-rename position past end / prepare-
+rename cursor inside multibyte char**.  Every case asserts no-panic;
+emoji-receiver and emoji-rename sweeps every byte offset in the line
+so at least one always lands mid-codepoint.
 
 ### 8.2 Lint rules false-positive/negative — DEFENSE CONFIRMED 2026-04-28
 

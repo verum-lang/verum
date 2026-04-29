@@ -29,6 +29,7 @@ use tower_lsp::lsp_types::Position;
 use verum_ast::FileId;
 use verum_lsp::completion::complete_at_position;
 use verum_lsp::document::DocumentState;
+use verum_lsp::rename::prepare_rename;
 
 fn doc(source: &str) -> DocumentState {
     DocumentState::new(source.to_string(), 1, FileId::new(1))
@@ -190,4 +191,44 @@ fn member_access_after_emoji_does_not_panic() {
     for col in 0..(s.len() as u32 + 2) {
         let _ = complete_at_position(&d, at(0, col));
     }
+}
+
+// ===== rename / find_word_range =====
+//
+// `prepare_rename` calls `find_word_range` which walks `&line[..n]`
+// using LSP byte offsets that may land mid-codepoint after editor-
+// negotiation rounding.  Multi-byte chars in the line previously
+// caused the slice to panic.
+
+#[test]
+fn prepare_rename_with_multibyte_line_does_not_panic() {
+    // Line containing combining accent before the cursor.
+    let d = doc("let π = 1; π\u{0301}");
+    for col in 0..30 {
+        let _ = prepare_rename(&d, at(0, col));
+    }
+}
+
+#[test]
+fn prepare_rename_emoji_does_not_panic() {
+    let d = doc("let 🦀 = 42;");
+    for col in 0..("let 🦀 = 42;".len() as u32 + 2) {
+        let _ = prepare_rename(&d, at(0, col));
+    }
+}
+
+#[test]
+fn prepare_rename_position_past_end_does_not_panic() {
+    let d = doc("");
+    let _ = prepare_rename(&d, at(0, 0));
+    let _ = prepare_rename(&d, at(100, 100));
+    let _ = prepare_rename(&d, at(u32::MAX, u32::MAX));
+}
+
+#[test]
+fn prepare_rename_cursor_inside_multibyte_char_does_not_panic() {
+    // Cursor at byte offset 1, mid-π (π is U+03C0, 2 bytes in UTF-8).
+    let d = doc("π = 1");
+    let _ = prepare_rename(&d, at(0, 1));
+    let _ = prepare_rename(&d, at(0, 2));
 }
