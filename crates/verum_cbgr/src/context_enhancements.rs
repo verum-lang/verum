@@ -1128,9 +1128,25 @@ impl ParallelContextAnalyzer {
         Self::new(ParallelConfig::new(threshold))
     }
 
-    /// Analyze contexts in parallel
+    /// Analyze contexts in parallel.
     ///
     /// Returns results indexed by context position in input vector.
+    /// Honours the full `ParallelConfig`:
+    ///
+    /// * `threshold` — already gated through `should_parallelize`.
+    /// * `max_threads > 0` — runs the parallel section inside a
+    ///   bespoke `rayon::ThreadPool` capped to that many workers
+    ///   (instead of leaking onto the global pool which is sized
+    ///   by `RAYON_NUM_THREADS` or logical CPU count). The pool
+    ///   is built per-call rather than cached because the cost
+    ///   amortises across the analysis work and cached pools
+    ///   would deadlock if a caller were to re-enter from inside
+    ///   `analyzer`.
+    /// * `work_stealing` — rayon's default scheduler is
+    ///   work-stealing; the flag is informational and matches
+    ///   the documented contract. Disabling it would require a
+    ///   different scheduler entirely; until that lands, the
+    ///   accessor `work_stealing_enabled()` is the read surface.
     pub fn analyze_parallel<F, T>(
         &self,
         contexts: &[FlowSensitiveContext],
@@ -1170,18 +1186,39 @@ impl ParallelContextAnalyzer {
 
         let par_start = Instant::now();
 
-        // Use Rayon's par_iter for parallel iteration
-        contexts.par_iter().enumerate().for_each(|(idx, ctx)| {
-            let result = analyzer(ctx);
-            accumulator.add_result(idx, result);
-        });
+        // Honour `max_threads`: when > 0, run the parallel
+        // section inside a bespoke pool capped to that many
+        // workers. Failures fall back to the global pool so a
+        // pool-build error doesn't abort the analysis.
+        let max_threads = self.config.max_threads;
+        let run_parallel = |acc: &ParallelResultAccumulator<T>| {
+            contexts.par_iter().enumerate().for_each(|(idx, ctx)| {
+                let result = analyzer(ctx);
+                acc.add_result(idx, result);
+            });
+        };
+        let threads_used = if max_threads > 0 {
+            match rayon::ThreadPoolBuilder::new()
+                .num_threads(max_threads)
+                .build()
+            {
+                Ok(pool) => {
+                    pool.install(|| run_parallel(&accumulator));
+                    max_threads
+                }
+                Err(_) => {
+                    run_parallel(&accumulator);
+                    rayon::current_num_threads()
+                }
+            }
+        } else {
+            run_parallel(&accumulator);
+            rayon::current_num_threads()
+        };
 
         let par_time = par_start.elapsed().as_secs_f64() * 1000.0;
 
         let (results, _errors) = accumulator.into_results().unwrap_or_default();
-
-        // Get actual thread count from rayon
-        let threads_used = rayon::current_num_threads();
 
         self.update_stats(context_count, threads_used, par_time, seq_time);
 
@@ -1262,6 +1299,22 @@ impl ParallelContextAnalyzer {
         stats.compute_speedup(estimated_sequential);
     }
 
+    /// Read mirror of `ParallelConfig.max_threads`. `0` means
+    /// "use rayon's default pool".
+    #[must_use]
+    pub fn max_threads(&self) -> usize {
+        self.config.max_threads
+    }
+
+    /// Read mirror of `ParallelConfig.work_stealing`. The
+    /// underlying rayon scheduler is always work-stealing; this
+    /// accessor exists so consumers of the analyzer can query the
+    /// declared stance and surface it in diagnostics.
+    #[must_use]
+    pub fn work_stealing_enabled(&self) -> bool {
+        self.config.work_stealing
+    }
+
     /// Configure parallelism threshold
     #[must_use]
     pub fn with_parallel_threshold(mut self, threshold: usize) -> Self {
@@ -1319,11 +1372,83 @@ impl ContextSensitiveAnalyzer {
         }
     }
 
-    /// Set configuration
+    /// Set configuration. The booleans on the config now drive the
+    /// optional helper-component slots so that
+    /// `ContextSensitiveAnalyzer::new().with_config(cfg)` produces
+    /// the same effective shape as the bespoke
+    /// `with_all_enhancements()` constructor when `cfg` is
+    /// `EnhancedContextConfig::all_enabled()`.
+    ///
+    /// Specifically:
+    ///
+    /// * `cfg.adaptive_depth == true` → install an
+    ///   `AdaptiveDepthPolicy::new(default_depth, max_depth)`.
+    ///   Pre-existing policies are replaced so the policy
+    ///   matches the active depth bounds.
+    /// * `cfg.compression == true` → install a fresh
+    ///   `ContextCompressor` if none is set; pre-existing
+    ///   compressors are preserved (caller may have configured a
+    ///   custom compression strategy).
+    /// * `cfg.flow_sensitive` is observable via
+    ///   `flow_sensitive_enabled()` for downstream analyses that
+    ///   gate flow-sensitive bookkeeping on it.
+    ///
+    /// Before this wire-up the booleans were inert — set on the
+    /// config but read by no consumer.
     #[must_use]
     pub fn with_config(mut self, config: EnhancedContextConfig) -> Self {
+        if config.adaptive_depth {
+            self.depth_policy = Some(AdaptiveDepthPolicy::new(
+                config.default_depth,
+                config.max_depth,
+            ));
+        }
+        if config.compression && self.compressor.is_none() {
+            self.compressor = Some(ContextCompressor::new());
+        }
         self.config = config;
         self
+    }
+
+    /// Whether flow-sensitive tracking is enabled. Mirrors
+    /// `EnhancedContextConfig.flow_sensitive`. Downstream
+    /// analyses that maintain per-flow state consult this to
+    /// decide whether to install or skip the flow-state map.
+    #[must_use]
+    pub fn flow_sensitive_enabled(&self) -> bool {
+        self.config.flow_sensitive
+    }
+
+    /// Whether adaptive depth is enabled. Mirrors
+    /// `EnhancedContextConfig.adaptive_depth`. `true` means the
+    /// `depth_policy` slot is in play; `false` means callers
+    /// should treat `default_depth` as the static depth bound.
+    #[must_use]
+    pub fn adaptive_depth_enabled(&self) -> bool {
+        self.config.adaptive_depth
+    }
+
+    /// Whether context compression is enabled. Mirrors
+    /// `EnhancedContextConfig.compression`. `true` means the
+    /// `compressor` slot is in play.
+    #[must_use]
+    pub fn compression_enabled(&self) -> bool {
+        self.config.compression
+    }
+
+    /// Default analysis depth — used by callers that don't have a
+    /// `depth_policy` installed (i.e. `adaptive_depth == false`).
+    #[must_use]
+    pub fn default_depth(&self) -> usize {
+        self.config.default_depth
+    }
+
+    /// Hard upper bound on context depth. The adaptive policy
+    /// honours this; callers in non-adaptive mode should refuse
+    /// to descend past it as a safety check.
+    #[must_use]
+    pub fn max_depth(&self) -> usize {
+        self.config.max_depth
     }
 
     /// Enable adaptive depth
@@ -1569,6 +1694,61 @@ mod tests {
 
         assert_eq!(stats.savings(), 70);
         assert_eq!(stats.compression_percentage(), 70.0);
+    }
+
+    #[test]
+    fn enhanced_context_config_drives_dependencies() {
+        // Pin: `with_config(EnhancedContextConfig::all_enabled())`
+        // installs the dependent components (depth_policy +
+        // compressor) — before the wire-up, the booleans on the
+        // config were inert and the dependent slots stayed `None`.
+        let analyzer = ContextSensitiveAnalyzer::new()
+            .with_config(EnhancedContextConfig::all_enabled());
+        assert!(analyzer.flow_sensitive_enabled());
+        assert!(analyzer.adaptive_depth_enabled());
+        assert!(analyzer.compression_enabled());
+        assert!(
+            analyzer.depth_policy.is_some(),
+            "adaptive_depth=true must install a depth policy"
+        );
+        assert!(
+            analyzer.compressor.is_some(),
+            "compression=true must install a compressor"
+        );
+        assert_eq!(analyzer.default_depth(), 3);
+        assert_eq!(analyzer.max_depth(), 10);
+
+        // Default config installs nothing.
+        let bare = ContextSensitiveAnalyzer::new()
+            .with_config(EnhancedContextConfig::default());
+        assert!(!bare.flow_sensitive_enabled());
+        assert!(!bare.adaptive_depth_enabled());
+        assert!(!bare.compression_enabled());
+        assert!(bare.depth_policy.is_none());
+        assert!(bare.compressor.is_none());
+    }
+
+    #[test]
+    fn parallel_config_max_threads_round_trips_through_accessor() {
+        // Pin: `ParallelConfig.max_threads` reaches the analyzer
+        // and is observable via the read accessor. Before the
+        // wire-up, the field was set on the config but never
+        // consulted by the analyzer; with the wire-up the
+        // accessor exposes the configured value and
+        // `analyze_parallel` honours it via a per-call
+        // `rayon::ThreadPoolBuilder`.
+        let cfg = ParallelConfig {
+            threshold: 4,
+            max_threads: 2,
+            work_stealing: true,
+        };
+        let analyzer = ParallelContextAnalyzer::new(cfg);
+        assert_eq!(analyzer.max_threads(), 2);
+        assert!(analyzer.work_stealing_enabled());
+
+        // 0 means "use rayon's default pool".
+        let unbounded = ParallelContextAnalyzer::with_default();
+        assert_eq!(unbounded.max_threads(), 0);
     }
 
     #[test]
