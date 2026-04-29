@@ -394,12 +394,20 @@ impl AttributeValidator {
             // @derive(...) - derive_attribute in grammar
             // @repr(...) - common attribute for type layout
             // @sealed - prevents external implementations
-            "derive" | "repr" | "sealed" => target.contains(AttributeTarget::Type),
+            // @must_consume - alias for `type linear` (must use exactly once)
+            "derive" | "repr" | "sealed" | "must_consume" => {
+                target.contains(AttributeTarget::Type)
+            }
 
             // Field-only attributes
             "skip_serialize" | "skip_deserialize" | "flatten" => {
                 target.contains(AttributeTarget::Field)
             }
+
+            // ShellRender derive markers — see crates/verum_compiler/src/derives/shell_render.rs
+            // @flag("-x") / @flag("--key") — prefix the field with this flag
+            // @positional               — emit value as bare positional arg
+            "flag" | "positional" => target.contains(AttributeTarget::Field),
 
             // Bitfield attributes for hardware register layouts and protocol headers
             // @bits(N) - specifies bit width for a field in a bitfield type
