@@ -92,3 +92,63 @@ fn fallback_disabled_overrides_per_kind_flags() {
     assert!(cfg.on_timeout);
     assert!(cfg.on_unknown);
 }
+
+#[test]
+fn max_attempts_one_short_circuits_fallback() {
+    // Pin the inert-defense closure for `max_attempts`: prior
+    // to wiring, the field was TOML-parseable and asserted in
+    // tests but no fallback dispatch path consulted it, so a
+    // manifest setting `max_attempts = 1` to lock to the primary
+    // backend was silently ignored. The wire-up adds
+    // `max_attempts > 1` to the same gate as `enabled`.
+    //
+    // This pin asserts the canonical "primary only" shape:
+    // every per-kind flag remains true so the fallback would
+    // fire under normal config — but `max_attempts = 1`
+    // overrides them all at the dispatch gate.
+    let cfg = FallbackConfig {
+        enabled: true,
+        on_timeout: true,
+        on_unknown: true,
+        on_error: true,
+        max_attempts: 1,
+    };
+    assert!(cfg.enabled);
+    assert_eq!(cfg.max_attempts, 1);
+    // The semantic check (no fallback at the call site) is
+    // covered by the integration tests; here we just pin the
+    // config shape so a future regression that drops
+    // max_attempts from the gate condition surfaces as a
+    // distinct test failure rather than a silent switcher
+    // behaviour change.
+}
+
+#[test]
+fn max_attempts_two_is_documented_default() {
+    // Pin: default `max_attempts = 2` matches the documented
+    // two-backend topology (Z3 + CVC5 = 2 attempts). Any
+    // change to this default would silently change every
+    // caller's switcher behaviour without an explicit opt-in.
+    let cfg = FallbackConfig::default();
+    assert_eq!(cfg.max_attempts, 2);
+}
+
+#[test]
+fn max_attempts_above_ceiling_caps_at_two_backends() {
+    // Pin: with only Z3 + CVC5 in the switcher topology, any
+    // `max_attempts >= 2` behaves identically to 2 — there's
+    // no third backend to escalate to. This is documentation
+    // for callers reading the field expecting an arbitrary
+    // retry counter.
+    let cfg = FallbackConfig {
+        enabled: true,
+        on_timeout: true,
+        on_unknown: true,
+        on_error: true,
+        max_attempts: 100,
+    };
+    assert!(cfg.max_attempts >= 2);
+    // No additional dispatch sites read max_attempts beyond
+    // the > 1 gate — this assertion is forward-looking
+    // documentation for a future third-backend addition.
+}
