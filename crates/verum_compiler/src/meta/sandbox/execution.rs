@@ -399,6 +399,38 @@ impl SandboxedExecutor {
                 result.push(ConstValue::Text(Text::from("None")));
                 Ok(ConstValue::Tuple(result))
             }
+            // Result.Ok / Result.Err — symmetric to Maybe.Some /
+            // Maybe.None above. Pre-fix the meta sandbox handled
+            // only Maybe constructors; meta code constructing
+            // `Ok(x)` or `Err(e)` errored out as "unknown function".
+            // Both forms (qualified `Result.Ok` and bare `Ok`)
+            // accepted to mirror the Maybe arms — `Ok` may be
+            // glob-imported via `mount core.base.{Ok}` in the meta
+            // function's source, so the bare form must work.
+            "Result.Ok" | "Ok" => {
+                if arg_values.len() != 1 {
+                    return Err(SandboxError::UnsafeOperation {
+                        operation: Text::from("Ok"),
+                        reason: Text::from("Ok expects exactly 1 argument"),
+                    });
+                }
+                let mut result = List::new();
+                result.push(ConstValue::Text(Text::from("Ok")));
+                result.push(arg_values.into_iter().next().unwrap());
+                Ok(ConstValue::Tuple(result))
+            }
+            "Result.Err" | "Err" => {
+                if arg_values.len() != 1 {
+                    return Err(SandboxError::UnsafeOperation {
+                        operation: Text::from("Err"),
+                        reason: Text::from("Err expects exactly 1 argument"),
+                    });
+                }
+                let mut result = List::new();
+                result.push(ConstValue::Text(Text::from("Err")));
+                result.push(arg_values.into_iter().next().unwrap());
+                Ok(ConstValue::Tuple(result))
+            }
 
             // ========== Collection Operations ==========
             "len" => {
@@ -585,5 +617,71 @@ mod tests {
     fn test_executor_creation() {
         let executor = SandboxedExecutor::new();
         assert_eq!(executor.limiter().current_iterations(), 0);
+    }
+
+    #[test]
+    fn execute_builtin_ok_emits_tagged_tuple() {
+        // Pin the Ok constructor: meta code calling `Ok(42)` must
+        // produce a tagged tuple `["Ok", 42]` matching the existing
+        // Some pattern. Pre-fix Result.Ok / Ok hit the catch-all
+        // ForbiddenFunction error.
+        let exec = SandboxedExecutor::new();
+        let ctx = MetaContext::new();
+        let result = exec
+            .execute_builtin_function("Ok", vec![ConstValue::Int(42)], &ctx)
+            .expect("Ok must succeed when sandbox supports Result");
+        match result {
+            ConstValue::Tuple(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert!(matches!(&parts[0], ConstValue::Text(t) if t.as_str() == "Ok"));
+                assert!(matches!(&parts[1], ConstValue::Int(42)));
+            }
+            other => panic!("Ok must produce a Tuple, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn execute_builtin_err_emits_tagged_tuple() {
+        // Symmetric pin for Err. A regression that drops the Err
+        // arm but keeps Ok would silently break Result-returning
+        // meta functions.
+        let exec = SandboxedExecutor::new();
+        let ctx = MetaContext::new();
+        let result = exec
+            .execute_builtin_function(
+                "Err",
+                vec![ConstValue::Text(Text::from("oops"))],
+                &ctx,
+            )
+            .expect("Err must succeed when sandbox supports Result");
+        match result {
+            ConstValue::Tuple(parts) => {
+                assert_eq!(parts.len(), 2);
+                assert!(matches!(&parts[0], ConstValue::Text(t) if t.as_str() == "Err"));
+                assert!(matches!(&parts[1], ConstValue::Text(t) if t.as_str() == "oops"));
+            }
+            other => panic!("Err must produce a Tuple, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn execute_builtin_qualified_result_paths_resolve() {
+        // Pin: both bare (`Ok(x)`) and qualified (`Result.Ok(x)`)
+        // forms must work, mirroring the Some/None convention.
+        // Glob-imported `mount core.base.{Ok}` produces the bare
+        // form; explicit qualification produces the qualified form.
+        // A regression that drops one path silently breaks one
+        // import style.
+        let exec = SandboxedExecutor::new();
+        let ctx = MetaContext::new();
+        let qualified = exec
+            .execute_builtin_function("Result.Ok", vec![ConstValue::Int(7)], &ctx)
+            .expect("Result.Ok must resolve");
+        let bare = exec
+            .execute_builtin_function("Ok", vec![ConstValue::Int(7)], &ctx)
+            .expect("Ok must resolve");
+        // Both paths produce identical tagged-tuple shapes.
+        assert!(matches!(&qualified, ConstValue::Tuple(p) if p.len() == 2));
+        assert!(matches!(&bare, ConstValue::Tuple(p) if p.len() == 2));
     }
 }
