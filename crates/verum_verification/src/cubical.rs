@@ -252,6 +252,33 @@ pub struct CubicalRule {
     pub rationale: Text,
 }
 
+/// Subset of canonical-rule names that the kernel actually applies
+/// during `verum_kernel::normalize`.  V0 ships seven structural
+/// reductions on the cubical face / interval markers; the rest are
+/// documented but their evaluators are V1 work (J-on-refl, ap-trans,
+/// equiv composition, ua-id / ua-trans / ua-sym, …).
+///
+/// Used by:
+///
+///   * The `cubical rules --kernel` CLI subcommand to mark which
+///     rules the kernel performs vs. which are documentation-only.
+///   * The CI gate that verifies every kernel-side reduction has a
+///     matching catalogue entry (single-source-of-truth invariant).
+pub const KERNEL_APPLIED_RULES: &[&str] = &[
+    "hcomp-id-when-empty-system",
+    "hcomp-id-when-φ-equals-1",
+    "transp-fill",
+    "transp-on-refl",
+    "transp-const",
+    "glue-on-false-face",
+    "glue-on-true-face",
+];
+
+/// True iff `rule_name` is one of the kernel-applied subset.
+pub fn rule_is_kernel_applied(rule_name: &str) -> bool {
+    KERNEL_APPLIED_RULES.contains(&rule_name)
+}
+
 // =============================================================================
 // CubicalCatalog trait
 // =============================================================================
@@ -1283,5 +1310,63 @@ mod tests {
         let s = serde_json::to_string(&f).unwrap();
         let back: FaceFormula = serde_json::from_str(&s).unwrap();
         assert_eq!(f, back);
+    }
+
+    // =========================================================================
+    // KERNEL_APPLIED_RULES — kernel ↔ catalogue invariant (#98 hardening)
+    // =========================================================================
+
+    #[test]
+    fn kernel_applied_rules_are_subset_of_catalogue() {
+        // Every name in `KERNEL_APPLIED_RULES` MUST exist in the
+        // canonical catalogue.  Single-source-of-truth invariant —
+        // the kernel can't reduce by a rule the catalogue doesn't
+        // document.
+        let cat = DefaultCubicalCatalog::new();
+        let known: std::collections::BTreeSet<String> = cat
+            .computation_rules()
+            .iter()
+            .map(|r| r.name.as_str().to_string())
+            .collect();
+        for &kr in KERNEL_APPLIED_RULES {
+            assert!(
+                known.contains(kr),
+                "KERNEL_APPLIED_RULES references `{}` which is not in the catalogue",
+                kr
+            );
+        }
+    }
+
+    #[test]
+    fn kernel_applied_rules_predicate_round_trips() {
+        for &kr in KERNEL_APPLIED_RULES {
+            assert!(rule_is_kernel_applied(kr), "{} should be applied", kr);
+        }
+        assert!(!rule_is_kernel_applied("nonexistent-rule"));
+        assert!(!rule_is_kernel_applied(""));
+    }
+
+    #[test]
+    fn task_98_kernel_applied_rules_cover_face_marker_class() {
+        // Pin: the seven face-/interval-marker reductions wired
+        // into `verum_kernel::normalize` are surfaced through the
+        // `KERNEL_APPLIED_RULES` constant so consumers (CLI,
+        // docs-generator, CI gate) can distinguish "documented"
+        // from "kernel-applied".
+        for required in [
+            "hcomp-id-when-empty-system",
+            "hcomp-id-when-φ-equals-1",
+            "transp-fill",
+            "transp-on-refl",
+            "transp-const",
+            "glue-on-false-face",
+            "glue-on-true-face",
+        ] {
+            assert!(
+                rule_is_kernel_applied(required),
+                "rule `{}` must be marked kernel-applied",
+                required
+            );
+        }
     }
 }

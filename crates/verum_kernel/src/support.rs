@@ -288,6 +288,128 @@ pub fn normalize(term: &CoreTerm) -> CoreTerm {
     normalize_with_budget(term, &mut steps_remaining)
 }
 
+// =============================================================================
+// Cubical face / interval helpers (#98 hardening)
+// =============================================================================
+//
+// The cubical primitives (`HComp` / `Transp` / `Glue`) are
+// parameterised by a face formula `phi` and an interval endpoint
+// `regular`.  Pre-this-module those were just opaque `CoreTerm`s
+// — even when `phi = ⊥` (no face constrained) the kernel
+// preserved `HComp` instead of reducing to its base.  That broke
+// the Kan-fibrancy contract: cubical reductions documented in
+// `verum_verification::cubical::canonical_rules` were *named* but
+// not actually performed.
+//
+// Hardening: recognise the canonical face / interval marker terms
+// at the kernel level and wire each catalogue rule into
+// `normalize_with_budget` below.  The marker convention is the same
+// the cubical surface uses (`⊤` / `⊥` / `i0` / `i1` plus their
+// ASCII aliases) — this is the *kernel-level* implementation of the
+// face-formula convention.
+//
+// Rule citations match `cubical::canonical_rules` names so the
+// catalogue ↔ kernel correspondence is explicit.
+
+/// True iff `term` is the canonical face-top marker (`⊤` / `1` /
+/// `top` / `true`).  Used by reductions that fire when `phi = ⊤`.
+pub fn is_face_top(term: &CoreTerm) -> bool {
+    match term {
+        CoreTerm::Var(name) => matches!(
+            name.as_str(),
+            "⊤" | "1" | "top" | "true" | "i1"
+        ),
+        _ => false,
+    }
+}
+
+/// True iff `term` is the canonical face-bot marker (`⊥` / `0` /
+/// `bot` / `false`).  Used by reductions that fire when `phi = ⊥`.
+pub fn is_face_bot(term: &CoreTerm) -> bool {
+    match term {
+        CoreTerm::Var(name) => matches!(
+            name.as_str(),
+            "⊥" | "0" | "bot" | "false" | "i0"
+        ),
+        _ => false,
+    }
+}
+
+/// True iff `term` is the interval endpoint `i1` (the cubical
+/// "everything-known" point).  Equivalent to `is_face_top` for the
+/// V0 marker convention but exposed separately so the
+/// `transp-fill` rule cites the precise cubical constant.
+pub fn is_interval_one(term: &CoreTerm) -> bool {
+    match term {
+        CoreTerm::Var(name) => matches!(name.as_str(), "i1" | "1" | "true"),
+        _ => false,
+    }
+}
+
+/// True iff `binder` occurs free in `body`.  Respects shadowing
+/// introduced by inner binders (Pi / Lam / Sigma / Refine /
+/// PathOver-motive).  Used by the cubical `transp-const` rule:
+/// when the path-of-types is a constant lambda (binder unused in
+/// body) transport reduces to the identity.
+fn body_uses_binder(body: &CoreTerm, binder: &str) -> bool {
+    fn occurs(t: &CoreTerm, name: &str) -> bool {
+        match t {
+            CoreTerm::Var(n) => n.as_str() == name,
+            CoreTerm::Universe(_) | CoreTerm::SmtProof(_) => false,
+            CoreTerm::App(f, a) => occurs(f, name) || occurs(a, name),
+            CoreTerm::Pi { binder: b, domain, codomain } => {
+                occurs(domain, name) || (b.as_str() != name && occurs(codomain, name))
+            }
+            CoreTerm::Lam { binder: b, domain, body } => {
+                occurs(domain, name) || (b.as_str() != name && occurs(body, name))
+            }
+            CoreTerm::Sigma { binder: b, fst_ty, snd_ty } => {
+                occurs(fst_ty, name) || (b.as_str() != name && occurs(snd_ty, name))
+            }
+            CoreTerm::Pair(a, b) => occurs(a, name) || occurs(b, name),
+            CoreTerm::Fst(p) | CoreTerm::Snd(p) => occurs(p, name),
+            CoreTerm::PathTy { carrier, lhs, rhs } => {
+                occurs(carrier, name) || occurs(lhs, name) || occurs(rhs, name)
+            }
+            CoreTerm::Refl(x) => occurs(x, name),
+            CoreTerm::PathOver { motive, path, lhs, rhs } => {
+                occurs(motive, name)
+                    || occurs(path, name)
+                    || occurs(lhs, name)
+                    || occurs(rhs, name)
+            }
+            CoreTerm::HComp { phi, walls, base } => {
+                occurs(phi, name) || occurs(walls, name) || occurs(base, name)
+            }
+            CoreTerm::Transp { path, regular, value } => {
+                occurs(path, name) || occurs(regular, name) || occurs(value, name)
+            }
+            CoreTerm::Glue { carrier, phi, fiber, equiv } => {
+                occurs(carrier, name)
+                    || occurs(phi, name)
+                    || occurs(fiber, name)
+                    || occurs(equiv, name)
+            }
+            CoreTerm::Refine { base, binder: b, predicate } => {
+                occurs(base, name) || (b.as_str() != name && occurs(predicate, name))
+            }
+            CoreTerm::Quotient { base, equiv } => occurs(base, name) || occurs(equiv, name),
+            CoreTerm::QuotIntro { value, base, equiv } => {
+                occurs(value, name) || occurs(base, name) || occurs(equiv, name)
+            }
+            CoreTerm::QuotElim { scrutinee, motive, case } => {
+                occurs(scrutinee, name) || occurs(motive, name) || occurs(case, name)
+            }
+            // Conservative fallback: assume usage for variants we
+            // don't enumerate.  False positives keep the rule from
+            // firing (correct but less aggressive); they never
+            // produce unsound reductions.
+            _ => true,
+        }
+    }
+    occurs(body, binder)
+}
+
 fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
     if *budget == 0 {
         return term.clone();
@@ -382,22 +504,102 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
             }
         }
         CoreTerm::Refl(x) => CoreTerm::Refl(Heap::new(normalize_with_budget(x, budget))),
-        CoreTerm::HComp { phi, walls, base } => CoreTerm::HComp {
-            phi: Heap::new(normalize_with_budget(phi, budget)),
-            walls: Heap::new(normalize_with_budget(walls, budget)),
-            base: Heap::new(normalize_with_budget(base, budget)),
-        },
-        CoreTerm::Transp { path, regular, value } => CoreTerm::Transp {
-            path: Heap::new(normalize_with_budget(path, budget)),
-            regular: Heap::new(normalize_with_budget(regular, budget)),
-            value: Heap::new(normalize_with_budget(value, budget)),
-        },
-        CoreTerm::Glue { carrier, phi, fiber, equiv } => CoreTerm::Glue {
-            carrier: Heap::new(normalize_with_budget(carrier, budget)),
-            phi: Heap::new(normalize_with_budget(phi, budget)),
-            fiber: Heap::new(normalize_with_budget(fiber, budget)),
-            equiv: Heap::new(normalize_with_budget(equiv, budget)),
-        },
+        CoreTerm::HComp { phi, walls, base } => {
+            let phi_n = normalize_with_budget(phi, budget);
+            let walls_n = normalize_with_budget(walls, budget);
+            let base_n = normalize_with_budget(base, budget);
+            // cubical::hcomp-id-when-empty-system —
+            // `hcomp {φ = ⊥} u a ↪ a`.  Empty face system carries no
+            // information; the composition collapses to the base.
+            if is_face_bot(&phi_n) {
+                return base_n;
+            }
+            // cubical::hcomp-id-when-φ-equals-1 —
+            // `hcomp {φ = ⊤} u a ↪ u i1 1=1`.  When the entire face
+            // is constrained the composition evaluates to the wall
+            // family at the top of the cube.  Best-effort: when
+            // `walls_n` is a lambda we apply it to `i1`; otherwise
+            // we leave the term residual (a downstream rewriter can
+            // pick it up).
+            if is_face_top(&phi_n) {
+                if let CoreTerm::Lam { binder, body, .. } = &walls_n {
+                    let i1_term = CoreTerm::Var(Text::from("i1"));
+                    let applied = substitute(body, binder.as_str(), &i1_term);
+                    return normalize_with_budget(&applied, budget);
+                }
+                // Wall family is neutral — produce `walls i1`.
+                return CoreTerm::App(
+                    Heap::new(walls_n),
+                    Heap::new(CoreTerm::Var(Text::from("i1"))),
+                );
+            }
+            CoreTerm::HComp {
+                phi: Heap::new(phi_n),
+                walls: Heap::new(walls_n),
+                base: Heap::new(base_n),
+            }
+        }
+        CoreTerm::Transp { path, regular, value } => {
+            let path_n = normalize_with_budget(path, budget);
+            let regular_n = normalize_with_budget(regular, budget);
+            let value_n = normalize_with_budget(value, budget);
+            // cubical::transp-fill — `transp A 1 a ↪ a`.  When the
+            // regularity endpoint is `i1` (everything is known) the
+            // transport returns the input unchanged.
+            if is_interval_one(&regular_n) {
+                return value_n;
+            }
+            // cubical::transp-on-refl — `transp A 0 a ↪ a` when the
+            // path is reflexive.  Constant line of types ⇒ identity.
+            if let CoreTerm::Refl(_) = &path_n {
+                return value_n;
+            }
+            // cubical::transp-const — transport along a constant
+            // lambda is the identity.  We detect `λ _ → A` shape
+            // (binder unused in body).
+            if let CoreTerm::Lam { binder, body, .. } = &path_n {
+                if !body_uses_binder(body, binder.as_str()) {
+                    return value_n;
+                }
+            }
+            CoreTerm::Transp {
+                path: Heap::new(path_n),
+                regular: Heap::new(regular_n),
+                value: Heap::new(value_n),
+            }
+        }
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => {
+            let carrier_n = normalize_with_budget(carrier, budget);
+            let phi_n = normalize_with_budget(phi, budget);
+            let fiber_n = normalize_with_budget(fiber, budget);
+            let equiv_n = normalize_with_budget(equiv, budget);
+            // cubical::glue-on-false-face —
+            // `Glue A {⊥} T e ↪ A`.  No face constrained ⇒ glue is
+            // the underlying carrier.
+            if is_face_bot(&phi_n) {
+                return carrier_n;
+            }
+            // cubical::glue-on-true-face —
+            // `Glue A {⊤} T e ↪ T 1=1`.  Whole face constrained ⇒
+            // glue evaluates to the partial fibre.
+            if is_face_top(&phi_n) {
+                // Best-effort: when `fiber_n` is a lambda we apply it
+                // to a unit witness for `1=1`; otherwise return the
+                // fibre as-is so downstream consumers can specialise.
+                if let CoreTerm::Lam { binder, body, .. } = &fiber_n {
+                    let unit_witness = CoreTerm::Var(Text::from("1=1"));
+                    let applied = substitute(body, binder.as_str(), &unit_witness);
+                    return normalize_with_budget(&applied, budget);
+                }
+                return fiber_n;
+            }
+            CoreTerm::Glue {
+                carrier: Heap::new(carrier_n),
+                phi: Heap::new(phi_n),
+                fiber: Heap::new(fiber_n),
+                equiv: Heap::new(equiv_n),
+            }
+        }
         CoreTerm::Refine { base, binder, predicate } => CoreTerm::Refine {
             base: Heap::new(normalize_with_budget(base, budget)),
             binder: binder.clone(),
