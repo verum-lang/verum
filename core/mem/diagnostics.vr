@@ -16,7 +16,7 @@
 // # Anti-goals
 //
 // - No reflection / type-erasure escape hatch that would break CBGR.
-//   `HeaderView` summarises numerically (generation, size, type_id) but
+//   `MemHeaderView` summarises numerically (generation, size, type_id) but
 //   does NOT yield a raw `&unsafe T` pointer.
 // - No global mutable state.  Diagnostic handles are scoped values that
 //   the caller drops when done.
@@ -42,7 +42,7 @@ mount super.capability.{
 };
 
 // =============================================================================
-// HeaderView — snapshot of an AllocationHeader's fields
+// MemHeaderView — snapshot of an AllocationHeader's fields
 // =============================================================================
 
 /// Read-only snapshot of an `AllocationHeader`'s fields.  Independent
@@ -52,7 +52,7 @@ mount super.capability.{
 ///
 /// All fields are captured atomically under Acquire ordering — see
 /// `from_header` for the exact memory-ordering contract.
-public type HeaderView is {
+public type MemHeaderView is {
     /// Generation counter at observation time.  Used by CBGR to detect
     /// use-after-free; observers can tag log entries with this value to
     /// reconstruct the lifetime ordering of references in a panic dump.
@@ -84,7 +84,7 @@ public type HeaderView is {
     ref_count:    UInt32,
 };
 
-implement HeaderView {
+implement MemHeaderView {
     /// Capture a snapshot of a header.
     ///
     /// # Memory ordering
@@ -105,9 +105,9 @@ implement HeaderView {
     /// which is the correct semantic for monitoring (the snapshot
     /// reflects the moment-of-observation state, not a single
     /// totally-ordered global view).
-    public fn from_header(header: &AllocationHeader) -> HeaderView {
+    public fn from_header(header: &AllocationHeader) -> MemHeaderView {
         let (generation, epoch) = header.load_generation_epoch_fast();
-        HeaderView {
+        MemHeaderView {
             generation:   generation,
             epoch:        epoch,
             capabilities: header.load_capabilities(),
@@ -128,9 +128,9 @@ implement HeaderView {
     /// `ptr` MUST be a CBGR-managed user pointer (i.e. produced by
     /// the heap allocator).  Calling this on a non-CBGR pointer
     /// dereferences arbitrary memory at offset -32.
-    public unsafe fn from_user_ptr(ptr: &unsafe Byte) -> HeaderView {
+    public unsafe fn from_user_ptr(ptr: &unsafe Byte) -> MemHeaderView {
         let header = AllocationHeader.from_user_ptr(ptr);
-        HeaderView.from_header(header)
+        MemHeaderView.from_header(header)
     }
 
     /// True iff the read capability is currently granted.
@@ -164,14 +164,14 @@ implement HeaderView {
     }
 }
 
-implement Display for HeaderView {
+implement Display for MemHeaderView {
     /// Single-line summary suitable for log lines.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(f"alloc[gen={self.generation},epoch={self.epoch},size={self.size},cap=0x{self.capabilities},refs={self.ref_count}]")
     }
 }
 
-implement Debug for HeaderView {
+implement Debug for MemHeaderView {
     /// Multi-line dump suitable for panic post-mortems.
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("AllocationHeader {\n")?;
@@ -192,7 +192,7 @@ implement Debug for HeaderView {
 // Public diagnostic functions
 // =============================================================================
 
-/// Capture a HeaderView snapshot of the allocation backing the given
+/// Capture a MemHeaderView snapshot of the allocation backing the given
 /// user-data pointer.  Returns `None` if `ptr` is null.
 ///
 /// # Safety
@@ -201,21 +201,21 @@ implement Debug for HeaderView {
 /// allocator) when non-null.  This function is the recommended entry
 /// point for panic handlers and debug-print helpers because it
 /// short-circuits on null without dereferencing.
-public unsafe fn header_view_of(ptr: &unsafe Byte) -> Maybe<HeaderView> {
+public unsafe fn header_view_of(ptr: &unsafe Byte) -> Maybe<MemHeaderView> {
     if (ptr as Int) == 0 {
         return None;
     }
-    Some(HeaderView.from_user_ptr(ptr))
+    Some(MemHeaderView.from_user_ptr(ptr))
 }
 
-/// Format a HeaderView as a panic-context block.  Two-space indented
+/// Format a MemHeaderView as a panic-context block.  Two-space indented
 /// so it composes naturally with multi-line panic messages:
 ///
 ///   panic(f"use-after-free at {ptr}\n{format_panic_context(view)}");
 ///
 /// The block is single-allocation: callers in OOM scenarios should
 /// prefer `Display` (single-line) over this function.
-implement HeaderView {
+implement MemHeaderView {
     /// Format as a panic-context block.  Two-space indented so it
     /// composes naturally with multi-line panic messages.  Single
     /// allocation per call so callers in OOM scenarios should prefer
@@ -237,7 +237,7 @@ implement HeaderView {
 // =============================================================================
 
 /// Snapshot the set of CBGR-managed allocations currently live in the
-/// process as a List of `HeaderView` records.
+/// process as a List of `MemHeaderView` records.
 ///
 /// # Status: format-stable boundary; producer-side wiring deferred
 ///
@@ -255,7 +255,7 @@ implement HeaderView {
 ///
 /// # Format-stable contract
 ///
-/// - Returns `List<HeaderView>` (re-exported via `core.diagnostics`).
+/// - Returns `List<MemHeaderView>` (re-exported via `core.diagnostics`).
 /// - Order is unspecified — observers MUST NOT rely on ordering.
 /// - Best-effort point-in-time view; an allocation that frees during
 ///   the snapshot may appear with stale capabilities/refcount.
@@ -264,10 +264,10 @@ implement HeaderView {
 ///
 /// # Performance (when sidecar lands)
 ///
-/// O(live_allocations) HeaderView clones + 1 mutex acquire on the
+/// O(live_allocations) MemHeaderView clones + 1 mutex acquire on the
 /// allocation index.  Not on the alloc/free hot path; observers call
 /// this from monitoring dashboards or panic post-mortem dumps.
-public fn live_allocations() -> List<HeaderView> {
+public fn live_allocations() -> List<MemHeaderView> {
     // Empty stub: no global allocation index exists yet.  Observers
     // calling this today get a graceful empty-result; when the
     // sidecar producer is wired, this body changes without API churn.

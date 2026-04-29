@@ -156,7 +156,7 @@ public mount .heap.{
 /// live debugger / observer integrations.  See `mem/diagnostics.vr` for
 /// the design rationale and memory-ordering contract.
 public mount .diagnostics.{
-    HeaderView, header_view_of,
+    MemHeaderView, header_view_of,
     live_allocations, live_allocation_count,
     CallFrame, current_call_stack,
 };

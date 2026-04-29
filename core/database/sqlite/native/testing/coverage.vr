@@ -17,16 +17,16 @@ mount collections.List;
 
 public type CoveragePhase is PhAlpha | PhBeta | PhGamma | PhRelease;
 
-public type Stratum is StL0 | StL1 | StL2 | StL3 | StDifferential;
+public type CoverageStratum is StL0 | StL1 | StL2 | StL3 | StDifferential;
 
 public type StratumTally is {
-    stratum: Stratum,
+    stratum: CoverageStratum,
     passed: Int,
     failed: Int,
     skipped: Int,
 };
 
-public fn tally_new(stratum: Stratum) -> StratumTally {
+public fn tally_new(stratum: CoverageStratum) -> StratumTally {
     StratumTally { stratum: stratum, passed: 0, failed: 0, skipped: 0 }
 }
 
@@ -68,7 +68,7 @@ public fn report_new() -> CoverageReport {
 }
 
 implement CoverageReport {
-    public fn record_pass(&mut self, stratum: &Stratum) {
+    public fn record_pass(&mut self, stratum: &CoverageStratum) {
         match stratum {
             StL0 => self.l0.record_pass(),
             StL1 => self.l1.record_pass(),
@@ -78,7 +78,7 @@ implement CoverageReport {
         }
     }
 
-    public fn record_fail(&mut self, stratum: &Stratum) {
+    public fn record_fail(&mut self, stratum: &CoverageStratum) {
         match stratum {
             StL0 => self.l0.record_fail(),
             StL1 => self.l1.record_fail(),
@@ -88,7 +88,7 @@ implement CoverageReport {
         }
     }
 
-    public fn record_skip(&mut self, stratum: &Stratum) {
+    public fn record_skip(&mut self, stratum: &CoverageStratum) {
         match stratum {
             StL0 => self.l0.record_skip(),
             StL1 => self.l1.record_skip(),

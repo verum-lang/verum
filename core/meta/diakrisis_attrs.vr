@@ -58,7 +58,7 @@ mount meta.span.{Span};
 // -----------------------------------------------------------------------------
 
 /// Canonical effect-kind enumeration per Diakrisis Part B §9.
-public type EffectKind is
+public type DiakrisisEffectKind is
     | Pure        // No effects (default; redundant marker).
     | Io          // Input/output (file system, network, console).
     | State       // Mutable-state effects (cells, refs, mutexes).
@@ -68,41 +68,41 @@ public type EffectKind is
     | Quantum     // VVA §14.4 quantum effect class.
     ;
 
-implement EffectKind {
+implement DiakrisisEffectKind {
     /// Parse an effect-kind identifier (case-insensitive). Returns
     /// `Maybe.Some(kind)` for canonical names + `exn` / `non_det`
     /// aliases; `Maybe.None` for unknown.
-    public fn from_ident(s: Text) -> Maybe<EffectKind> {
+    public fn from_ident(s: Text) -> Maybe<DiakrisisEffectKind> {
         let lower = s.to_ascii_lowercase();
-        if lower == "pure"       { Maybe.Some(EffectKind.Pure) }
-        else if lower == "io"        { Maybe.Some(EffectKind.Io) }
-        else if lower == "state"     { Maybe.Some(EffectKind.State) }
-        else if lower == "async"     { Maybe.Some(EffectKind.Async) }
-        else if lower == "exception" { Maybe.Some(EffectKind.Exception) }
-        else if lower == "exn"       { Maybe.Some(EffectKind.Exception) }
-        else if lower == "nondet"    { Maybe.Some(EffectKind.Nondet) }
-        else if lower == "non_det"   { Maybe.Some(EffectKind.Nondet) }
-        else if lower == "quantum"   { Maybe.Some(EffectKind.Quantum) }
+        if lower == "pure"       { Maybe.Some(DiakrisisEffectKind.Pure) }
+        else if lower == "io"        { Maybe.Some(DiakrisisEffectKind.Io) }
+        else if lower == "state"     { Maybe.Some(DiakrisisEffectKind.State) }
+        else if lower == "async"     { Maybe.Some(DiakrisisEffectKind.Async) }
+        else if lower == "exception" { Maybe.Some(DiakrisisEffectKind.Exception) }
+        else if lower == "exn"       { Maybe.Some(DiakrisisEffectKind.Exception) }
+        else if lower == "nondet"    { Maybe.Some(DiakrisisEffectKind.Nondet) }
+        else if lower == "non_det"   { Maybe.Some(DiakrisisEffectKind.Nondet) }
+        else if lower == "quantum"   { Maybe.Some(DiakrisisEffectKind.Quantum) }
         else                         { Maybe.None }
     }
 
     /// Canonical lowercase identifier.
     public fn as_str(&self) -> Text {
         match self {
-            EffectKind.Pure      => "pure",
-            EffectKind.Io        => "io",
-            EffectKind.State     => "state",
-            EffectKind.Async     => "async",
-            EffectKind.Exception => "exception",
-            EffectKind.Nondet    => "nondet",
-            EffectKind.Quantum   => "quantum",
+            DiakrisisEffectKind.Pure      => "pure",
+            DiakrisisEffectKind.Io        => "io",
+            DiakrisisEffectKind.State     => "state",
+            DiakrisisEffectKind.Async     => "async",
+            DiakrisisEffectKind.Exception => "exception",
+            DiakrisisEffectKind.Nondet    => "nondet",
+            DiakrisisEffectKind.Quantum   => "quantum",
         }
     }
 }
 
 /// Validated `@effect(<kind>)` annotation.
 public type EffectAttr is {
-    kind: EffectKind,
+    kind: DiakrisisEffectKind,
     span: Span,
 };
 
@@ -114,7 +114,7 @@ public fn parse_effect_attr(attr: &Attribute) -> Maybe<EffectAttr> {
     if attr.name != "effect" { return Maybe.None; }
     if attr.args.len() != 1 { return Maybe.None; }
     let arg_kind = match attr.args.get(0) {
-        Maybe.Some(AttributeArg.Ident(name)) => EffectKind.from_ident(name),
+        Maybe.Some(AttributeArg.Ident(name)) => DiakrisisEffectKind.from_ident(name),
         _                                    => Maybe.None,
     };
     match arg_kind {

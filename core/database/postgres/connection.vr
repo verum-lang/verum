@@ -35,7 +35,7 @@ mount core.net.tcp.TcpStream;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.postgres.config.{PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull};
 mount core.database.postgres.error.dberr_from_pg;
-mount core.database.postgres.wire.frame.{Frame, try_parse_tagged, TaggedReadOutcome};
+mount core.database.postgres.wire.frame.{PgFrame, try_parse_tagged, TaggedReadOutcome};
 mount core.database.postgres.wire.frontend.{
     StartupParams, startup, simple_query, terminate, sasl_initial_response, sasl_response,
     cancel_request,
@@ -852,7 +852,7 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
     }
 }
 
-fn decode_one(frame: Frame, formats: &List<Int>) -> Result<BackendMessage, DbError> {
+fn decode_one(frame: PgFrame, formats: &List<Int>) -> Result<BackendMessage, DbError> {
     match parse_backend(frame, formats) {
         Ok(m)  => Ok(m),
         Err(_) => Err(DbError.Adapter(AdapterSpecific {

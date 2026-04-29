@@ -6,7 +6,7 @@
 // =============================================================================
 //
 // `CapEvent` is the load-bearing record type for forensic reconstruction
-// of CBGR capability changes.  Where `HeaderView` snapshots an
+// of CBGR capability changes.  Where `MemHeaderView` snapshots an
 // allocation's *current* state, a sequence of `CapEvent`s lets observers
 // reconstruct the *history* of capability and generation changes that
 // led there — essential for diagnosing use-after-free, capability
@@ -22,7 +22,7 @@
 // ~0.93ns budget for builds that opt out of recording.
 //
 // Splitting the type from the recording infrastructure follows the
-// established pattern in `mem/diagnostics.vr` (HeaderView ships before
+// established pattern in `mem/diagnostics.vr` (MemHeaderView ships before
 // `live_allocations` iterator) and `async/diagnostics.vr` (TaskInfo
 // ships before per-executor `snapshot_tasks` walker).
 //
