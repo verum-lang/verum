@@ -531,8 +531,38 @@ impl ReplSession {
     /// 4. Execute via JIT
     /// 5. Update session state
     pub fn eval(&self, input: &str) -> Result<EvalResult> {
+        // Honour `ReplConfig.timeout_seconds` — when nonzero, refuse
+        // any eval issued after the documented session lifetime has
+        // elapsed. The "0 = no timeout" sentinel preserves the
+        // existing unbounded behaviour for default sessions.
+        if self.config.timeout_seconds > 0
+            && self.created_at.elapsed().as_secs() >= self.config.timeout_seconds
+        {
+            return Err(MlirError::ReplError {
+                message: Text::from(format!(
+                    "REPL session expired (timeout_seconds = {}, elapsed = {}s) — start a new session",
+                    self.config.timeout_seconds,
+                    self.created_at.elapsed().as_secs(),
+                )),
+            });
+        }
+
         let eval_num = self.eval_count.fetch_add(1, Ordering::Relaxed);
         let start = instant::Instant::now();
+
+        // Honour `ReplConfig.verbose` — emit a structured trace
+        // event on every eval entry so debuggers / log tailers can
+        // follow what the REPL is processing. The flag was inert
+        // before this wiring: setting verbose = true had no
+        // observable effect.
+        if self.config.verbose {
+            tracing::info!(
+                "repl session {}: eval #{} ({} bytes input)",
+                self.id,
+                eval_num,
+                input.len(),
+            );
+        }
 
         self.stats.evaluations.fetch_add(1, Ordering::Relaxed);
 
@@ -1013,5 +1043,76 @@ mod tests {
         stats.failures.fetch_add(1, Ordering::Relaxed);
 
         assert_eq!(stats.success_rate(), 0.9);
+    }
+
+    #[test]
+    fn timeout_seconds_zero_means_no_timeout() -> Result<()> {
+        // Pin: the documented "0 = no timeout" sentinel preserves
+        // unbounded session lifetime — eval succeeds regardless of
+        // wall-clock elapsed.
+        let mut config = ReplConfig::default();
+        config.timeout_seconds = 0;
+        let session = ReplSession::new(config)?;
+
+        let result = session.eval("let x = 1");
+        assert!(
+            result.is_ok(),
+            "timeout=0 must NOT block any eval, got: {:?}",
+            result.err(),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn timeout_seconds_nonzero_rejects_late_eval() -> Result<()> {
+        // Pin: with `timeout_seconds = 1`, an eval issued after
+        // the configured lifetime (forced via a small sleep) is
+        // rejected with a typed `MlirError::ReplError` whose
+        // message names the field so callers can attribute the
+        // failure correctly.
+        let mut config = ReplConfig::default();
+        config.timeout_seconds = 1;
+        let session = ReplSession::new(config)?;
+
+        // Eval immediately — should succeed (well within 1s).
+        let early = session.eval("let x = 1");
+        assert!(
+            early.is_ok(),
+            "early eval must succeed within timeout, got: {:?}",
+            early.err(),
+        );
+
+        // Sleep past the deadline.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        // Eval again — must fail with the documented timeout error.
+        let late = session.eval("let y = 2");
+        match late {
+            Err(MlirError::ReplError { message }) => {
+                assert!(
+                    message.as_str().contains("timeout_seconds"),
+                    "timeout error must name the field, got: {}",
+                    message,
+                );
+            }
+            other => panic!(
+                "expected ReplError after timeout, got: {:?}",
+                other,
+            ),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn verbose_flag_default_off() -> Result<()> {
+        // Pin: default config has verbose = false; eval must
+        // succeed without emitting any tracing. We can't directly
+        // observe tracing absence in a unit test, but we pin the
+        // call surface succeeds with the default flag.
+        let session = ReplSession::new(ReplConfig::default())?;
+        assert!(!session.config().verbose, "default verbose is false");
+        let result = session.eval("let x = 1");
+        assert!(result.is_ok());
+        Ok(())
     }
 }
