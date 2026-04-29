@@ -41,6 +41,11 @@ pub mod proof_repair;
 /// algebraic laws look like, and what a single combinator's full
 /// doc record is.
 pub mod tactic;
+/// `verum cache-closure` subcommand — surfaces
+/// `verum_verification::closure_cache::FilesystemCacheStore` so
+/// users / IDE / CI can inspect / list / clear / probe the
+/// per-theorem closure-hash incremental verification cache.
+pub mod cache_closure;
 pub mod repl;
 pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.

@@ -982,6 +982,24 @@ enum Commands {
         format: String,
     },
 
+    /// Closure-hash incremental verification cache surface.  Wires
+    /// `verum_verification::closure_cache::FilesystemCacheStore` to
+    /// the CLI so IDE / CI / users can inspect, list, clear, and
+    /// probe the per-theorem cache without depending on the Rust
+    /// API.
+    ///
+    /// Subcommands:
+    ///   verum cache-closure stat    [--root <P>] [--format <F>]
+    ///   verum cache-closure list    [--root <P>] [--format <F>]
+    ///   verum cache-closure get     <theorem> [--root <P>] [--format <F>]
+    ///   verum cache-closure clear   [--root <P>] [--format <F>]
+    ///   verum cache-closure decide  <theorem> --signature <s> --body <s> \
+    ///       [--cite <c>]… [--kernel-version <v>] [--root <P>] [--format <F>]
+    CacheClosure {
+        #[clap(subcommand)]
+        sub: CacheClosureSub,
+    },
+
     /// Industrial-grade tactic combinator catalogue surface.  Wires
     /// `verum_verification::tactic_combinator::DefaultTacticCatalog`
     /// to the CLI so IDE / docs-generator / CI consumers can read
@@ -1415,6 +1433,62 @@ enum ConfigCommands {
 }
 
 /// `verum hooks <subcommand>` — manage git hooks for the project.
+#[derive(Subcommand)]
+enum CacheClosureSub {
+    /// Show summary stats: entries, size, hit ratio.
+    Stat {
+        #[clap(long)]
+        root: Option<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// List every theorem name currently cached.
+    List {
+        #[clap(long)]
+        root: Option<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// Print a single record (fingerprint + verdict).
+    Get {
+        theorem: String,
+        #[clap(long)]
+        root: Option<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// Remove every cache entry.  Idempotent.
+    Clear {
+        #[clap(long)]
+        root: Option<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// Probe the cache: report Skip / Recheck for the given fingerprint.
+    Decide {
+        theorem: String,
+        /// Theorem signature payload (hashed by the cache).  Pass any
+        /// stable serialisation of the elaborated signature.
+        #[clap(long)]
+        signature: String,
+        /// Proof body payload.
+        #[clap(long)]
+        body: String,
+        /// Repeated `--cite <citation>` for transitive @framework
+        /// citations; sorted+deduped before hashing.
+        #[clap(long = "cite")]
+        cite: Vec<String>,
+        /// Override the kernel version reported in the fingerprint
+        /// (defaults to the running `verum_kernel::VVA_VERSION`).
+        #[clap(long)]
+        kernel_version: Option<String>,
+        #[clap(long)]
+        root: Option<String>,
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum TacticSub {
     /// List every combinator in the canonical catalogue with a
@@ -2654,6 +2728,39 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             commands::proof_repair::run_proof_repair(&kind, &field, max, &format)
         }
+        Commands::CacheClosure { sub } => match sub {
+            CacheClosureSub::Stat { root, format } => {
+                commands::cache_closure::run_stat(root.as_deref(), &format)
+            }
+            CacheClosureSub::List { root, format } => {
+                commands::cache_closure::run_list(root.as_deref(), &format)
+            }
+            CacheClosureSub::Get {
+                theorem,
+                root,
+                format,
+            } => commands::cache_closure::run_get(&theorem, root.as_deref(), &format),
+            CacheClosureSub::Clear { root, format } => {
+                commands::cache_closure::run_clear(root.as_deref(), &format)
+            }
+            CacheClosureSub::Decide {
+                theorem,
+                signature,
+                body,
+                cite,
+                kernel_version,
+                root,
+                format,
+            } => commands::cache_closure::run_decide(
+                &theorem,
+                kernel_version.as_deref(),
+                &signature,
+                &body,
+                &cite,
+                root.as_deref(),
+                &format,
+            ),
+        },
         Commands::Tactic { sub } => match sub {
             TacticSub::List { format, category } => {
                 commands::tactic::run_list(&format, category.as_deref())
