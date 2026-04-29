@@ -29,7 +29,7 @@ mount core.net.tls13.handshake.{
     Transcript, HandshakeMessage, ClientHello, ServerHello,
     Extension, ExtensionContext, KeyShareEntry, ServerName,
     Finished, CertificateMessage, CertificateEntry,
-    ClientConfig, ClientSm,
+    Tls13ClientConfig, ClientSm,
     encode_handshake, decode_handshake,
     encode_extensions_block, decode_extensions_block,
 };
@@ -68,7 +68,7 @@ fn check_handshake_encode_decode() -> Result<(), CodecError> {
 
 fn check_client_sm_start() -> Result<(), TlsError> {
     let server_name: Text = "example.com";
-    let config = ClientConfig {
+    let config = Tls13ClientConfig {
         server_name: server_name,
         alpn:        [],
         trust:       TrustStore.empty(),

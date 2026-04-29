@@ -20,7 +20,7 @@ mount core.*;
 mount core.collections.List;
 mount core.net.quic.frame.{QuicFrame, encode_frame, decode_all_frames};
 
-fn build_transport(err: UInt64, ft: UInt64, reason: List<Byte>) -> Frame {
+fn build_transport(err: UInt64, ft: UInt64, reason: List<Byte>) -> QuicFrame {
     QuicFrame.ConnectionCloseTransport {
         error_code: err,
         frame_type: ft,
@@ -28,14 +28,14 @@ fn build_transport(err: UInt64, ft: UInt64, reason: List<Byte>) -> Frame {
     }
 }
 
-fn build_application(err: UInt64, reason: List<Byte>) -> Frame {
+fn build_application(err: UInt64, reason: List<Byte>) -> QuicFrame {
     QuicFrame.ConnectionCloseApplication {
         error_code: err,
         reason:     reason,
     }
 }
 
-fn encode_and_decode(f: &Frame) -> List<Frame> {
+fn encode_and_decode(f: &QuicFrame) -> List<QuicFrame> {
     let mut buf: List<Byte> = [];
     let _ = encode_frame(f, &mut buf);
     decode_all_frames(&buf).unwrap()

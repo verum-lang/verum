@@ -15,7 +15,7 @@
 
 mount core.*;
 mount core.collections.List;
-mount core.net.quic.stream_sm.send.{SendStream, SendState, SendError};
+mount core.net.quic.stream_sm.send.{SendStream, SendState, QuicSendError};
 
 fn new_stream_starts_in_ready() {
     let s = SendStream.new(0_u64, 1024_u64);
@@ -65,7 +65,7 @@ fn reset_after_reset_returns_already_reset() {
     let mut s = SendStream.new(0_u64, 1024_u64);
     let _ = s.reset(0_u64);
     match s.reset(0_u64) {
-        Err(SendError.AlreadyReset) => {},
+        Err(QuicSendError.AlreadyReset) => {},
         _ => panic("double reset must error"),
     }
 }
@@ -75,7 +75,7 @@ fn write_after_reset_returns_already_reset() {
     let _ = s.reset(0_u64);
     let data: List<Byte> = [0x01_u8];
     match s.write(data.as_slice(), 1024_u64) {
-        Err(SendError.AlreadyReset) => {},
+        Err(QuicSendError.AlreadyReset) => {},
         _ => panic("write after reset must error"),
     }
 }

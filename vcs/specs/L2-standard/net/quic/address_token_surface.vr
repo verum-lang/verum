@@ -13,7 +13,7 @@
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.address_token.{
-    AddressTokenKey, TokenKind, TokenError, QuicTokenVerifyOptions,
+    AddressTokenKey, QuicTokenKind, TokenError, QuicTokenVerifyOptions,
     WIRE_VERSION,
 };
 
@@ -23,16 +23,16 @@ fn wire_version_is_one() {
 }
 
 fn token_kinds_are_distinct() {
-    let retry:     TokenKind = TokenKind.Retry;
-    let new_token: TokenKind = TokenKind.NewToken;
+    let retry:     QuicTokenKind = QuicTokenKind.Retry;
+    let new_token: QuicTokenKind = QuicTokenKind.NewToken;
     // Match-based distinctness check.
     let r = match retry {
-        TokenKind.Retry    => 1,
-        TokenKind.NewToken => 2,
+        QuicTokenKind.Retry    => 1,
+        QuicTokenKind.NewToken => 2,
     };
     let n = match new_token {
-        TokenKind.Retry    => 1,
-        TokenKind.NewToken => 2,
+        QuicTokenKind.Retry    => 1,
+        QuicTokenKind.NewToken => 2,
     };
     assert(r != n);
 }
