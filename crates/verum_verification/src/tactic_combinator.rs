@@ -61,6 +61,7 @@
 
 use serde::{Deserialize, Serialize};
 use verum_common::Text;
+use verum_smt::tactic_laws::{LawId, CANONICAL_LAW_TABLE};
 
 // =============================================================================
 // TacticCombinator — the 15 canonical forms
@@ -441,120 +442,50 @@ fn entry_for(c: TacticCombinator) -> TacticEntry {
     }
 }
 
-/// Canonical algebraic-laws inventory — must mirror what the
-/// `verum_smt::tactic_laws` simplifier exploits.
-fn canonical_laws() -> Vec<AlgebraicLaw> {
+/// Map a [`LawId`] to the surface combinators that participate in it.
+///
+/// The catalogue's `participants` field is the *only* per-law metadata
+/// the verification crate adds on top of the `verum_smt::tactic_laws`
+/// canonical inventory — name / lhs / rhs / rationale all come from
+/// the single source of truth (`CANONICAL_LAW_TABLE`).
+fn participants_for(id: LawId) -> Vec<TacticCombinator> {
     use TacticCombinator as TC;
-    vec![
-        AlgebraicLaw {
-            name: Text::from("seq-left-identity"),
-            participants: vec![TC::Skip, TC::Seq],
-            lhs: Text::from("skip ; t"),
-            rhs: Text::from("t"),
-            rationale: Text::from(
-                "skip is the left identity for sequential composition: prefixing any tactic with skip produces the original tactic.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("seq-right-identity"),
-            participants: vec![TC::Skip, TC::Seq],
-            lhs: Text::from("t ; skip"),
-            rhs: Text::from("t"),
-            rationale: Text::from(
-                "skip is the right identity for sequential composition: appending skip is a no-op.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("seq-associative"),
-            participants: vec![TC::Seq],
-            lhs: Text::from("(t ; u) ; v"),
-            rhs: Text::from("t ; (u ; v)"),
-            rationale: Text::from(
-                "Sequential composition is associative — the simplifier canonicalises to right-association for dedup.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("orelse-left-identity"),
-            participants: vec![TC::Fail, TC::OrElse],
-            lhs: Text::from("fail || t"),
-            rhs: Text::from("t"),
-            rationale: Text::from(
-                "fail is the left identity for choice: a never-succeeding alternative immediately yields to its fallback.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("orelse-right-identity"),
-            participants: vec![TC::Fail, TC::OrElse],
-            lhs: Text::from("t || fail"),
-            rhs: Text::from("t"),
-            rationale: Text::from(
-                "fail is the right identity for choice: a never-succeeding fallback can never override the primary's verdict.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("orelse-associative"),
-            participants: vec![TC::OrElse],
-            lhs: Text::from("(t || u) || v"),
-            rhs: Text::from("t || (u || v)"),
-            rationale: Text::from(
-                "Choice is associative — the simplifier canonicalises to right-association.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("repeat-zero-is-skip"),
-            participants: vec![TC::RepeatN, TC::Skip],
-            lhs: Text::from("repeat_n(0, t)"),
-            rhs: Text::from("skip"),
-            rationale: Text::from(
-                "Zero-iteration repetition cannot perform any work, so it collapses to skip.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("repeat-one-is-body"),
-            participants: vec![TC::RepeatN],
-            lhs: Text::from("repeat_n(1, t)"),
-            rhs: Text::from("t"),
-            rationale: Text::from(
-                "One-iteration repetition is just the body — the loop overhead is observable only at n ≥ 2.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("try-equals-orelse-skip"),
-            participants: vec![TC::Try, TC::OrElse, TC::Skip],
-            lhs: Text::from("try { t }"),
-            rhs: Text::from("t || skip"),
-            rationale: Text::from(
-                "Soft-fail is desugared to a choice with skip: if t fails, the no-op alternative succeeds.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("solve-of-skip-fails-when-open"),
-            participants: vec![TC::Solve, TC::Skip],
-            lhs: Text::from("solve { skip }"),
-            rhs: Text::from("fail   (when goals are non-empty)"),
-            rationale: Text::from(
-                "solve enforces total discharge: a no-op cannot close any goal, so solve { skip } must fail whenever goals remain.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("first-of-singleton-collapses"),
-            participants: vec![TC::FirstOf],
-            lhs: Text::from("first_of([t])"),
-            rhs: Text::from("t"),
-            rationale: Text::from(
-                "A first-of with a single alternative is operationally equivalent to that alternative.",
-            ),
-        },
-        AlgebraicLaw {
-            name: Text::from("all-goals-of-skip-is-skip"),
-            participants: vec![TC::AllGoals, TC::Skip],
-            lhs: Text::from("all_goals { skip }"),
-            rhs: Text::from("skip"),
-            rationale: Text::from(
-                "Applying skip to every goal is equivalent to skipping the focus operation altogether.",
-            ),
-        },
-    ]
+    match id {
+        LawId::SeqLeftIdentity => vec![TC::Skip, TC::Seq],
+        LawId::SeqRightIdentity => vec![TC::Skip, TC::Seq],
+        LawId::SeqAssociative => vec![TC::Seq],
+        LawId::OrelseLeftIdentity => vec![TC::Fail, TC::OrElse],
+        LawId::OrelseRightIdentity => vec![TC::Fail, TC::OrElse],
+        LawId::OrelseAssociative => vec![TC::OrElse],
+        LawId::RepeatZeroIsSkip => vec![TC::RepeatN, TC::Skip],
+        LawId::RepeatOneIsBody => vec![TC::RepeatN],
+        LawId::TryEqualsOrelseSkip => vec![TC::Try, TC::OrElse, TC::Skip],
+        LawId::SolveOfSkipFailsWhenOpen => vec![TC::Solve, TC::Skip],
+        LawId::FirstOfSingletonCollapses => vec![TC::FirstOf],
+        LawId::AllGoalsOfSkipIsSkip => vec![TC::AllGoals, TC::Skip],
+    }
+}
+
+/// Canonical algebraic-laws inventory.
+///
+/// **Single source of truth** — the prose (`name` / `lhs` / `rhs` /
+/// `rationale`) is projected from
+/// [`verum_smt::tactic_laws::CANONICAL_LAW_TABLE`].  Adding or
+/// renaming a law happens in one place (the `verum_smt` table) and
+/// propagates here automatically; this crate only contributes the
+/// per-law `participants` mapping over its own `TacticCombinator`
+/// enum.
+fn canonical_laws() -> Vec<AlgebraicLaw> {
+    CANONICAL_LAW_TABLE
+        .iter()
+        .map(|spec| AlgebraicLaw {
+            name: Text::from(spec.name),
+            participants: participants_for(spec.id),
+            lhs: Text::from(spec.lhs),
+            rhs: Text::from(spec.rhs),
+            rationale: Text::from(spec.rationale),
+        })
+        .collect()
 }
 
 // =============================================================================
@@ -728,9 +659,44 @@ mod tests {
     fn laws_inventory_non_empty() {
         let cat = DefaultTacticCatalog::new();
         let laws = cat.laws();
-        // We have 12 hand-curated laws covering identity / associativity / the
-        // simplifier's canonical normalisation set.
-        assert_eq!(laws.len(), 12);
+        // The catalogue projects the canonical law-table from
+        // `verum_smt::tactic_laws` — count must match `LawId::all()`.
+        assert_eq!(laws.len(), LawId::all().len());
+    }
+
+    #[test]
+    fn laws_match_verum_smt_canonical_table_one_to_one() {
+        // Single-source-of-truth invariant: the catalogue's law set
+        // equals `LawId::all()` (kebab-case names).  Drift here means
+        // `verum_smt::tactic_laws::CANONICAL_LAW_TABLE` and the
+        // verification-crate catalogue have diverged — a regression
+        // the V0→V1 hardening pass exists to prevent.
+        use std::collections::BTreeSet;
+        let catalogue: BTreeSet<String> = canonical_laws()
+            .iter()
+            .map(|l| l.name.as_str().to_string())
+            .collect();
+        let canonical: BTreeSet<String> = LawId::all()
+            .iter()
+            .map(|id| id.name().to_string())
+            .collect();
+        assert_eq!(catalogue, canonical);
+    }
+
+    #[test]
+    fn participants_cover_every_law_id() {
+        // `participants_for` is exhaustive over `LawId` (the match
+        // arm count enforces this at compile time), but pin the
+        // post-condition so a future refactor that switches to
+        // `_ => vec![]` would surface here too.
+        for id in LawId::all() {
+            let parts = participants_for(id);
+            assert!(
+                !parts.is_empty(),
+                "law `{}` has no participating combinators",
+                id.name()
+            );
+        }
     }
 
     #[test]
@@ -793,7 +759,7 @@ mod tests {
             Box::new(DefaultTacticCatalog::new()),
             Box::new(DefaultTacticCatalog::new()),
         ]);
-        assert_eq!(composite.laws().len(), 12);
+        assert_eq!(composite.laws().len(), LawId::all().len());
     }
 
     #[test]

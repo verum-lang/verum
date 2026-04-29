@@ -104,6 +104,223 @@ pub fn is_fail(c: &TacticCombinator) -> bool {
     )
 }
 
+// =============================================================================
+// LawId — single source of truth for the algebraic-law inventory
+// =============================================================================
+//
+// Both this simplifier (`normalize_once` rewrites) and the
+// `verum_verification::tactic_combinator` catalogue project off
+// the `CANONICAL_LAW_TABLE` below.  Adding / renaming a law is a
+// one-place edit.
+
+/// Stable identifier for one canonical algebraic law.  The kebab-
+/// case `name()` is what shows up in `verum tactic laws` output
+/// and in the catalogue's JSON schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub enum LawId {
+    SeqLeftIdentity,
+    SeqRightIdentity,
+    SeqAssociative,
+    OrelseLeftIdentity,
+    OrelseRightIdentity,
+    OrelseAssociative,
+    RepeatZeroIsSkip,
+    RepeatOneIsBody,
+    TryEqualsOrelseSkip,
+    SolveOfSkipFailsWhenOpen,
+    FirstOfSingletonCollapses,
+    AllGoalsOfSkipIsSkip,
+}
+
+impl LawId {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SeqLeftIdentity => "seq-left-identity",
+            Self::SeqRightIdentity => "seq-right-identity",
+            Self::SeqAssociative => "seq-associative",
+            Self::OrelseLeftIdentity => "orelse-left-identity",
+            Self::OrelseRightIdentity => "orelse-right-identity",
+            Self::OrelseAssociative => "orelse-associative",
+            Self::RepeatZeroIsSkip => "repeat-zero-is-skip",
+            Self::RepeatOneIsBody => "repeat-one-is-body",
+            Self::TryEqualsOrelseSkip => "try-equals-orelse-skip",
+            Self::SolveOfSkipFailsWhenOpen => "solve-of-skip-fails-when-open",
+            Self::FirstOfSingletonCollapses => "first-of-singleton-collapses",
+            Self::AllGoalsOfSkipIsSkip => "all-goals-of-skip-is-skip",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "seq-left-identity" => Some(Self::SeqLeftIdentity),
+            "seq-right-identity" => Some(Self::SeqRightIdentity),
+            "seq-associative" => Some(Self::SeqAssociative),
+            "orelse-left-identity" => Some(Self::OrelseLeftIdentity),
+            "orelse-right-identity" => Some(Self::OrelseRightIdentity),
+            "orelse-associative" => Some(Self::OrelseAssociative),
+            "repeat-zero-is-skip" => Some(Self::RepeatZeroIsSkip),
+            "repeat-one-is-body" => Some(Self::RepeatOneIsBody),
+            "try-equals-orelse-skip" => Some(Self::TryEqualsOrelseSkip),
+            "solve-of-skip-fails-when-open" => Some(Self::SolveOfSkipFailsWhenOpen),
+            "first-of-singleton-collapses" => Some(Self::FirstOfSingletonCollapses),
+            "all-goals-of-skip-is-skip" => Some(Self::AllGoalsOfSkipIsSkip),
+            _ => None,
+        }
+    }
+
+    pub fn all() -> [LawId; 12] {
+        [
+            Self::SeqLeftIdentity,
+            Self::SeqRightIdentity,
+            Self::SeqAssociative,
+            Self::OrelseLeftIdentity,
+            Self::OrelseRightIdentity,
+            Self::OrelseAssociative,
+            Self::RepeatZeroIsSkip,
+            Self::RepeatOneIsBody,
+            Self::TryEqualsOrelseSkip,
+            Self::SolveOfSkipFailsWhenOpen,
+            Self::FirstOfSingletonCollapses,
+            Self::AllGoalsOfSkipIsSkip,
+        ]
+    }
+}
+
+/// One canonical law's structured doc.
+#[derive(Debug, Clone, Copy)]
+pub struct LawSpec {
+    pub id: LawId,
+    /// Kebab-case name (must match `id.name()`).
+    pub name: &'static str,
+    pub lhs: &'static str,
+    pub rhs: &'static str,
+    pub rationale: &'static str,
+}
+
+/// **Single source of truth** for the canonical algebraic-law
+/// inventory.  Both the simplifier (this module's `normalize_once`)
+/// and the catalogue
+/// (`verum_verification::tactic_combinator::canonical_laws`) read
+/// from this table.  A law name appears here exactly once.
+pub const CANONICAL_LAW_TABLE: &[LawSpec] = &[
+    LawSpec {
+        id: LawId::SeqLeftIdentity,
+        name: "seq-left-identity",
+        lhs: "skip ; t",
+        rhs: "t",
+        rationale: "skip is the left identity for sequential composition: prefixing any tactic with skip produces the original tactic.",
+    },
+    LawSpec {
+        id: LawId::SeqRightIdentity,
+        name: "seq-right-identity",
+        lhs: "t ; skip",
+        rhs: "t",
+        rationale: "skip is the right identity for sequential composition: appending skip is a no-op.",
+    },
+    LawSpec {
+        id: LawId::SeqAssociative,
+        name: "seq-associative",
+        lhs: "(t ; u) ; v",
+        rhs: "t ; (u ; v)",
+        rationale: "Sequential composition is associative — the simplifier canonicalises to right-association for dedup.",
+    },
+    LawSpec {
+        id: LawId::OrelseLeftIdentity,
+        name: "orelse-left-identity",
+        lhs: "fail || t",
+        rhs: "t",
+        rationale: "fail is the left identity for choice: a never-succeeding alternative immediately yields to its fallback.",
+    },
+    LawSpec {
+        id: LawId::OrelseRightIdentity,
+        name: "orelse-right-identity",
+        lhs: "t || fail",
+        rhs: "t",
+        rationale: "fail is the right identity for choice: a never-succeeding fallback can never override the primary's verdict.",
+    },
+    LawSpec {
+        id: LawId::OrelseAssociative,
+        name: "orelse-associative",
+        lhs: "(t || u) || v",
+        rhs: "t || (u || v)",
+        rationale: "Choice is associative — the simplifier canonicalises to right-association.",
+    },
+    LawSpec {
+        id: LawId::RepeatZeroIsSkip,
+        name: "repeat-zero-is-skip",
+        lhs: "repeat_n(0, t)",
+        rhs: "skip",
+        rationale: "Zero-iteration repetition cannot perform any work, so it collapses to skip.",
+    },
+    LawSpec {
+        id: LawId::RepeatOneIsBody,
+        name: "repeat-one-is-body",
+        lhs: "repeat_n(1, t)",
+        rhs: "t",
+        rationale: "One-iteration repetition is just the body — the loop overhead is observable only at n ≥ 2.",
+    },
+    LawSpec {
+        id: LawId::TryEqualsOrelseSkip,
+        name: "try-equals-orelse-skip",
+        lhs: "try { t }",
+        rhs: "t || skip",
+        rationale: "Soft-fail is desugared to a choice with skip: if t fails, the no-op alternative succeeds.",
+    },
+    LawSpec {
+        id: LawId::SolveOfSkipFailsWhenOpen,
+        name: "solve-of-skip-fails-when-open",
+        lhs: "solve { skip }",
+        rhs: "fail   (when goals are non-empty)",
+        rationale: "solve enforces total discharge: a no-op cannot close any goal, so solve { skip } must fail whenever goals remain.",
+    },
+    LawSpec {
+        id: LawId::FirstOfSingletonCollapses,
+        name: "first-of-singleton-collapses",
+        lhs: "first_of([t])",
+        rhs: "t",
+        rationale: "A first-of with a single alternative is operationally equivalent to that alternative.",
+    },
+    LawSpec {
+        id: LawId::AllGoalsOfSkipIsSkip,
+        name: "all-goals-of-skip-is-skip",
+        lhs: "all_goals { skip }",
+        rhs: "skip",
+        rationale: "Applying skip to every goal is equivalent to skipping the focus operation altogether.",
+    },
+];
+
+/// Lookup a law by its typed id.
+pub fn law_by_id(id: LawId) -> &'static LawSpec {
+    CANONICAL_LAW_TABLE
+        .iter()
+        .find(|s| s.id == id)
+        .expect("CANONICAL_LAW_TABLE must cover every LawId variant")
+}
+
+/// Lookup a law by its kebab-case name.
+pub fn law_by_name(name: &str) -> Option<&'static LawSpec> {
+    CANONICAL_LAW_TABLE.iter().find(|s| s.name == name)
+}
+
+/// The subset of [`LawId`] this module's `normalize_once`
+/// rewriter currently applies.  V0 covers the identity / repeat-
+/// elision / OrElse-singleton subset; the remaining laws are
+/// documented but not yet rewritten by the simplifier (e.g.
+/// `solve-of-skip-fails-when-open` has no `Solve` constructor in
+/// the Z3-side `TacticCombinator` enum yet).
+///
+/// Used by the catalogue's CI gate to verify that every law the
+/// simplifier rewrites by is in the canonical inventory.
+pub const SIMPLIFIER_APPLIES: &[LawId] = &[
+    LawId::SeqLeftIdentity,
+    LawId::SeqRightIdentity,
+    LawId::SeqAssociative,
+    LawId::OrelseLeftIdentity,
+    LawId::OrelseRightIdentity,
+    LawId::RepeatZeroIsSkip,
+    LawId::RepeatOneIsBody,
+];
+
 /// Normalise a combinator to its canonical form by applying every
 /// simplification law to fixpoint.
 ///
@@ -132,19 +349,19 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
         TacticCombinator::AndThen(l, r) => {
             let l = normalize_once(*l);
             let r = normalize_once(*r);
-            // L1: skip ; t ≡ t
+            // LawId::SeqLeftIdentity — `skip ; t ≡ t`
             if is_skip(&l) {
                 return r;
             }
-            // L2: t ; skip ≡ t
+            // LawId::SeqRightIdentity — `t ; skip ≡ t`
             if is_skip(&r) {
                 return l;
             }
-            // L3: right-associate. `(a ; b) ; c` becomes
-            // `a ; (b ; c)`. This gives every AndThen chain a
-            // canonical right-associated shape, so two chains
-            // that differ only in bracketing compare equal after
-            // normalize.
+            // LawId::SeqAssociative — right-associate.
+            // `(a ; b) ; c` becomes `a ; (b ; c)`.  Gives every
+            // AndThen chain a canonical right-associated shape, so
+            // two chains that differ only in bracketing compare
+            // equal after normalize.
             if let TacticCombinator::AndThen(ll, lr) = l {
                 return normalize_once(TacticCombinator::AndThen(
                     ll,
@@ -157,17 +374,21 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
         TacticCombinator::OrElse(l, r) => {
             let l = normalize_once(*l);
             let r = normalize_once(*r);
-            // L4: fail | t ≡ t
+            // LawId::OrelseLeftIdentity — `fail | t ≡ t`
             if is_fail(&l) {
                 return r;
             }
-            // L5: t | fail ≡ t
+            // LawId::OrelseRightIdentity — `t | fail ≡ t`
             if is_fail(&r) {
                 return l;
             }
             // L9: Single(k) | Single(k) ≡ Single(k) (only for
             // identical single-leaf tactics — see module docs for
             // why this is sound but AndThen-idempotence isn't).
+            // Not a member of the canonical catalogue: this is a
+            // simplifier-internal optimisation that the catalogue
+            // does not expose because it's a degenerate case of
+            // OrElse rather than a primitive algebraic law.
             if let (
                 TacticCombinator::Single(a),
                 TacticCombinator::Single(b),
@@ -181,15 +402,16 @@ fn normalize_once(c: TacticCombinator) -> TacticCombinator {
         }
 
         TacticCombinator::Repeat(inner, 0) => {
-            // L7: Repeat(t, 0) ≡ skip — regardless of what t is.
-            // This is how `Quote` / `GoalIntro` compile-targets
-            // fall out during normalization.
+            // LawId::RepeatZeroIsSkip — `repeat_n(0, t) ≡ skip`,
+            // regardless of what t is.  This is how `Quote` /
+            // `GoalIntro` compile-targets fall out during
+            // normalization.
             let _ = inner;
             skip()
         }
 
         TacticCombinator::Repeat(inner, 1) => {
-            // L8: Repeat(t, 1) ≡ t
+            // LawId::RepeatOneIsBody — `repeat_n(1, t) ≡ t`
             normalize_once(*inner)
         }
 
