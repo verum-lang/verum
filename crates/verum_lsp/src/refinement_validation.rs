@@ -140,6 +140,18 @@ fn default_validation_mode() -> ValidationMode {
 pub enum ValidationMode {
     Quick,    // <100ms
     Thorough, // <1s
+    /// Unlimited latency — reserved for CI/CD invocations that
+    /// don't need to fit inside a typical editor budget. The
+    /// per-call timeout falls back to the configured
+    /// `cfg.smt_timeout` (typically tens of seconds) instead of
+    /// a hardcoded short bound. Pre-fix the
+    /// `lsp_config::ValidationMode::Complete` variant was
+    /// silently normalised to `Thorough` at the validator
+    /// boundary, so clients that set
+    /// `verum.lsp.validationMode = "complete"` got the 1s
+    /// Thorough timeout instead of the documented unlimited
+    /// latency.
+    Complete,
 }
 
 /// Result of validateRefinement request
@@ -410,7 +422,12 @@ impl RefinementValidator {
         guard.default_mode = match cfg.validation_mode {
             crate::lsp_config::ValidationMode::Quick => ValidationMode::Quick,
             crate::lsp_config::ValidationMode::Thorough => ValidationMode::Thorough,
-            crate::lsp_config::ValidationMode::Complete => ValidationMode::Thorough,
+            // Honour `Complete` as its own variant rather than
+            // collapsing to Thorough — clients that set
+            // `verum.lsp.validationMode = "complete"` get the
+            // documented unlimited-latency behaviour (the
+            // per-call timeout falls back to cfg.smt_timeout).
+            crate::lsp_config::ValidationMode::Complete => ValidationMode::Complete,
         };
         guard.smt_timeout = cfg.smt_timeout;
         guard.show_counterexamples = cfg.show_counterexamples;
@@ -502,10 +519,18 @@ impl RefinementValidator {
             return Ok(self.result_to_response(cached_result, start.elapsed()));
         }
 
-        // Determine timeout based on mode
+        // Determine timeout based on mode. `Complete` falls back
+        // to the configured `cfg.smt_timeout` so CI/CD invocations
+        // get the unlimited-latency behaviour documented in
+        // lsp_config — typically tens of seconds rather than the
+        // sub-second editor budget. Closes the inert-defense
+        // pattern around `lsp_config::ValidationMode::Complete`,
+        // which was previously normalised to Thorough at the
+        // validator boundary.
         let timeout = match mode {
             ValidationMode::Quick => Duration::from_millis(100),
             ValidationMode::Thorough => Duration::from_secs(1),
+            ValidationMode::Complete => self.config.read().smt_timeout,
         };
 
         // Perform validation with timeout
@@ -3350,5 +3375,38 @@ mod tests {
         validator.apply_config(&cfg);
         let stance = validator.config.read().smt_solver;
         assert_eq!(stance, SmtSolver::Z3);
+    }
+
+    #[test]
+    fn validation_mode_complete_no_longer_collapses_to_thorough() {
+        // Pin: when LspConfig.validation_mode = Complete, the
+        // validator's default_mode is set to Complete (its own
+        // variant). Pre-fix Complete was silently normalised to
+        // Thorough, defeating the documented unlimited-latency
+        // contract for CI/CD invocations.
+        let validator = RefinementValidator::new();
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.validation_mode = crate::lsp_config::ValidationMode::Complete;
+        validator.apply_config(&cfg);
+        let stance = validator.config.read().default_mode;
+        assert_eq!(stance, ValidationMode::Complete);
+    }
+
+    #[test]
+    fn validation_mode_quick_and_thorough_round_trip() {
+        // Pin: Quick and Thorough preserve their semantics
+        // through the apply_config translation — only Complete
+        // got the wire-up fix; the other two were already
+        // correctly mapped pre-fix.
+        let validator = RefinementValidator::new();
+
+        let mut cfg = crate::lsp_config::LspConfig::default();
+        cfg.validation_mode = crate::lsp_config::ValidationMode::Quick;
+        validator.apply_config(&cfg);
+        assert_eq!(validator.config.read().default_mode, ValidationMode::Quick);
+
+        cfg.validation_mode = crate::lsp_config::ValidationMode::Thorough;
+        validator.apply_config(&cfg);
+        assert_eq!(validator.config.read().default_mode, ValidationMode::Thorough);
     }
 }
