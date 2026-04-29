@@ -329,6 +329,18 @@ pub struct VerifyConfig {
     #[serde(default)]
     pub distributed_cache: Option<Text>,
 
+    /// Trust policy for distributed-cache reads. Accepted values:
+    /// `"all"` (no verification — trust everything), `"signatures"`
+    /// (require Ed25519 signature, default), `"signatures_and_expiry"`
+    /// (signatures plus TTL freshness check). Determines what level
+    /// of validation the local proof-cache layer applies to a result
+    /// fetched from the configured `distributed_cache` backend before
+    /// installing it into the in-memory cache. Unknown values fall
+    /// back to `"signatures"` with a warning at construction time so
+    /// a typo never silently downgrades to `All`.
+    #[serde(default)]
+    pub distributed_cache_trust: Option<Text>,
+
     /// Turn on per-function profiling of slow verifications. Default:
     /// `true` — the profiler is enabled iff `--profile` is passed on
     /// the CLI.
@@ -421,6 +433,10 @@ pub struct VerifyProfileOverride {
     /// Override for `distributed_cache`.
     #[serde(default)]
     pub distributed_cache: Option<Text>,
+
+    /// Override for `distributed_cache_trust`.
+    #[serde(default)]
+    pub distributed_cache_trust: Option<Text>,
 }
 
 impl VerifyConfig {
@@ -479,6 +495,9 @@ impl VerifyConfig {
         if let Some(v) = profile.distributed_cache {
             merged.distributed_cache = Some(v);
         }
+        if let Some(v) = profile.distributed_cache_trust {
+            merged.distributed_cache_trust = Some(v);
+        }
         Ok(merged)
     }
 }
@@ -498,6 +517,7 @@ impl Default for VerifyConfig {
             cache_max_size: None,
             cache_ttl: None,
             distributed_cache: None,
+            distributed_cache_trust: None,
             profile_slow_functions: true,
             profile_threshold: None,
             profiles: Map::new(),

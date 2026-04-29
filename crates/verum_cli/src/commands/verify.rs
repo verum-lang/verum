@@ -130,6 +130,12 @@ pub struct ProfileConfig {
     /// URL of a distributed verification cache, if any. Surfaced in the
     /// report; actual wire-up is still handled by the compiler core.
     pub distributed_cache: Option<String>,
+    /// Trust policy for distributed-cache reads ("all" / "signatures" /
+    /// "signatures_and_expiry"). Plumbed through to
+    /// `CompilerOptions.distributed_cache_trust` so the verification-
+    /// cache layer can validate fetched entries before installing them.
+    /// `None` defaults to `"signatures"` at consumption time.
+    pub distributed_cache_trust: Option<String>,
     /// Named `[verify.profiles.<name>]` profile to apply from
     /// `verum.toml`. CLI flags still win over profile values —
     /// precedence order is: CLI flag > profile override > base
@@ -261,6 +267,12 @@ fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
     }
     if out.distributed_cache.is_none() {
         out.distributed_cache = v.distributed_cache.as_ref().map(|t| t.to_string());
+    }
+    if out.distributed_cache_trust.is_none() {
+        out.distributed_cache_trust = v
+            .distributed_cache_trust
+            .as_ref()
+            .map(|t| t.to_string());
     }
     out
 }
@@ -501,6 +513,7 @@ fn verify_file_proof(
         export_verification_json: profile.export_path.is_some(),
         verification_json_path: profile.export_path.clone(),
         distributed_cache_url: profile.distributed_cache.clone(),
+        distributed_cache_trust: profile.distributed_cache_trust.clone(),
         // Closure-hash incremental verification cache (#79 / #88).
         // The `closure_cache_root` override implies
         // `closure_cache_enabled = true`; an explicit `--closure-cache`
