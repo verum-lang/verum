@@ -145,6 +145,15 @@ pub struct ProfileConfig {
     /// the full per-obligation list. Implies `enabled = true`.
     /// Docs: `docs/verification/performance.md §5`.
     pub profile_obligation: bool,
+    /// Enable the closure-hash incremental verification cache (#79).
+    /// When true, theorem proofs whose closure-hash + verdict are
+    /// already cached are skipped without invoking the SMT/kernel
+    /// re-check.  See `verum_verification::closure_cache`.
+    pub closure_cache_enabled: bool,
+    /// Override the closure-cache root directory.  When `None`, the
+    /// default `<project>/target/.verum_cache/closure-hashes/` is
+    /// used.  Implies `closure_cache_enabled = true` if set.
+    pub closure_cache_root: Option<PathBuf>,
 }
 
 /// Compute the list of `.vr` source files changed since the given
@@ -492,6 +501,13 @@ fn verify_file_proof(
         export_verification_json: profile.export_path.is_some(),
         verification_json_path: profile.export_path.clone(),
         distributed_cache_url: profile.distributed_cache.clone(),
+        // Closure-hash incremental verification cache (#79 / #88).
+        // The `closure_cache_root` override implies
+        // `closure_cache_enabled = true`; an explicit `--closure-cache`
+        // without a root falls back to the default
+        // `<input.parent>/target/.verum_cache/closure-hashes/`.
+        closure_cache_enabled: profile.closure_cache_enabled || profile.closure_cache_root.is_some(),
+        closure_cache_root: profile.closure_cache_root.clone(),
         ..Default::default()
     };
 
