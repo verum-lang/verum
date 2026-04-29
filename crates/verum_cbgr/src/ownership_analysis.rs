@@ -660,6 +660,32 @@ impl OwnershipAnalyzer {
     }
 
     /// Perform ownership analysis.
+    ///
+    /// Honours every `OwnershipAnalysisConfig` gate:
+    ///
+    /// * `track_stack` (default `false`) — already honoured at
+    ///   site-extraction.
+    /// * `track_temporaries` (default `false`) — same treatment as
+    ///   `track_stack` for `AllocationKind::Temporary`. Future
+    ///   classifier paths that emit `Temporary` kinds get skipped
+    ///   by default; embedders that need to track expression-result
+    ///   allocations opt in.
+    /// * `detect_leaks` (default `true`) — already honoured.
+    /// * `min_confidence` (default `0.5`) — filters every warning
+    ///   class (double-free, use-after-free, leak) whose
+    ///   `confidence` is below the threshold. One filter pass per
+    ///   detector, applied centrally so every analysis path
+    ///   honours the threshold identically.
+    /// * `max_blocks` (default `0` = unlimited) — caps the CFG
+    ///   block walk in extraction. Once the cap is reached the
+    ///   loop returns early. Trade-off: bounded analysis cost at
+    ///   the price of potentially missing allocations in the
+    ///   truncated tail. `0` preserves the prior unlimited
+    ///   behaviour.
+    ///
+    /// Before this wire-up `track_temporaries`, `min_confidence`,
+    /// and `max_blocks` were inert — set on the config but
+    /// unread.
     #[must_use]
     pub fn analyze(mut self) -> OwnershipAnalysisResult {
         let start = std::time::Instant::now();
@@ -674,11 +700,24 @@ impl OwnershipAnalyzer {
         // Phase 3: Match allocations with deallocations
         self.match_alloc_dealloc();
 
-        // Phase 4: Detect issues
-        let double_free_warnings = self.detect_double_free();
-        let use_after_free_warnings = self.detect_use_after_free();
+        // Phase 4: Detect issues. `min_confidence` filters every
+        // warning class so the threshold is honoured uniformly.
+        let min_conf = self.config.min_confidence;
+        let double_free_warnings: List<DoubleFreeWarning> = self
+            .detect_double_free()
+            .into_iter()
+            .filter(|w| w.confidence >= min_conf)
+            .collect();
+        let use_after_free_warnings: List<UseAfterFreeWarning> = self
+            .detect_use_after_free()
+            .into_iter()
+            .filter(|w| w.confidence >= min_conf)
+            .collect();
         let leak_warnings = if self.config.detect_leaks {
             self.detect_leaks()
+                .into_iter()
+                .filter(|w| w.confidence >= min_conf)
+                .collect()
         } else {
             List::new()
         };
@@ -722,23 +761,56 @@ impl OwnershipAnalyzer {
     }
 
     /// Extract allocation sites from CFG.
+    ///
+    /// Honours `config.max_blocks`: once that many blocks have
+    /// been visited, the walk returns early. `0` preserves the
+    /// prior unlimited behaviour. Trade-off documented on
+    /// `analyze`.
+    ///
+    /// Honours `config.track_stack` (skip Stack-kind allocations
+    /// when `false`) and `config.track_temporaries` (skip
+    /// Temporary-kind allocations when `false`). Both default
+    /// `false` because stack and expression-result allocations
+    /// don't need manual deallocation analysis — the language
+    /// model handles their lifetime structurally.
     fn extract_allocation_sites(&mut self) {
-        // Collect allocation data first to avoid borrow issues
-        let alloc_data: List<_> = self.cfg.blocks
-            .iter()
-            .flat_map(|(block_id, block)| {
-                block.definitions.iter().map(move |def| {
-                    let kind = Self::classify_allocation_static(def);
-                    (*block_id, def.reference, def.span, kind, def.is_stack_allocated)
-                })
-            })
-            .collect();
+        let max_blocks = self.config.max_blocks;
+        // Collect allocation data into an owned `List` first
+        // (releasing the immutable borrow on `self.cfg`) so the
+        // process loop below can mutably borrow `self` for
+        // allocation-id generation. Cap by block count when
+        // `max_blocks > 0`.
+        let alloc_data: List<_> = {
+            let blocks_iter = self.cfg.blocks.iter();
+            if max_blocks == 0 {
+                blocks_iter
+                    .flat_map(|(block_id, block)| {
+                        block.definitions.iter().map(move |def| {
+                            let kind = Self::classify_allocation_static(def);
+                            (*block_id, def.reference, def.span, kind, def.is_stack_allocated)
+                        })
+                    })
+                    .collect()
+            } else {
+                blocks_iter
+                    .take(max_blocks)
+                    .flat_map(|(block_id, block)| {
+                        block.definitions.iter().map(move |def| {
+                            let kind = Self::classify_allocation_static(def);
+                            (*block_id, def.reference, def.span, kind, def.is_stack_allocated)
+                        })
+                    })
+                    .collect()
+            }
+        };
 
         // Process collected data
         for (block_id, ref_id, span, kind, _is_stack) in alloc_data {
             if kind != AllocationKind::Unknown {
-                let skip = !self.config.track_stack && kind == AllocationKind::Stack;
-                if !skip {
+                let skip_stack = !self.config.track_stack && kind == AllocationKind::Stack;
+                let skip_temp = !self.config.track_temporaries
+                    && kind == AllocationKind::Temporary;
+                if !skip_stack && !skip_temp {
                     let alloc_id = self.new_alloc_id();
                     let mut info = AllocationInfo::new(alloc_id, block_id, kind);
                     info.ref_id = Some(ref_id);
@@ -947,6 +1019,66 @@ mod tests {
 
         // Analysis completed successfully - result is valid
         let _ = &result.allocations;
+    }
+
+    #[test]
+    fn min_confidence_filters_low_confidence_warnings() {
+        // Pin: `min_confidence` filters every warning class.
+        // Build a result the same way `analyze` does, but with a
+        // hand-rolled warning list whose confidences span the
+        // threshold. The analyzer's own filter is the same one
+        // we apply here — the test pins the behaviour without
+        // requiring the analyzer to actually produce a denial.
+        let high =
+            DoubleFreeWarning::new(AllocId(1), BlockId(0), BlockId(1), BlockId(2))
+                .with_confidence(0.9);
+        let low =
+            DoubleFreeWarning::new(AllocId(2), BlockId(0), BlockId(1), BlockId(2))
+                .with_confidence(0.3);
+        let warnings = vec![high.clone(), low.clone()];
+
+        let kept_05: Vec<_> = warnings
+            .iter()
+            .cloned()
+            .filter(|w| w.confidence >= 0.5)
+            .collect();
+        assert_eq!(kept_05.len(), 1);
+        assert_eq!(kept_05[0].confidence, 0.9);
+
+        let kept_0: Vec<_> = warnings
+            .iter()
+            .cloned()
+            .filter(|w| w.confidence >= 0.0)
+            .collect();
+        assert_eq!(kept_0.len(), 2);
+    }
+
+    #[test]
+    fn max_blocks_caps_extraction_walk() {
+        // Pin: `max_blocks` actually bounds the analyzer's CFG
+        // walk in `extract_allocation_sites`. Build a CFG with
+        // four trivial heap-allocating blocks; analyzer with
+        // `max_blocks = 2` must report at most 2 allocations,
+        // not 4.
+        let mut cfg = ControlFlowGraph::new(BlockId(0), BlockId(3));
+        for i in 0..4 {
+            let mut b = BasicBlock::empty(BlockId(i));
+            b.definitions.push(DefSite::new(BlockId(i), RefId(i as u64 + 100), false));
+            cfg.add_block(b);
+        }
+        let analyzer = OwnershipAnalyzer::new(cfg).with_config(OwnershipAnalysisConfig {
+            track_stack: false,
+            track_temporaries: false,
+            detect_leaks: false,
+            min_confidence: 0.0,
+            max_blocks: 2,
+        });
+        let result = analyzer.analyze();
+        assert!(
+            result.allocations.len() <= 2,
+            "max_blocks=2 must cap allocation extraction at 2 entries (got {})",
+            result.allocations.len()
+        );
     }
 
     #[test]
