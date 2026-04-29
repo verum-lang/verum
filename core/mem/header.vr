@@ -201,6 +201,18 @@ implement Display for MemValidationError {
     }
 }
 
+implement Eq for MemValidationError {
+    fn eq(&self, other: &MemValidationError) -> Bool {
+        match (self, other) {
+            (GenerationMismatch { expected: ea, actual: aa },
+             GenerationMismatch { expected: eb, actual: ab }) => ea == eb && aa == ab,
+            (EpochMismatch { expected: ea, actual: aa },
+             EpochMismatch { expected: eb, actual: ab })      => ea == eb && aa == ab,
+            _ => false,
+        }
+    }
+}
+
 @repr(C, align(32))
 public type AllocationHeader is {
     /// Current generation counter (atomic) — HOT: checked on every deref.

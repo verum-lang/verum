@@ -88,6 +88,22 @@ implement Display for DataError {
     }
 }
 
+implement Eq for DataError {
+    fn eq(&self, other: &DataError) -> Bool {
+        match (self, other) {
+            (TypeMismatch { expected: ea, actual: aa },
+             TypeMismatch { expected: eb, actual: ab })          => ea == eb && aa == ab,
+            (KeyNotFound { key: a },        KeyNotFound { key: b })        => a == b,
+            (IndexOutOfBounds { index: ia, length: la },
+             IndexOutOfBounds { index: ib, length: lb })         => ia == ib && la == lb,
+            (ParseError { message: a },     ParseError { message: b })     => a == b,
+            (InvalidCast { from: fa, to: ta },
+             InvalidCast { from: fb, to: tb })                   => fa == fb && ta == tb,
+            _ => false,
+        }
+    }
+}
+
 implement Data {
     // =========================================================================
     // Constructors

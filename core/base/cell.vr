@@ -320,6 +320,18 @@ implement Display for BorrowMutError {
     }
 }
 
+implement Eq for BorrowError {
+    fn eq(&self, other: &BorrowError) -> Bool {
+        self.message == other.message
+    }
+}
+
+implement Eq for BorrowMutError {
+    fn eq(&self, other: &BorrowMutError) -> Bool {
+        self.message == other.message
+    }
+}
+
 // =============================================================================
 // OnceCell<T> - Write-once cell for lazy initialization
 // =============================================================================
