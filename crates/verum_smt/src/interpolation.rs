@@ -230,6 +230,48 @@ impl InterpolationEngine {
     pub fn new(config: InterpolationConfig) -> Self {
         // Note: Z3 context configuration is implicit and thread-local in z3 0.19.4
         // Set up solver parameters globally if needed through Solver/Optimize/etc
+
+        // Surface inert InterpolationConfig fields. `proof_based`
+        // and `model_based` flow from the manifest but no code
+        // path consults them — the algorithm choice
+        // (`InterpolationAlgorithm`) already encodes proof-based
+        // (McMillan) vs model-based (MBI) dispatch. The boolean
+        // flags are redundant with the algorithm enum, but
+        // embedders setting `proof_based = true` while picking
+        // MBI saw the inconsistency silently accepted.
+        //
+        // Closes the inert-defense pattern by emitting a
+        // tracing::debug! when the boolean flags are inconsistent
+        // with the chosen algorithm — surfaces the misconfig at
+        // construction time so embedders see when their config
+        // is internally contradictory.
+        let algo_proof_based = matches!(
+            config.algorithm,
+            InterpolationAlgorithm::McMillan
+                | InterpolationAlgorithm::Pudlak
+                | InterpolationAlgorithm::Symmetric
+                | InterpolationAlgorithm::Dual
+        );
+        let algo_model_based = matches!(
+            config.algorithm,
+            InterpolationAlgorithm::MBI | InterpolationAlgorithm::PingPong
+        );
+        if config.proof_based != algo_proof_based
+            || config.model_based != algo_model_based
+        {
+            tracing::debug!(
+                "InterpolationConfig: proof_based={}, model_based={}, \
+                 algorithm={:?} — boolean flags are inconsistent with the \
+                 algorithm-encoded dispatch (algorithm encodes proof_based={}, \
+                 model_based={}); algorithm choice takes precedence",
+                config.proof_based,
+                config.model_based,
+                config.algorithm,
+                algo_proof_based,
+                algo_model_based,
+            );
+        }
+
         Self { config }
     }
 
