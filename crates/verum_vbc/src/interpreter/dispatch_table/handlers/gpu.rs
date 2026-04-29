@@ -294,9 +294,21 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let _device_reg = read_reg(state)?; // memory_space arg (CPU fallback ignores)
             let size = state.get_reg(size_reg).as_i64() as usize;
             let alloc_size = if size == 0 { 1 } else { size };
-            let layout = std::alloc::Layout::from_size_align(alloc_size, 8).unwrap_or(
-                std::alloc::Layout::new::<u8>()
-            );
+            // Layout-construction failure means the requested size
+            // exceeds isize::MAX once aligned.  The previous
+            // `unwrap_or(Layout::new::<u8>())` fallback silently
+            // downgraded to a 1-byte allocation while leaving the
+            // caller believing they got `alloc_size` bytes — a heap
+            // overflow waiting to happen the first time the caller
+            // wrote past byte 0.  Treat as null pointer (allocation
+            // failure), matching the standard malloc-fail contract.
+            let layout = match std::alloc::Layout::from_size_align(alloc_size, 8) {
+                Ok(l) => l,
+                Err(_) => {
+                    state.set_reg(dst, Value::from_ptr::<u8>(std::ptr::null_mut()));
+                    return Ok(DispatchResult::Continue);
+                }
+            };
             let ptr = unsafe { std::alloc::alloc(layout) };
             if !ptr.is_null() {
                 state.gpu_context.allocated_buffers.insert(ptr as usize, alloc_size);
@@ -310,9 +322,15 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let size_reg = read_reg(state)?;
             let size = state.get_reg(size_reg).as_i64() as usize;
             let alloc_size = if size == 0 { 1 } else { size };
-            let layout = std::alloc::Layout::from_size_align(alloc_size, 8).unwrap_or(
-                std::alloc::Layout::new::<u8>()
-            );
+            // Same heap-overflow class as GpuSubOpcode::Alloc — never
+            // silently downgrade an oversize layout to 1 byte.
+            let layout = match std::alloc::Layout::from_size_align(alloc_size, 8) {
+                Ok(l) => l,
+                Err(_) => {
+                    state.set_reg(dst, Value::from_ptr::<u8>(std::ptr::null_mut()));
+                    return Ok(DispatchResult::Continue);
+                }
+            };
             let ptr = unsafe { std::alloc::alloc(layout) };
             if !ptr.is_null() {
                 state.gpu_context.allocated_buffers.insert(ptr as usize, alloc_size);
@@ -326,12 +344,21 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let ptr_reg = read_reg(state)?;
             let ptr = state.get_reg(ptr_reg).as_ptr::<u8>();
             let ptr_addr = ptr as usize;
-            // Look up the allocation size and deallocate properly
+            // Look up the allocation size and deallocate properly.
+            //
+            // Layout-construction failure on the dealloc path is
+            // architecturally impossible — `allocated_buffers` only
+            // contains `alloc_size` values that successfully
+            // constructed a layout above, so the matching call here
+            // cannot fail.  If it ever does, leak the allocation
+            // rather than dealloc with a wrong (1-byte) layout —
+            // dealloc with mismatched layout is undefined behaviour
+            // in std::alloc; the leak is strictly the safer
+            // failure mode.
             if let Some(size) = state.gpu_context.allocated_buffers.remove(&ptr_addr) {
-                let layout = std::alloc::Layout::from_size_align(size, 8).unwrap_or(
-                    std::alloc::Layout::new::<u8>()
-                );
-                unsafe { std::alloc::dealloc(ptr, layout); }
+                if let Ok(layout) = std::alloc::Layout::from_size_align(size, 8) {
+                    unsafe { std::alloc::dealloc(ptr, layout); }
+                }
             }
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
@@ -1079,9 +1106,18 @@ pub(in super::super) fn handle_gpu_alloc(state: &mut InterpreterState) -> Interp
 
     let size = state.get_reg(size_reg).as_i64() as usize;
     let alloc_size = if size == 0 { 1 } else { size };
-    let layout = std::alloc::Layout::from_size_align(alloc_size, 8).unwrap_or(
-        std::alloc::Layout::new::<u8>()
-    );
+    // Layout-construction failure means the requested size exceeds
+    // isize::MAX once aligned.  Treat as null pointer (allocation
+    // failure) — never silently downgrade to a 1-byte layout, since
+    // that would lie about the size to the caller and produce a
+    // heap overflow on the first write.
+    let layout = match std::alloc::Layout::from_size_align(alloc_size, 8) {
+        Ok(l) => l,
+        Err(_) => {
+            state.set_reg(dst, Value::from_ptr::<u8>(std::ptr::null_mut()));
+            return Ok(DispatchResult::Continue);
+        }
+    };
     let ptr = unsafe { std::alloc::alloc(layout) };
     if !ptr.is_null() {
         state.gpu_context.allocated_buffers.insert(ptr as usize, alloc_size);
