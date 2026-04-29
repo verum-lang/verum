@@ -6,7 +6,7 @@
 // @expect: pass
 
 mount core.net.ipv6_canonical.{
-    Ipv6CanonicalError, format, parse, canonicalize, equal_addresses,
+    Ipv6CanonicalError, format_ipv6, parse, canonicalize, equal_addresses,
 };
 mount core.net.addr.{Ipv6Addr};
 
@@ -32,9 +32,9 @@ fn exercise_canonical() -> Result<(), Ipv6CanonicalError> {
     // IPv4-mapped form preserved.
     let _ = canonicalize(&Text.from("::ffff:192.0.2.1"))?;
 
-    // Direct format call.
+    // Direct format_ipv6 call.
     let addr: Ipv6Addr = parse(&Text.from("2001:db8::"))?;
-    let s: Text = format(&addr);
+    let s: Text = format_ipv6(&addr);
     let _ = s;
 
     // Malformed input → typed error.

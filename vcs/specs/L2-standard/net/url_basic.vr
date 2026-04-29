@@ -39,6 +39,7 @@ fn main() {
             InvalidAuthority      => "invalid authority",
             InvalidPort           => "invalid port",
             InvalidPercentEscape  => "invalid % escape",
+            UrlTooLong            => "URL too long",
         }
     }
 }

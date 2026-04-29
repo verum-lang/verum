@@ -7,7 +7,7 @@
 
 mount core.net.link_header.{
     LinkEntry, LinkHeaderError,
-    parse, format, find_rel,
+    parse, format_link_header, find_rel,
 };
 mount core.collections.List;
 
@@ -46,7 +46,7 @@ fn exercise_link_header() -> Result<(), LinkHeaderError> {
     match find_rel(&multi, "index") { Some(_) => {}, None => panic("") }
 
     // Round-trip via format.
-    let rebuilt: Text = format(&entries);
+    let rebuilt: Text = format_link_header(&entries);
     let _ = rebuilt;
 
     // Malformed.
