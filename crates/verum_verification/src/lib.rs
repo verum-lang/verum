@@ -76,6 +76,10 @@ pub mod contract;
 /// 13-strategy verification ladder dispatcher.  Foundation-neutral
 /// trait + reference V0 dispatcher + ν-monotonicity invariant.
 pub mod ladder_dispatch;
+/// Proof-drafting infrastructure — typed proof-state view + ranked
+/// tactic-suggestion trait + reference engine.  Single boundary that
+/// LSP / REPL / CLI consumers all drive through.
+pub mod proof_drafting;
 pub mod cost;
 pub mod dependent_verification;
 pub mod hoare_logic;
