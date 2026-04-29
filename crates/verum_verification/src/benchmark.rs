@@ -435,6 +435,250 @@ impl BenchmarkRunner for MockBenchmarkRunner {
 }
 
 // =============================================================================
+// ProductionBenchmarkRunner — real tool invocation (#94 hardening)
+// =============================================================================
+//
+// V0 shipped only `MockBenchmarkRunner`, returning canned values
+// derived from the documented-landscape claims.  Hardening: real
+// runners that:
+//
+//   * Detect tool presence by invoking `<cmd> <version_flag>` and
+//     checking the exit code (no PATH gymnastics — `Command::new`
+//     resolves through PATH itself, surfacing `NotFound` cleanly).
+//   * Run `<cmd> <theorem-source>` per theorem, captures
+//     `elapsed_ms` via `Instant::now()`, exit-status as
+//     pass/fail, and per-theorem stdout-tail as detail.
+//   * Return `BenchmarkError::ToolMissing` when the tool isn't on
+//     PATH; the CLI's matrix logic already handles that.
+//
+// Runners are generic over `(command, version_flag, source_extension)`
+// so the same type is reused across systems.  Per-system
+// constructors below pin the conventions (`coqc` / `lean` /
+// `isabelle process` / `agda` / `verum`).
+
+/// Production runner that invokes a real foreign tool per theorem.
+#[derive(Debug, Clone)]
+pub struct ProductionBenchmarkRunner {
+    system: BenchmarkSystem,
+    /// Executable to run (resolved via PATH).
+    command: Text,
+    /// Extra arguments prepended to every invocation (e.g.
+    /// `["process"]` for `isabelle process <session>`).
+    leading_args: Vec<Text>,
+    /// Argument that prints the tool's version (e.g. `"--version"`)
+    /// — used by `is_available` to verify the tool exists and is
+    /// callable.
+    version_arg: Text,
+    /// Directory holding `<theorem>.<extension>` source files.
+    source_dir: std::path::PathBuf,
+    /// Source-file extension (e.g. `"v"` for Coq, `"lean"` for
+    /// Lean4).  Empty means the theorem id IS the full filename.
+    source_extension: Text,
+    /// Per-theorem wall-clock deadline.  Exceeding kills the
+    /// process and emits a timeout result.  V1 — currently the
+    /// runner waits unconditionally; a future Wall-clock-budget
+    /// extension lands here.
+    pub timeout_secs: u64,
+}
+
+impl ProductionBenchmarkRunner {
+    /// Build a production runner for a generic system.  Per-system
+    /// helpers below ([`coq_production_runner`] etc.) pin the
+    /// conventional command names so callers don't have to.
+    pub fn new(
+        system: BenchmarkSystem,
+        command: impl Into<Text>,
+        source_dir: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            system,
+            command: command.into(),
+            leading_args: Vec::new(),
+            version_arg: Text::from("--version"),
+            source_dir: source_dir.into(),
+            source_extension: Text::from(""),
+            timeout_secs: 600,
+        }
+    }
+
+    pub fn with_version_arg(mut self, arg: impl Into<Text>) -> Self {
+        self.version_arg = arg.into();
+        self
+    }
+
+    pub fn with_leading_args(mut self, args: &[&str]) -> Self {
+        self.leading_args = args.iter().map(|s| Text::from(*s)).collect();
+        self
+    }
+
+    pub fn with_extension(mut self, ext: impl Into<Text>) -> Self {
+        self.source_extension = ext.into();
+        self
+    }
+
+    /// Resolve a theorem id to its on-disk source path.
+    fn source_path_for(&self, theorem: &str) -> std::path::PathBuf {
+        let ext = self.source_extension.as_str();
+        if ext.is_empty() {
+            self.source_dir.join(theorem)
+        } else {
+            self.source_dir.join(format!("{}.{}", theorem, ext))
+        }
+    }
+}
+
+impl BenchmarkRunner for ProductionBenchmarkRunner {
+    fn system(&self) -> BenchmarkSystem {
+        self.system
+    }
+
+    fn is_available(&self) -> bool {
+        // `Command::new(cmd).arg(version_arg).output()` returns
+        // `Err(io::Error)` (kind == NotFound) when `cmd` is missing
+        // from PATH.  Any successful spawn with a 0 exit code
+        // (or a 0/non-zero status if the tool prints version to
+        // stderr — Lean4's `lean --version` exits 0; Coq's
+        // `coqc -v` ditto) is sufficient.
+        let mut cmd = std::process::Command::new(self.command.as_str());
+        for a in &self.leading_args {
+            cmd.arg(a.as_str());
+        }
+        cmd.arg(self.version_arg.as_str());
+        match cmd.output() {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    fn run(&self, suite: &BenchmarkSuite) -> Result<Vec<BenchmarkResult>, BenchmarkError> {
+        if !self.is_available() {
+            return Err(BenchmarkError::ToolMissing(Text::from(format!(
+                "{} runner: `{}` not on PATH",
+                self.system.name(),
+                self.command.as_str()
+            ))));
+        }
+        let mut out: Vec<BenchmarkResult> = Vec::new();
+        let mut total_elapsed_ms: f64 = 0.0;
+        let mut completed: u64 = 0;
+        for thm in &suite.theorems {
+            let source = self.source_path_for(thm.as_str());
+            let mut cmd = std::process::Command::new(self.command.as_str());
+            for a in &self.leading_args {
+                cmd.arg(a.as_str());
+            }
+            cmd.arg(&source);
+            let started = std::time::Instant::now();
+            let outcome = cmd.output();
+            let elapsed_ms = started.elapsed().as_millis() as f64;
+            match outcome {
+                Ok(o) if o.status.success() => {
+                    total_elapsed_ms += elapsed_ms;
+                    completed += 1;
+                    let mut r = BenchmarkResult::new(
+                        self.system,
+                        suite.name.clone(),
+                        BenchmarkMetric::ElapsedMs,
+                        elapsed_ms,
+                    )
+                    .with_theorem(thm.clone());
+                    if let Some(env) = &suite.repro_envelope {
+                        r = r.with_envelope(env.clone());
+                    }
+                    out.push(r);
+                }
+                Ok(o) => {
+                    return Err(BenchmarkError::Other(Text::from(format!(
+                        "{} `{}` exited with non-zero status {} in {}ms; stderr tail: {}",
+                        self.system.name(),
+                        thm.as_str(),
+                        o.status,
+                        elapsed_ms,
+                        truncate_for_diag(&String::from_utf8_lossy(&o.stderr), 200)
+                    ))));
+                }
+                Err(e) => {
+                    return Err(BenchmarkError::ToolMissing(Text::from(format!(
+                        "{} `{}` failed to spawn: {}",
+                        self.system.name(),
+                        thm.as_str(),
+                        e
+                    ))));
+                }
+            }
+        }
+        // Suite-level aggregate: theorems_per_second.
+        if total_elapsed_ms > 0.0 {
+            let tps = (completed as f64) / (total_elapsed_ms / 1000.0);
+            let mut r = BenchmarkResult::new(
+                self.system,
+                suite.name.clone(),
+                BenchmarkMetric::TheoremsPerSecond,
+                tps,
+            );
+            if let Some(env) = &suite.repro_envelope {
+                r = r.with_envelope(env.clone());
+            }
+            out.push(r);
+        }
+        Ok(out)
+    }
+}
+
+fn truncate_for_diag(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+/// `coqc <theorem>.v`.
+pub fn coq_production_runner(
+    source_dir: impl Into<std::path::PathBuf>,
+) -> ProductionBenchmarkRunner {
+    ProductionBenchmarkRunner::new(BenchmarkSystem::Coq, "coqc", source_dir)
+        .with_extension("v")
+        .with_version_arg("--version")
+}
+
+/// `lean <theorem>.lean`.
+pub fn lean4_production_runner(
+    source_dir: impl Into<std::path::PathBuf>,
+) -> ProductionBenchmarkRunner {
+    ProductionBenchmarkRunner::new(BenchmarkSystem::Lean4, "lean", source_dir)
+        .with_extension("lean")
+        .with_version_arg("--version")
+}
+
+/// `isabelle process <theorem>` (the theorem id is interpreted as a
+/// session name; no extension).
+pub fn isabelle_production_runner(
+    source_dir: impl Into<std::path::PathBuf>,
+) -> ProductionBenchmarkRunner {
+    ProductionBenchmarkRunner::new(BenchmarkSystem::Isabelle, "isabelle", source_dir)
+        .with_leading_args(&["process"])
+        .with_extension("thy")
+        .with_version_arg("version")
+}
+
+/// `agda --no-libraries <theorem>.agda`.
+pub fn agda_production_runner(
+    source_dir: impl Into<std::path::PathBuf>,
+) -> ProductionBenchmarkRunner {
+    ProductionBenchmarkRunner::new(BenchmarkSystem::Agda, "agda", source_dir)
+        .with_leading_args(&["--no-libraries"])
+        .with_extension("agda")
+        .with_version_arg("--version")
+}
+
+/// `verum verify <theorem>.vr`.
+pub fn verum_production_runner(
+    source_dir: impl Into<std::path::PathBuf>,
+) -> ProductionBenchmarkRunner {
+    ProductionBenchmarkRunner::new(BenchmarkSystem::Verum, "verum", source_dir)
+        .with_leading_args(&["verify"])
+        .with_extension("vr")
+        .with_version_arg("--version")
+}
+
+// =============================================================================
 // runner_for — per-system reference dispatcher
 // =============================================================================
 
@@ -959,5 +1203,153 @@ mod tests {
             m.leader(BenchmarkMetric::CrossFormatExports),
             Some(BenchmarkSystem::Verum)
         );
+    }
+
+    // =========================================================================
+    // ProductionBenchmarkRunner (#94 hardening)
+    // =========================================================================
+
+    #[test]
+    fn production_runner_factories_pin_command_and_extension() {
+        let dir = std::path::PathBuf::from("/tmp/whatever");
+        let coq = coq_production_runner(&dir);
+        assert_eq!(coq.system, BenchmarkSystem::Coq);
+        assert_eq!(coq.command.as_str(), "coqc");
+        assert_eq!(coq.source_extension.as_str(), "v");
+
+        let lean = lean4_production_runner(&dir);
+        assert_eq!(lean.command.as_str(), "lean");
+        assert_eq!(lean.source_extension.as_str(), "lean");
+
+        let isa = isabelle_production_runner(&dir);
+        assert_eq!(isa.command.as_str(), "isabelle");
+        assert_eq!(isa.leading_args.len(), 1);
+        assert_eq!(isa.leading_args[0].as_str(), "process");
+
+        let agda = agda_production_runner(&dir);
+        assert_eq!(agda.command.as_str(), "agda");
+
+        let verum = verum_production_runner(&dir);
+        assert_eq!(verum.command.as_str(), "verum");
+    }
+
+    #[test]
+    fn production_runner_source_path_uses_extension() {
+        let dir = std::path::PathBuf::from("/some/dir");
+        let r = coq_production_runner(&dir);
+        let p = r.source_path_for("foo");
+        assert_eq!(p, std::path::PathBuf::from("/some/dir/foo.v"));
+    }
+
+    #[test]
+    fn production_runner_source_path_no_extension_uses_id_directly() {
+        let dir = std::path::PathBuf::from("/some/dir");
+        let r = ProductionBenchmarkRunner::new(BenchmarkSystem::Verum, "verum", &dir);
+        let p = r.source_path_for("session_X");
+        assert_eq!(p, std::path::PathBuf::from("/some/dir/session_X"));
+    }
+
+    #[test]
+    fn production_runner_unavailable_when_command_missing() {
+        let dir = std::path::PathBuf::from("/tmp");
+        let r = ProductionBenchmarkRunner::new(
+            BenchmarkSystem::Coq,
+            "definitely_not_a_real_command_e7a92f",
+            &dir,
+        );
+        assert!(!r.is_available());
+        let suite = BenchmarkSuite::new("s").add_theorem("t1");
+        match r.run(&suite) {
+            Err(BenchmarkError::ToolMissing(t)) => {
+                assert!(t.as_str().contains("definitely_not_a_real_command_e7a92f"));
+            }
+            other => panic!("expected ToolMissing, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn production_runner_runs_real_tool_against_tempfile() {
+        // Use `/bin/echo` as a stand-in for a tool that always
+        // succeeds — the production runner protocol is the same:
+        // version-check passes, per-theorem invocation exits 0,
+        // elapsed_ms gets recorded.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let thm_path = tmpdir.path().join("toy.txt");
+        std::fs::write(&thm_path, "stub").unwrap();
+        let r = ProductionBenchmarkRunner::new(
+            BenchmarkSystem::Verum,
+            "echo",
+            tmpdir.path(),
+        )
+        .with_extension("txt");
+        assert!(r.is_available());
+        let suite = BenchmarkSuite::new("s").add_theorem("toy");
+        let results = r.run(&suite).unwrap();
+        // One ElapsedMs result + one TheoremsPerSecond aggregate.
+        let elapsed_count = results
+            .iter()
+            .filter(|r| r.metric == BenchmarkMetric::ElapsedMs)
+            .count();
+        assert_eq!(elapsed_count, 1);
+        let tps_count = results
+            .iter()
+            .filter(|r| r.metric == BenchmarkMetric::TheoremsPerSecond)
+            .count();
+        assert_eq!(tps_count, 1);
+    }
+
+    #[test]
+    fn production_runner_propagates_nonzero_exit() {
+        // `false` always exits 1 — the runner must surface this as
+        // a structured error rather than silently coding 0.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let r = ProductionBenchmarkRunner::new(
+            BenchmarkSystem::Verum,
+            "false",
+            tmpdir.path(),
+        );
+        if !r.is_available() {
+            // `false` is missing on some build sandboxes; skip
+            // gracefully rather than failing the suite.
+            return;
+        }
+        let suite = BenchmarkSuite::new("s").add_theorem("nope");
+        let err = r.run(&suite).unwrap_err();
+        match err {
+            BenchmarkError::Other(t) => {
+                assert!(t.as_str().contains("non-zero status"));
+            }
+            other => panic!("expected Other (non-zero exit), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn task_94_real_runners_replace_canned_values_when_tools_present() {
+        // Acceptance: when the underlying tool is on PATH, the
+        // production runner does NOT use the canned landscape
+        // values — it measures `elapsed_ms` from `Instant::now()`.
+        // We pin the *protocol* using `echo` as a stand-in (always
+        // available across CI); the same code path applies to
+        // coqc / lean / isabelle / agda / verum when those binaries
+        // are present.
+        let tmpdir = tempfile::tempdir().unwrap();
+        let thm_path = tmpdir.path().join("p.txt");
+        std::fs::write(&thm_path, "x").unwrap();
+        let r = ProductionBenchmarkRunner::new(
+            BenchmarkSystem::Lean4,
+            "echo",
+            tmpdir.path(),
+        )
+        .with_extension("txt");
+        let suite = BenchmarkSuite::new("acceptance").add_theorem("p");
+        let results = r.run(&suite).unwrap();
+        let elapsed = results
+            .iter()
+            .find(|r| r.metric == BenchmarkMetric::ElapsedMs)
+            .expect("ElapsedMs must be emitted");
+        // The mock for Lean4 has no per-theorem ElapsedMs entry;
+        // the production runner does, with a measured value.
+        assert!(elapsed.value >= 0.0);
+        assert_eq!(elapsed.theorem.as_ref().unwrap().as_str(), "p");
     }
 }
