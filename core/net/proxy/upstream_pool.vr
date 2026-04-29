@@ -39,7 +39,7 @@ mount core.time.{Instant};
 mount core.sync.Mutex;
 mount core.net.tcp.{TcpStream};
 mount core.net.addr.{SocketAddr};
-mount core.net.http.{PoolConfig};
+mount core.net.http.{HttpPoolConfig};
 
 // =============================================================================
 // Upstream
@@ -190,7 +190,7 @@ implement ConnectionLease {
 // =============================================================================
 
 type PoolState is {
-    config: PoolConfig,
+    config: HttpPoolConfig,
     idle: Mutex<Map<UpstreamKey, List<IdleConn>>>,
 };
 
@@ -200,7 +200,7 @@ public type UpstreamPool is {
 };
 
 implement UpstreamPool {
-    public fn new(config: PoolConfig) -> UpstreamPool {
+    public fn new(config: HttpPoolConfig) -> UpstreamPool {
         UpstreamPool {
             state: Shared.new(PoolState {
                 config: config,
@@ -211,7 +211,7 @@ implement UpstreamPool {
 
     /// Default configuration — 100 total idle, 10 per host, 90s timeout.
     public fn default() -> UpstreamPool {
-        UpstreamPool.new(PoolConfig.new())
+        UpstreamPool.new(HttpPoolConfig.new())
     }
 
     /// Acquire a connection to the given upstream. Reuses an idle one if

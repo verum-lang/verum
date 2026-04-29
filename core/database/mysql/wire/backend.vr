@@ -4,8 +4,8 @@
 // Spec: dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_packets.html
 //
 // Decodes the basic server packet types (Initial Handshake, OK / EOF /
-// ERR, AuthSwitchRequest, AuthMoreData) plus ColumnDefinition41.
-// All decoders propagate `FrameError` from `wire/frame.vr`; the
+// ERR, AuthSwitchRequest, AuthMoreData) plus MyColumnDefinition41.
+// All decoders propagate `MyFrameError` from `wire/frame.vr`; the
 // connection layer maps that into the unified `core.database.common.
 // error.DbError` once at the API boundary.
 // =============================================================================
@@ -16,7 +16,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.mysql.wire.frame.{
-    FrameError, FeShort, FeBadLength, FeInvalidUtf8,
+    MyFrameError, FeShort, FeBadLength, FeInvalidUtf8,
     decode_lei, read_u8, read_u16_le, read_u32_le, read_cstr, read_bytes,
     read_lenenc_string, LkNull,
 };
@@ -42,7 +42,7 @@ public type InitialHandshake is {
     auth_plugin_name: Text,
 };
 
-public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, FrameError> {
+public fn parse_initial_handshake(payload: &[Byte]) -> Result<InitialHandshake, MyFrameError> {
     let mut off: Int = 0;
     let proto = read_u8(payload, off)?;
     off = off + 1;
@@ -122,7 +122,7 @@ public type OkPacket is {
     info: Text,
 };
 
-public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, FrameError> {
+public fn parse_ok(payload: &[Byte], capabilities: Int) -> Result<OkPacket, MyFrameError> {
     if (payload.len() as Int) < 1 {
         return Err(FeShort { wanted: 1, available: 0 });
     }
@@ -171,7 +171,7 @@ public type ErrPacket is {
     message: Text,
 };
 
-public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, FrameError> {
+public fn parse_err(payload: &[Byte], capabilities: Int) -> Result<ErrPacket, MyFrameError> {
     if (payload.len() as Int) < 3 {
         return Err(FeShort { wanted: 3, available: payload.len() as Int });
     }
@@ -212,7 +212,7 @@ public type AuthSwitch is {
     auth_data: List<Byte>,
 };
 
-public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, FrameError> {
+public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, MyFrameError> {
     if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_SW {
         return Err(FeBadLength { len: 0 });
     }
@@ -231,7 +231,7 @@ public fn parse_auth_switch(payload: &[Byte]) -> Result<AuthSwitch, FrameError> 
 
 public type AuthMore is { data: List<Byte> };
 
-public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, FrameError> {
+public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, MyFrameError> {
     if (payload.len() as Int) < 1 || payload[0] != PKT_AUTH_MORE {
         return Err(FeBadLength { len: 0 });
     }
@@ -245,10 +245,10 @@ public fn parse_auth_more(payload: &[Byte]) -> Result<AuthMore, FrameError> {
 }
 
 // -----------------------------------------------------------------------------
-// ColumnDefinition41
+// MyColumnDefinition41
 // -----------------------------------------------------------------------------
 
-public type ColumnDef is {
+public type MyColumnDef is {
     schema: Text,
     table: Text,
     org_table: Text,
@@ -261,7 +261,7 @@ public type ColumnDef is {
     decimals: Int,
 };
 
-public fn parse_column_def(payload: &[Byte]) -> Result<ColumnDef, FrameError> {
+public fn parse_column_def(payload: &[Byte]) -> Result<MyColumnDef, MyFrameError> {
     let mut off: Int = 0;
     let (_, u0) = read_lenenc_string(payload, off)?;     off = off + u0;
     let (schema_b,  u1) = read_lenenc_string(payload, off)?; off = off + u1;
@@ -278,7 +278,7 @@ public fn parse_column_def(payload: &[Byte]) -> Result<ColumnDef, FrameError> {
     let flags = read_u16_le(payload, off)?;              off = off + 2;
     let dec = read_u8(payload, off)?;                    off = off + 1;
 
-    Ok(ColumnDef {
+    Ok(MyColumnDef {
         schema:    bytes_to_text(&schema_b),
         table:     bytes_to_text(&table_b),
         org_table: bytes_to_text(&otable_b),
@@ -312,12 +312,12 @@ fn bytes_to_text(o: &Maybe<List<Byte>>) -> Text {
 //     u16  warning_count
 //
 // Followed on the wire by:
-//     num_params  ColumnDefinition41 packets + EOF (or skipped if 0)
-//     num_columns ColumnDefinition41 packets + EOF (or skipped if 0)
+//     num_params  MyColumnDefinition41 packets + EOF (or skipped if 0)
+//     num_columns MyColumnDefinition41 packets + EOF (or skipped if 0)
 //
 // We parse the fixed-size header here; the trailing column descs are
 // read separately by the connection driver (it already knows how to
-// loop ColumnDefs from the COM_QUERY result-set path).
+// loop MyColumnDefs from the COM_QUERY result-set path).
 
 public type StmtPrepareOk is {
     statement_id: Int,
@@ -327,13 +327,13 @@ public type StmtPrepareOk is {
 };
 
 public fn parse_stmt_prepare_ok(payload: &[Byte])
-    -> Result<StmtPrepareOk, FrameError>
+    -> Result<StmtPrepareOk, MyFrameError>
 {
     let mut off: Int = 0;
     // Status byte must be 0x00 — caller has already routed via classify().
     let status = read_u8(payload, off)?; off = off + 1;
     if status != 0 {
-        return Err(FrameError.PayloadTooShort {
+        return Err(MyFrameError.PayloadTooShort {
             wanted: 1, available: 0,
         });
     }
@@ -367,12 +367,12 @@ public fn parse_stmt_prepare_ok(payload: &[Byte])
 public fn parse_binary_row(
     payload: &[Byte],
     column_types: &List<Int>,
-) -> Result<List<Maybe<List<Byte>>>, FrameError> {
+) -> Result<List<Maybe<List<Byte>>>, MyFrameError> {
     let n = column_types.len();
     let mut off: Int = 0;
     let header = read_u8(payload, off)?; off = off + 1;
     if header != 0 {
-        return Err(FrameError.PayloadTooShort { wanted: 1, available: 0 });
+        return Err(MyFrameError.PayloadTooShort { wanted: 1, available: 0 });
     }
 
     let bitmap_len = (n + 7 + 2) / 8;
@@ -413,7 +413,7 @@ fn decode_binary_value(
     payload: &[Byte],
     off: Int,
     column_type: Int,
-) -> Result<(List<Byte>, Int), FrameError> {
+) -> Result<(List<Byte>, Int), MyFrameError> {
     // Fixed-width integers + floats.
     if column_type == 0x01 {           // TINY
         let v = read_u8(payload, off)?;

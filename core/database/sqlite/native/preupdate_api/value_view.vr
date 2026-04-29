@@ -4,7 +4,7 @@
 // Spec: SQLite C API
 //
 // The catalogue handles index-bounds + op-gating logic.  Actual value
-// storage is opaque here — the runtime feeds SqliteValue references.
+// storage is opaque here — the runtime feeds SqliteApiValue references.
 // =============================================================================
 
 module core.database.sqlite.native.preupdate_api.value_view;

@@ -24,9 +24,9 @@
 //        * AuthSwitch        → reject; pinned to caching_sha2_password
 //        * ERR               → translate via dberr_from_mysql
 //   6. simple_query(sql) sends COM_QUERY (resets seq to 0), reads
-//      ColumnCount LEI → ColumnDefinition41 packets → EOF (or
+//      ColumnCount LEI → MyColumnDefinition41 packets → EOF (or
 //      DEPRECATE_EOF skips this) → DataRow text packets → OK / EOF /
-//      ERR. Returns SimpleQueryResult.
+//      ERR. Returns MySimpleQueryResult.
 // =============================================================================
 
 module core.database.mysql.connection;
@@ -39,7 +39,7 @@ mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.mysql.config.{MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired};
 mount core.database.mysql.error.dberr_from_mysql;
 mount core.database.mysql.wire.frame.{
-    MysqlPacket, ParseOutcome, frame_packet, try_parse_packet,
+    MysqlPacket, FrameParseOutcome, frame_packet, try_parse_packet,
     decode_lei, read_lenenc_string, read_bytes,
 };
 mount core.database.mysql.wire.frontend.{
@@ -51,7 +51,7 @@ mount core.database.mysql.wire.frontend.{
     param_null, param_int, param_text, param_blob, param_double,
 };
 mount core.database.mysql.wire.backend.{
-    InitialHandshake, OkPacket, ErrPacket, AuthSwitch, AuthMore, ColumnDef,
+    InitialHandshake, OkPacket, ErrPacket, AuthSwitch, AuthMore, MyColumnDef,
     ServerPacketKind, StmtPrepareOk,
     SkOk, SkError, SkEof, SkAuthSwitch, SkAuthMore, SkLocalInfile, SkData,
     parse_initial_handshake, parse_ok, parse_err, parse_auth_switch,
@@ -81,7 +81,7 @@ public type MysqlConnState is
     | McsFailed;
 
 // -----------------------------------------------------------------------------
-// SimpleQueryResult — text-mode rows.
+// MySimpleQueryResult — text-mode rows.
 // -----------------------------------------------------------------------------
 
 /// One column value as it sat on the wire — text-encoded bytes (the
@@ -90,8 +90,8 @@ public type MysqlTextValue is
       MtvNull
     | MtvBytes(List<Byte>);
 
-public type SimpleQueryResult is {
-    columns: List<ColumnDef>,
+public type MySimpleQueryResult is {
+    columns: List<MyColumnDef>,
     rows: List<List<MysqlTextValue>>,
     affected_rows: Int,           // 0 unless OK packet supplied a count
     last_insert_id: Int,
@@ -196,9 +196,9 @@ implement MysqlConnection {
     public fn capabilities(&self) -> Int { self.capabilities }
 
     /// Issue a COM_QUERY single-statement query in text-mode protocol.
-    /// Returns ColumnDef list + decoded text rows (NULL preserved as
+    /// Returns MyColumnDef list + decoded text rows (NULL preserved as
     /// `MtvNull`).
-    public fn simple_query(&mut self, sql: &Text) -> Result<SimpleQueryResult, DbError> {
+    public fn simple_query(&mut self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
         match self.state {
             McsReady => {}
             _ => { return Err(DbError.Adapter(AdapterSpecific {
@@ -238,7 +238,7 @@ implement MysqlConnection {
                     Err(_) => { return Err(bad_decode("OK")); }
                 };
                 self.state = McsReady;
-                return Ok(SimpleQueryResult {
+                return Ok(MySimpleQueryResult {
                     columns: List.new(),
                     rows: List.new(),
                     affected_rows: ok.affected_rows,
@@ -265,13 +265,13 @@ implement MysqlConnection {
             Err(_) => { return Err(bad_decode("column count LEI")); }
         };
 
-        let mut columns: List<ColumnDef> = List.new();
+        let mut columns: List<MyColumnDef> = List.new();
         let mut i: Int = 0;
         while i < col_count {
             let p = recv_packet(self)?;
             let cd = match parse_column_def(p.payload().as_slice()) {
                 Ok(c)  => c,
-                Err(_) => { return Err(bad_decode("ColumnDef41")); }
+                Err(_) => { return Err(bad_decode("MyColumnDef41")); }
             };
             columns.push(cd);
             i = i + 1;
@@ -311,7 +311,7 @@ implement MysqlConnection {
         }
 
         self.state = McsReady;
-        Ok(SimpleQueryResult {
+        Ok(MySimpleQueryResult {
             columns: columns,
             rows: rows,
             affected_rows: 0,
@@ -377,8 +377,8 @@ implement MysqlConnection {
     //                           streaming workflows.
 
     /// Prepare `sql` — round-trips COM_STMT_PREPARE, parses the
-    /// COM_STMT_PREPARE_OK + parameter ColumnDefinitions + result-
-    /// column ColumnDefinitions.  Returns the typed handle.
+    /// COM_STMT_PREPARE_OK + parameter MyColumnDefinitions + result-
+    /// column MyColumnDefinitions.  Returns the typed handle.
     public fn prepare(&mut self, sql: &Text) -> Result<MysqlPreparedStatement, DbError> {
         match self.state {
             McsReady => {}
@@ -410,7 +410,7 @@ implement MysqlConnection {
             Err(_) => { return Err(bad_decode("prepare OK")); }
         };
 
-        // Drain num_params ColumnDefinitions + EOF (or skip if 0).
+        // Drain num_params MyColumnDefinitions + EOF (or skip if 0).
         let mut param_types: List<Int> = List.with_capacity(prep.num_params);
         let mut i: Int = 0;
         while i < prep.num_params {
@@ -427,7 +427,7 @@ implement MysqlConnection {
             let _eof = recv_packet(self)?;     // intermediate EOF
         }
 
-        // Drain num_columns ColumnDefinitions + EOF.
+        // Drain num_columns MyColumnDefinitions + EOF.
         let mut column_types: List<Int> = List.with_capacity(prep.num_columns);
         let mut k: Int = 0;
         while k < prep.num_columns {
@@ -509,9 +509,9 @@ implement MysqlConnection {
             _ => {}
         }
 
-        // Result-set form: column count (lenenc) + N ColumnDef + EOF
+        // Result-set form: column count (lenenc) + N MyColumnDef + EOF
         // + binary rows + EOF/OK.  We already have the column types
-        // from prepare time, so we skip re-decoding ColumnDefs and
+        // from prepare time, so we skip re-decoding MyColumnDefs and
         // just count packets to find the row boundary.
         let (col_count_opt, _) = match decode_lei(fb.as_slice(), 0) {
             Ok((n, _, h)) => (Some(n), h),
@@ -522,7 +522,7 @@ implement MysqlConnection {
             None    => 0,
         };
 
-        // Drain ColumnDefs.
+        // Drain MyColumnDefs.
         let mut c: Int = 0;
         while c < col_count {
             let _p = recv_packet(self)?;

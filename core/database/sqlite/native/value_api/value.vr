@@ -1,5 +1,5 @@
 // =============================================================================
-// value_api/value.vr — SqliteValue with flags
+// value_api/value.vr — SqliteApiValue with flags
 // =============================================================================
 // Spec: SQLite C API
 //
@@ -27,7 +27,7 @@ public fn payload_byte_len(p: &ValuePayload) -> Int {
     }
 }
 
-public type SqliteValue is {
+public type SqliteApiValue is {
     payload: ValuePayload,
     /// Subtype byte 0..255 (sqlite3_value_subtype).  0 = default.
     subtype: Int,
@@ -38,26 +38,26 @@ public type SqliteValue is {
     nochange: Bool,
 }
 
-public fn new_int(i: Int64) -> SqliteValue {
-    SqliteValue { payload: VpInt(i), subtype: 0, from_bind: false, nochange: false }
+public fn new_int(i: Int64) -> SqliteApiValue {
+    SqliteApiValue { payload: VpInt(i), subtype: 0, from_bind: false, nochange: false }
 }
 
-public fn new_double(f: Float) -> SqliteValue {
-    SqliteValue { payload: VpDouble(f), subtype: 0, from_bind: false, nochange: false }
+public fn new_double(f: Float) -> SqliteApiValue {
+    SqliteApiValue { payload: VpDouble(f), subtype: 0, from_bind: false, nochange: false }
 }
 
-public fn new_text(t: Text) -> SqliteValue {
-    SqliteValue { payload: VpText(t), subtype: 0, from_bind: false, nochange: false }
+public fn new_text(t: Text) -> SqliteApiValue {
+    SqliteApiValue { payload: VpText(t), subtype: 0, from_bind: false, nochange: false }
 }
 
-public fn new_blob(b: List<u8>) -> SqliteValue {
-    SqliteValue { payload: VpBlob(b), subtype: 0, from_bind: false, nochange: false }
+public fn new_blob(b: List<u8>) -> SqliteApiValue {
+    SqliteApiValue { payload: VpBlob(b), subtype: 0, from_bind: false, nochange: false }
 }
 
-public fn new_null() -> SqliteValue {
-    SqliteValue { payload: VpNull, subtype: 0, from_bind: false, nochange: false }
+public fn new_null() -> SqliteApiValue {
+    SqliteApiValue { payload: VpNull, subtype: 0, from_bind: false, nochange: false }
 }
 
-public fn mark_from_bind(v: &mut SqliteValue) { v.from_bind = true; }
-public fn mark_nochange(v: &mut SqliteValue) { v.nochange = true; }
-public fn set_subtype(v: &mut SqliteValue, st: Int) { v.subtype = st; }
+public fn mark_from_bind(v: &mut SqliteApiValue) { v.from_bind = true; }
+public fn mark_nochange(v: &mut SqliteApiValue) { v.nochange = true; }
+public fn set_subtype(v: &mut SqliteApiValue, st: Int) { v.subtype = st; }

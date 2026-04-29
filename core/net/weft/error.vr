@@ -38,14 +38,14 @@ implement IntoResponse for () {
 
 /// High-level classification used by retry / circuit-breaker middleware
 /// to decide whether to retry an error (§5.6).
-public type ErrorCategory is
+public type WeftErrorCategory is
     | ErrTransient
     | ErrPermanent
     | ErrSecurity
     | ErrClient
     | ErrUpstream;
 
-implement ErrorCategory {
+implement WeftErrorCategory {
     public fn default_status(&self) -> StatusCode {
         match self {
             ErrTransient => StatusCode.new(503),
@@ -65,8 +65,8 @@ implement ErrorCategory {
     }
 }
 
-implement Eq for ErrorCategory {
-    fn eq(&self, other: &ErrorCategory) -> Bool {
+implement Eq for WeftErrorCategory {
+    fn eq(&self, other: &WeftErrorCategory) -> Bool {
         match (self, other) {
             (ErrTransient, ErrTransient) => true,
             (ErrPermanent, ErrPermanent) => true,
@@ -78,9 +78,9 @@ implement Eq for ErrorCategory {
     }
 }
 
-implement Copy for ErrorCategory {}
-implement Clone for ErrorCategory {
-    fn clone(&self) -> ErrorCategory { *self }
+implement Copy for WeftErrorCategory {}
+implement Clone for WeftErrorCategory {
+    fn clone(&self) -> WeftErrorCategory { *self }
 }
 
 /// Base error taxonomy for framework-internal failures.
@@ -141,16 +141,16 @@ implement Eq for WeftError {
 }
 
 implement WeftError {
-    public fn category(&self) -> ErrorCategory {
+    public fn category(&self) -> WeftErrorCategory {
         match self {
-            BadRequest(_)         => ErrorCategory.ErrClient,
-            RouteNotFound         => ErrorCategory.ErrClient,
-            MethodNotAllowed      => ErrorCategory.ErrClient,
-            ExtractionRejected(_) => ErrorCategory.ErrClient,
-            Timeout               => ErrorCategory.ErrTransient,
-            Overloaded            => ErrorCategory.ErrTransient,
-            UpstreamIo(_)         => ErrorCategory.ErrUpstream,
-            Internal(_)           => ErrorCategory.ErrPermanent,
+            BadRequest(_)         => WeftErrorCategory.ErrClient,
+            RouteNotFound         => WeftErrorCategory.ErrClient,
+            MethodNotAllowed      => WeftErrorCategory.ErrClient,
+            ExtractionRejected(_) => WeftErrorCategory.ErrClient,
+            Timeout               => WeftErrorCategory.ErrTransient,
+            Overloaded            => WeftErrorCategory.ErrTransient,
+            UpstreamIo(_)         => WeftErrorCategory.ErrUpstream,
+            Internal(_)           => WeftErrorCategory.ErrPermanent,
         }
     }
 

@@ -1013,12 +1013,12 @@ implement Display for Cookie {
 ///
 /// # Example
 /// ```verum
-/// let pool_config = PoolConfig.new()
+/// let pool_config = HttpPoolConfig.new()
 ///     .with_max_idle(100)
 ///     .with_max_per_host(10)
 ///     .with_idle_timeout(Duration.secs(90));
 /// ```
-public type PoolConfig is {
+public type HttpPoolConfig is {
     /// Maximum number of total idle connections.
     max_idle: Int,
     /// Maximum number of idle connections per host.
@@ -1029,10 +1029,10 @@ public type PoolConfig is {
     max_lifetime_ms: Int,
 };
 
-implement PoolConfig {
+implement HttpPoolConfig {
     /// Create a pool configuration with sensible defaults.
-    public fn new() -> PoolConfig {
-        PoolConfig {
+    public fn new() -> HttpPoolConfig {
+        HttpPoolConfig {
             max_idle: 100,
             max_per_host: 10,
             idle_timeout_ms: 90_000,
@@ -1041,29 +1041,29 @@ implement PoolConfig {
     }
 
     /// Set the maximum number of total idle connections.
-    public fn with_max_idle(self, max: Int) -> PoolConfig {
-        PoolConfig { max_idle: max, ..self }
+    public fn with_max_idle(self, max: Int) -> HttpPoolConfig {
+        HttpPoolConfig { max_idle: max, ..self }
     }
 
     /// Set the maximum number of idle connections per host.
-    public fn with_max_per_host(self, max: Int) -> PoolConfig {
-        PoolConfig { max_per_host: max, ..self }
+    public fn with_max_per_host(self, max: Int) -> HttpPoolConfig {
+        HttpPoolConfig { max_per_host: max, ..self }
     }
 
     /// Set the idle connection timeout in milliseconds.
-    public fn with_idle_timeout_ms(self, ms: Int) -> PoolConfig {
-        PoolConfig { idle_timeout_ms: ms, ..self }
+    public fn with_idle_timeout_ms(self, ms: Int) -> HttpPoolConfig {
+        HttpPoolConfig { idle_timeout_ms: ms, ..self }
     }
 
     /// Set the maximum connection lifetime in milliseconds.
-    public fn with_max_lifetime_ms(self, ms: Int) -> PoolConfig {
-        PoolConfig { max_lifetime_ms: ms, ..self }
+    public fn with_max_lifetime_ms(self, ms: Int) -> HttpPoolConfig {
+        HttpPoolConfig { max_lifetime_ms: ms, ..self }
     }
 }
 
 implement Clone for PoolConfig {
-    fn clone(&self) -> PoolConfig {
-        PoolConfig {
+    fn clone(&self) -> HttpPoolConfig {
+        HttpPoolConfig {
             max_idle: self.max_idle,
             max_per_host: self.max_per_host,
             idle_timeout_ms: self.idle_timeout_ms,
@@ -1132,7 +1132,7 @@ implement Clone for PoolKey {
 /// let config = ClientConfig.new()
 ///     .with_timeout_ms(30_000)
 ///     .with_max_redirects(10)
-///     .with_pool(PoolConfig.new().with_max_idle(50));
+///     .with_pool(HttpPoolConfig.new().with_max_idle(50));
 /// ```
 public type ClientConfig is {
     /// Request timeout in milliseconds (0 = no timeout).
@@ -1159,7 +1159,7 @@ implement ClientConfig {
             connect_timeout_ms: 10_000,
             max_redirects: 10,
             follow_redirects: true,
-            pool_config: PoolConfig.new(),
+            pool_config: HttpPoolConfig.new(),
             default_headers: Headers.new(),
             user_agent: "Verum/1.0",
         }

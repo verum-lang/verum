@@ -23,7 +23,7 @@
 //     consistent (always 503 with Retry-After) regardless of which
 //     internal limiter tripped.
 //
-// All three surface the same ErrorCategory.Transient-classed failure so
+// All three surface the same WeftErrorCategory.Transient-classed failure so
 // higher-level retry middleware can back off uniformly.
 //
 // =============================================================================

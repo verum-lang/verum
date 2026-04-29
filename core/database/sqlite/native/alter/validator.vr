@@ -144,16 +144,16 @@ implement TableShape {
 }
 
 // -----------------------------------------------------------------------------
-// SchemaSnapshot
+// AlterSchemaSnapshot
 // -----------------------------------------------------------------------------
 
-public type SchemaSnapshot is {
+public type AlterSchemaSnapshot is {
     tables: List<TableShape>,
 }
 
-public fn snapshot_new() -> SchemaSnapshot { SchemaSnapshot { tables: List.new() } }
+public fn snapshot_new() -> AlterSchemaSnapshot { AlterSchemaSnapshot { tables: List.new() } }
 
-implement SchemaSnapshot {
+implement AlterSchemaSnapshot {
     public fn add_table(&mut self, t: TableShape) { self.tables.push(t); }
 
     public fn table(&self, name: &Text) -> Maybe<TableShape> {
@@ -198,7 +198,7 @@ fn clone_table(t: &TableShape) -> TableShape {
 // validate
 // -----------------------------------------------------------------------------
 
-public fn validate(op: &AlterOp, snap: &SchemaSnapshot) -> Result<(), AlterValidationError> {
+public fn validate(op: &AlterOp, snap: &AlterSchemaSnapshot) -> Result<(), AlterValidationError> {
     match op {
         AoRenameTable(old, new) => {
             if snap.table(old).is_none() { return Err(VeNoSuchTable(old.clone())); }

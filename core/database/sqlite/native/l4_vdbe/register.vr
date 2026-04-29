@@ -9,7 +9,7 @@ module core.database.sqlite.native.l4_vdbe.register;
 // A VDBE register holds one SQLite value. The tag is observable at
 // runtime via `register_kind` (used by the `Column` opcode for dynamic
 // `sqlite3_column_type` queries). The value tags are identical to
-// `l2_record.SqliteValue` — once the static-SSA-register patch lands,
+// `l2_record.SqliteApiValue` — once the static-SSA-register patch lands,
 // the two types will merge; for now they're separate because the VDBE
 // register also carries an optional `sub_type` byte used by JSONB
 // and a few extension hooks.

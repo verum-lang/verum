@@ -67,7 +67,7 @@ mount core.database.sqlite.native.l6_session.schema_cache.{
     SchemaCache, TableMeta, ColumnMeta,
 };
 mount core.database.sqlite.native.l7_api.database.{
-    Database, DbError,
+    Database, SqliteApiDbError,
     DbGeneric, DbReadonly, DbCorrupt, DbCannotOpen, DbBindRange,
 };
 
@@ -91,7 +91,7 @@ fn resolve_location(
     table: &Text,
     column: &Text,
     rowid: Int64,
-) -> Result<BlobLocation, DbError> {
+) -> Result<BlobLocation, SqliteApiDbError> {
     let cache: &SchemaCache = db.conn_view_for_blob().schema();
     let meta = match cache.lookup_table(schema, table) {
         Ok(m)  => m,
@@ -166,7 +166,7 @@ pub fn blob_open(
     column: &Text,
     rowid: Int64,
     write_mode: Bool,
-) -> Result<Int64, DbError> {
+) -> Result<Int64, SqliteApiDbError> {
     let loc = match resolve_location(db, schema, table, column, rowid) {
         Ok(l)  => l,
         Err(e) => { return Err(e); }
@@ -190,7 +190,7 @@ pub fn blob_open(
 
 /// Total size in bytes of the BLOB the handle was opened against.
 /// O(1) — answered from the cached size at open time.
-pub fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, DbError> {
+pub fn blob_bytes(db: &Database, handle_id: Int64) -> Result<Int, SqliteApiDbError> {
     let engine = db.conn_view_for_blob().blob_engine_view();
     match engine.lookup_size(handle_id) {
         Some(n) => Ok(n),
@@ -205,7 +205,7 @@ pub fn blob_read(
     handle_id: Int64,
     offset: Int,
     length: Int,
-) -> Result<List<Byte>, DbError> {
+) -> Result<List<Byte>, SqliteApiDbError> {
     if offset < 0 || length < 0 {
         return Err(DbBindRange(offset));
     }
@@ -257,7 +257,7 @@ pub fn blob_write(
     handle_id: Int64,
     offset: Int,
     data: &[Byte],
-) -> Result<(), DbError> {
+) -> Result<(), SqliteApiDbError> {
     if offset < 0 {
         return Err(DbBindRange(offset));
     }
@@ -326,7 +326,7 @@ pub fn blob_reopen(
     db: &mut Database,
     handle_id: Int64,
     new_rowid: Int64,
-) -> Result<(), DbError> {
+) -> Result<(), SqliteApiDbError> {
     let h = match engine_handle(db.conn_view_for_blob().blob_engine_view(), handle_id) {
         Some(meta) => meta,
         None       => { return Err(DbCannotOpen("blob_reopen: handle not open".clone())); }
@@ -344,7 +344,7 @@ pub fn blob_reopen(
 
 /// Close the handle.  Subsequent operations on `handle_id` return
 /// `DbCannotOpen`.  Closing an already-closed handle is a no-op.
-pub fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), DbError> {
+pub fn blob_close(db: &mut Database, handle_id: Int64) -> Result<(), SqliteApiDbError> {
     let engine = db.conn_mut_for_blob().blob_engine_mut();
     let _ = engine.close(handle_id);
     Ok(())

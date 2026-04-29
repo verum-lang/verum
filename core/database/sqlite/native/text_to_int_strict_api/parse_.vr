@@ -10,7 +10,7 @@ public fn int64_min() -> Int64 {
     hi
 }
 
-public type ParseOutcome is {
+public type IntParseOutcome is {
     value: Int64,
     had_digits: Bool,
     is_overflow: Bool,
@@ -18,8 +18,8 @@ public type ParseOutcome is {
     was_negative: Bool,
 };
 
-public fn failed() -> ParseOutcome {
-    ParseOutcome {
+public fn failed() -> IntParseOutcome {
+    IntParseOutcome {
         value: 0 as Int64,
         had_digits: false,
         is_overflow: false,
@@ -36,7 +36,7 @@ fn is_digit(b: u8) -> Bool {
     b >= 0x30 as u8 && b <= 0x39 as u8
 }
 
-public fn parse(raw: &Text) -> ParseOutcome {
+public fn parse(raw: &Text) -> IntParseOutcome {
     let bs = raw.as_bytes();
     let mut i: Int = 0;
     while i < bs.len() && is_space(bs[i]) { i = i + 1; }
@@ -67,7 +67,7 @@ public fn parse(raw: &Text) -> ParseOutcome {
     if overflow {
         if was_negative { acc = int64_min(); } else { acc = int64_max(); }
     }
-    ParseOutcome {
+    IntParseOutcome {
         value: acc,
         had_digits: had_digits,
         is_overflow: overflow,
@@ -76,7 +76,7 @@ public fn parse(raw: &Text) -> ParseOutcome {
     }
 }
 
-public fn is_valid_integer(p: &ParseOutcome) -> Bool {
+public fn is_valid_integer(p: &IntParseOutcome) -> Bool {
     p.had_digits && !p.trailing_non_digit && !p.is_overflow
 }
 

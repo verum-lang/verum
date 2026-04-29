@@ -178,7 +178,7 @@ implement PgConnection {
     /// set; subsequent ones are still consumed off the wire so the
     /// connection ends in `Ready` state, but rows beyond the first
     /// CommandComplete are dropped.
-    public fn simple_query(&mut self, sql: &Text) -> Result<SimpleQueryResult, DbError> {
+    public fn simple_query(&mut self, sql: &Text) -> Result<PgSimpleQueryResult, DbError> {
         match self.state {
             PcsReady => {}
             _ => { return Err(DbError.Adapter(AdapterSpecific {
@@ -235,7 +235,7 @@ implement PgConnection {
 
         match diagnostic {
             Some(d) => Err(dberr_from_pg(d)),
-            None    => Ok(SimpleQueryResult {
+            None    => Ok(PgSimpleQueryResult {
                 command_tag: command_tag,
                 row_description: row_desc,
                 rows: rows,
@@ -653,7 +653,7 @@ public fn cancel_running_query_at(
     Ok(())
 }
 
-public type SimpleQueryResult is {
+public type PgSimpleQueryResult is {
     command_tag: Text,
     row_description: Maybe<RowDescription>,
     rows: List<List<WireValue>>,

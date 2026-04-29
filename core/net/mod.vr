@@ -125,7 +125,7 @@ public mount .http.HttpError;
 public mount .http.Url;
 public mount .http.Cookie;
 public mount .http.ClientConfig;
-public mount .http.PoolConfig;
+public mount .http.HttpPoolConfig;
 
 // From tls
 public mount .tls.TlsVersion;

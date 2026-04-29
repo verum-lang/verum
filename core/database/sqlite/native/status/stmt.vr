@@ -9,7 +9,7 @@ module core.database.sqlite.native.status.stmt;
 mount core.*;
 mount base.{Bool};
 mount core.database.sqlite.native.status.kind.{
-    StmtKind, SsFullscanStep, SsSort, SsAutoindex, SsVmStep,
+    SqliteStatStmtKind, SsFullscanStep, SsSort, SsAutoindex, SsVmStep,
     SsReprepare, SsRun, SsFilterMiss, SsFilterHit,
 };
 mount core.database.sqlite.native.status.counter.{Counter, counter_zero};
@@ -39,7 +39,7 @@ public fn stmt_status_new() -> StmtStatus {
 }
 
 implement StmtStatus {
-    pub fn read(&self, kind: &StmtKind) -> (Int64, Int64) {
+    pub fn read(&self, kind: &SqliteStatStmtKind) -> (Int64, Int64) {
         match kind {
             SsFullscanStep => self.fullscan_step.snapshot(),
             SsSort         => self.sort.snapshot(),
@@ -52,7 +52,7 @@ implement StmtStatus {
         }
     }
 
-    pub fn reset_high_water(&mut self, kind: &StmtKind) {
+    pub fn reset_high_water(&mut self, kind: &SqliteStatStmtKind) {
         match kind {
             SsFullscanStep => self.fullscan_step.reset_high_water(),
             SsSort         => self.sort.reset_high_water(),

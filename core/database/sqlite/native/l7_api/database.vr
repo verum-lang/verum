@@ -8,7 +8,7 @@ module core.database.sqlite.native.l7_api.database;
 //
 // `Database` is what end-user code holds. It wraps a Connection at L6,
 // translates L6's strongly-typed ConnectionError / StmtError into a
-// single `DbError` tagged with SQLSTATE-style codes, and exposes the
+// single `SqliteApiDbError` tagged with SQLSTATE-style codes, and exposes the
 // idiomatic open / prepare / execute / close API.
 //
 // For v1:
@@ -53,10 +53,10 @@ mount core.database.sqlite.native.l7_api.transaction.{
 };
 
 // -----------------------------------------------------------------------------
-// DbError — SQLSTATE-style tagged sum
+// SqliteApiDbError — SQLSTATE-style tagged sum
 // -----------------------------------------------------------------------------
 
-public type DbError is
+public type SqliteApiDbError is
       DbOk
     | DbGeneric(Text)
     | DbBusy
@@ -79,7 +79,7 @@ public type DbError is
     | DbStmtError(StmtError)
     | DbUnsupported(Text);
 
-implement Display for DbError {
+implement Display for SqliteApiDbError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             DbOk                  => f.write_str("OK"),
@@ -107,7 +107,7 @@ implement Display for DbError {
     }
 }
 
-implement Debug for DbError {
+implement Debug for SqliteApiDbError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         match self {
             DbOk                  => f.write_str("DbOk"),
@@ -135,8 +135,8 @@ implement Debug for DbError {
     }
 }
 
-implement Eq for DbError {
-    fn eq(&self, other: &DbError) -> Bool {
+implement Eq for SqliteApiDbError {
+    fn eq(&self, other: &SqliteApiDbError) -> Bool {
         match (self, other) {
             (DbOk,                    DbOk)                    => true,
             (DbGeneric(a),            DbGeneric(b))            => a == b,
@@ -164,8 +164,8 @@ implement Eq for DbError {
     }
 }
 
-/// Map ConnectionError → DbError for the facade layer.
-public fn db_error_from_conn(e: ConnectionError) -> DbError {
+/// Map ConnectionError → SqliteApiDbError for the facade layer.
+public fn db_error_from_conn(e: ConnectionError) -> SqliteApiDbError {
     match e {
         NotWritable          => DbReadonly,
         NotAdmin             => DbAuthDenied,
@@ -184,7 +184,7 @@ public type Database is {
 };
 
 /// Open an in-memory database with the given capability.
-public fn open_memory_db(mode: ConnectionMode) -> Result<Database, DbError> {
+public fn open_memory_db(mode: ConnectionMode) -> Result<Database, SqliteApiDbError> {
     match open_memory(mode) {
         Ok(c)  => Ok(Database { conn: c }),
         Err(e) => Err(db_error_from_conn(e)),
@@ -198,21 +198,21 @@ public fn open_memory_db(mode: ConnectionMode) -> Result<Database, DbError> {
 // stabilised (task #152).  Inlining sidesteps the broken wrapper-call path
 // without losing any expressiveness — the bodies are tiny and the duplicate
 // match is the only price.
-public fn open_readonly() -> Result<Database, DbError> {
+public fn open_readonly() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmRead) {
         Ok(c)  => Ok(Database { conn: c }),
         Err(e) => Err(db_error_from_conn(e)),
     }
 }
 
-public fn open_readwrite() -> Result<Database, DbError> {
+public fn open_readwrite() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmWrite) {
         Ok(c)  => Ok(Database { conn: c }),
         Err(e) => Err(db_error_from_conn(e)),
     }
 }
 
-public fn open_admin() -> Result<Database, DbError> {
+public fn open_admin() -> Result<Database, SqliteApiDbError> {
     match open_memory(CmAdmin) {
         Ok(c)  => Ok(Database { conn: c }),
         Err(e) => Err(db_error_from_conn(e)),
@@ -224,22 +224,22 @@ public fn open_admin() -> Result<Database, DbError> {
 /// The path is interpreted by the platform's filesystem; the caller
 /// is responsible for any URI parsing (the `file:` URI handler is a
 /// separate `core.database.sqlite.native.uri` task).
-public fn open_path(path: &Text, mode: ConnectionMode) -> Result<Database, DbError> {
+public fn open_path(path: &Text, mode: ConnectionMode) -> Result<Database, SqliteApiDbError> {
     match open_file(path, mode) {
         Ok(c)  => Ok(Database { conn: c }),
         Err(e) => Err(db_error_from_conn(e)),
     }
 }
 
-public fn open_path_readonly(path: &Text) -> Result<Database, DbError> {
+public fn open_path_readonly(path: &Text) -> Result<Database, SqliteApiDbError> {
     open_path(path, CmRead)
 }
 
-public fn open_path_readwrite(path: &Text) -> Result<Database, DbError> {
+public fn open_path_readwrite(path: &Text) -> Result<Database, SqliteApiDbError> {
     open_path(path, CmWrite)
 }
 
-public fn open_path_admin(path: &Text) -> Result<Database, DbError> {
+public fn open_path_admin(path: &Text) -> Result<Database, SqliteApiDbError> {
     open_path(path, CmAdmin)
 }
 
@@ -282,7 +282,7 @@ implement Database {
     /// Compile `sql` into a PreparedStatement. Routes through the
     /// schema-aware pipeline so that `SELECT ... FROM t` resolves
     /// column references against the live SchemaCache.
-    public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, DbError> {
+    public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, SqliteApiDbError> {
         match prepare_with_schema(sql, self.conn.schema()) {
             Ok(p)  => Ok(p),
             Err(e) => Err(DbStmtError(e)),
@@ -293,7 +293,7 @@ implement Database {
     /// produce no rows (DDL, INSERT/UPDATE/DELETE, transaction
     /// control). For CREATE TABLE / DROP TABLE we also apply the
     /// schema side-effect so subsequent SELECTs can resolve.
-    public fn execute(&mut self, sql: &Text) -> Result<(), DbError> {
+    public fn execute(&mut self, sql: &Text) -> Result<(), SqliteApiDbError> {
         // Parse once up front for the schema side-effect hook.
         let stmt_ast = match parse_one(sql) {
             Ok(s)  => s,
@@ -388,7 +388,7 @@ implement Database {
             Ok(s)  => s, Err(e) => { return Err(e); }
         };
         seed_cursors_from_connection(&mut stmt, &self.conn);
-        let mut err_result: Maybe<DbError> = None;
+        let mut err_result: Maybe<SqliteApiDbError> = None;
         loop {
             match stmt.step() {
                 Done => { break; }
@@ -416,7 +416,7 @@ implement Database {
     /// Compile + step once, returning the first row (if any) as a
     /// list of Register values. Intended for single-row SELECTs;
     /// multi-row consumers call `prepare` + loop directly.
-    public fn query_first_row(&mut self, sql: &Text) -> Result<List<Register>, DbError> {
+    public fn query_first_row(&mut self, sql: &Text) -> Result<List<Register>, SqliteApiDbError> {
         let mut stmt = match self.prepare(sql) {
             Ok(s)  => s, Err(e) => { return Err(e); }
         };
@@ -443,13 +443,13 @@ implement Database {
     /// stepping and writes back after. Use for bounded-size result
     /// sets; large scans should iterate via `prepare` + manual `step`
     /// loop + the bridge helpers.
-    public fn query_all(&mut self, sql: &Text) -> Result<List<List<Register>>, DbError> {
+    public fn query_all(&mut self, sql: &Text) -> Result<List<List<Register>>, SqliteApiDbError> {
         let mut stmt = match self.prepare(sql) {
             Ok(s)  => s, Err(e) => { return Err(e); }
         };
         seed_cursors_from_connection(&mut stmt, &self.conn);
         let mut out: List<List<Register>> = List.new();
-        let mut err_result: Maybe<DbError> = None;
+        let mut err_result: Maybe<SqliteApiDbError> = None;
         loop {
             match stmt.step() {
                 Row(_, cols) => {
@@ -491,7 +491,7 @@ implement Database {
 
     /// Begin a deferred transaction (BEGIN).  Returns the affine
     /// handle the caller MUST consume.
-    public fn begin_tx(&mut self) -> Result<Transaction, DbError> {
+    public fn begin_tx(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmDeferred) {
             Ok(_)  => Ok(tx_make(depth, TkDeferred)),
@@ -500,7 +500,7 @@ implement Database {
     }
 
     /// Begin an IMMEDIATE transaction (RESERVED lock at start).
-    public fn begin_tx_immediate(&mut self) -> Result<Transaction, DbError> {
+    public fn begin_tx_immediate(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmImmediate) {
             Ok(_)  => Ok(tx_make(depth, TkImmediate)),
@@ -509,7 +509,7 @@ implement Database {
     }
 
     /// Begin an EXCLUSIVE transaction.
-    public fn begin_tx_exclusive(&mut self) -> Result<Transaction, DbError> {
+    public fn begin_tx_exclusive(&mut self) -> Result<Transaction, SqliteApiDbError> {
         let depth = self.conn.tx_depth();
         match self.conn.begin_tx(TmExclusive) {
             Ok(_)  => Ok(tx_make(depth, TkExclusive)),
@@ -520,7 +520,7 @@ implement Database {
     /// Consume the transaction handle and COMMIT.  Returns
     /// `DbMisuse(...)` if the connection's tx-depth no longer matches
     /// what `tx` recorded at begin time (savepoint left dangling).
-    public fn commit_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
+    public fn commit_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
         let started = tx.started_at_depth();
         let _ = tx;     // affine consume — no further use of `tx` is possible.
         let now = self.conn.tx_depth();
@@ -541,7 +541,7 @@ implement Database {
     /// Consume the transaction handle and ROLLBACK.  Tolerant of stale
     /// depth — rollback is a recovery path, so we issue the ROLLBACK
     /// regardless.
-    public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), DbError> {
+    public fn rollback_tx(&mut self, tx: Transaction) -> Result<(), SqliteApiDbError> {
         let _ = tx;
         match self.conn.rollback_tx() {
             Ok(_)  => Ok(()),
@@ -558,8 +558,8 @@ implement Database {
     /// internally so the caller never has to thread it.
     public fn with_transaction<R>(
         &mut self,
-        body: fn(&mut Database) -> Result<R, DbError>,
-    ) -> Result<R, DbError> {
+        body: fn(&mut Database) -> Result<R, SqliteApiDbError>,
+    ) -> Result<R, SqliteApiDbError> {
         let tx = match self.begin_tx() {
             Ok(t)  => t,
             Err(e) => { return Err(e); }
@@ -584,8 +584,8 @@ implement Database {
     /// concurrent-writer setups to avoid SQLITE_BUSY.
     public fn with_transaction_immediate<R>(
         &mut self,
-        body: fn(&mut Database) -> Result<R, DbError>,
-    ) -> Result<R, DbError> {
+        body: fn(&mut Database) -> Result<R, SqliteApiDbError>,
+    ) -> Result<R, SqliteApiDbError> {
         let tx = match self.begin_tx_immediate() {
             Ok(t)  => t,
             Err(e) => { return Err(e); }

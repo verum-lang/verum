@@ -16,7 +16,7 @@
 //
 // Submodules:
 //   * `datatype`  — SQLITE_INTEGER/FLOAT/TEXT/BLOB/NULL constants + enum
-//   * `value`     — SqliteValue variant + flags (subtype, from_bind, nochange)
+//   * `value`     — SqliteApiValue variant + flags (subtype, from_bind, nochange)
 //   * `engine`    — C-API-aligned accessors
 // =============================================================================
 

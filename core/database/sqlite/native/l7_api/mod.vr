@@ -15,7 +15,7 @@ public module pragma_api;
 public module blob;
 
 public mount .database.{
-    Database, DbError,
+    Database, SqliteApiDbError,
     open_memory_db, open_readonly, open_readwrite, open_admin,
     open_path, open_path_readonly, open_path_readwrite, open_path_admin,
     db_error_from_conn,

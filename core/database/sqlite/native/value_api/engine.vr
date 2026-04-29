@@ -13,11 +13,11 @@ mount core.database.sqlite.native.value_api.datatype.{
     Datatype, DtInteger, DtFloat, DtText, DtBlob, DtNull, datatype_numeric,
 };
 mount core.database.sqlite.native.value_api.value.{
-    SqliteValue, ValuePayload, VpInt, VpDouble, VpText, VpBlob, VpNull,
+    SqliteApiValue, ValuePayload, VpInt, VpDouble, VpText, VpBlob, VpNull,
     payload_byte_len,
 };
 
-public fn sqlite3_value_type(v: &SqliteValue) -> Int {
+public fn sqlite3_value_type(v: &SqliteApiValue) -> Int {
     datatype_numeric(&match &v.payload {
         VpInt(_)    => DtInteger,
         VpDouble(_) => DtFloat,
@@ -27,7 +27,7 @@ public fn sqlite3_value_type(v: &SqliteValue) -> Int {
     })
 }
 
-public fn sqlite3_value_numeric_type(v: &SqliteValue) -> Int {
+public fn sqlite3_value_numeric_type(v: &SqliteApiValue) -> Int {
     match &v.payload {
         VpInt(_)    => datatype_numeric(&DtInteger),
         VpDouble(_) => datatype_numeric(&DtFloat),
@@ -37,7 +37,7 @@ public fn sqlite3_value_numeric_type(v: &SqliteValue) -> Int {
     }
 }
 
-public fn sqlite3_value_int(v: &SqliteValue) -> Int {
+public fn sqlite3_value_int(v: &SqliteApiValue) -> Int {
     match &v.payload {
         VpInt(i)    => *i as Int,
         VpDouble(f) => *f as Int,
@@ -45,7 +45,7 @@ public fn sqlite3_value_int(v: &SqliteValue) -> Int {
     }
 }
 
-public fn sqlite3_value_int64(v: &SqliteValue) -> Int64 {
+public fn sqlite3_value_int64(v: &SqliteApiValue) -> Int64 {
     match &v.payload {
         VpInt(i)    => *i,
         VpDouble(f) => *f as Int64,
@@ -53,7 +53,7 @@ public fn sqlite3_value_int64(v: &SqliteValue) -> Int64 {
     }
 }
 
-public fn sqlite3_value_double(v: &SqliteValue) -> Float {
+public fn sqlite3_value_double(v: &SqliteApiValue) -> Float {
     match &v.payload {
         VpDouble(f) => *f,
         VpInt(i)    => *i as Float,
@@ -61,23 +61,23 @@ public fn sqlite3_value_double(v: &SqliteValue) -> Float {
     }
 }
 
-public fn sqlite3_value_text(v: &SqliteValue) -> Text {
+public fn sqlite3_value_text(v: &SqliteApiValue) -> Text {
     match &v.payload {
         VpText(t) => t.clone(),
         _ => "".clone(),
     }
 }
 
-public fn sqlite3_value_bytes(v: &SqliteValue) -> Int {
+public fn sqlite3_value_bytes(v: &SqliteApiValue) -> Int {
     payload_byte_len(&v.payload)
 }
 
-public fn sqlite3_value_subtype(v: &SqliteValue) -> Int { v.subtype }
+public fn sqlite3_value_subtype(v: &SqliteApiValue) -> Int { v.subtype }
 
-public fn sqlite3_value_frombind(v: &SqliteValue) -> Int {
+public fn sqlite3_value_frombind(v: &SqliteApiValue) -> Int {
     if v.from_bind { 1 } else { 0 }
 }
 
-public fn sqlite3_value_nochange(v: &SqliteValue) -> Int {
+public fn sqlite3_value_nochange(v: &SqliteApiValue) -> Int {
     if v.nochange { 1 } else { 0 }
 }

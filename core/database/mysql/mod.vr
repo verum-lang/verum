@@ -32,7 +32,7 @@ public mount .config.{
     MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
 };
 public mount .connection.{
-    MysqlConnection, MysqlConnState, SimpleQueryResult,
+    MysqlConnection, MysqlConnState, MySimpleQueryResult,
     MysqlTextValue, MtvNull, MtvBytes,
     MysqlPreparedStatement, MysqlPreparedResult,
     McsConnecting, McsAuthenticating, McsReady, McsBusy, McsClosed, McsFailed,

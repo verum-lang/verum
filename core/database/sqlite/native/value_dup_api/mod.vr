@@ -7,7 +7,7 @@
 //   sqlite3_value *sqlite3_value_dup(const sqlite3_value *)
 //   void           sqlite3_value_free(sqlite3_value *)
 //
-// `_value_dup` creates a deep copy of a SqliteValue that outlives the
+// `_value_dup` creates a deep copy of a SqliteApiValue that outlives the
 // current callback frame — essential when user functions cache
 // arguments for later use (e.g. aggregate accumulators).  `_value_free`
 // releases a dup'd handle.

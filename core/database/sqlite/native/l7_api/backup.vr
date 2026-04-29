@@ -64,7 +64,7 @@ mount core.database.sqlite.native.backup_api.request.{
 };
 mount core.database.sqlite.native.errors.code.{ ExtendedCode, ExtIoErrRead, ExtIoErrWrite };
 mount core.database.sqlite.native.l7_api.database.{
-    Database, DbError,
+    Database, SqliteApiDbError,
     DbCannotOpen, DbIoError, DbCorrupt, DbReadonly,
     open_path_admin,
 };
@@ -130,7 +130,7 @@ fn read_total_pages(src: &Database) -> Int {
 public fn backup_init_to_path(
     src: &Database,
     dst_path: &Text,
-) -> Result<BackupSession, DbError> {
+) -> Result<BackupSession, SqliteApiDbError> {
     let mut dst = match open_path_admin(dst_path) {
         Ok(d)  => d,
         Err(e) => { return Err(e); }
@@ -144,7 +144,7 @@ public fn backup_init_to_path(
 public fn backup_init_into(
     src: &Database,
     dst: Database,
-) -> Result<BackupSession, DbError> {
+) -> Result<BackupSession, SqliteApiDbError> {
     let src_page_size = src.pager_view().page_size_view();
     let dst_page_size = dst.pager_view().page_size_view();
     if src_page_size != dst_page_size {
@@ -291,7 +291,7 @@ public fn backup_abandon(session: BackupSession) -> Database {
 public fn backup_to_path_in_one_go(
     src: &mut Database,
     dst_path: &Text,
-) -> Result<Database, DbError> {
+) -> Result<Database, SqliteApiDbError> {
     let session = match backup_init_to_path(src, dst_path) {
         Ok(s)  => s,
         Err(e) => { return Err(e); }
