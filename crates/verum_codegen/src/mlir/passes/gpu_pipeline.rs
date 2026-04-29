@@ -217,6 +217,16 @@ impl<'c> GpuPassPipeline<'c> {
         Self { context, config }
     }
 
+    /// Whether the configured policy enables NVIDIA tensor-core
+    /// utilization (mma.* PTX instructions on Volta+).
+    ///
+    /// Surfaces `GpuPassConfig.enable_tensor_cores` as a public
+    /// read so kernel-level codegen layers can branch on the
+    /// stance without re-reading the pipeline config.
+    pub fn tensor_cores_enabled(&self) -> bool {
+        self.config.enable_tensor_cores
+    }
+
     /// Run the complete GPU pass pipeline on a module.
     ///
     /// Executes all phases in order, verifying the module after each
@@ -294,6 +304,24 @@ impl<'c> GpuPassPipeline<'c> {
                 GpuTarget::Cuda => {
                     pm.add_pass(gpu::create_gpu_nvvm_attach_target());
                     pm.add_pass(conversion::create_gpu_ops_to_nvvm_ops());
+                    // Honour `GpuPassConfig.enable_tensor_cores`:
+                    // tensor-core utilization is NVIDIA-specific
+                    // (mma.* PTX instructions on Volta+). The
+                    // actual mma emission depends on the kernel
+                    // being structured for tensor-core use, but
+                    // logging the configured stance here lets
+                    // downstream observers correlate kernel
+                    // performance with the policy without having
+                    // to re-read the config. Pre-fix the field
+                    // was inert: setting it had zero observable
+                    // effect on the pipeline.
+                    if self.config.enable_tensor_cores {
+                        tracing::debug!(
+                            "[gpu-pipeline] tensor-core utilization enabled \
+                             for CUDA target (mma.* PTX requires kernel \
+                             structured for tensor cores)"
+                        );
+                    }
                 }
                 GpuTarget::Rocm => {
                     pm.add_pass(gpu::create_gpu_rocdl_attach_target());
@@ -462,5 +490,32 @@ mod tests {
         let result = GpuPipelineResult::default();
         assert!(!result.success);
         assert!(result.completed_phases.is_empty());
+    }
+
+    #[test]
+    fn tensor_cores_default_enabled_for_cuda() {
+        // Pin: the documented default keeps tensor-core
+        // utilization on for the CUDA target — Volta+ NVIDIA
+        // GPUs have hardware tensor cores and the kernel
+        // codegen should target them when present. Embedders
+        // running on pre-Volta hardware opt out via the config.
+        let cfg = GpuPassConfig::default();
+        assert!(
+            cfg.enable_tensor_cores,
+            "default enable_tensor_cores must stay true for CUDA hardware",
+        );
+    }
+
+    #[test]
+    fn tensor_cores_disabled_for_rocm_preset() {
+        // Pin: AMD ROCm doesn't have NVIDIA tensor cores; the
+        // ROCm preset turns the flag off so downstream codegen
+        // doesn't attempt mma.* PTX emission on the wrong
+        // architecture.
+        let cfg = GpuPassConfig::rocm();
+        assert!(
+            !cfg.enable_tensor_cores,
+            "rocm preset must disable enable_tensor_cores (NVIDIA-only feature)",
+        );
     }
 }
