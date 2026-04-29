@@ -1107,6 +1107,39 @@ implement<T: Debug> Debug for ManuallyDrop<T> {
     }
 }
 
+// Display delegates transparently — ManuallyDrop is a drop-suppression
+// wrapper, conceptually invisible to user-facing rendering.  Mirrors
+// the Heap<T> / Shared<T> / Cow<T> Display convention.
+implement<T: Display> Display for ManuallyDrop<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        self.value.fmt(f)
+    }
+}
+
+implement<T: Eq> Eq for ManuallyDrop<T> {
+    fn eq(&self, other: &ManuallyDrop<T>) -> Bool {
+        self.value == other.value
+    }
+}
+
+implement<T: Ord> Ord for ManuallyDrop<T> {
+    fn cmp(&self, other: &ManuallyDrop<T>) -> Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
+implement<T: Hash> Hash for ManuallyDrop<T> {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.value.hash(hasher);
+    }
+}
+
+implement<T: Default> Default for ManuallyDrop<T> {
+    fn default() -> ManuallyDrop<T> {
+        ManuallyDrop { value: T.default() }
+    }
+}
+
 // =============================================================================
 // MaybeUninit<T> - Uninitialized memory
 // =============================================================================
