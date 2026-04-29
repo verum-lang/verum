@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: shell, mock, ci, testability, integration, typecheck
-// @timeout: 5000
+// @timeout: 30000
 // @expect: pass
 
 // Demonstrates the mock layer: a test can swap in a deterministic

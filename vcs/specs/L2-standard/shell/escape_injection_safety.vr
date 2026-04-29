@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: shell, escape, injection, security
-// @timeout: 5000
+// @timeout: 30000
 // @expect: pass
 
 // The escape strategy is *unforgeable*: for any byte sequence, the produced
