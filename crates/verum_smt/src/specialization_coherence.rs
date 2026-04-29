@@ -44,7 +44,7 @@ use std::time::{Duration, Instant};
 use verum_ast::span::Span;
 use verum_ast::ty::{Path, Type};
 use verum_common::{List, Map, Maybe, Set, Text};
-use verum_protocol_types::protocol_base::ProtocolImpl;
+use verum_protocol_types::protocol_base::{Protocol, ProtocolImpl};
 use verum_protocol_types::specialization::SpecializationLattice;
 use verum_common::ToText;
 
@@ -189,6 +189,15 @@ pub struct SpecializationVerifier {
     /// Known type parameters from registered implementations
     /// Maps implementation index to set of type parameter names
     known_type_params: Map<usize, Set<Text>>,
+    /// Protocol declaration registry, keyed by protocol short name.
+    ///
+    /// Populated externally via [`register_protocol`]. The
+    /// `super_protocols` field of each `Protocol` declares the parent
+    /// protocols in the hierarchy (`A : B` means B is in A's super list).
+    /// Used by [`is_subprotocol`] to traverse the hierarchy graph so the
+    /// coherence checker can recognize that types implementing
+    /// subprotocols also satisfy their superprotocols.
+    protocols: Map<Text, Protocol>,
 }
 
 impl SpecializationVerifier {
@@ -208,7 +217,31 @@ impl SpecializationVerifier {
             lattice: SpecializationLattice::new(default_protocol),
             comparison_cache: Map::new(),
             known_type_params: Map::new(),
+            protocols: Map::new(),
         })
+    }
+
+    /// Register a protocol declaration so the coherence checker can
+    /// traverse the super-protocol hierarchy. Idempotent: re-registering
+    /// the same name overwrites the previous definition.
+    pub fn register_protocol(&mut self, protocol: Protocol) {
+        self.protocols.insert(protocol.name.clone(), protocol);
+    }
+
+    /// Public reflection over the protocol hierarchy: returns `true` iff
+    /// `sub_name` is reachable from `super_name` via the
+    /// super-protocol graph (reflexively, transitively).
+    ///
+    /// This is the public surface over the internal `is_subprotocol`
+    /// walker — useful for diagnostics, external coherence consumers, and
+    /// tests that pin the hierarchy contract without having to construct
+    /// a full `ProtocolImpl` to drive it indirectly.
+    pub fn is_subprotocol_by_name(&self, sub_name: &str, super_name: &str) -> bool {
+        let path = Path::single(verum_ast::ty::Ident {
+            name: sub_name.into(),
+            span: verum_ast::span::Span::default(),
+        });
+        self.is_subprotocol(&path, super_name)
     }
 
     /// Register an implementation
@@ -1466,26 +1499,56 @@ impl SpecializationVerifier {
         true
     }
 
-    /// Check if a protocol is a subprotocol of another
+    /// Check if `sub_protocol` is a subprotocol of `super_protocol_name`,
+    /// reflexively or transitively, by walking the super-protocol graph.
     ///
-    /// Uses the protocol hierarchy to determine if `sub_protocol` : `super_protocol`
+    /// Uses BFS over the `protocols` registry. Each protocol's
+    /// `super_protocols` list provides the next frontier. A `visited` set
+    /// guards against cycles in malformed declarations (e.g., user writes
+    /// `protocol A: B { ... }` and `protocol B: A { ... }` — cycles
+    /// shouldn't typecheck, but the coherence walker must still terminate
+    /// rather than loop forever during checking).
+    ///
+    /// Pre-fix this returned `false` for everything except the trivial
+    /// reflexive case, which silently broke `type_implements_protocol_local`:
+    /// types implementing subprotocols were not recognized as satisfying
+    /// their superprotocols, narrowing valid specializations.
     fn is_subprotocol(&self, sub_protocol: &Path, super_protocol_name: &str) -> bool {
-        // Get the subprotocol name
         let sub_name = sub_protocol.as_ident().map(|i| i.as_str()).unwrap_or("");
-
-        // Same protocol is trivially a subprotocol
+        if sub_name.is_empty() {
+            return false;
+        }
         if sub_name == super_protocol_name {
             return true;
         }
 
-        // Check using protocol_smt's hierarchy verification
-        // Note: Full implementation would query the protocol hierarchy table
-        // For now, we use a simple syntactic check
+        let mut visited: Set<Text> = Set::new();
+        let mut frontier: Vec<Text> = vec![Text::from(sub_name)];
 
-        // Check if any superprotocol of the subprotocol matches the target
-        // This would require looking up the protocol definitions
-        // For now, return false as a conservative default
-        // Full implementation would traverse the protocol hierarchy graph
+        while let Some(current) = frontier.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            let Some(proto) = self.protocols.get(&current) else {
+                continue;
+            };
+            for bound in proto.super_protocols.iter() {
+                let parent_name = bound
+                    .protocol
+                    .as_ident()
+                    .map(|i| i.as_str())
+                    .unwrap_or("");
+                if parent_name.is_empty() {
+                    continue;
+                }
+                if parent_name == super_protocol_name {
+                    return true;
+                }
+                if !visited.contains(&Text::from(parent_name)) {
+                    frontier.push(Text::from(parent_name));
+                }
+            }
+        }
         false
     }
 
