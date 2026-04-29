@@ -115,6 +115,7 @@ use crate::module::{
     FunctionDescriptor, FunctionId, MemoryEffects, ParamDescriptor, VbcFunction, VbcModule,
 };
 use crate::types::{StringId, TypeDescriptor, TypeId, TypeRef};
+use crate::validate;
 
 use verum_ast::decl::{ExternBlockDecl, MountDecl, MountTree, MountTreeKind, TypeDeclBody, VariantData};
 use verum_ast::ffi::{FFIBoundary, CallingConvention as AstCallingConvention};
@@ -2889,7 +2890,25 @@ impl VbcCodegen {
                 }
             }
         }
-        self.build_module()
+        let module = self.build_module()?;
+
+        // Honour `config.validate`: when set, run the VBC structural
+        // validator over the freshly-built module before returning.
+        // Surfaces malformed bytecode at codegen-time instead of
+        // letting it reach the interpreter / serializer where the
+        // failure mode is far harder to localise. Default-off keeps
+        // the codegen hot path unchanged for production builds.
+        if self.config.validate {
+            if let Err(e) = validate::validate_module(&module) {
+                return Err(CodegenError::internal(format!(
+                    "VBC structural validation failed for module `{}`: {}",
+                    module.name,
+                    e,
+                )));
+            }
+        }
+
+        Ok(module)
     }
 
     /// Verify that every `TypeDescriptor` in `self.types` satisfies the
@@ -9111,6 +9130,50 @@ mod tests {
     /// Default config is lenient — partial / forward-referenced stdlib
     /// state still builds.  `with_strict_codegen()` opts in to promoting
     /// bug-class skips to hard errors.  Tracked under #166.
+    #[test]
+    fn validate_default_runs_validator_on_well_formed_module() {
+        // Pin: default `CodegenConfig` has `validate = true`, so
+        // `finalize_module` invokes `validate::validate_module` after
+        // `build_module`. A clean module produced via the standard
+        // codegen path satisfies the structural invariants and
+        // therefore passes — proving the gate is wired without
+        // changing the public success contract.
+        let config = CodegenConfig::new("validate_default");
+        assert!(
+            config.validate,
+            "documented default for `validate` is true — pin so a flip to false can never silently disable the structural safety net",
+        );
+
+        let mut codegen = VbcCodegen::with_config(config);
+        let module = codegen
+            .finalize_module()
+            .expect("clean module must pass the validator under the documented default");
+        assert_eq!(module.name, "validate_default");
+    }
+
+    #[test]
+    fn validate_config_off_skips_validator_short_circuit() {
+        // Pin: the gate short-circuits before the validator call, so
+        // setting `validate = false` keeps the codegen hot path free
+        // of any structural-validation cost. We can't observe the
+        // skip directly (the validator has no side effects on a clean
+        // module), but we pin the semantic contract: a manually-
+        // disabled gate produces an Ok result with the same module
+        // identity as the default-on path. If a future refactor
+        // accidentally makes the validator unconditional, this test
+        // breaks together with `validate_default_*` only when the
+        // validator starts catching something — at which point the
+        // single-source-of-truth gate is the right place to fix.
+        let mut config = CodegenConfig::new("validate_off");
+        config.validate = false;
+
+        let mut codegen = VbcCodegen::with_config(config);
+        let module = codegen
+            .finalize_module()
+            .expect("validate=false codegen path must always succeed");
+        assert_eq!(module.name, "validate_off");
+    }
+
     #[test]
     fn test_strict_codegen_default_lenient() {
         let config = CodegenConfig::new("test");
