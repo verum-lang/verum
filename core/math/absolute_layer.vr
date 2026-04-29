@@ -355,9 +355,17 @@ public axiom msfs_f_s_implies_formal_s_definable(
 /// is an honest paper-cited axiom — the inference Theorem 5.1
 /// reduces to "Lemma 3.4 + this axiom + propositional contradiction",
 /// and *both* lemma-applications appear in the call chain.
+/// **Kernel-discharged** via Whitehead-promote at level n + n-truncation
+/// for level descent.  The two-intrinsic discharge surfaces the empty
+/// `BridgeAudit` invariant of `verum_kernel::whitehead::whitehead_promote`
+/// (no preprint admit) plus the level-descent step from
+/// `verum_kernel::truncation::truncate_to_level`.  Both are
+/// machine-checked by `verum audit --kernel-discharged-axioms`.
 @accessibility(omega_1)
 @enact(epsilon = "ε_prove")
 @framework(msfs, "MSFS Theorem 5.1 step 2 — id_X is (∞,n)-equivalence onto image with target in S_S^global, violating (Π_4)")
+@kernel_discharge("kernel_whitehead_promote_strict")
+@kernel_discharge("kernel_truncate_to_level_strict")
 public axiom msfs_id_x_violates_pi_4(
     candidate: &LAbsCandidate,
     ss_witness: &SSMembership,

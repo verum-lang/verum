@@ -4523,6 +4523,232 @@ pub fn audit_bridge_admits_with_format(format: AuditFormat) -> Result<()> {
 }
 
 // =============================================================================
+// Kernel-discharged-axioms audit
+// =============================================================================
+
+/// `verum audit --kernel-discharged-axioms` — walks every `.vr` file in the
+/// project, finds every `@kernel_discharge("<intrinsic_name>")` attribute,
+/// and verifies that every cited dispatcher name appears in
+/// `verum_kernel::intrinsic_dispatch::available_intrinsics()`.
+///
+/// This is the **machine-checked cross-link** between the host stdlib's
+/// paper-cited `@axiom` declarations and the algorithmic V0 kernel surfaces:
+/// when an axiom carries `@kernel_discharge(...)`, we audit-prove (a) the
+/// named dispatcher exists, (b) the trusted-base-shrinkage gain is
+/// observable in the report.
+///
+/// Exits non-zero on any unmatched citation.
+pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::literal::{LiteralKind, StringLit};
+    use verum_common::Maybe;
+    use verum_kernel::intrinsic_dispatch::is_known_intrinsic;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Kernel-discharged framework axioms — audit");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    /// One @kernel_discharge citation site found in the corpus.
+    struct DischargeCite {
+        axiom_name: Text,
+        intrinsic_name: Text,
+        file: PathBuf,
+        recognised: bool,
+    }
+
+    let mut cites: Vec<DischargeCite> = Vec::new();
+    let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            let (item_name, decl_attrs): (
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
+                ItemKind::Theorem(decl) => (decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => (decl.name.name.clone(), &decl.attributes),
+                ItemKind::Corollary(decl) => (decl.name.name.clone(), &decl.attributes),
+                _ => continue,
+            };
+
+            // Scan both the outer item.attributes and the inner decl.attributes.
+            let attr_iters: [&verum_common::List<verum_ast::attr::Attribute>; 2] =
+                [&item.attributes, decl_attrs];
+
+            for attrs in attr_iters {
+                for attr in attrs {
+                    let name = attr.name.as_str();
+                    if name != "kernel_discharge" {
+                        continue;
+                    }
+                    // Expect a single string-literal argument identifying
+                    // the kernel intrinsic.
+                    let args_list = match &attr.args {
+                        Maybe::Some(list) => list,
+                        Maybe::None => {
+                            malformed.push((
+                                rel_path.clone(),
+                                Text::from(format!(
+                                    "{}: @kernel_discharge() called without an intrinsic name",
+                                    item_name.as_str()
+                                )),
+                            ));
+                            continue;
+                        }
+                    };
+                    let first_arg = match args_list.iter().next() {
+                        Some(e) => e,
+                        None => {
+                            malformed.push((
+                                rel_path.clone(),
+                                Text::from(format!(
+                                    "{}: @kernel_discharge() called with empty args",
+                                    item_name.as_str()
+                                )),
+                            ));
+                            continue;
+                        }
+                    };
+                    let intrinsic_name: Text = match &first_arg.kind {
+                        ExprKind::Literal(lit) => match &lit.kind {
+                            LiteralKind::Text(StringLit::Regular(s))
+                            | LiteralKind::Text(StringLit::MultiLine(s)) => s.clone(),
+                            _ => {
+                                malformed.push((
+                                    rel_path.clone(),
+                                    Text::from(format!(
+                                        "{}: @kernel_discharge expects a string-literal argument",
+                                        item_name.as_str()
+                                    )),
+                                ));
+                                continue;
+                            }
+                        },
+                        _ => {
+                            malformed.push((
+                                rel_path.clone(),
+                                Text::from(format!(
+                                    "{}: @kernel_discharge expects a string-literal argument",
+                                    item_name.as_str()
+                                )),
+                            ));
+                            continue;
+                        }
+                    };
+                    let intrinsic = intrinsic_name;
+                    let recognised = is_known_intrinsic(intrinsic.as_str());
+                    cites.push(DischargeCite {
+                        axiom_name: item_name.clone(),
+                        intrinsic_name: intrinsic,
+                        file: rel_path.clone(),
+                        recognised,
+                    });
+                }
+            }
+        }
+    }
+
+    let total = cites.len();
+    let unrecognised = cites.iter().filter(|c| !c.recognised).count();
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!(
+                "  {:<48}  {:<46}  {}",
+                "Axiom", "Kernel intrinsic discharge", "Status"
+            );
+            println!(
+                "  {}  {}  {}",
+                "─".repeat(48),
+                "─".repeat(46),
+                "─".repeat(8)
+            );
+            for cite in &cites {
+                let status = if cite.recognised { "✓ ok" } else { "✗ MISSING" };
+                println!(
+                    "  {:<48}  {:<46}  {}",
+                    cite.axiom_name.as_str(),
+                    cite.intrinsic_name.as_str(),
+                    status
+                );
+            }
+            println!();
+            println!(
+                "  {} files scanned, {} parsed, {} skipped; {} discharge citations, {} unrecognised",
+                vr_files.len(),
+                parsed_files,
+                skipped_files,
+                total,
+                unrecognised
+            );
+            for (path, msg) in &malformed {
+                eprintln!(
+                    "  E_KERNEL_DISCHARGE_MALFORMED at {}: {}",
+                    path.display(),
+                    msg.as_str()
+                );
+            }
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"files_scanned\": {},\n", vr_files.len()));
+            out.push_str(&format!("  \"files_parsed\": {},\n", parsed_files));
+            out.push_str(&format!("  \"files_skipped\": {},\n", skipped_files));
+            out.push_str(&format!("  \"discharge_count\": {},\n", total));
+            out.push_str(&format!("  \"unrecognised_count\": {},\n", unrecognised));
+            out.push_str("  \"discharges\": [\n");
+            for (i, cite) in cites.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {{ \"axiom\": \"{}\", \"intrinsic\": \"{}\", \"file\": \"{}\", \"recognised\": {} }}{}\n",
+                    json_escape(cite.axiom_name.as_str()),
+                    json_escape(cite.intrinsic_name.as_str()),
+                    json_escape(&cite.file.display().to_string()),
+                    cite.recognised,
+                    if i + 1 < cites.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            println!("{}", out);
+        }
+    }
+
+    if unrecognised > 0 || !malformed.is_empty() {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "@kernel_discharge audit: {} unrecognised + {} malformed citations",
+            unrecognised,
+            malformed.len()
+        )));
+    }
+    Ok(())
+}
+
+// =============================================================================
 // HTT mechanisation roadmap audit
 // =============================================================================
 

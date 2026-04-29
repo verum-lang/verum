@@ -484,8 +484,16 @@ pub fn available_intrinsics() -> &'static [&'static str] {
 }
 
 /// Returns true iff the given name is an available kernel intrinsic.
+///
+/// Recognises both the bare dispatcher name (e.g.
+/// `kernel_grothendieck_construction`) AND its `_strict` form
+/// (`kernel_grothendieck_construction_strict`); the strict form is the
+/// refinement-typed bridge declared in `core/proof/kernel_bridge.vr`
+/// whose argument types encode the dispatcher's preconditions, but the
+/// underlying dispatch surface is the same.
 pub fn is_known_intrinsic(name: &str) -> bool {
-    available_intrinsics().contains(&name)
+    let bare = name.strip_suffix("_strict").unwrap_or(name);
+    available_intrinsics().contains(&bare)
 }
 
 /// Used by the discharge auditor to ensure that a Verum-side
@@ -1135,6 +1143,16 @@ mod tests {
         assert!(is_known_intrinsic("kernel_grothendieck_construction"));
         assert!(!is_known_intrinsic("kernel_undefined"));
         assert!(!is_known_intrinsic(""));
+    }
+
+    #[test]
+    fn is_known_intrinsic_recognises_strict_suffix() {
+        // The strict form is the refinement-typed bridge; underlying
+        // dispatcher is the same.
+        assert!(is_known_intrinsic("kernel_grothendieck_construction_strict"));
+        assert!(is_known_intrinsic("kernel_whitehead_promote_strict"));
+        assert!(is_known_intrinsic("kernel_truncate_to_level_strict"));
+        assert!(!is_known_intrinsic("kernel_undefined_strict"));
     }
 
     #[test]
