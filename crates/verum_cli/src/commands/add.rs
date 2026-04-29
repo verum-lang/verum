@@ -57,6 +57,30 @@ pub fn add(options: AddOptions) -> Result<()> {
         options.name.as_str().cyan()
     ));
 
+    // Surface inert AddOptions fields. `cbgr_profile` (CBGR
+    // optimization profile to apply when building this dep) and
+    // `prefer_ipfs` (route registry fetches through IPFS first
+    // before HTTPS) flow from CLI flags but no current path
+    // consults them — the dep gets added to the manifest with
+    // the standard registry/git/ipfs/path source resolution
+    // regardless of the profile or transport preference.
+    // Closes the inert-defense pattern by routing the requested
+    // values through tracing so embedders writing
+    // `verum add foo --cbgr-profile=Strict` or
+    // `--prefer-ipfs` see the request was observed at the
+    // command entry, even when the integration with build-time
+    // profile selection / IPFS-first transport isn't yet
+    // realised.
+    if options.cbgr_profile.is_some() || options.prefer_ipfs {
+        tracing::debug!(
+            "verum add: cbgr_profile={:?}, prefer_ipfs={} — these fields \
+             are forward-looking; the registry/git/ipfs/path source path \
+             does not yet differentiate behaviour based on them",
+            options.cbgr_profile.as_ref().map(|t| t.as_str()),
+            options.prefer_ipfs,
+        );
+    }
+
     // Find manifest
     let manifest_dir = Manifest::find_manifest_dir()?;
     let manifest_path = Manifest::manifest_path(&manifest_dir);
