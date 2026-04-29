@@ -56,7 +56,7 @@ fn update_single_cog(package: &str, options: &UpdateOptions) -> Result<()> {
         .map(|p| p.version.clone());
 
     // Fetch latest version
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let latest_version = client.get_latest_version(package)?;
 
     if let Some(current) = &current_version {
@@ -108,7 +108,7 @@ fn update_all_cogs(options: &UpdateOptions) -> Result<()> {
     }
 
     let mut lockfile = Lockfile::from_file(&lockfile_path)?;
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
 
     let mut updated: List<Text> = List::new();
     let mut failed: List<(Text, Text)> = List::new();

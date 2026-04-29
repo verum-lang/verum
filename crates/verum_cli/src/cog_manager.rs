@@ -32,7 +32,7 @@ pub struct CogManager {
 impl CogManager {
     /// Create new cog manager
     pub fn new(work_dir: PathBuf) -> Result<Self> {
-        let registry = RegistryClient::default()?;
+        let registry = RegistryClient::from_manifest()?;
         let cache_dir = CacheManager::default_cache_dir()?;
         let cache = CacheManager::new(cache_dir)?;
         let security = SecurityScanner::new();

@@ -25,7 +25,7 @@ impl Default for SearchOptions {
 pub fn search(options: SearchOptions) -> Result<()> {
     ui::step(&format!("Searching for: {}", options.query.as_str().cyan()));
 
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     let results = client.search(options.query.as_str(), options.limit)?;
 
     if results.is_empty() {

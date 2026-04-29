@@ -613,7 +613,7 @@ fn publish_member_to_registry(member_path: &Path, _config: &Config) -> Result<()
     let token = get_workspace_auth_token()?;
 
     // Publish to registry
-    let client = RegistryClient::default()?;
+    let client = RegistryClient::from_manifest()?;
     client.publish(&metadata, &cog_file, token.as_str())?;
 
     // Clean up temporary file

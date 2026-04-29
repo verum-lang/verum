@@ -30,7 +30,7 @@ impl RegistryMirror {
         use super::client::RegistryClient;
         use tempfile::TempDir;
 
-        let client = RegistryClient::default()?;
+        let client = RegistryClient::from_manifest()?;
         let mut synced = 0;
 
         for package in packages {
