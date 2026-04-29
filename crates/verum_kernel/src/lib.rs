@@ -189,6 +189,34 @@ pub use infinity_category::{
     compose, compose_is_associative, identity_is_equivalence, is_equivalence_at,
 };
 
+/// HTT 5.1.4 ∞-Grothendieck construction — V0 algorithmic kernel rule.
+/// The load-bearing technical pivot for MSFS Lemma 3.4 (and AFN-T).
+/// Pre-this-module the construction was admitted as
+/// `lurie_htt_5_1_4_syn_is_grothendieck` framework axiom; V0 ships an
+/// algorithmic builder that constructively produces the total
+/// Cartesian fibration `∫D = { (b, x) : b ∈ B, x ∈ D(b) }` from any
+/// `S`-indexed diagram, with explicit accessibility-preservation
+/// witness per AR 1.26.
+///
+/// V1 promotion: full ∞-categorical higher-cell content (associator
+/// 2-cells, pentagonal coherence) — gates Theorem 9.3 Step 1.
+pub mod grothendieck;
+pub use grothendieck::{
+    GrothendieckConstruction, SIndexedDiagram, build_grothendieck,
+};
+
+/// Adámek-Rosický 1.26 — λ-filtered colimit closure of κ-accessible
+/// categories.  V0 algorithmic kernel rule.  Discharges the
+/// "κ_1-accessibility preserved under transfinite-tower colimit"
+/// invariant that gates MSFS §6 β-part Step 4.  Pre-this-module
+/// admitted via msfs_lemma_A_8_adamek_rosicky framework axiom;
+/// V0 ships the constructive closure operation itself.
+pub mod accessibility;
+pub use accessibility::{
+    FilteredColimit, KappaAccessibleCategory, LambdaFilteredDiagram,
+    build_filtered_colimit, cofinality_bound_holds,
+};
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a
