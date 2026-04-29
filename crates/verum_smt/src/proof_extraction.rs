@@ -148,9 +148,21 @@ impl ProofGenerationConfig {
 
     /// Apply this configuration to a Z3 Config object
     ///
-    /// This sets up Z3's internal configuration for proof generation.
+    /// This sets up Z3's internal configuration for proof
+    /// generation. Closes the inert-defense pattern around
+    /// `enable_unsat_cores`: previously the field was set on
+    /// the config but never reached Z3 — extracting an unsat
+    /// core required a side-channel call. Now both
+    /// `enable_proofs` and `enable_unsat_cores` flow through
+    /// to the Z3 Config in one place.
     pub fn apply_to_z3_config(&self, cfg: &mut Config) {
         cfg.set_proof_generation(self.enable_proofs);
+        // unsat_core is a documented Config-level Z3 param;
+        // forwarding it here means every solver constructed
+        // under `with_config` inherits the policy without
+        // needing to re-call `set_params({unsat_core: true})`
+        // per query.
+        cfg.set_bool_param_value("unsat_core", self.enable_unsat_cores);
     }
 
     /// Execute code with this proof generation configuration
