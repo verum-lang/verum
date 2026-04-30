@@ -1160,3 +1160,98 @@ fn proof_block_let_literal_as_type_fails() {
         }
     "#));
 }
+
+// ============================================================================
+// Proof-block bare-expression-step disambiguation (regression for stdlib
+// monad-law theorems whose proof tail is a bare equality / logical
+// expression — `bound == direct`, `lhs.value == rhs.value && …`, etc.).
+//
+// Pre-fix the Ident-arm of `parse_proof_step` consumed the leading
+// path as a Named tactic and then the proof-step loop failed at the
+// trailing binop, surfacing as "expected proof step" warnings in the
+// existing stdlib (core/action/monads/{reader, writer}.vr). Post-fix
+// a bounded forward scan looks for top-level `==` / `!=` / `<` / `<=`
+// / `>` / `>=` / `&&` / `||` and routes to the bare-expression path.
+// ============================================================================
+
+#[test]
+fn proof_block_bare_equality_tail_parses() {
+    assert_parses(r#"
+        theorem eq_thm(a: Int, b: Int) -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                let lhs: Int = a;
+                let rhs: Int = b;
+                lhs == rhs
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_field_access_equality_parses() {
+    // Pin the `bound.value == rhs.value` shape (writer.vr).
+    assert_parses(r#"
+        type Pair is { value: Int, output: Bool };
+
+        theorem field_eq_thm(p: Pair, q: Pair) -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                p.value == q.value && p.output == q.output
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_logical_combination_parses() {
+    // Pin `&&` and `||` work as top-level proof-step expressions.
+    assert_parses(r#"
+        theorem logical_thm(a: Bool, b: Bool) -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                a || b
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_tactic_with_args_still_parses() {
+    // Regression guard: tactic calls like `induction(n)` must NOT
+    // be misrouted to the bare-expression path.
+    assert_parses(r#"
+        theorem tactic_thm(n: Int) -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                trivial
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_paren_grouped_binop_inside_call_parses() {
+    // Pin the depth-counter logic: a `==` INSIDE a function-call
+    // parens (i.e. `f(x == y)`) must NOT route to expression-path
+    // — the call itself is a tactic. The depth counter prevents
+    // false positives.
+    assert_parses(r#"
+        theorem grouped_thm() -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                trivial
+            }
+        }
+    "#);
+}
