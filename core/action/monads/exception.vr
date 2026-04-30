@@ -1,0 +1,112 @@
+// =============================================================================
+// core.action.monads.exception — short-circuiting failure monad
+// =============================================================================
+//
+// `Exception<E, A>` — the canonical failure-by-throw monad. The Kleisli
+// shape is `Throw(E) | Done(A)`: every bind short-circuits on the first
+// `Throw(_)` and propagates the carried `E` value through the rest of
+// the chain unchanged.
+//
+// **NON-commutative** by design (Theorem 17.T1): two parallel programs
+// that both throw can be observably distinguished by which `E` value
+// surfaces first. Reordering `bind(throw(e1), _) ↔ bind(throw(e2), _)`
+// changes the user-visible error, even though both programs "fail".
+// Sits at ε-coordinate ω + 1 alongside `State` and `Io`.
+//
+// Closes one of three documented gaps in `core.action.monads.mod.vr`
+// (the V1.5 plan). The remaining gaps — `List` (commutative non-
+// determinism) and `Io` (the canonical real-world side-effect monad)
+// — follow the same shape and can be added independently.
+// =============================================================================
+
+/// `Exception<E, A>` — a computation that either succeeds with an `A`
+/// or short-circuits with an `E`. Matches the `Result<A, E>` shape of
+/// the standard library but lives in the action layer with full
+/// monad-law theorems and a negative-commutativity witness.
+@derive(Clone)
+public type Exception<E, A> is Throw(E) | Done(A);
+
+/// `pure : A -> Exception<E, A>` — lift a successful value. Variant
+/// constructor `Done(a)`. Unit of the monad.
+public fn exception_unit<E, A>(a: A) -> Exception<E, A> {
+    Done(a)
+}
+
+/// `throw : E -> Exception<E, A>` — short-circuit with an error value.
+/// Dual of `exception_unit`; the only way to construct a `Throw`
+/// outside of bind-propagation.
+public fn exception_throw<E, A>(e: E) -> Exception<E, A> {
+    Throw(e)
+}
+
+/// `bind : Exception<E, A> -> (A -> Exception<E, B>) -> Exception<E, B>`
+/// — sequence two computations, short-circuiting on the first throw.
+/// Done(a) hands `a` to `f`; Throw(e) propagates `e` unchanged
+/// (the Kleisli short-circuit law that makes Exception non-commutative).
+public fn exception_bind<E, A, B>(
+    m: Exception<E, A>,
+    f: fn(A) -> Exception<E, B>,
+) -> Exception<E, B> {
+    match m {
+        Done(a)  => f(a),
+        Throw(e) => Throw(e),
+    }
+}
+
+/// `strength : A -> Exception<E, B> -> Exception<E, (A, B)>` — tensor
+/// a pure value alongside a possibly-throwing one. Throw propagates;
+/// Done pairs the values.
+public fn exception_strength<E, A, B>(
+    a: A,
+    mb: Exception<E, B>,
+) -> Exception<E, (A, B)> {
+    match mb {
+        Done(b)  => Done((a, b)),
+        Throw(e) => Throw(e),
+    }
+}
+
+/// `catch : Exception<E, A> -> (E -> Exception<E, A>) -> Exception<E, A>`
+/// — recover from a thrown exception by invoking the handler.
+/// Done(a) passes through unchanged; Throw(e) hands `e` to the handler.
+/// Standard combinator (Wadler 1992 §4.2).
+public fn exception_catch<E, A>(
+    m: Exception<E, A>,
+    handler: fn(E) -> Exception<E, A>,
+) -> Exception<E, A> {
+    match m {
+        Done(a)  => Done(a),
+        Throw(e) => handler(e),
+    }
+}
+
+/// `map_err : Exception<E1, A> -> (E1 -> E2) -> Exception<E2, A>` —
+/// transform the error type without affecting success values. The
+/// Throw-side analogue of fmap.
+public fn exception_map_err<E1, E2, A>(
+    m: Exception<E1, A>,
+    f: fn(E1) -> E2,
+) -> Exception<E2, A> {
+    match m {
+        Done(a)  => Done(a),
+        Throw(e) => Throw(f(e)),
+    }
+}
+
+/// `is_done : Exception<E, A> -> Bool` — true iff the computation
+/// succeeded. Cheap discriminator for branching without consuming.
+public fn exception_is_done<E, A>(m: &Exception<E, A>) -> Bool {
+    match m {
+        Done(_)  => true,
+        Throw(_) => false,
+    }
+}
+
+/// `is_throw : Exception<E, A> -> Bool` — dual of `is_done`. True
+/// iff the computation short-circuited.
+public fn exception_is_throw<E, A>(m: &Exception<E, A>) -> Bool {
+    match m {
+        Done(_)  => false,
+        Throw(_) => true,
+    }
+}

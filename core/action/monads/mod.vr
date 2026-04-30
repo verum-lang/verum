@@ -17,9 +17,11 @@
 //     compose under coherent-concurrent without explicit
 //     synchronisation — used by VVA §11.2 to demonstrate the gate.
 //
-// V1.5 will add `List`, `Probability`, `Exception`, `Io`. V2 will add
-// monad-laws verification through `@verify(formal)` instead of the
-// V1 trusted-boundary axioms.
+// V1.5 partial — `Probability` (commit history) and `Exception` (this
+// commit) are now wired with full monad-law theorems. Remaining V1.5
+// gaps: `List` (commutative non-determinism) and `Io` (canonical
+// real-world side-effect monad). V2 will lift the monad-laws from
+// V1 trusted-boundary axioms to `@verify(formal)`-discharged proofs.
 //
 // Each monad ships:
 //   - data type with the canonical Kleisli shape;
@@ -37,3 +39,6 @@ public mount core.action.monads.state;
 // VVA-Tier-A V0 — probabilistic + quantum effect classes.
 public mount core.action.monads.probability;
 public mount core.action.monads.quantum;
+// VVA-Tier-A V1.5 — short-circuiting failure monad (non-commutative,
+// ε-coordinate ω + 1 alongside State / Io).
+public mount core.action.monads.exception;
