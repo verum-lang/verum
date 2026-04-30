@@ -1,0 +1,41 @@
+// =============================================================================
+// kernel_v0 — Module aggregator
+// =============================================================================
+//
+// Single import point for the bootstrap-verified minimal kernel.
+// Downstream consumers (audit gates, future Verum-language proofs)
+// `mount core.verify.kernel_v0.{...}` to access the kernel surface.
+//
+// **What's exported**
+//
+//   - CoreTerm     (the inductive term language, 5 variants)
+//   - Context      (de Bruijn-indexed type stack)
+//   - Judgment     (the well-typedness statement Γ ⊢ t : T)
+//   - Derivation   (constructive proof of a judgment)
+//   - The 10 inference rules (rules/k_*.vr)
+//   - The kernel_soundness theorem (soundness.vr)
+//
+// **Trust delegation post-Phase-3**
+//
+// A reviewer who reads this directory has audited the entire
+// trusted base.  Nothing else in the Verum tree contributes to the
+// kernel verdict.  ~500 LOC Verum + ~100 LOC bootstrap shim + ZFC
+// + 2 inaccessibles.
+//
+// **What's NOT here**
+//
+//   - Refinement-subtype rules — separate kernel_refine extension layer
+//   - Cubical extensions (Path, hcomp) — separate kernel_cubical layer
+//   - Modal operators — separate kernel_modal layer
+//   - Quotient types — separate kernel_quotient layer
+//
+// Each extension is an independent kernel_*.{vr} mounting kernel_v0
+// + adding its own rules + soundness lemmas.  Corpora pick the
+// extensions they need; audit gates verify each layer independently.
+// =============================================================================
+
+module core.verify.kernel_v0.mod;
+
+mount super.core_term.{CoreTerm, type_universe};
+mount super.context.{Context, empty as context_empty, extend, lookup, depth};
+mount super.judgment.{Judgment, Derivation, DefinitionalEquality, term_of, type_of};
