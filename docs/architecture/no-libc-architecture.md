@@ -118,9 +118,9 @@ shipping):
 | ✅ `runtime.rs::get_or_declare_memcpy`        | `memcpy`              | Internal-linkage wrapper over `llvm.memcpy.p0.p0.i64`. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_memset`        | `memset`              | Internal-linkage wrapper over `llvm.memset.p0.i64`. **Closed.** |
 | `runtime.rs::get_or_declare_malloc`           | `malloc`              | `core/mem/allocator.vr`'s mmap-backed arena. **Open.** |
-| `runtime.rs::get_or_declare_unlink`           | `unlink`              | Linux `SYS_unlink` (87) ; libSystem on macOS. **Open.** |
-| `runtime.rs::get_or_declare_lseek`            | `lseek`               | Linux `SYS_lseek` (8) ; libSystem on macOS. **Open.** |
-| `runtime.rs::get_or_declare_access`           | `access`              | Linux `SYS_access` (21) ; libSystem on macOS. **Open.** |
+| ✅ `runtime.rs::get_or_declare_unlink`        | `unlink`              | Linux x86_64 `SYS_unlink` (87) / aarch64 `SYS_unlinkat` (35) ; libSystem on macOS. **Closed.** |
+| ✅ `runtime.rs::get_or_declare_lseek`         | `lseek`               | Linux `SYS_lseek` (8) direct syscall ; libSystem on macOS. **Closed.** |
+| ✅ `runtime.rs::get_or_declare_access`        | `access`              | Linux x86_64 `SYS_access` (21) / aarch64 `SYS_faccessat` (48) ; libSystem on macOS. **Closed.** |
 | `runtime.rs::get_or_declare_clock_gettime`    | `clock_gettime`       | Already replaced for Linux / macOS via direct syscall + libSystem; the helper itself remains for the macOS + other-Unix fallback paths.  Audit each remaining call. |
 | `runtime.rs::get_or_declare_nanosleep`        | `nanosleep`           | Same as clock_gettime.                       |
 | `runtime.rs::get_or_declare_freeaddrinfo`     | `freeaddrinfo`        | Audit usage; the resolver path likely shouldn't require this in a no-libc world. |

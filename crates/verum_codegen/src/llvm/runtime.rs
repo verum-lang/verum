@@ -6188,37 +6188,218 @@ impl<'ctx> RuntimeLowering<'ctx> {
         wrapper
     }
 
-    /// Get or declare unlink(path: *i8) -> i32.
+    /// Get or declare a libc-free `unlink(path) -> i32` wrapper.
+    ///
+    /// **Libc-free**: Linux uses `SYS_unlink` (87) direct syscall on
+    /// x86_64; aarch64 uses `SYS_unlinkat` (35) which takes
+    /// `(AT_FDCWD, path, 0)` instead of a bare path — we issue the
+    /// arch-correct call via target-triple inspection.  Other-Unix
+    /// routes through libSystem.
     fn get_or_declare_unlink(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("unlink") {
-            return f;
-        }
-        let i32_type = self.context.i32_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
-        module.add_function("unlink", fn_type, None)
-    }
-
-    /// Get or declare lseek(fd: i32, offset: i64, whence: i32) -> i64.
-    fn get_or_declare_lseek(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("lseek") {
+        let wrapper_name = "verum_internal_unlink";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(&[i32_type.into(), i64_type.into(), i32_type.into()], false);
-        module.add_function("lseek", fn_type, None)
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+
+        let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let path = wrapper.get_first_param().expect("unlink p0").into_pointer_value();
+
+        if target_is_linux(module) {
+            let path_addr = builder
+                .build_ptr_to_int(path, i64_type, "path_addr")
+                .expect("unlink path p2i");
+            let ret = if target_is_aarch64(module) {
+                // SYS_unlinkat(AT_FDCWD=-100, path, flags=0) = 35
+                let at_fdcwd = i64_type.const_int(u64::wrapping_sub(0, 100), false);
+                let flags = i64_type.const_zero();
+                self.emit_linux_syscall(&builder, module, 35, &[at_fdcwd, path_addr, flags])
+                    .expect("unlinkat syscall")
+            } else {
+                // SYS_unlink(path) = 87 on x86_64.
+                self.emit_linux_syscall(&builder, module, 87, &[path_addr])
+                    .expect("unlink syscall")
+            };
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("unlink ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("unlink return");
+        } else {
+            let libsys = module.get_function("__verum_libsys_unlink").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_unlink",
+                    i32_type.fn_type(&[ptr_type.into()], false),
+                    None,
+                );
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "unlink"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(libsys, &[path.into()], "ret")
+                .expect("unlink libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("unlink return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("unlink return");
+        }
+
+        wrapper
     }
 
-    /// Get or declare access(path: *i8, mode: i32) -> i32.
-    fn get_or_declare_access(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("access") {
+    /// Get or declare a libc-free `lseek(fd, offset, whence) -> i64` wrapper.
+    ///
+    /// **Libc-free**: Linux uses `SYS_lseek` (8) direct syscall.
+    /// Other-Unix routes through libSystem.
+    fn get_or_declare_lseek(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+        let wrapper_name = "verum_internal_lseek";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
+
+        let fn_type = i64_type.fn_type(&[i32_type.into(), i64_type.into(), i32_type.into()], false);
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let fd_i32 = wrapper.get_nth_param(0).expect("lseek p0").into_int_value();
+        let offset = wrapper.get_nth_param(1).expect("lseek p1").into_int_value();
+        let whence_i32 = wrapper.get_nth_param(2).expect("lseek p2").into_int_value();
+
+        if target_is_linux(module) {
+            let fd_i64 = builder
+                .build_int_s_extend(fd_i32, i64_type, "fd_i64")
+                .expect("lseek fd extend");
+            let whence_i64 = builder
+                .build_int_s_extend(whence_i32, i64_type, "whence_i64")
+                .expect("lseek whence extend");
+            // SYS_lseek = 8 on x86_64; on aarch64 it's the same number
+            // for the lseek shape (no off64_t variant).
+            let ret = self
+                .emit_linux_syscall(&builder, module, 8, &[fd_i64, offset, whence_i64])
+                .expect("lseek syscall");
+            builder.build_return(Some(&ret)).expect("lseek return");
+        } else {
+            let libsys = module.get_function("__verum_libsys_lseek").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_lseek",
+                    i64_type.fn_type(
+                        &[i32_type.into(), i64_type.into(), i32_type.into()],
+                        false,
+                    ),
+                    None,
+                );
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "lseek"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(
+                    libsys,
+                    &[fd_i32.into(), offset.into(), whence_i32.into()],
+                    "ret",
+                )
+                .expect("lseek libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("lseek return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("lseek return");
+        }
+
+        wrapper
+    }
+
+    /// Get or declare a libc-free `access(path, mode) -> i32` wrapper.
+    ///
+    /// **Libc-free**: Linux x86_64 uses `SYS_access` (21); aarch64
+    /// uses `SYS_faccessat` (48) with `AT_FDCWD` since `access` was
+    /// removed from the aarch64 syscall table.  Other-Unix routes
+    /// through libSystem.
+    fn get_or_declare_access(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+        let wrapper_name = "verum_internal_access";
+        if let Some(f) = module.get_function(wrapper_name) {
+            return f;
+        }
+        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
+
         let fn_type = i32_type.fn_type(&[ptr_type.into(), i32_type.into()], false);
-        module.add_function("access", fn_type, None)
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let path = wrapper.get_nth_param(0).expect("access p0").into_pointer_value();
+        let mode_i32 = wrapper.get_nth_param(1).expect("access p1").into_int_value();
+
+        if target_is_linux(module) {
+            let path_addr = builder
+                .build_ptr_to_int(path, i64_type, "path_addr")
+                .expect("access path p2i");
+            let mode_i64 = builder
+                .build_int_z_extend(mode_i32, i64_type, "mode_i64")
+                .expect("access mode extend");
+            let ret = if target_is_aarch64(module) {
+                // SYS_faccessat(AT_FDCWD=-100, path, mode) = 48
+                let at_fdcwd = i64_type.const_int(u64::wrapping_sub(0, 100), false);
+                self.emit_linux_syscall(&builder, module, 48, &[at_fdcwd, path_addr, mode_i64])
+                    .expect("faccessat syscall")
+            } else {
+                // SYS_access = 21 on x86_64.
+                self.emit_linux_syscall(&builder, module, 21, &[path_addr, mode_i64])
+                    .expect("access syscall")
+            };
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("access ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("access return");
+        } else {
+            let libsys = module.get_function("__verum_libsys_access").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_access",
+                    i32_type.fn_type(&[ptr_type.into(), i32_type.into()], false),
+                    None,
+                );
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "access"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(libsys, &[path.into(), mode_i32.into()], "ret")
+                .expect("access libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("access return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("access return");
+        }
+
+        wrapper
     }
 
     /// Get or declare a libc-free `write(fd, buf, count) -> i64` wrapper.
