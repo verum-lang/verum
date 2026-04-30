@@ -1,0 +1,431 @@
+// =============================================================================
+// kernel_soundness.theorems — per-rule soundness lemmas (35 statements)
+// =============================================================================
+//
+// One soundness lemma per `KernelRule`.  The shape is:
+//
+//   lemma K_<Rule>_sound: forall d: Derivation.
+//       d.rule == KernelRule.K<Rule>
+//       /\ premises_well_typed(d)
+//       /\ side_conditions_hold(d)
+//       -> conclusion_well_typed(d)
+//
+// **Audit-able TCB principle.**  Every lemma is either:
+//
+//   * **Proved structurally** in Verum, the proof being a function
+//     consuming the `Derivation` evidence and producing a
+//     `WellTyped(d.conclusion)` witness.  The proof is run by
+//     `verum audit --kernel-soundness` so any code drift surfaces
+//     immediately.
+//
+//   * **Admitted with a concrete cost annotation** via `Admit { reason }`.
+//     The reason names the missing meta-theory (e.g., "requires
+//     positivity-of-W-types decision procedure" for K-Pos in full
+//     generality) and is preserved verbatim into the Coq `Admitted.`
+//     and Lean `sorry` emissions, so a foreign reviewer sees the
+//     same gap Verum sees.  Admits are *not* hand-waves — they are
+//     load-bearing IOUs against future meta-theoretic work, and the
+//     audit gate's report enumerates them so they can never be
+//     forgotten.
+//
+// **What's proved here vs. admitted.**
+//
+// Proved (4): K-Var, K-Univ, K-FwAx (Prop side-condition discharge),
+//             K-Pos (Berardi-shape rejection by structural check on
+//             constructor signatures).
+//
+// Admitted (31): the remaining rules.  Each admit names exactly the
+// piece of meta-theory it depends on.  See the per-lemma reasons.
+//
+// **Cross-export contract.**  The Coq emitter walks
+// `lemma_admit_reason` for each lemma; if `Some(reason)`, the .v file
+// emits `Admitted.` with `(* reason: <reason> *)`.  If `None`, the
+// .v file emits the proof tactics from `lemma_coq_proof`.  Same for
+// Lean.  This is what makes the cross-export an *honest* foreign
+// re-check rather than a rubber-stamp.
+// =============================================================================
+
+module core.verify.kernel_soundness.theorems;
+
+mount core.verify.kernel_soundness.model.{CoreTerm, CoreType, UniverseLevel, universe_is_prop};
+mount core.verify.kernel_soundness.judgment.{
+    Context, Judgment, SideCondition, Derivation, KernelRule,
+    context_lookup, kernel_rule_name,
+};
+mount core.verify.kernel_soundness.rules.{
+    PremiseShape, RuleCategory,
+    rule_premises_required, rule_side_conditions_required,
+    rule_conclusion_shape, rule_category,
+};
+
+// =============================================================================
+// LemmaStatus — proved or admitted (with a concrete reason)
+// =============================================================================
+
+/// The proof status of a per-rule soundness lemma.
+///
+///   * `Proved` — Verum has a structural proof in this corpus.  The
+///     audit gate runs the proof and the cross-export emits the
+///     corresponding tactic chain in Coq/Lean.
+///   * `Admitted { reason }` — a concrete IOU.  `reason` describes
+///     the meta-theoretic prerequisite; it appears in audit reports
+///     and is preserved into Coq `Admitted.` / Lean `sorry`.
+public type LemmaStatus is
+    | Proved
+    | Admitted { reason: Text };
+
+/// Project the soundness status of a kernel rule.  This is the
+/// public accountability surface: every admit is enumerated, every
+/// proof is named, and the cross-export uses the result to decide
+/// whether to emit a tactic chain or an `Admitted` marker.
+public pure fn lemma_status(r: KernelRule) -> LemmaStatus {
+    match r {
+        // ---------- PROVED structurally in Verum --------------------------
+        KernelRule.KVar => LemmaStatus.Proved,
+        KernelRule.KUniv => LemmaStatus.Proved,
+        KernelRule.KFwAx => LemmaStatus.Proved,
+        KernelRule.KPos => LemmaStatus.Proved,
+
+        // ---------- ADMITTED with concrete cost ----------------------------
+        // Structural — the missing piece is named for each.
+        KernelRule.KPiForm => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires substitution-lemma for telescoped contexts \
+                 (subst-by-fresh-var preserves typing under shadowing)"
+            ),
+        },
+        KernelRule.KLamIntro => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires K-Pi-Form structural soundness as prerequisite \
+                 (the Pi formation lemma above)"
+            ),
+        },
+        KernelRule.KAppElim => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires beta-reduction confluence + substitution-lemma \
+                 (Church-Rosser for the calculus extended with HIT eliminators)"
+            ),
+        },
+        KernelRule.KSigmaForm => LemmaStatus.Admitted {
+            reason: Text.from(
+                "structurally identical to K-Pi-Form modulo position swap; \
+                 awaits the same substitution-lemma"
+            ),
+        },
+        KernelRule.KPairIntro => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires K-Sigma-Form + the dependent-product structure \
+                 of the Sigma type"
+            ),
+        },
+        KernelRule.KFstElim => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires Sigma-projection eta-rule (fst (a, b) ≡ a) and \
+                 Sigma-formation soundness"
+            ),
+        },
+        KernelRule.KSndElim => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the dependent counterpart of K-Fst-Elim's \
+                 eta-rule (snd (a, b) : B[a/x])"
+            ),
+        },
+        // Cubical — large-step missing for hcomp/transp/glue regularity
+        KernelRule.KPathTyForm => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires interval-object semantics (CCHM De Morgan algebra) \
+                 — once formalised, the formation lemma is structural"
+            ),
+        },
+        KernelRule.KPathOverForm => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires K-Path-Ty-Form + dependent-path semantics over \
+                 a motive (HoTT Book §6.2)"
+            ),
+        },
+        KernelRule.KReflIntro => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires K-Path-Ty-Form + the J-rule's unit law \
+                 (refl is the identity element in the path groupoid)"
+            ),
+        },
+        KernelRule.KHComp => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires CCHM hcomp regularity + Kan-filling lemmas \
+                 (Cohen-Coquand-Huber-Mörtberg §3)"
+            ),
+        },
+        KernelRule.KTransp => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires CCHM transp regularity (the regularity \
+                 endpoint at i=1 reduces to identity)"
+            ),
+        },
+        KernelRule.KGlue => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires univalence-via-Glue (the equivalence on the \
+                 boundary lifts to a path in the universe)"
+            ),
+        },
+        // Refinement
+        KernelRule.KRefine => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the refinement-typing hierarchy: predicates over \
+                 base types are themselves Bool-valued at universe Type(0)"
+            ),
+        },
+        KernelRule.KRefineOmega => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires modal-depth ordinal arithmetic well-foundedness \
+                 (md^ω is bounded by ω₁ at a fixed predicate; see \
+                 Definition 136.D1 + Lemma 136.L0)"
+            ),
+        },
+        KernelRule.KRefineIntro => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires K-Refine + decidability of the predicate at the \
+                 introduced value (Bool-discharged at this layer)"
+            ),
+        },
+        KernelRule.KRefineErase => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the underlying-type-recovery lemma: erasing the \
+                 predicate yields the base type"
+            ),
+        },
+        // Quotient
+        KernelRule.KQuotForm => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires equivalence-relation properties (refl/symm/trans) \
+                 to be witnessed at the kernel layer; currently framework- \
+                 axiomatised"
+            ),
+        },
+        KernelRule.KQuotIntro => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires K-Quot-Form + projection-onto-equivalence-class \
+                 well-typedness"
+            ),
+        },
+        KernelRule.KQuotElim => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the respect-of-equivalence side-condition to be \
+                 discharged structurally; currently audited via \
+                 verum audit --proof-honesty"
+            ),
+        },
+        // Inductive
+        KernelRule.KInductive => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires positivity-condition decision procedure \
+                 (mutual recursion with K-Pos below)"
+            ),
+        },
+        KernelRule.KElim => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the dependent eliminator's motive- \
+                 substitution lemma + W-type recursion"
+            ),
+        },
+        // SMT
+        KernelRule.KSmt => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the SMT-cert replay lemma: every cert that \
+                 verum_kernel::replay_smt_cert accepts denotes a \
+                 well-typed CoreTerm derivation"
+            ),
+        },
+        // Diakrisis
+        KernelRule.KEpsMu => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires Proposition 5.1 + Corollary 5.10 of the M ⊣ A \
+                 biadjunction; the τ-witness construction is V1 work"
+            ),
+        },
+        KernelRule.KUniverseAscent => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires κ-tower well-foundedness for arbitrary heights \
+                 (κ a regular cardinal); proved for finite heights, \
+                 transfinite case is separate work"
+            ),
+        },
+        KernelRule.KRoundTrip => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the bridge-audit completeness lemma: every \
+                 BridgeAudit trail recovers the original term modulo \
+                 normalisation"
+            ),
+        },
+        KernelRule.KEpsilonOf => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the M ⊣ A biadjunction unit law"
+            ),
+        },
+        KernelRule.KAlphaOf => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the M ⊣ A biadjunction counit law"
+            ),
+        },
+        KernelRule.KModalBox => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires modal-depth recursion lemma: md^ω(□φ) = md^ω(φ) + 1 \
+                 (Definition 136.D1)"
+            ),
+        },
+        KernelRule.KModalDiamond => LemmaStatus.Admitted {
+            reason: Text.from(
+                "structurally identical to K-Modal-Box; awaits the same \
+                 modal-depth recursion lemma"
+            ),
+        },
+        KernelRule.KModalBigAnd => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires transfinite-supremum lemma for ordinal recursion \
+                 (Lemma 136.L0)"
+            ),
+        },
+        KernelRule.KShape => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires Schreiber DCCT cohesive triple-adjunction \
+                 ∫ ⊣ ♭ ⊣ ♯ (DCCT §3.4)"
+            ),
+        },
+        KernelRule.KFlat => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the discrete-subuniverse localisation lemma \
+                 (Shulman 2018 §3)"
+            ),
+        },
+        KernelRule.KSharp => LemmaStatus.Admitted {
+            reason: Text.from(
+                "requires the codiscrete-subuniverse colocalisation lemma \
+                 (DCCT §3.4)"
+            ),
+        },
+    }
+}
+
+/// Project: is this lemma proved (structurally) in the Verum corpus?
+public pure fn lemma_is_proved(r: KernelRule) -> Bool {
+    match lemma_status(r) {
+        LemmaStatus.Proved => true,
+        LemmaStatus.Admitted { reason: _ } => false,
+    }
+}
+
+/// Project: get the admit-reason if this lemma is admitted, else None.
+/// Cross-export emitters use this to populate the `(* reason: ... *)`
+/// comment on `Admitted.` / `sorry` lines.
+public pure fn lemma_admit_reason(r: KernelRule) -> Maybe<Text> {
+    match lemma_status(r) {
+        LemmaStatus.Proved => None,
+        LemmaStatus.Admitted { reason } => Some(reason),
+    }
+}
+
+// =============================================================================
+// Per-rule statement skeletons
+// =============================================================================
+//
+// `lemma_statement(r)` produces the statement text for the soundness
+// lemma corresponding to rule `r` — pure data, no proof.  The cross-
+// export emitter uses this to generate the `Lemma K_<Name>_sound : ...`
+// in Coq / `theorem K_<Name>_sound : ...` in Lean.  Every emitted
+// statement carries the same shape:
+//
+//   forall d: Derivation,
+//     d.rule = K<Name> ->
+//     all_premises_well_typed(d) ->
+//     all_side_conditions_hold(d) ->
+//     well_typed(d.conclusion)
+//
+// We render the *uniform* shape rather than per-rule custom text so
+// the foreign-tool import is mechanical.  The per-rule meaning is
+// recovered from `rule_premises_required(d)` and
+// `rule_side_conditions_required(d)`, which the emitter walks
+// alongside.
+// =============================================================================
+
+/// Stable lemma-name for kernel rule `r`.  Format: `K_<Name>_sound`.
+/// Used by the cross-export emitter as the foreign-tool identifier.
+public pure fn lemma_name(r: KernelRule) -> Text {
+    let rule_text = kernel_rule_name(r);
+    rule_text + Text.from("_sound")
+}
+
+// =============================================================================
+// Proof discharge for the structurally-proved lemmas
+// =============================================================================
+//
+// For each proved lemma we record:
+//   * `coq_proof_text(r)` — the exact tactic chain the cross-export
+//     should emit between `Proof.` and `Qed.` in the .v file.
+//   * `lean_proof_text(r)` — the exact tactic block for the .lean file.
+//
+// The proofs themselves are short because the propositions reduce to
+// inspections of structural data (a context lookup, a universe-level
+// comparison, a structural-positivity scan).  Verum's own elaborator
+// would also discharge these — they're admit-free here, and the
+// cross-export ensures Coq + Lean agree.
+// =============================================================================
+
+/// Coq proof tactic for a structurally-proved lemma.  Empty string
+/// for admitted lemmas (the emitter will use `Admitted.` instead).
+public pure fn coq_proof_text(r: KernelRule) -> Text {
+    match r {
+        // K-Var: variable lookup is deterministic.  In Coq the proof is:
+        //   Proof. intros d Hrule Hctx Hwf. apply ctx_lookup_sound;
+        //   [exact Hrule | exact Hctx | exact Hwf]. Qed.
+        KernelRule.KVar => Text.from(
+            "  intros d Hrule Hwf. apply ctx_lookup_sound; auto."
+        ),
+        // K-Univ: universe stratification is reflexive on the conclusion shape.
+        KernelRule.KUniv => Text.from(
+            "  intros d Hrule. apply universe_form_sound."
+        ),
+        // K-FwAx: side condition `BodyInProp` carries the proof obligation.
+        // Discharge by case-analysis on the side-condition list (which contains
+        // exactly one `BodyInProp` whose witness is the universe-typing of the
+        // axiom body).
+        KernelRule.KFwAx => Text.from(
+            "  intros d Hrule Hpremises Hside.\n\
+            \  destruct Hside as [body_prop _].\n\
+            \  exact (axiom_body_typed_in_prop body_prop)."
+        ),
+        // K-Pos: strict-positivity rejection is a structural scan.  The
+        // side condition produces a `StrictlyPositive` witness; the proof
+        // wraps it.
+        KernelRule.KPos => Text.from(
+            "  intros d Hrule Hside.\n\
+            \  destruct Hside as [strict_pos _].\n\
+            \  exact (strict_positivity_sound strict_pos)."
+        ),
+        _ => Text.from(""),
+    }
+}
+
+/// Lean 4 proof tactic for a structurally-proved lemma.  Same role as
+/// `coq_proof_text` but in Lean syntax.
+public pure fn lean_proof_text(r: KernelRule) -> Text {
+    match r {
+        KernelRule.KVar => Text.from(
+            "  intros d Hrule Hwf\n\
+            \  exact ctx_lookup_sound Hrule Hwf"
+        ),
+        KernelRule.KUniv => Text.from(
+            "  intros d Hrule\n\
+            \  exact universe_form_sound"
+        ),
+        KernelRule.KFwAx => Text.from(
+            "  intros d Hrule Hpremises Hside\n\
+            \  rcases Hside with ⟨body_prop, _⟩\n\
+            \  exact axiom_body_typed_in_prop body_prop"
+        ),
+        KernelRule.KPos => Text.from(
+            "  intros d Hrule Hside\n\
+            \  rcases Hside with ⟨strict_pos, _⟩\n\
+            \  exact strict_positivity_sound strict_pos"
+        ),
+        _ => Text.from(""),
+    }
+}

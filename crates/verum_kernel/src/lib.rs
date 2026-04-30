@@ -606,6 +606,19 @@ pub use intrinsic_dispatch::{
     is_known_intrinsic, missing_dispatchers,
 };
 
+/// Meta-circular kernel soundness export — the cross-tool
+/// re-checking surface for task #80 / VERUM-TRUST-1.  Walks the
+/// 35-rule corpus declared in `core/verify/kernel_soundness/` and
+/// emits parallel theory files for Coq + Lean (and any other
+/// `SoundnessBackend` implementation).  See module docs for the
+/// architectural rationale (one trait, multiple instances).
+pub mod soundness;
+pub use soundness::{
+    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleCategory, RuleSpec,
+    SoundnessBackend, SoundnessExporter, canonical_rules,
+    coq::CoqBackend, lean::LeanBackend,
+};
+
 /// Supporting kernel operations — `shape_of`, `substitute`,
 /// `structural_eq`, `replay_smt_cert`. Split . The
 /// kernel's "infrastructure layer": these don't implement a

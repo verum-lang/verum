@@ -1216,6 +1216,16 @@ enum Commands {
         #[clap(long)]
         kernel_recheck: bool,
 
+        /// Run the kernel-soundness corpus check (task #80 / VERUM-TRUST-1).
+        /// Verifies the Rust-side rule list matches the .vr corpus's
+        /// declared rule count, enumerates per-rule proved / admitted
+        /// status, and emits parallel Coq + Lean theory files into
+        /// `target/audit-reports/kernel-soundness/` for independent
+        /// re-checking.  Exits non-zero only on Rust↔.vr drift;
+        /// admitted lemmas are accountability surface, not failures.
+        #[clap(long = "kernel-soundness")]
+        kernel_soundness: bool,
+
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
@@ -3505,6 +3515,7 @@ fn run_command(cli: Cli) -> Result<()> {
             framework_axioms,
             kernel_rules,
             kernel_recheck,
+            kernel_soundness,
             epsilon,
             coord,
             no_coord,
@@ -3545,6 +3556,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_rules(output_format)
             } else if kernel_recheck {
                 commands::audit::audit_kernel_recheck_with_format(output_format)
+            } else if kernel_soundness {
+                commands::audit::audit_kernel_soundness_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {
