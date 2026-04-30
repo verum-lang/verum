@@ -640,6 +640,15 @@ impl StaticVerifier {
         // Set solver parameters
         let mut params = Params::new();
         params.set_u32("timeout", self.config.constraint_timeout_ms as u32);
+        // Wire `minimize_cores`: Z3's `smt.core.minimize` controls
+        // whether the solver runs additional minimization on the
+        // unsat core before returning it. Pre-fix the field
+        // defaulted to `true` (and `MinimalUnsatCore.is_minimal`
+        // stamped that flag onto the result) but never reached
+        // Z3 — every returned core was whatever non-minimized set
+        // the solver produced in passing. Mirrors z3_backend.rs's
+        // global_param wiring at the per-solver-params layer.
+        params.set_bool("smt.core.minimize", self.config.minimize_cores);
         solver.set_params(&params);
 
         // Track assertions for unsat core
