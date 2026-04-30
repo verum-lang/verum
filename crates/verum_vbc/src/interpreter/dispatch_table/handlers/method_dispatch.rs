@@ -349,15 +349,24 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // Shared layout: [ObjectHeader][refcount: i64][value: Value]
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
-            // Strip type prefix if present (e.g., "Shared.borrow" -> "borrow")
-            // Support both "." (new convention) and "::" (legacy) for backwards compatibility
-            let base_method = method_name
-                .rsplit('.')
-                .next()
-                .or_else(|| method_name.rsplit("::").next())
-                .unwrap_or(&method_name);
+            // Strip type prefix if present (e.g., "Shared.borrow" -> "borrow").
+            // Support both "." (new convention) and "::" (legacy) for backwards compatibility.
+            //
+            // Owned `String` rather than borrowed `&str` so the
+            // auto-deref arm below can re-qualify `method_name` to
+            // the inner type without running into the borrow
+            // checker — `base_method` would otherwise hold an
+            // immutable reference into `method_name` for the entire
+            // match scope.
+            let base_method: String = if let Some(idx) = method_name.rfind('.') {
+                method_name[idx + 1..].to_string()
+            } else if let Some(idx) = method_name.rfind("::") {
+                method_name[idx + 2..].to_string()
+            } else {
+                method_name.clone()
+            };
 
-            match base_method {
+            match base_method.as_str() {
                 "borrow" | "borrow_mut" => {
                     // Return the inner value (or a reference to it)
                     // In VBC, we simplify by returning the value itself since
