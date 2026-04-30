@@ -6018,13 +6018,26 @@ impl ProofValidator {
         Ok(())
     }
 
-    /// Validate Distributivity: f distributes over g
+    /// Validate Distributivity: an algebraic axiom of the shape
+    /// `a * (b + c) = a * b + a * c` (or any of its mirror /
+    /// logical / bitwise equivalents).
     ///
-    /// Validates a distributivity axiom like a*(b+c) = a*b + a*c.
+    /// Pre-fix this only checked `formula == expected`, which made
+    /// `Distributivity { formula }` a "trust me, this is a
+    /// distributivity tautology" annotation: any equation
+    /// (e.g. `2 * 3 = 1 + 2`, FALSE) was accepted as long as
+    /// `formula == expected`.
     ///
-    /// Distributivity axiom: validates f distributes over g, e.g., a*(b+c) = a*b + a*c.
+    /// Post-fix the formula must structurally match one of the
+    /// canonical distributivity shapes — `outer(a, inner(b, c)) =
+    /// inner(outer(a, b), outer(a, c))` (left) or its mirror
+    /// (right) — for one of the registered (outer, inner) pairs:
+    ///   * `Mul` over `Add`        (arithmetic)
+    ///   * `And` over `Or`         (logical)
+    ///   * `Or` over `And`         (logical, dual)
+    ///   * `BitAnd` over `BitOr`   (bitwise)
+    ///   * `BitOr` over `BitAnd`   (bitwise, dual)
     fn validate_distributivity(&self, formula: &Expr, expected: &Expr) -> ValidationResult<()> {
-        // The formula should be an equality expressing distributivity
         if !self.expr_eq(formula, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
@@ -6032,7 +6045,182 @@ impl ProofValidator {
             });
         }
 
+        if !self.is_distributivity_shape(formula) {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "distributivity: formula {} does not match a canonical \
+                     distributivity shape (e.g. `a * (b + c) = a * b + a * c`)",
+                    self.expr_to_text(formula)
+                )
+                .into(),
+            });
+        }
+
         Ok(())
+    }
+
+    /// Whether `expr` matches a left- or right-distributivity equation
+    /// for one of the recognised (outer, inner) operator pairs.
+    fn is_distributivity_shape(&self, expr: &Expr) -> bool {
+        // Pairs (outer, inner) such that outer distributes over inner.
+        const PAIRS: &[(BinOp, BinOp)] = &[
+            (BinOp::Mul, BinOp::Add),
+            (BinOp::And, BinOp::Or),
+            (BinOp::Or, BinOp::And),
+            (BinOp::BitAnd, BinOp::BitOr),
+            (BinOp::BitOr, BinOp::BitAnd),
+        ];
+
+        let ExprKind::Binary {
+            op: BinOp::Eq,
+            left,
+            right,
+        } = &expr.kind
+        else {
+            return false;
+        };
+
+        for (outer, inner) in PAIRS.iter().copied() {
+            // Left form: `a outer (b inner c) == (a outer b) inner (a outer c)`.
+            if self.matches_left_distributivity(left, right, outer, inner) {
+                return true;
+            }
+            // Right form: `(a inner b) outer c == (a outer c) inner (b outer c)`.
+            if self.matches_right_distributivity(left, right, outer, inner) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn matches_left_distributivity(
+        &self,
+        lhs: &Expr,
+        rhs: &Expr,
+        outer: BinOp,
+        inner: BinOp,
+    ) -> bool {
+        // Pattern: lhs = a OUTER (b INNER c)
+        let ExprKind::Binary {
+            op: outer_op,
+            left: a,
+            right: bc,
+        } = &lhs.kind
+        else {
+            return false;
+        };
+        if *outer_op != outer {
+            return false;
+        }
+        let ExprKind::Binary {
+            op: inner_op,
+            left: b,
+            right: c,
+        } = &bc.kind
+        else {
+            return false;
+        };
+        if *inner_op != inner {
+            return false;
+        }
+        // Pattern: rhs = (a OUTER b) INNER (a OUTER c)
+        let ExprKind::Binary {
+            op: r_inner_op,
+            left: ab,
+            right: ac,
+        } = &rhs.kind
+        else {
+            return false;
+        };
+        if *r_inner_op != inner {
+            return false;
+        }
+        let (
+            ExprKind::Binary {
+                op: ab_op,
+                left: ab_l,
+                right: ab_r,
+            },
+            ExprKind::Binary {
+                op: ac_op,
+                left: ac_l,
+                right: ac_r,
+            },
+        ) = (&ab.kind, &ac.kind)
+        else {
+            return false;
+        };
+        ab_op == &outer
+            && ac_op == &outer
+            && self.expr_eq(ab_l, a)
+            && self.expr_eq(ab_r, b)
+            && self.expr_eq(ac_l, a)
+            && self.expr_eq(ac_r, c)
+    }
+
+    fn matches_right_distributivity(
+        &self,
+        lhs: &Expr,
+        rhs: &Expr,
+        outer: BinOp,
+        inner: BinOp,
+    ) -> bool {
+        // Pattern: lhs = (a INNER b) OUTER c
+        let ExprKind::Binary {
+            op: outer_op,
+            left: ab,
+            right: c,
+        } = &lhs.kind
+        else {
+            return false;
+        };
+        if *outer_op != outer {
+            return false;
+        }
+        let ExprKind::Binary {
+            op: inner_op,
+            left: a,
+            right: b,
+        } = &ab.kind
+        else {
+            return false;
+        };
+        if *inner_op != inner {
+            return false;
+        }
+        // Pattern: rhs = (a OUTER c) INNER (b OUTER c)
+        let ExprKind::Binary {
+            op: r_inner_op,
+            left: ac,
+            right: bc,
+        } = &rhs.kind
+        else {
+            return false;
+        };
+        if *r_inner_op != inner {
+            return false;
+        }
+        let (
+            ExprKind::Binary {
+                op: ac_op,
+                left: ac_l,
+                right: ac_r,
+            },
+            ExprKind::Binary {
+                op: bc_op,
+                left: bc_l,
+                right: bc_r,
+            },
+        ) = (&ac.kind, &bc.kind)
+        else {
+            return false;
+        };
+        ac_op == &outer
+            && bc_op == &outer
+            && self.expr_eq(ac_l, a)
+            && self.expr_eq(ac_r, c)
+            && self.expr_eq(bc_l, b)
+            && self.expr_eq(bc_r, c)
     }
 
     /// Validate DefAxiom: Tseitin-style CNF transformation axiom
@@ -8982,9 +9170,48 @@ mod tests {
     fn test_validate_distributivity() {
         let mut validator = ProofValidator::new();
 
-        // Create formula representing a*(b+c) = a*b + a*c
+        // Build a real distributivity-shaped formula:
+        //   a * (b + c) = a * b + a * c
+        let a = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("a", Span::dummy()))),
+            Span::dummy(),
+        );
+        let b = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("b", Span::dummy()))),
+            Span::dummy(),
+        );
+        let c = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("c", Span::dummy()))),
+            Span::dummy(),
+        );
+        let mul = |l: Expr, r: Expr| {
+            Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Mul,
+                    left: Heap::new(l),
+                    right: Heap::new(r),
+                },
+                Span::dummy(),
+            )
+        };
+        let add = |l: Expr, r: Expr| {
+            Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Add,
+                    left: Heap::new(l),
+                    right: Heap::new(r),
+                },
+                Span::dummy(),
+            )
+        };
+        let lhs = mul(a.clone(), add(b.clone(), c.clone()));
+        let rhs = add(mul(a.clone(), b.clone()), mul(a.clone(), c.clone()));
         let formula = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            ExprKind::Binary {
+                op: BinOp::Eq,
+                left: Heap::new(lhs),
+                right: Heap::new(rhs),
+            },
             Span::dummy(),
         );
 
@@ -8993,7 +9220,31 @@ mod tests {
         };
 
         let result = validator.validate(&proof, &formula);
-        assert!(result.is_ok(), "Distributivity should validate correctly");
+        assert!(
+            result.is_ok(),
+            "Distributivity should validate the canonical a*(b+c) = a*b + a*c shape: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_validate_distributivity_rejects_non_distributivity_shape() {
+        // Soundness regression for #37: a literal `true` is NOT a
+        // distributivity-shaped formula. Pre-fix the validator
+        // accepted it because formula == expected was the only check.
+        let mut validator = ProofValidator::new();
+        let formula = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let proof = ProofTerm::Distributivity {
+            formula: formula.clone(),
+        };
+        let result = validator.validate(&proof, &formula);
+        assert!(
+            result.is_err(),
+            "literal `true` is not a distributivity shape — must reject"
+        );
     }
 
     #[test]
