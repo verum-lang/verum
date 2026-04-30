@@ -129,6 +129,146 @@ pub enum ItemKind {
     Pattern(PatternDecl),
 }
 
+/// Payload-free **proof-item discriminator**.  Surfaces the four
+/// proof-bearing item shapes (Theorem / Lemma / Corollary / Axiom)
+/// as a single typed enum so consumers that classify but don't walk
+/// the payload — audit gates, JSON exporters, diagnostic renderers,
+/// CLI dispatch — work uniformly across all four sources.
+///
+/// Stable serde tags (`"theorem"` / `"lemma"` / `"corollary"` /
+/// `"axiom"`) make this safe for round-trip pipelines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProofItemKind {
+    /// `theorem name(params) ensures Q { proof body }` —
+    /// stand-alone formal statement.
+    Theorem,
+    /// `lemma name(params) ensures Q { proof body }` — helper
+    /// theorem; same shape, semantic role differs (intermediate
+    /// result reused by downstream theorems).
+    Lemma,
+    /// `corollary name(params) ensures Q { proof body }` —
+    /// consequence of a prior theorem; same shape.
+    Corollary,
+    /// `axiom name(params) -> Type` — unproven assumption, the
+    /// trust extension.
+    Axiom,
+}
+
+impl ProofItemKind {
+    /// Stable string tag — used by audit gates, JSON exporters,
+    /// CLI flag parsers.  One of `"theorem"`, `"lemma"`,
+    /// `"corollary"`, `"axiom"`.
+    pub fn tag(self) -> &'static str {
+        match self {
+            ProofItemKind::Theorem => "theorem",
+            ProofItemKind::Lemma => "lemma",
+            ProofItemKind::Corollary => "corollary",
+            ProofItemKind::Axiom => "axiom",
+        }
+    }
+
+    /// Whether this item kind requires a proof body.  Theorem /
+    /// lemma / corollary do; axiom does not (it IS the trust
+    /// extension).
+    pub fn requires_proof(self) -> bool {
+        !matches!(self, ProofItemKind::Axiom)
+    }
+
+    /// Whether this item kind contributes to the trust extension
+    /// (i.e., is admitted without proof).  True only for `Axiom`.
+    pub fn is_trust_extension(self) -> bool {
+        matches!(self, ProofItemKind::Axiom)
+    }
+}
+
+impl ItemKind {
+    /// Classify a proof-bearing or axiom item by its kind, returning
+    /// `None` for non-proof items (functions, types, modules, etc.).
+    /// This is the load-bearing accessor for code that walks
+    /// `Module.items` and dispatches uniformly across the four
+    /// proof-item shapes — audit gates, citation collectors,
+    /// elaborator entry points, doc generators.
+    pub fn proof_item_kind(&self) -> Option<ProofItemKind> {
+        match self {
+            ItemKind::Theorem(_) => Some(ProofItemKind::Theorem),
+            ItemKind::Lemma(_) => Some(ProofItemKind::Lemma),
+            ItemKind::Corollary(_) => Some(ProofItemKind::Corollary),
+            ItemKind::Axiom(_) => Some(ProofItemKind::Axiom),
+            _ => None,
+        }
+    }
+
+    /// Whether this is a theorem-shaped item (Theorem / Lemma /
+    /// Corollary).  All three share `TheoremDecl` and produce
+    /// `ProofBody`-bearing obligations; consumers that walk proof
+    /// bodies typically want all three uniformly.
+    pub fn is_theorem_shaped(&self) -> bool {
+        matches!(
+            self,
+            ItemKind::Theorem(_) | ItemKind::Lemma(_) | ItemKind::Corollary(_)
+        )
+    }
+
+    /// Whether this is the trust-extension item form (Axiom).
+    pub fn is_axiom(&self) -> bool {
+        matches!(self, ItemKind::Axiom(_))
+    }
+
+    /// Whether this is any proof-item form (theorem / lemma /
+    /// corollary / axiom).
+    pub fn is_proof_item(&self) -> bool {
+        self.proof_item_kind().is_some()
+    }
+
+    /// Common projection for proof-bearing items: the underlying
+    /// `TheoremDecl`.  Returns `None` for axioms (they use
+    /// `AxiomDecl`) and non-proof items.
+    pub fn as_theorem_decl(&self) -> Option<&TheoremDecl> {
+        match self {
+            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
+                Some(d)
+            }
+            _ => None,
+        }
+    }
+
+    /// Common projection for axiom items.
+    pub fn as_axiom_decl(&self) -> Option<&AxiomDecl> {
+        if let ItemKind::Axiom(a) = self {
+            Some(a)
+        } else {
+            None
+        }
+    }
+
+    /// **Uniform name accessor** for proof items — works regardless
+    /// of which of the four variants the item carries.  Returns
+    /// `None` for non-proof items.
+    pub fn proof_item_name(&self) -> Option<&Ident> {
+        match self {
+            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
+                Some(&d.name)
+            }
+            ItemKind::Axiom(a) => Some(&a.name),
+            _ => None,
+        }
+    }
+
+    /// **Uniform attribute accessor** for proof items.  Returns the
+    /// attribute list regardless of variant.  Returns `None` for
+    /// non-proof items.
+    pub fn proof_item_attributes(&self) -> Option<&List<Attribute>> {
+        match self {
+            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
+                Some(&d.attributes)
+            }
+            ItemKind::Axiom(a) => Some(&a.attributes),
+            _ => None,
+        }
+    }
+}
+
 /// A function declaration.
 ///
 /// # Syntax Order
@@ -3233,6 +3373,179 @@ mod proof_body_kind_tests {
             ProofBodyKind::Tactic,
             ProofBodyKind::Structured,
             ProofBodyKind::ByMethod,
+        ]
+        .iter()
+        .map(|k| k.tag())
+        .collect();
+        assert_eq!(tags.len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod proof_item_kind_tests {
+    use super::*;
+    use verum_common::Span;
+
+    fn span() -> Span {
+        Span::dummy()
+    }
+
+    fn dummy_expr() -> crate::expr::Expr {
+        crate::expr::Expr::new(
+            crate::expr::ExprKind::Literal(crate::Literal::bool(true, span())),
+            span(),
+        )
+    }
+
+    fn dummy_ident(name: &str) -> Ident {
+        Ident { name: name.into(), span: span() }
+    }
+
+    fn theorem_item(name: &str) -> Item {
+        Item::new(
+            ItemKind::Theorem(TheoremDecl::new(
+                dummy_ident(name),
+                dummy_expr(),
+                span(),
+            )),
+            span(),
+        )
+    }
+
+    fn lemma_item(name: &str) -> Item {
+        Item::new(
+            ItemKind::Lemma(TheoremDecl::new(
+                dummy_ident(name),
+                dummy_expr(),
+                span(),
+            )),
+            span(),
+        )
+    }
+
+    fn corollary_item(name: &str) -> Item {
+        Item::new(
+            ItemKind::Corollary(TheoremDecl::new(
+                dummy_ident(name),
+                dummy_expr(),
+                span(),
+            )),
+            span(),
+        )
+    }
+
+    fn axiom_item(name: &str) -> Item {
+        Item::new(
+            ItemKind::Axiom(AxiomDecl::new(
+                dummy_ident(name),
+                dummy_expr(),
+                span(),
+            )),
+            span(),
+        )
+    }
+
+    #[test]
+    fn proof_item_kind_classifies_each_variant() {
+        assert_eq!(theorem_item("t").kind.proof_item_kind(), Some(ProofItemKind::Theorem));
+        assert_eq!(lemma_item("l").kind.proof_item_kind(), Some(ProofItemKind::Lemma));
+        assert_eq!(corollary_item("c").kind.proof_item_kind(), Some(ProofItemKind::Corollary));
+        assert_eq!(axiom_item("a").kind.proof_item_kind(), Some(ProofItemKind::Axiom));
+    }
+
+    #[test]
+    fn proof_item_kind_classifies_proof_items_only() {
+        // Every proof-item variant returns Some; the predicate
+        // helper distinguishes them from non-proof items.
+        assert!(theorem_item("t").kind.is_proof_item());
+        assert!(lemma_item("l").kind.is_proof_item());
+        assert!(corollary_item("c").kind.is_proof_item());
+        assert!(axiom_item("a").kind.is_proof_item());
+    }
+
+    #[test]
+    fn is_theorem_shaped_is_true_for_three_variants() {
+        assert!(theorem_item("t").kind.is_theorem_shaped());
+        assert!(lemma_item("l").kind.is_theorem_shaped());
+        assert!(corollary_item("c").kind.is_theorem_shaped());
+        assert!(!axiom_item("a").kind.is_theorem_shaped());
+    }
+
+    #[test]
+    fn is_axiom_only_for_axiom_variant() {
+        assert!(!theorem_item("t").kind.is_axiom());
+        assert!(!lemma_item("l").kind.is_axiom());
+        assert!(!corollary_item("c").kind.is_axiom());
+        assert!(axiom_item("a").kind.is_axiom());
+    }
+
+    #[test]
+    fn as_theorem_decl_extracts_for_three_variants() {
+        assert!(theorem_item("t").kind.as_theorem_decl().is_some());
+        assert!(lemma_item("l").kind.as_theorem_decl().is_some());
+        assert!(corollary_item("c").kind.as_theorem_decl().is_some());
+        assert!(axiom_item("a").kind.as_theorem_decl().is_none());
+    }
+
+    #[test]
+    fn as_axiom_decl_only_for_axiom() {
+        assert!(theorem_item("t").kind.as_axiom_decl().is_none());
+        assert!(axiom_item("a").kind.as_axiom_decl().is_some());
+    }
+
+    #[test]
+    fn proof_item_name_works_uniformly() {
+        assert_eq!(theorem_item("thm1").kind.proof_item_name().unwrap().name.as_str(), "thm1");
+        assert_eq!(lemma_item("lem1").kind.proof_item_name().unwrap().name.as_str(), "lem1");
+        assert_eq!(corollary_item("cor1").kind.proof_item_name().unwrap().name.as_str(), "cor1");
+        assert_eq!(axiom_item("ax1").kind.proof_item_name().unwrap().name.as_str(), "ax1");
+    }
+
+    #[test]
+    fn proof_item_attributes_works_uniformly() {
+        assert!(theorem_item("t").kind.proof_item_attributes().is_some());
+        assert!(lemma_item("l").kind.proof_item_attributes().is_some());
+        assert!(corollary_item("c").kind.proof_item_attributes().is_some());
+        assert!(axiom_item("a").kind.proof_item_attributes().is_some());
+    }
+
+    #[test]
+    fn requires_proof_distinguishes_axiom_from_others() {
+        assert!(ProofItemKind::Theorem.requires_proof());
+        assert!(ProofItemKind::Lemma.requires_proof());
+        assert!(ProofItemKind::Corollary.requires_proof());
+        assert!(!ProofItemKind::Axiom.requires_proof());
+    }
+
+    #[test]
+    fn is_trust_extension_only_for_axiom() {
+        assert!(!ProofItemKind::Theorem.is_trust_extension());
+        assert!(!ProofItemKind::Lemma.is_trust_extension());
+        assert!(!ProofItemKind::Corollary.is_trust_extension());
+        assert!(ProofItemKind::Axiom.is_trust_extension());
+    }
+
+    #[test]
+    fn proof_item_kind_serde_round_trip() {
+        for kind in [
+            ProofItemKind::Theorem,
+            ProofItemKind::Lemma,
+            ProofItemKind::Corollary,
+            ProofItemKind::Axiom,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let restored: ProofItemKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, kind, "round-trip failed for {:?}", kind);
+        }
+    }
+
+    #[test]
+    fn proof_item_kind_tags_are_distinct() {
+        let tags: std::collections::BTreeSet<_> = [
+            ProofItemKind::Theorem,
+            ProofItemKind::Lemma,
+            ProofItemKind::Corollary,
+            ProofItemKind::Axiom,
         ]
         .iter()
         .map(|k| k.tag())
