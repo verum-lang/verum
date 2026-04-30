@@ -853,6 +853,26 @@ impl IntrinsicLowering {
                     region: None,
                 })
             }
+            InlineSequenceId::SecureZero => {
+                // Volatile memset(0) — must survive every optimisation pass.
+                // The `isVolatile = true` attribute on `llvm.intr.memset`
+                // tells the LLVM dialect lowering to emit
+                // `llvm.memset.p0.i64(..., i1 true)`, which the optimiser
+                // cannot DCE.  See `internal/specs/tls-quic-security-audit.md`
+                // §2 Action #2.
+                self.emit(MlirOp {
+                    name: "llvm.intr.memset".to_string(),
+                    attrs: vec![
+                        MlirAttr {
+                            name: "isVolatile".to_string(),
+                            value: MlirAttrValue::Bool(true),
+                        },
+                    ],
+                    result_types: vec![],
+                    operands: operands.to_vec(),
+                    region: None,
+                })
+            }
             InlineSequenceId::Memcmp => {
                 // llvm.memcmp or custom comparison loop
                 self.emit(MlirOp {

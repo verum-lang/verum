@@ -16692,6 +16692,28 @@ impl VbcCodegen {
                 // Return dst pointer as result
                 self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
             }
+            InlineSequenceId::SecureZero => {
+                // Format: dst:reg, size:reg
+                //
+                // Routes to FFI sub-opcode 0xA3 (CSecureZero), which
+                // lowers in AOT to a *volatile* `llvm.memset` (the
+                // optimiser cannot DCE it).  Used to wipe key
+                // material before storage leaves scope.  Audit
+                // `internal/specs/tls-quic-security-audit.md` §2
+                // Action #2.
+                if args.len() >= 2 {
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, args[0].0);  // dst
+                    Self::write_reg(&mut operands, args[1].0);  // size
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0xA3, // CSecureZero
+                        operands,
+                    });
+                }
+                // No result; emit a placeholder unit-mov so the dest
+                // register isn't left undefined for the caller.
+                self.ctx.emit(Instruction::LoadNil { dst: dest });
+            }
             InlineSequenceId::Memcmp => {
                 // Format: dst:reg, ptr1:reg, ptr2:reg, size:reg
                 // Returns: i64 comparison result

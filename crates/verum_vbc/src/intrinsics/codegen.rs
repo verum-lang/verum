@@ -465,6 +465,7 @@ impl<'a> IntrinsicCodegen<'a> {
             InlineSequenceId::Memcpy => self.emit_memcpy(args),
             InlineSequenceId::Memmove => self.emit_memmove(args),
             InlineSequenceId::Memset => self.emit_memset(args),
+            InlineSequenceId::SecureZero => self.emit_secure_zero(args),
             InlineSequenceId::Memcmp => self.emit_memcmp(args),
             InlineSequenceId::AtomicFetchAdd => self.emit_atomic_fetch_add(args),
             InlineSequenceId::AtomicFetchSub => self.emit_atomic_fetch_sub(args),
@@ -995,6 +996,35 @@ impl<'a> IntrinsicCodegen<'a> {
             dst: args[0],
             src: args[1], // value (byte)
             len: args[2],
+        });
+
+        None
+    }
+
+    /// secure_zero: volatile memset(0) — survives every LLVM
+    /// optimisation pass.  Used to wipe key material before storage
+    /// leaves scope.
+    ///
+    /// Args: `[dst, len]`.  Reuses the `MemIntrinsic` carrier with
+    /// `kind = SecureZero`; the dispatch arms in
+    /// `expressions.rs::emit_intrinsic_inline_sequence` route the
+    /// distinct kind to FFI sub-opcode `0xA3` (`CSecureZero`),
+    /// which lowers to `llvm.memset.p0.i64(..., i1 true)`.
+    fn emit_secure_zero(&mut self, args: &[Reg]) -> Option<Reg> {
+        if args.len() < 2 {
+            return None;
+        }
+
+        self.emit(IntrinsicInstruction::MemIntrinsic {
+            kind: MemIntrinsicKind::SecureZero,
+            dst: args[0],
+            // The `MemIntrinsic` carrier expects a `src` field; for
+            // secure_zero the byte value is implicitly 0, but we
+            // still need to pass *something* through the carrier.
+            // Reuse the dst register — the dispatch arm at
+            // `expressions.rs` ignores it.
+            src: args[0],
+            len: args[1],
         });
 
         None
@@ -2867,6 +2897,11 @@ pub enum MemIntrinsicKind {
     Memcpy,
     Memmove,
     Memset,
+    /// Volatile memset(0) — survives LLVM optimisation passes.
+    /// Used for cryptographic-zeroise of secret material before
+    /// scope exit.  See `internal/specs/tls-quic-security-audit.md`
+    /// §2 Action #2.
+    SecureZero,
 }
 
 /// Atomic RMW operation kind.
