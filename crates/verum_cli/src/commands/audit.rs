@@ -6474,10 +6474,18 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let vr_files = discover_vr_files(&manifest_dir);
+    let mut vr_files = discover_vr_files(&manifest_dir);
+    // Extend the scan with the verum stdlib's `core/math/` tree (#136
+    // follow-up).  Most `@kernel_discharge` annotations live in stdlib
+    // (e.g., `core/math/syn_mod.vr::lurie_htt_5_1_4_syn_is_grothendieck`,
+    // `core/math/absolute_layer.vr::msfs_id_x_violates_pi_4`) — without
+    // this step, corpus-level audit runs surface 0 discharges even when
+    // the corpus's transitive apply-chains route through these stdlib
+    // axioms.  Sibling of `apply_graph`'s stdlib-walker.
+    vr_files.extend(discover_stdlib_vr_files());
 
     if vr_files.is_empty() {
-        ui::warn("No .vr files found under the current project.");
+        ui::warn("No .vr files found under the current project or stdlib.");
         return Ok(());
     }
 
