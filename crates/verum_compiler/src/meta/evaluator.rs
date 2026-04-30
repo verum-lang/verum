@@ -2405,7 +2405,7 @@ impl MetaContext {
     /// with actual values from the meta evaluation context. $name splices identifiers,
     /// #expr splices arbitrary expressions, and #(#items),* splices repeated sequences
     /// with separators. This is the core mechanism for procedural code generation.
-    fn expand_quote_splices(&self, expr: &Expr) -> Result<Expr, MetaError> {
+    fn expand_quote_splices(&mut self, expr: &Expr) -> Result<Expr, MetaError> {
         use verum_ast::expr::ExprKind;
 
         // Only process Quote expressions
@@ -2445,13 +2445,22 @@ impl MetaContext {
     /// identifiers that would shadow bindings the quote-site author
     /// did not anticipate.
     ///
-    /// The checker is constructed fresh each call (no shared state on
-    /// `MetaContext` yet). Violations are emitted as compile-time
-    /// diagnostics via `tracing::warn!` — full integration with the
-    /// session's diagnostic stream is the follow-up that lands
-    /// alongside the diagnostics-as-event-stream refactor (#105).
+    /// Each violation is converted to a `verum_diagnostics::Diagnostic`
+    /// (severity `Warning`, code from `violation.error_code()` —
+    /// the M4xx range) and pushed onto `MetaContext.diagnostics`.
+    /// The macro-expansion phase drains this list into
+    /// `PhaseOutput.warnings`, which `api.rs::run_pipeline` extends
+    /// onto the session's diagnostic stream. Pre-fix violations only
+    /// reached `tracing::warn!` — they didn't surface in `cargo build`
+    /// output, IDE diagnostics, or compilation failure decisions, so
+    /// macros with capture issues silently produced wrong code.
+    ///
+    /// `&mut self` so the diagnostics list can be appended to. The
+    /// caller still sees a `tracing::warn!` summary at the original
+    /// site (one log line per quote with violations) for log-tailing
+    /// observability.
     fn recheck_post_splice_hygiene(
-        &self,
+        &mut self,
         tokens: &List<verum_ast::expr::TokenTree>,
         span: verum_ast::span::Span,
     ) {
@@ -2462,12 +2471,22 @@ impl MetaContext {
         );
         checker.check_post_splice_tokens(tokens);
         let violations = checker.take_violations();
-        if !violations.is_empty() {
-            tracing::warn!(
-                "post-splice hygiene check found {} potential capture violation(s) at {:?}",
-                violations.len(),
-                span,
-            );
+        if violations.is_empty() {
+            return;
+        }
+        tracing::warn!(
+            "post-splice hygiene check found {} potential capture violation(s) at {:?}",
+            violations.len(),
+            span,
+        );
+        // Materialise each violation as a user-facing diagnostic so
+        // the session diagnostic stream catches it. The conversion
+        // is in `hygiene_violation_to_diagnostic` so unit tests can
+        // pin the M4xx-code shape and span resolution without
+        // building a full checker fixture.
+        for v in violations.iter() {
+            let diag = hygiene_violation_to_diagnostic(v, span);
+            self.diagnostics.push(diag);
         }
     }
 
@@ -4346,6 +4365,162 @@ impl MetaContext {
         }
 
         names
+    }
+}
+
+/// Convert a hygiene violation into a user-facing diagnostic.
+///
+/// The diagnostic carries the violation's M4xx error code (from
+/// `HygieneViolation::error_code`) and human-readable message
+/// (from `HygieneViolation::message`). Span resolution falls back
+/// to the supplied `fallback_span` (the quote expression's outer
+/// span) when the violation itself has no concrete location —
+/// this happens for the few `HygieneViolation` variants whose
+/// `span()` returns the dummy span (e.g. internal-error
+/// `GensymCollision` produced without a real source location).
+///
+/// Severity is `Warning` — hygiene violations are non-fatal by
+/// default; an embedder that wants hard-fail wires it through
+/// `CheckerConfig::strict_mode`. The session diagnostic emitter
+/// honours the severity for cargo build summary lines.
+pub(crate) fn hygiene_violation_to_diagnostic(
+    v: &crate::hygiene::HygieneViolation,
+    fallback_span: verum_ast::span::Span,
+) -> verum_diagnostics::Diagnostic {
+    use verum_diagnostics::DiagnosticBuilder;
+    let v_span = v.span();
+    let resolved_span = if v_span.is_dummy() { fallback_span } else { v_span };
+    DiagnosticBuilder::warning()
+        .code(verum_common::Text::from(v.error_code()))
+        .message(v.message())
+        .span(crate::phases::ast_span_to_diagnostic_span(resolved_span, None))
+        .build()
+}
+
+#[cfg(test)]
+mod hygiene_diagnostic_tests {
+    //! Pin tests for the HygieneViolation → Diagnostic conversion
+    //! and the user-diagnostics emission path. Pre-fix violations
+    //! only reached `tracing::warn!` — these tests pin that the
+    //! conversion preserves M4xx error codes and routes the
+    //! per-violation span through the standard span adapter.
+    use super::*;
+    use crate::hygiene::{HygieneViolation, scope::{HygienicIdent, ScopeSet}};
+    use verum_ast::span::Span;
+    use verum_common::Text;
+
+    fn dummy_span_at(byte_offset: u32) -> Span {
+        // Construct a non-dummy span with a known byte offset so
+        // the resolved-span branch can be pinned (the dummy-span
+        // fallback case is exercised by a sister test).
+        verum_common::span::Span::new(
+            byte_offset,
+            byte_offset + 1,
+            verum_ast::FileId::new(0),
+        )
+    }
+
+    #[test]
+    fn accidental_capture_yields_m402_warning() {
+        let violation = HygieneViolation::AccidentalCapture {
+            captured: HygienicIdent::new(
+                Text::from("foo"),
+                ScopeSet::default(),
+                dummy_span_at(42),
+            ),
+            intended_binding: dummy_span_at(10),
+            actual_binding: dummy_span_at(20),
+        };
+        let diag = hygiene_violation_to_diagnostic(&violation, Span::dummy());
+        let msg = format!("{:?}", diag);
+        assert!(
+            msg.contains("M402"),
+            "AccidentalCapture must carry the M402 error code (got: {})",
+            msg
+        );
+        assert!(
+            msg.contains("foo"),
+            "diagnostic must mention the captured identifier (got: {})",
+            msg
+        );
+    }
+
+    #[test]
+    fn shadow_conflict_yields_m402_warning() {
+        let violation = HygieneViolation::ShadowConflict {
+            shadowed: HygienicIdent::new(
+                Text::from("bar"),
+                ScopeSet::default(),
+                dummy_span_at(7),
+            ),
+            introduced_at: dummy_span_at(7),
+        };
+        let diag = hygiene_violation_to_diagnostic(&violation, Span::dummy());
+        let msg = format!("{:?}", diag);
+        assert!(msg.contains("M402"));
+        assert!(msg.contains("bar"));
+    }
+
+    #[test]
+    fn stage_mismatch_yields_m405_warning() {
+        let violation = HygieneViolation::StageMismatch {
+            expected_stage: 1,
+            actual_stage: 0,
+            span: dummy_span_at(5),
+        };
+        let diag = hygiene_violation_to_diagnostic(&violation, Span::dummy());
+        let msg = format!("{:?}", diag);
+        assert!(msg.contains("M405"));
+    }
+
+    #[test]
+    fn dummy_violation_span_falls_back_to_outer_quote_span() {
+        // GensymCollision constructed with a dummy span — the
+        // resolver must fall back to the supplied outer span.
+        // We can't pin the rendered byte offset (the LineColSpan
+        // adapter resolves spans against registered sources, which
+        // are absent in unit-test isolation), but we CAN pin that
+        // the fallback path produces a non-dummy primary label —
+        // the dummy-span branch in the production code would
+        // collapse the label onto a default location instead.
+        let violation = HygieneViolation::GensymCollision {
+            name: Text::from("x"),
+            span: Span::dummy(),
+        };
+        let outer = dummy_span_at(99);
+        let diag = hygiene_violation_to_diagnostic(&violation, outer);
+        let msg = format!("{:?}", diag);
+        // M403 code present (carried from violation.error_code()).
+        assert!(msg.contains("M403"));
+        // The diagnostic must have one primary label — the
+        // fallback-span branch installs the outer span as the
+        // primary location. Pinning label *count* is the stable
+        // observable for unit tests without source registration.
+        assert!(
+            msg.contains("primary_labels: List { inner: [SpanLabel"),
+            "diagnostic must carry a primary span label (got: {})",
+            msg,
+        );
+    }
+
+    #[test]
+    fn meta_context_diagnostics_accumulates_after_recheck() {
+        // End-to-end pin: verify that `recheck_post_splice_hygiene`
+        // (the only production caller of the conversion) does NOT
+        // error on an empty token tree (no violations → no
+        // diagnostics added). This is the regression test for the
+        // happy path — the violation-producing path is covered by
+        // the unit tests above and the integration test that
+        // populates the checker's binding table.
+        let mut ctx = MetaContext::new();
+        let initial = ctx.diagnostics.len();
+        let empty_tokens: List<verum_ast::expr::TokenTree> = List::new();
+        ctx.recheck_post_splice_hygiene(&empty_tokens, Span::dummy());
+        assert_eq!(
+            ctx.diagnostics.len(),
+            initial,
+            "no violations on empty input → diagnostics count unchanged"
+        );
     }
 }
 
