@@ -4,6 +4,7 @@ pub mod dap;
 pub mod bench;
 pub mod build;
 pub mod check;
+pub mod check_proof;
 pub mod clean;
 pub mod config;
 pub mod deps;
