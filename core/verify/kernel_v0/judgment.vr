@@ -1,0 +1,156 @@
+// =============================================================================
+// kernel_v0 — Judgment (Γ ⊢ t : T)
+// =============================================================================
+//
+// The well-typedness judgment that the bootstrap kernel decides.
+// `Γ ⊢ t : T` reads as "in context Γ, the term t has type T".  The
+// 7 inference rules in `rules/` constructively build derivations of
+// this judgment; the soundness theorem in `soundness.vr` shows that
+// every such derivation denotes a value of the claimed type in the
+// categorical model.
+//
+// **Architectural role**
+//
+// The Judgment type is the propositional surface: theorems quantify
+// over derivations, rules introduce + eliminate them, the soundness
+// theorem unpacks them.  Phase 3 (#154) close: this Verum-side
+// Judgment becomes the source of truth for what the Rust-side
+// `proof_checker::infer` decides.
+//
+// **Faithfulness mirror**
+//
+//   Rust-side `proof_checker::infer(ctx, term) -> Result<Term, _>`
+//     → Verum-side `Derivation { ctx, term, type, witness }`
+//
+//   Successful inference IS the existence of a Derivation; failure
+//   IS the absence.  The 7 rules are constructive recipes for
+//   building Derivations.
+// =============================================================================
+
+module core.verify.kernel_v0.judgment;
+
+mount core.prelude.{Heap, Maybe};
+mount super.core_term.{CoreTerm};
+mount super.context.{Context};
+
+/// **Judgment** — `Γ ⊢ t : T` formed by the 7 inference rules.
+///
+/// A value of `Judgment` is a STATEMENT.  The proof of it is a
+/// `Derivation` (separate type), constructed by the rules.
+public type Judgment is {
+    context:    Context,
+    term:       CoreTerm,
+    expected:   CoreTerm,
+};
+
+/// **Derivation** — a constructive proof of a Judgment.
+///
+/// The seven cases mirror the seven inference rules in `rules/`:
+/// each case carries the sub-derivations the rule consumes.
+/// Building a derivation IS proving the corresponding judgment;
+/// the soundness theorem peels off cases inductively to show the
+/// term denotes a value of the claimed type.
+public type Derivation is
+    /// **T-Var**: `Γ ⊢ Var(i) : T` when `Γ.lookup(i) = T`.
+    | Var {
+        context: Context,
+        index: Int{>= 0},
+        result_type: CoreTerm,
+    }
+    /// **T-Univ**: `Γ ⊢ Universe(n) : Universe(n+1)`.
+    | Univ {
+        context: Context,
+        level: Int{>= 0},
+    }
+    /// **T-Pi-Form**: from `Γ ⊢ A : Univ(n)` and `Γ, A ⊢ B : Univ(m)`,
+    /// derive `Γ ⊢ Pi(A, B) : Univ(max(n, m))`.
+    | PiForm {
+        context: Context,
+        domain_derivation:   Heap<Derivation>,
+        codomain_derivation: Heap<Derivation>,
+        result_type:         CoreTerm,
+    }
+    /// **T-Lam-Intro**: from `Γ, A ⊢ body : T`, derive
+    /// `Γ ⊢ Lam(A, body) : Pi(A, T)`.
+    | LamIntro {
+        context: Context,
+        domain_well_typed:   Heap<Derivation>,
+        body_derivation:     Heap<Derivation>,
+        result_type:         CoreTerm,
+    }
+    /// **T-App-Elim**: from `Γ ⊢ f : Pi(A, B)` and `Γ ⊢ x : A`,
+    /// derive `Γ ⊢ App(f, x) : B[x/0]`.
+    | AppElim {
+        context: Context,
+        function_derivation: Heap<Derivation>,
+        argument_derivation: Heap<Derivation>,
+        result_type:         CoreTerm,
+    }
+    /// **T-Conv** (β-equivalence): if `Γ ⊢ t : T1` and `T1 ≡_β T2`,
+    /// then `Γ ⊢ t : T2`.  Implicitly used by T-App-Elim's
+    /// argument-matching step.
+    | BetaConv {
+        context: Context,
+        original: Heap<Derivation>,
+        equality_witness: Heap<DefinitionalEquality>,
+        new_type: CoreTerm,
+    }
+    /// **T-Eta-Conv** (η-equivalence): same shape as T-Conv but
+    /// using η-equivalence as the equality witness.
+    | EtaConv {
+        context: Context,
+        original: Heap<Derivation>,
+        equality_witness: Heap<DefinitionalEquality>,
+        new_type: CoreTerm,
+    };
+
+/// **Definitional equality witness** — a proof that two terms are
+/// definitionally equal under the kernel's notion of α + β + η.
+///
+/// The four cases mirror the def_eq rules in
+/// `verum_kernel::proof_checker`:
+public type DefinitionalEquality is
+    /// **Refl**: every term is equal to itself.
+    | Refl { term: CoreTerm }
+    /// **Beta**: `App(Lam(A, body), x) ≡ subst(body, 0, x)`.
+    | Beta {
+        domain: CoreTerm,
+        body: CoreTerm,
+        argument: CoreTerm,
+    }
+    /// **Eta**: `Lam(A, App(f, Var(0))) ≡ f`  (when Var(0) ∉ FV(f)).
+    | Eta {
+        domain: CoreTerm,
+        function: CoreTerm,
+    }
+    /// **Symm + Trans + Congr** are derivable; not first-class
+    /// constructors here.  The minimal set is { Refl, Beta, Eta }
+    /// — every other equation reduces to compositions of these.
+    | Trans {
+        first:  Heap<DefinitionalEquality>,
+        second: Heap<DefinitionalEquality>,
+    };
+
+/// **Project** — the term whose typing the derivation proves.
+public fn term_of(d: &Derivation) -> CoreTerm {
+    match d {
+        Derivation.Var { index, .. } => CoreTerm.Var { index: index },
+        Derivation.Univ { level, .. } => CoreTerm.Universe { level: level },
+        // Other cases extract from sub-derivations; full implementation
+        // lands once the Verum compiler can type-check kernel_v0/.
+        _ => CoreTerm.Var { index: 0 },  // placeholder
+    };
+}
+
+/// **Project** — the type the derivation establishes for the term.
+public fn type_of(d: &Derivation) -> CoreTerm {
+    match d {
+        Derivation.Var { result_type, .. } => result_type.clone(),
+        Derivation.Univ { level, .. } => CoreTerm.Universe { level: level + 1 },
+        Derivation.PiForm { result_type, .. } => result_type.clone(),
+        Derivation.LamIntro { result_type, .. } => result_type.clone(),
+        Derivation.AppElim { result_type, .. } => result_type.clone(),
+        Derivation.BetaConv { new_type, .. } => new_type.clone(),
+        Derivation.EtaConv { new_type, .. } => new_type.clone(),
+    };
+}
