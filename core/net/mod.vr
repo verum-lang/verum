@@ -83,6 +83,21 @@ public module uri_template;
 public module ipv6_canonical;
 public module cidr;
 
+// HTTP/HTTPS forward + reverse proxy — CONNECT tunnelling,
+// upstream-pool maintenance, SOCKS5/4a wrapping. Sub-tree
+// umbrella; the `proxy/mod.vr` re-exports the public surface.
+// Pre-fix the directory + `mod.vr` shipped but the umbrella was
+// unregistered here, so `mount core.net.proxy.*;` silently
+// failed to resolve through the parent namespace.
+public module proxy;
+
+// Weft — Verum's typed HTTP framework: handlers + extractors +
+// middleware + routing + arena-pooled buffer / connection
+// management. Sub-tree umbrella; see `weft/mod.vr` for the
+// full framework surface (route trees, JSON/HTML/Form
+// extractors, SSE / WebSocket adapters, middleware composition).
+public module weft;
+
 // =============================================================================
 // Re-exports
 // =============================================================================

@@ -69,6 +69,21 @@ public module darwin;
 @cfg(target_os = "windows")
 public module windows;
 
+// C-ABI integer type aliases for FFI declarations — `c_char`,
+// `c_int`, `c_long`, etc. that platform-conditional compile to
+// the native widths. Pre-fix the file shipped but had no
+// umbrella declaration; downstream FFI mounts (`mount
+// core.sys.cabi.c_int;`) worked via direct file lookup but the
+// namespace was invisible.
+public module cabi;
+
+// POSIX-style signal handling primitives — sigaction wrappers,
+// SIGINT / SIGTERM handlers, the self-pipe pattern that
+// `core.signal` (the async wrapper) sits on top of. Reachable
+// before via direct file mount; this declaration restores
+// namespace visibility under `core.sys.*`.
+public module signal;
+
 // =============================================================================
 // Re-export common types at module level
 // =============================================================================
