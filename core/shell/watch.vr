@@ -152,7 +152,7 @@ pub async fn watch_native(pattern: &Text)
 {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
-        let ctx = provide ShellContext;
+        let ctx = ShellContext.default();
         let base = match ctx.effective_cwd() {
             Some(c) => PathBuf.from(c),
             None    => PathBuf.from("."),
@@ -235,7 +235,7 @@ pub async fn watch_with(
 ) -> Result<WatchHandle, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     let base = match ctx.effective_cwd() {
         Some(c) => PathBuf.from(c),
         None    => PathBuf.from("."),
@@ -260,7 +260,7 @@ pub async fn watch_with(
 
         loop {
             select {
-                _ = sleep(interval) => {
+                _ = sleep(interval).await => {
                     let next = scan(&base, &pattern_owned);
                     let events = diff_states(&state, &next);
                     for ev in events.iter() {
@@ -268,7 +268,7 @@ pub async fn watch_with(
                     }
                     state = next;
                 },
-                _ = token.cancelled() => break,
+                _ = token.cancelled().await => break,
             }
         }
         Ok(core.shell.result.ShellResult.from_error(

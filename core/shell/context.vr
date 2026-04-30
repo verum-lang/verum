@@ -413,7 +413,7 @@ implement Debug for ShellContext {
 
 /// Returns the current working directory considering the active ShellContext.
 public fn cwd() -> Maybe<Text> using [ShellContext] {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     ctx.effective_cwd()
 }
 
@@ -421,12 +421,12 @@ public fn cwd() -> Maybe<Text> using [ShellContext] {
 /// to `provide` it back into the relevant scope. This avoids global mutation
 /// — parallel branches see independent cwds.
 public fn cd(path: &Text) -> ShellContext using [ShellContext] {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     ctx.clone().with_cwd(path.clone())
 }
 
 /// Returns a new ShellContext with `key=value` overlay added.
 public fn set_env(key: &Text, value: &Text) -> ShellContext using [ShellContext] {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     ctx.clone().with_env(key.clone(), value.clone())
 }

@@ -56,7 +56,7 @@ public async fn run(program: &Text, args: List<Text>)
     -> Result<ShellResult, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
 
     // Permission gate first — fast-fail before allocations
     ctx.permissions.check_run(program)?;
@@ -130,7 +130,7 @@ public async fn sh_check(cmd_text: &Text)
     -> Result<ShellResult, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
 
     // Resolve shell program — also subjects it to the run-permission gate
     let shell_prog = ctx.resolve_shell();
@@ -198,7 +198,7 @@ public async fn run_with_cancel(
 ) -> Result<ShellResult, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     ctx.permissions.check_run(program)?;
 
     let display_cmd = render_argv(program, &args);
@@ -235,21 +235,21 @@ public async fn run_with_cancel(
     let effective_grace = if grace.as_millis() == 0 { Duration.from_millis(5000) } else { grace };
 
     select {
-        out = wait_with_output_async(&child) => match out {
+        out = wait_with_output_async(&child).await => match out {
             Ok(o) => Ok(ShellResult.new(
                 o.status, o.stdout_bytes, o.stderr_bytes,
                 display_cmd, start.elapsed(),
             )),
             Err(reason) => Err(ShellError.SpawnFailed { command: display_cmd, reason }),
         },
-        reason = token.cancelled() => {
+        reason = token.cancelled().await => {
             // Graceful shutdown — SIGTERM first
             let _ = child.terminate();
             // Wait up to `grace` for clean exit, then SIGKILL
             let kill_ct = CancellationToken.with_timeout(effective_grace);
             select {
-                _ = wait_with_output_async(&child) => {},
-                _ = kill_ct.cancelled() => { let _ = child.kill(); },
+                _ = wait_with_output_async(&child).await => {},
+                _ = kill_ct.cancelled().await => { let _ = child.kill(); },
             };
             Err(ShellError.Cancelled {
                 command: display_cmd,
@@ -267,7 +267,7 @@ public async fn sh_with_cancel(
 ) -> Result<ShellResult, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();
     let flag = ctx.shell_command_flag();
     run_with_cancel(&shell_prog, [flag, cmd_text.clone()], token, grace).await

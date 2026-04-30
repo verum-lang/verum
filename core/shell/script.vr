@@ -119,7 +119,7 @@ public fn bootstrap_from_file(path: &Path) -> Result<ShellContext, ShellError> {
 ///         script_main(|| async { Ok(()) }).await;
 ///     }
 public async fn script_main<F: async fn() -> Result<(), ShellError>>(body: F) -> ! {
-    provide ShellContext = ShellContext.default();
+
     match body().await {
         Ok(())   => exit_success(),
         Err(err) => {

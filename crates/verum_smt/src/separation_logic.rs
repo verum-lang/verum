@@ -1288,6 +1288,32 @@ impl SepLogicEncoder {
         params.set_u32("timeout", config.entailment_timeout_ms as u32);
         solver.set_params(&params);
 
+        // Phase-not-realised tracing: two SepLogicConfig fields
+        // are forward-looking — `enable_symbolic_execution`
+        // (default true) would gate a symbolic-execution path
+        // for entailment that the current implementation doesn't
+        // include (verify_entailment uses pure SMT-encode-and-
+        // refute), and `enable_caching` (default true) would
+        // gate an entailment-result cache (currently only the
+        // per-encoder `encoding_cache` for SepAssertion→Bool
+        // memoisation is in place — that's a different cache,
+        // always on). Surface a warning when either is set to a
+        // non-default value so a `[smt.sep_logic] enable_caching
+        // = false` setting in verum.toml doesn't silently behave
+        // as if cached.
+        if !config.enable_symbolic_execution || !config.enable_caching {
+            tracing::warn!(
+                "SepLogicConfig surface: enable_symbolic_execution={}, \
+                 enable_caching={} (these fields land on the encoder but \
+                 the current entailment path uses pure SMT-encode-and-\
+                 refute without a separate symbolic-execution branch and \
+                 without a per-(antecedent,consequent) result cache — \
+                 they're forward-looking knobs)",
+                config.enable_symbolic_execution,
+                config.enable_caching,
+            );
+        }
+
         Self {
             model,
             solver,

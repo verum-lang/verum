@@ -138,7 +138,30 @@ implement Executor {
     public async fn sh(&self, cmd_text: &Text) -> Result<ShellResult, ShellError>
         using [ShellContext]
     {
-        self.run_loop(|| self.dispatch_sh(cmd_text)).await
+        let token = self.acquire_token();
+        // Inline retry loop — generic dispatch closure can't be expressed
+        // as an `async fn` trait bound in current grammar.
+        let mut outcome = sh_with_cancel(cmd_text, &token, self.grace).await;
+        if let Some(policy) = &self.retry {
+            let mut backoff = policy.backoff.clone();
+            let mut attempt = 1;
+            loop {
+                match &outcome {
+                    Ok(_)  => return outcome,
+                    Err(e) => {
+                        if attempt >= policy.max_attempts { return outcome; }
+                        if !(policy.retry_on)(e)          { return outcome; }
+                        match backoff.next_delay() {
+                            None    => return outcome,
+                            Some(d) => sleep_then(&d, &self.cancel_token).await,
+                        }
+                        attempt = attempt + 1;
+                        outcome = sh_with_cancel(cmd_text, &token, self.grace).await;
+                    }
+                }
+            }
+        }
+        outcome
     }
 
     /// Dispatch directly: argv with no shell parsing. Same retry / timeout
@@ -147,7 +170,28 @@ implement Executor {
         -> Result<ShellResult, ShellError>
         using [ShellContext]
     {
-        self.run_loop(|| self.dispatch_run(program, args.clone())).await
+        let token = self.acquire_token();
+        let mut outcome = run_with_cancel(program, args.clone(), &token, self.grace).await;
+        if let Some(policy) = &self.retry {
+            let mut backoff = policy.backoff.clone();
+            let mut attempt = 1;
+            loop {
+                match &outcome {
+                    Ok(_)  => return outcome,
+                    Err(e) => {
+                        if attempt >= policy.max_attempts { return outcome; }
+                        if !(policy.retry_on)(e)          { return outcome; }
+                        match backoff.next_delay() {
+                            None    => return outcome,
+                            Some(d) => sleep_then(&d, &self.cancel_token).await,
+                        }
+                        attempt = attempt + 1;
+                        outcome = run_with_cancel(program, args.clone(), &token, self.grace).await;
+                    }
+                }
+            }
+        }
+        outcome
     }
 
     /// Idempotent dispatch — opt-in marker indicating "safe to re-run".
@@ -165,51 +209,6 @@ implement Executor {
     // -------------------------------------------------------------------------
     // Internals — retry/timeout loop
     // -------------------------------------------------------------------------
-
-    async fn run_loop<F: async fn() -> Result<ShellResult, ShellError>>(
-        &self,
-        mut dispatch: F,
-    ) -> Result<ShellResult, ShellError> {
-        match &self.retry {
-            None => dispatch().await,
-            Some(policy) => {
-                let mut backoff = policy.backoff.clone();
-                let mut attempt = 1;
-                loop {
-                    let outcome = dispatch().await;
-                    match &outcome {
-                        Ok(_)  => return outcome,
-                        Err(e) => {
-                            if attempt >= policy.max_attempts { return outcome; }
-                            if !(policy.retry_on)(e)         { return outcome; }
-                            // Wait before next attempt (or give up if backoff is exhausted)
-                            match backoff.next_delay() {
-                                None => return outcome,
-                                Some(d) => sleep_then(&d, &self.cancel_token).await,
-                            }
-                            attempt = attempt + 1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    async fn dispatch_sh(&self, cmd_text: &Text)
-        -> Result<ShellResult, ShellError>
-        using [ShellContext]
-    {
-        let token = self.acquire_token();
-        sh_with_cancel(cmd_text, &token, self.grace).await
-    }
-
-    async fn dispatch_run(&self, program: &Text, args: List<Text>)
-        -> Result<ShellResult, ShellError>
-        using [ShellContext]
-    {
-        let token = self.acquire_token();
-        run_with_cancel(program, args, &token, self.grace).await
-    }
 
     /// Build the effective cancellation token: combine user-supplied token
     /// (if any) with a timeout-derived token (if any).
@@ -232,8 +231,8 @@ async fn sleep_then(d: &Duration, token: &Maybe<CancellationToken>) {
         Some(t) => {
             // If cancellation fires during the sleep, wake immediately.
             select {
-                _ = time_sleep(*d) => {},
-                _ = t.cancelled() => {},
+                _ = time_sleep(*d).await => {},
+                _ = t.cancelled().await => {},
             }
         }
     }
