@@ -2296,6 +2296,24 @@ pub struct ProofSearchEngine {
     /// || ...`) for parameters typed as a variant.
     variant_map: std::collections::HashMap<Text, Vec<Text>>,
 
+    /// Constructor recursion metadata: type name → vector of
+    /// recursive-arg indices per constructor (parallel to the
+    /// `variant_map` ctor list for the same type).
+    ///
+    /// For each constructor, the inner `Vec<usize>` lists the argument
+    /// positions that recurse on the parent type. E.g. for
+    /// `List<T> = Nil | Cons(T, List<T>)`, the entry would be
+    /// `vec![vec![], vec![1]]` — `Nil` has no recursive args, `Cons`
+    /// recurses on its second argument (index 1).
+    ///
+    /// Populated externally via `register_variant_recursion`. When a
+    /// type is registered via `register_variant_type` without
+    /// recursion info, its constructors are treated as non-recursive —
+    /// induction degenerates to case analysis without recursive
+    /// subgoals, which is the correct behaviour for non-recursive
+    /// variants like `Color = Red | Green | Blue`.
+    variant_recursive_args: std::collections::HashMap<Text, Vec<Vec<usize>>>,
+
     /// Names of hypotheses whose static type is `Bool`.
     ///
     /// Populated externally via `register_bool_hypothesis` from the
@@ -2337,6 +2355,7 @@ impl ProofSearchEngine {
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
+            variant_recursive_args: std::collections::HashMap::new(),
             bool_typed_hypotheses: std::collections::HashSet::new(),
         }
     }
@@ -2355,6 +2374,7 @@ impl ProofSearchEngine {
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
             variant_map: std::collections::HashMap::new(),
+            variant_recursive_args: std::collections::HashMap::new(),
             bool_typed_hypotheses: std::collections::HashSet::new(),
         }
     }
@@ -2431,6 +2451,48 @@ impl ProofSearchEngine {
     /// for parameters typed as a variant.
     pub fn register_variant_type(&mut self, type_name: Text, ctors: Vec<Text>) {
         self.variant_map.insert(type_name, ctors);
+    }
+
+    /// Register recursion metadata for a previously-registered variant
+    /// type. `recursive_args` is parallel to the constructor list
+    /// (same length, same order); each inner `Vec<usize>` lists the
+    /// argument positions that recurse on the parent type.
+    ///
+    /// Example for `List<T> = Nil | Cons(T, List<T>)`:
+    ///
+    ///     engine.register_variant_type("List".into(),
+    ///         vec!["Nil".into(), "Cons".into()]);
+    ///     engine.register_variant_recursion("List".into(),
+    ///         vec![vec![], vec![1]]); // Cons recurses on arg 1
+    ///
+    /// Types registered via `register_variant_type` alone are treated
+    /// as non-recursive — `induction` reduces to case analysis with
+    /// no recursive subgoals, which is correct for `Color = Red |
+    /// Green | Blue`-shaped variants.
+    pub fn register_variant_recursion(
+        &mut self,
+        type_name: Text,
+        recursive_args: Vec<Vec<usize>>,
+    ) {
+        self.variant_recursive_args.insert(type_name, recursive_args);
+    }
+
+    /// Public reflection over the constructor lookup added in #35.
+    /// Returns each constructor's name + recursive-arg positions for
+    /// the registered variant type, or an error when the type isn't
+    /// registered. Used by induction tactics and by tests.
+    pub fn get_type_constructors_for_test(
+        &self,
+        type_name: &Text,
+    ) -> Result<Vec<(Text, Vec<usize>)>, ProofError> {
+        let ctors = self.get_type_constructors(type_name)?;
+        Ok(ctors
+            .iter()
+            .map(|c| {
+                let args: Vec<usize> = c.recursive_args.iter().copied().collect();
+                (c.name.clone(), args)
+            })
+            .collect())
     }
 
     /// Public reflection over the goal-aware variable-type inference
@@ -3719,72 +3781,51 @@ impl ProofSearchEngine {
         None
     }
 
-    /// Get constructors for an inductive type
+    /// Get constructors for a variant type from the metadata
+    /// registry.
     ///
-    /// Returns a simplified constructor representation.
-    /// In a full implementation, this would query the type registry.
+    /// Pre-fix this hardcoded `Nat`, `List`, `Tree`/`BinaryTree`, and
+    /// `Bool` with their constructors and rejected every user-defined
+    /// type with "Unknown inductive type" — same compiler-side
+    /// stdlib-name knowledge violation as #18, #19, #21, #34.
+    ///
+    /// Post-fix:
+    /// - Constructor names come from `variant_map` (populated via
+    ///   `register_variant_type`).
+    /// - Recursive-arg metadata comes from `variant_recursive_args`
+    ///   (populated via `register_variant_recursion`). When absent
+    ///   for a constructor, defaults to no recursive args — induction
+    ///   then degenerates to case analysis, the correct behaviour for
+    ///   non-recursive variants like `Color = Red | Green | Blue`.
+    /// - Unregistered types still return a real error pointing at
+    ///   `register_variant_type` as the remediation.
     fn get_type_constructors(
         &self,
         type_name: &Text,
     ) -> Result<List<SimpleConstructor>, ProofError> {
+        let ctor_names = self.variant_map.get(type_name).ok_or_else(|| {
+            ProofError::TacticFailed(
+                format!(
+                    "induction: type '{}' is not registered. Call \
+                     ProofSearchEngine::register_variant_type first.",
+                    type_name
+                )
+                .into(),
+            )
+        })?;
+
+        let recursion = self.variant_recursive_args.get(type_name);
         let mut constructors = List::new();
-
-        match type_name.as_str() {
-            "Nat" | "Natural" => {
-                // Natural numbers: Zero | Succ(Nat)
-                constructors.push(SimpleConstructor {
-                    name: "Zero".into(),
-                    recursive_args: List::new(),
-                });
-                constructors.push(SimpleConstructor {
-                    name: "Succ".into(),
-                    recursive_args: List::from_iter(vec![0]), // Argument 0 is recursive
-                });
-            }
-
-            "List" => {
-                // Lists: Nil | Cons(T, List<T>)
-                constructors.push(SimpleConstructor {
-                    name: "Nil".into(),
-                    recursive_args: List::new(),
-                });
-                constructors.push(SimpleConstructor {
-                    name: "Cons".into(),
-                    recursive_args: List::from_iter(vec![1]), // Argument 1 (tail) is recursive
-                });
-            }
-
-            "Tree" | "BinaryTree" => {
-                // Binary trees: Leaf | Node(Tree, T, Tree)
-                constructors.push(SimpleConstructor {
-                    name: "Leaf".into(),
-                    recursive_args: List::new(),
-                });
-                constructors.push(SimpleConstructor {
-                    name: "Node".into(),
-                    recursive_args: List::from_iter(vec![0, 2]), // Left and right subtrees
-                });
-            }
-
-            "Bool" => {
-                // Booleans: True | False
-                constructors.push(SimpleConstructor {
-                    name: "True".into(),
-                    recursive_args: List::new(),
-                });
-                constructors.push(SimpleConstructor {
-                    name: "False".into(),
-                    recursive_args: List::new(),
-                });
-            }
-
-            _ => {
-                return Err(ProofError::TacticFailed(
-                    format!("Unknown inductive type: {}", type_name).into(),
-                ));
-            }
+        for (idx, ctor_name) in ctor_names.iter().enumerate() {
+            let recursive_args: List<usize> = recursion
+                .and_then(|info| info.get(idx))
+                .map(|args| args.iter().copied().collect())
+                .unwrap_or_else(List::new);
+            constructors.push(SimpleConstructor {
+                name: ctor_name.clone(),
+                recursive_args,
+            });
         }
-
         Ok(constructors)
     }
 
