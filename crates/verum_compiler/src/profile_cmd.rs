@@ -60,6 +60,27 @@ impl<'s> ProfileCommand<'s> {
 
     /// Set profiling mode
     pub fn with_mode(mut self, mode: ProfilingMode) -> Self {
+        // Phase-not-realised tracing: `ProfileCommand::with_mode`
+        // selects between `Static` (AST-based estimation) and
+        // `Runtime` (requires execution sampling). The CLI
+        // `verum profile --memory <file>` entry point at
+        // commands/file.rs:1474 calls `ProfileCommand::new` which
+        // defaults to Static — no caller threads `--memory` into
+        // a Runtime selection. This builder exists for embedders
+        // but the CLI surface doesn't expose mode selection yet.
+        // Surface a debug trace when the user picks Runtime so
+        // the gap is visible (Static stays quiet — that's the
+        // default already).
+        if matches!(mode, ProfilingMode::Runtime) {
+            tracing::debug!(
+                "ProfileCommand::with_mode(Runtime) — Runtime mode requires \
+                 execution sampling, but the CLI's `verum profile` command \
+                 doesn't yet expose a mode selector. The default Static path \
+                 (AST-based estimation) runs regardless of the --memory flag. \
+                 Forward-looking: hook this builder into a future \
+                 `verum profile --runtime` flag."
+            );
+        }
         self.mode = mode;
         self
     }
