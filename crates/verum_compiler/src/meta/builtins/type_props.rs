@@ -791,4 +791,128 @@ mod tests {
         assert_eq!(compute_type_name(&TypeKind::Bool), Text::from("Bool"));
         assert_eq!(compute_type_name(&TypeKind::Unit), Text::from("()"));
     }
+
+    fn lit_int(n: i128) -> Expr {
+        use verum_ast::span::Span;
+        let span = Span::dummy();
+        Expr::new(
+            ExprKind::Literal(verum_ast::Literal::int(n, span)),
+            span,
+        )
+    }
+
+    fn array_kind_with_size(elem: TypeKind, size: Option<Expr>) -> TypeKind {
+        use verum_ast::span::Span;
+        TypeKind::Array {
+            element: Box::new(verum_ast::Type::new(elem, Span::dummy())),
+            size: size.map(Box::new),
+        }
+    }
+
+    #[test]
+    fn array_size_literal_multiplies_element_stride() {
+        // Pre-fix: `[Int; 100]` reported size = 8 (the stride of ONE
+        // element). Post-fix: 8 * 100 = 800. This is the headline
+        // regression — the only test that distinguishes the new
+        // multiply-by-N behavior from the legacy single-element
+        // fallback.
+        let ty = array_kind_with_size(TypeKind::Int, Some(lit_int(100)));
+        assert_eq!(compute_type_size(&ty).unwrap(), 800);
+
+        let ty = array_kind_with_size(TypeKind::Bool, Some(lit_int(7)));
+        // Bool stride is 1 → [Bool; 7] = 7 bytes.
+        assert_eq!(compute_type_size(&ty).unwrap(), 7);
+
+        let ty = array_kind_with_size(TypeKind::Char, Some(lit_int(3)));
+        // Char stride is 4 → [Char; 3] = 12 bytes.
+        assert_eq!(compute_type_size(&ty).unwrap(), 12);
+    }
+
+    #[test]
+    fn array_size_zero_literal_yields_zero_bytes() {
+        // `[Int; 0]` is 0 bytes. saturating_mul on the literal
+        // path returns 0 cleanly; this test pins that the size-0
+        // case isn't accidentally treated as "no size known".
+        let ty = array_kind_with_size(TypeKind::Int, Some(lit_int(0)));
+        assert_eq!(compute_type_size(&ty).unwrap(), 0);
+    }
+
+    #[test]
+    fn array_no_size_yields_conservative_zero() {
+        // No size at all (slice-form `[T]` carrying through as
+        // Array { size: None }) → 0, the conservative answer.
+        let ty = array_kind_with_size(TypeKind::Int, None);
+        assert_eq!(compute_type_size(&ty).unwrap(), 0);
+    }
+
+    #[test]
+    fn array_size_negative_literal_falls_back_to_single_element() {
+        // Negative size can't be cast to u64; helper returns None
+        // and we fall through to the conservative single-element
+        // stride. Locks the safety guard against signed→unsigned
+        // wrap producing absurd sizes.
+        let ty = array_kind_with_size(TypeKind::Int, Some(lit_int(-1)));
+        assert_eq!(compute_type_size(&ty).unwrap(), 8);
+    }
+
+    #[test]
+    fn array_size_in_paren_unwraps() {
+        // `[Int; (4)]` parses as `Paren(Int(4))`. The helper
+        // should look through Paren wrappers — this matches
+        // what hand-written sizes typically look like in the
+        // AST before const-folding runs.
+        use verum_ast::span::Span;
+        let paren = Expr::new(
+            ExprKind::Paren(Box::new(lit_int(4))),
+            Span::dummy(),
+        );
+        let ty = array_kind_with_size(TypeKind::Int, Some(paren));
+        assert_eq!(compute_type_size(&ty).unwrap(), 32);
+    }
+
+    #[test]
+    fn array_size_non_literal_falls_back_to_single_element() {
+        // A non-literal size expression (e.g., a Path reference
+        // to a const) can't be folded here, so the function must
+        // fall through to the conservative pre-fix answer of one
+        // element's stride rather than guessing or panicking.
+        use verum_ast::span::Span;
+        use verum_ast::ty::Path;
+        let path_expr = Expr::new(
+            ExprKind::Path(Path::single(verum_ast::ty::Ident::new(
+                "N",
+                Span::dummy(),
+            ))),
+            Span::dummy(),
+        );
+        let ty = array_kind_with_size(TypeKind::Int, Some(path_expr));
+        assert_eq!(compute_type_size(&ty).unwrap(), 8);
+    }
+
+    #[test]
+    fn array_type_name_renders_literal_size() {
+        // compute_type_name historically printed `[Int; _]` for
+        // any sized array, dropping the literal. Post-fix it
+        // surfaces the literal directly when it's a non-negative
+        // integer.
+        let ty = array_kind_with_size(TypeKind::Int, Some(lit_int(42)));
+        assert_eq!(compute_type_name(&ty), Text::from("[Int; 42]"));
+
+        // Non-literal size: still uses `_`.
+        use verum_ast::span::Span;
+        use verum_ast::ty::Path;
+        let path_expr = Expr::new(
+            ExprKind::Path(Path::single(verum_ast::ty::Ident::new(
+                "N",
+                Span::dummy(),
+            ))),
+            Span::dummy(),
+        );
+        let ty = array_kind_with_size(TypeKind::Int, Some(path_expr));
+        assert_eq!(compute_type_name(&ty), Text::from("[Int; _]"));
+
+        // No size: slice-form `[Int]`.
+        let ty = array_kind_with_size(TypeKind::Int, None);
+        assert_eq!(compute_type_name(&ty), Text::from("[Int]"));
+    }
 }
