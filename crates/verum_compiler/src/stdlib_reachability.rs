@@ -68,8 +68,6 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
     // stdlib module. Filter against the index so the returned set only
     // contains paths the loader can actually resolve to a `.vr` source.
     let candidate = graph.reachable_from(&seeds, |prefix| expand_glob(index, prefix));
-    #[cfg(test)]
-    eprintln!("BFS candidate set has {} entries (before filter)", candidate.len());
     let real: HashSet<String> = candidate
         .into_iter()
         .filter(|m| index.module_to_file(m).is_some())
@@ -294,33 +292,12 @@ mod tests {
         assert!(reachable.contains("core.shell.exec"),
             "should include the directly-mounted module");
         let index = crate::stdlib_index::get_module_index().unwrap();
-        // Diagnostic — print the reachable set if it cascades to all of stdlib
-        // so we can see WHICH module is acting as a hub.
-        if reachable.len() == index.len() {
-            // Diagnostic: which edges does `core.shell` have?
-            let g = crate::stdlib_dep_graph::get_dep_graph().unwrap();
-            if let Some(e) = g.edges_of("core.shell") {
-                eprintln!("core.shell edges: path={:?}\n  glob={:?}\n  nested={:?}",
-                    e.path.iter().take(5).collect::<Vec<_>>(),
-                    e.glob.iter().take(5).collect::<Vec<_>>(),
-                    e.nested.iter().take(5).collect::<Vec<_>>());
-            }
-            if let Some(e) = g.edges_of("core") {
-                eprintln!("core edges: path={:?}\n  glob={:?}\n  nested={:?}",
-                    e.path.iter().take(5).collect::<Vec<_>>(),
-                    e.glob.iter().take(5).collect::<Vec<_>>(),
-                    e.nested.iter().take(5).collect::<Vec<_>>());
-            }
-            if let Some(e) = g.edges_of("core.shell.exec") {
-                eprintln!("core.shell.exec edges: path={:?}\n  glob={:?}\n  nested={:?}",
-                    e.path.iter().take(8).collect::<Vec<_>>(),
-                    e.glob.iter().take(5).collect::<Vec<_>>(),
-                    e.nested.iter().take(8).collect::<Vec<_>>());
-            }
-            eprintln!("seeds: {:?}", collect_user_mount_seeds(&m));
-        }
-        // Should be far smaller than the full stdlib.
-        assert!(reachable.len() < index.len(),
-            "reachable {} should be < total {}", reachable.len(), index.len());
+        // Reachability should be a small fraction of the full stdlib —
+        // the whole point of this pass. A regression that cascades to
+        // every module (e.g. via an unsuppressed prelude glob) would
+        // trip this assertion.
+        assert!(reachable.len() < index.len() / 2,
+            "reachable {} should be much smaller than total {}",
+            reachable.len(), index.len());
     }
 }
