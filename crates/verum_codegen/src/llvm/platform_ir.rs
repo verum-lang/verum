@@ -138,9 +138,11 @@ impl<'ctx> PlatformIR<'ctx> {
         // Entry point — LLVM IR main() wraps user's verum_main.
         self.emit_main_entry(module)?;
 
-        // Windows PE entry point — mainCRTStartup → main() → ExitProcess()
-        #[cfg(target_os = "windows")]
-        self.emit_windows_entry(module)?;
+        // Windows PE entry point — mainCRTStartup → main() → ExitProcess().
+        // Cross-compilation-correct: TARGET-triple dispatch.
+        if target_is_windows(module) {
+            self.emit_windows_entry(module)?;
+        }
 
         // Exception handling declarations (setjmp/longjmp)
         self.emit_exception_handling(module)?;
@@ -220,9 +222,10 @@ impl<'ctx> PlatformIR<'ctx> {
         // Time functions
         self.emit_time_functions(module)?;
 
-        // Platform-specific declarations
-        #[cfg(target_os = "macos")]
-        self.emit_macos_declarations(module)?;
+        // Platform-specific declarations.  TARGET-triple dispatch.
+        if target_is_darwin(module) {
+            self.emit_macos_declarations(module)?;
+        }
 
         // GROUP 1: TLS + get_or_create_context (full LLVM IR bodies)
         self.emit_tls_and_context_ir(module)?;
@@ -343,13 +346,15 @@ impl<'ctx> PlatformIR<'ctx> {
         let flags = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
         let mode = func.get_nth_param(2).or_internal("missing param 2")?.into_int_value();
 
-        // SYS_open: macOS arm64 = 0x2000005, Linux x86_64 = 2
-        #[cfg(target_os = "macos")]
-        let sys_open = i64_type.const_int(0x2000005, false);
-        #[cfg(target_os = "linux")]
-        let sys_open = i64_type.const_int(2, false);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let sys_open = i64_type.const_int(2, false);
+        // SYS_open: macOS arm64 = 0x2000005, Linux x86_64 = 2.
+        // TARGET-triple dispatch — never host `#[cfg]`.
+        let sys_open_num: u64 = if target_is_darwin(module) {
+            0x2000005
+        } else {
+            2 // Linux x86_64; aarch64 Linux uses SYS_openat (257) but
+              // this code path is x86_64-only — see syscall_fn arity.
+        };
+        let sys_open = i64_type.const_int(sys_open_num, false);
 
         let fd_i32 = builder.build_call(syscall_fn, &[
             sys_open.into(), path.into(), flags.into(), mode.into()
@@ -597,8 +602,8 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let size = func.get_first_param().or_internal("missing first param")?.into_int_value();
 
-        #[cfg(target_os = "windows")]
-        {
+        // TARGET-triple dispatch — never host `#[cfg]`.
+        if target_is_windows(module) {
             // VirtualAlloc(NULL, size, MEM_COMMIT|MEM_RESERVE=0x3000, PAGE_READWRITE=0x04)
             let virtual_alloc = module.get_function("VirtualAlloc").unwrap_or_else(|| {
                 let va_type = ptr_type.fn_type(&[
@@ -627,10 +632,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 _ => ptr_type.const_null(),
             };
             builder.build_return(Some(&result_ptr)).or_llvm_err()?;
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
+        } else {
             // mmap may be pre-declared by VBC (from core/sys FFI) with all-i64 args,
             // or by emit_macos_declarations with ptr first arg. Adapt to whichever exists.
             let mmap_fn = module.get_function("mmap").unwrap_or_else(|| {
@@ -641,12 +643,13 @@ impl<'ctx> PlatformIR<'ctx> {
                 module.add_function("mmap", mmap_type, None)
             });
 
-            #[cfg(target_os = "macos")]
-            let map_flags = i64_type.const_int(0x1002, false); // MAP_PRIVATE | MAP_ANON
-            #[cfg(target_os = "linux")]
-            let map_flags = i64_type.const_int(0x0022, false); // MAP_PRIVATE | MAP_ANONYMOUS
-            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-            let map_flags = i64_type.const_int(0x1002, false); // fallback
+            // MAP_PRIVATE | MAP_ANON{YMOUS}: Darwin=0x1002, Linux=0x0022.
+            let map_flags_val: u64 = if target_is_linux(module) {
+                0x0022
+            } else {
+                0x1002
+            };
+            let map_flags = i64_type.const_int(map_flags_val, false);
 
             let mmap_param0_is_ptr = mmap_fn.get_type().get_param_types().first()
                 .map_or(false, |t| t.is_pointer_type());
@@ -705,10 +708,10 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.position_at_end(entry);
 
         let ptr_param = func.get_nth_param(0).or_internal("missing param 0")?.into_pointer_value();
-        let _size_param = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
+        let size_param = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
 
-        #[cfg(target_os = "windows")]
-        {
+        // TARGET-triple dispatch.
+        if target_is_windows(module) {
             // VirtualFree(ptr, 0, MEM_RELEASE=0x8000)
             let virtual_free = module.get_function("VirtualFree").unwrap_or_else(|| {
                 let vf_type = i32_type.fn_type(&[
@@ -727,10 +730,8 @@ impl<'ctx> PlatformIR<'ctx> {
                 i64_type.const_zero().into(),                    // dwSize = 0 (required for MEM_RELEASE)
                 i32_type.const_int(0x8000, false).into(),       // MEM_RELEASE
             ], "").or_llvm_err()?;
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
+            let _ = size_param; // Windows path doesn't need it.
+        } else {
             let munmap_fn = module.get_function("munmap").unwrap_or_else(|| {
                 let munmap_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
                 module.add_function("munmap", munmap_type, None)
@@ -743,7 +744,7 @@ impl<'ctx> PlatformIR<'ctx> {
             } else {
                 builder.build_ptr_to_int(ptr_param, i64_type, "ptr_i64").or_llvm_err()?.into()
             };
-            builder.build_call(munmap_fn, &[addr_arg, _size_param.into()], "").or_llvm_err()?;
+            builder.build_call(munmap_fn, &[addr_arg, size_param.into()], "").or_llvm_err()?;
         }
 
         builder.build_return(None).or_llvm_err()?;
@@ -778,8 +779,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let buf = func.get_nth_param(1).or_internal("missing param 1")?;
         let count = func.get_nth_param(2).or_internal("missing param 2")?;
 
-        #[cfg(target_os = "windows")]
-        {
+        // TARGET-triple dispatch.
+        if target_is_windows(module) {
             // GetStdHandle(nStdHandle) -> HANDLE
             //   STD_OUTPUT_HANDLE = -11 (0xFFFFFFF5)
             //   STD_ERROR_HANDLE  = -12 (0xFFFFFFF4)
@@ -835,10 +836,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let written_val = builder.build_load(i32_type, written_ptr, "wr").or_llvm_err()?;
             let result = builder.build_int_z_extend(written_val.into_int_value(), i64_type, "wr64").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
+        } else {
             let write_fn = module.get_function("write").unwrap_or_else(|| {
                 let write_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
                 module.add_function("write", write_type, None)
@@ -879,8 +877,8 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let code = func.get_first_param().or_internal("missing first param")?.into_int_value();
 
-        #[cfg(target_os = "windows")]
-        {
+        // TARGET-triple dispatch.
+        if target_is_windows(module) {
             // ExitProcess(uExitCode: UINT) -> ! from kernel32.dll
             let exit_process = module.get_function("ExitProcess").unwrap_or_else(|| {
                 let ep_type = void_type.fn_type(&[i32_type.into()], false);
@@ -894,10 +892,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
             let code_u32 = builder.build_int_cast(code, i32_type, "code32").or_llvm_err()?;
             builder.build_call(exit_process, &[code_u32.into()], "").or_llvm_err()?;
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
+        } else {
             let exit_fn = module.get_function("_exit").unwrap_or_else(|| {
                 let exit_type = void_type.fn_type(&[i64_type.into()], false);
                 let f = module.add_function("_exit", exit_type, None);
@@ -1002,7 +997,14 @@ impl<'ctx> PlatformIR<'ctx> {
     /// For the initial V-LLSI implementation we emit a minimal entry that
     /// passes argc=0, argv=NULL — command-line parsing is handled by the
     /// Verum runtime (`verum_store_args` reads `GetCommandLineW` directly).
-    #[cfg(target_os = "windows")]
+    ///
+    /// **Cross-compilation note**: this method is ALWAYS available
+    /// regardless of host OS — the caller (`emit_main_entry`'s
+    /// dispatch site) gates the call on `target_is_windows(module)`,
+    /// so the Windows PE entry path is reachable when building a
+    /// Windows binary on any host (Linux / macOS / Windows alike).
+    /// HOST `#[cfg(target_os = "windows")]` would have forced the
+    /// host to be Windows just to produce a Windows binary.
     fn emit_windows_entry(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         if module.get_function("mainCRTStartup").map_or(false, |f| f.count_basic_blocks() > 0) {
             return Ok(());
