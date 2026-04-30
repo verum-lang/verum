@@ -429,9 +429,8 @@ impl Session {
             );
         }
 
-        // Phase-not-realised tracing for inert codegen knobs.
-        // The `[codegen]` manifest section parses four fields. Three
-        // are wired:
+        // The `[codegen]` manifest section parses four fields. ALL
+        // FOUR are wired:
         //   - `monomorphization_cache` flows through pipeline.rs:
         //     10630 / 12161 to `VbcMonomorphizationPhase::without_
         //     cache()` — manifest `false` actually disables the
@@ -445,23 +444,18 @@ impl Session {
         //   - `vectorize` flows the same path; emits
         //     `no-loop-vectorize` + `no-slp-vectorize` LLVM string
         //     attributes when manifest sets it `false`.
-        // One remains inert:
-        //   - `inline_depth`: the LLVM inliner consults its own
-        //     threshold heuristic.
+        //   - `inline_depth` (default 3) flows through
+        //     `pipeline/native_codegen.rs` →
+        //     `LoweringConfig.inline_depth` → `lower_vbc_function`,
+        //     which emits `"inline-threshold"="<N>"` per-function
+        //     string attribute (N = inline_depth * 75) when
+        //     manifest sets it ≠ 3.  Default 3 maps to LLVM's
+        //     built-in 225 threshold so default builds emit no
+        //     attribute and produce IR bit-identical to pre-wire
+        //     output.  Closes task #267.
         //
-        // Surface a warning when this one is set to a non-default
-        // value so an explicit override doesn't silently fall
-        // through.
-        let cg = &opts.language_features.codegen;
-        if cg.inline_depth != 3 {
-            tracing::warn!(
-                "manifest [codegen] surface: inline_depth={} (this field lands \
-                 on LanguageFeatures.codegen but no production codegen path \
-                 consults it — LLVM's inliner uses its own threshold heuristic \
-                 driven by opt_level)",
-                cg.inline_depth,
-            );
-        }
+        // No runtime warn! needed — every value the user can set
+        // produces observable codegen behaviour.
 
         // Phase-not-realised tracing for inert type-system
         // knobs. The `[types]` manifest section parses 7 bool

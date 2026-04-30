@@ -228,6 +228,20 @@ impl<'s> CompilationPipeline<'s> {
             .codegen
             .vectorize;
 
+        // Resolve `[codegen].inline_depth` from Verum.toml.  Maps
+        // to per-function `"inline-threshold"` LLVM string
+        // attribute (threshold = inline_depth * 75; default 3 →
+        // 225 = LLVM default, no IR emission).  Pre-fix the
+        // manifest field was tracing-only at session.rs:448;
+        // setting it had zero effect on generated code.  Closes
+        // task #267.
+        let inline_depth = self
+            .session
+            .options()
+            .language_features
+            .codegen
+            .inline_depth;
+
         // Resolve manifest-driven runtime-bridge values
         // (architectural prerequisite #261).  Each field flows
         // through to a `__verum_runtime_*` LLVM global at codegen
@@ -250,7 +264,8 @@ impl<'s> CompilationPipeline<'s> {
             .with_panic_strategy(panic_strategy)
             .with_tail_call_optimization(tail_call_optimization)
             .with_vectorize(vectorize)
-            .with_runtime_bridge(runtime_bridge);
+            .with_runtime_bridge(runtime_bridge)
+            .with_inline_depth(inline_depth);
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,
