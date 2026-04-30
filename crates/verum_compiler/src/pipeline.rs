@@ -6130,6 +6130,13 @@ impl<'s> CompilationPipeline<'s> {
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
 
+        // On-demand narrowing: drop stdlib modules not reachable from the
+        // user's `mount` set. Cuts the type-check surface from ~2266 to
+        // typically <100 modules; opt-out via `VERUM_NO_LAZY_STDLIB=1`.
+        if std::env::var("VERUM_NO_LAZY_STDLIB").is_err() {
+            self.narrow_stdlib_to_user_reachable(&module);
+        }
+
         // Get module path for registration and expansion
         let module_path = Text::from(self.session.options().input.display().to_string());
 
