@@ -864,6 +864,26 @@ impl VbcCodegen {
         // Create cfg evaluator from target config
         let cfg_evaluator = CfgEvaluator::with_config(config.target_config.clone());
 
+        // Phase-not-realised tracing: `CodegenConfig.debug_info`
+        // (default false) lands on the config from CompilerConfig
+        // forwarding (api.rs:1045) but the VBC codegen does not
+        // currently emit DWARF-style or other broad debug info.
+        // The narrower `source_map` flag (line/col tracking via
+        // debug_vars) IS wired at finalize_module (line ~4827) —
+        // these are conceptually separate even though the names
+        // overlap. Surface a warning when `debug_info = true` so
+        // a `[codegen.vbc] debug_info = true` setting in
+        // verum.toml doesn't silently produce a module without
+        // any DWARF metadata.
+        if config.debug_info {
+            tracing::warn!(
+                "CodegenConfig surface: debug_info=true (this field lands on \
+                 the config but VBC codegen does not currently emit DWARF-\
+                 style debug info — only the narrower `source_map` flag, \
+                 which controls line/col tracking via debug_vars, is wired)",
+            );
+        }
+
         Self {
             ctx: CodegenContext::new(),
             config,
