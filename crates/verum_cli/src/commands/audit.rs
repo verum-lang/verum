@@ -2750,6 +2750,197 @@ fn audit_cross_format_roundtrip_inner(
 }
 
 // =============================================================================
+// audit --proof-term-library — #157 follow-up / canonical regression suite
+// =============================================================================
+
+/// Verify every `.vproof` in the canonical proof-term certificate
+/// library.  Walks `core/verify/proof_term_examples/` (or the
+/// directory pointed at by `VERUM_PROOF_TERM_EXAMPLES`), runs
+/// `proof_checker::Certificate::verify()` on each, exits non-zero on
+/// any rejection.
+///
+/// This is the trust-base regression suite — every kernel
+/// implementation claiming Verum compatibility must accept all
+/// canonical certificates.  The library currently covers identity,
+/// polymorphic identity, K combinator; grows as `proof_checker`
+/// admits new inference rules (refinement subtyping, W-types,
+/// inductive types, etc.).
+pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::proof_checker::Certificate;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Verifying canonical proof-term certificate library");
+    }
+
+    // Discovery: env override → workspace ancestor walk → manifest dir
+    // co-located.
+    let candidates = proof_term_library_candidates();
+    let library_dir = candidates.into_iter().find(|p| p.is_dir());
+    let library_dir = match library_dir {
+        Some(d) => d,
+        None => {
+            return Err(crate::error::CliError::InvalidArgument(
+                "proof-term certificate library not found — set VERUM_PROOF_TERM_EXAMPLES \
+                 or run from a tree containing core/verify/proof_term_examples/"
+                    .to_string(),
+            ));
+        }
+    };
+
+    // Walk every .vproof file in the library directory.
+    let mut entries: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&library_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map_or(false, |ext| ext == "vproof") {
+                entries.push(p);
+            }
+        }
+    }
+    entries.sort();
+
+    let mut verifications: Vec<serde_json::Value> = Vec::new();
+    let mut verified = 0usize;
+    let mut rejected = 0usize;
+    let mut malformed = 0usize;
+
+    for path in &entries {
+        let outcome = match std::fs::read_to_string(path) {
+            Ok(text) => match serde_json::from_str::<Certificate>(&text) {
+                Ok(cert) => {
+                    let name = cert
+                        .metadata
+                        .get("name")
+                        .cloned()
+                        .unwrap_or_else(|| "(anonymous)".to_string());
+                    match cert.verify() {
+                        Ok(()) => {
+                            verified += 1;
+                            ("verified", name, "".to_string())
+                        }
+                        Err(e) => {
+                            rejected += 1;
+                            ("rejected", name, format!("{:?}", e))
+                        }
+                    }
+                }
+                Err(e) => {
+                    malformed += 1;
+                    ("malformed_json", String::new(), e.to_string())
+                }
+            },
+            Err(e) => {
+                malformed += 1;
+                ("read_error", String::new(), e.to_string())
+            }
+        };
+        verifications.push(serde_json::json!({
+            "file": path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            "name": outcome.1,
+            "outcome": outcome.0,
+            "detail": outcome.2,
+        }));
+    }
+
+    // Emit JSON to disk for bundle composition.
+    let manifest_dir = Manifest::find_manifest_dir().ok();
+    let report_path = match &manifest_dir {
+        Some(d) => d.join("target").join("audit-reports").join("proof-term-library.json"),
+        None => library_dir.join("proof-term-library.json"),
+    };
+    if let Some(parent) = report_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-proof-term-library",
+        "library_path": library_dir.display().to_string(),
+        "total": entries.len(),
+        "verified": verified,
+        "rejected": rejected,
+        "malformed": malformed,
+        "verifications": verifications,
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Canonical proof-term certificate library");
+            println!("────────────────────────────────────────");
+            println!("  Library: {}", library_dir.display());
+            println!(
+                "  ✓ {} verified · ✗ {} rejected · ⚠ {} malformed (total {})",
+                verified, rejected, malformed, entries.len(),
+            );
+            if rejected > 0 || malformed > 0 {
+                println!();
+                for v in verifications.iter().filter(|v| {
+                    !matches!(v.get("outcome").and_then(|s| s.as_str()), Some("verified"))
+                }) {
+                    println!(
+                        "    {} :: {} :: {}",
+                        v.get("file").and_then(|s| s.as_str()).unwrap_or("?"),
+                        v.get("outcome").and_then(|s| s.as_str()).unwrap_or("?"),
+                        v.get("detail").and_then(|s| s.as_str()).unwrap_or("?"),
+                    );
+                }
+            }
+            println!();
+            println!("  Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+    }
+
+    if rejected > 0 || malformed > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "proof-term-library: {} rejected + {} malformed",
+            rejected, malformed,
+        )));
+    }
+    Ok(())
+}
+
+fn proof_term_library_candidates() -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(env_dir) = std::env::var("VERUM_PROOF_TERM_EXAMPLES") {
+        out.push(std::path::PathBuf::from(env_dir));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = cwd;
+        for _ in 0..8 {
+            let candidate = cur.join("core").join("verify").join("proof_term_examples");
+            if candidate.is_dir() {
+                out.push(candidate);
+            }
+            if !cur.pop() {
+                break;
+            }
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let mut cur = dir.to_path_buf();
+            for _ in 0..6 {
+                let candidate = cur.join("core").join("verify").join("proof_term_examples");
+                if candidate.is_dir() {
+                    out.push(candidate);
+                }
+                if !cur.pop() {
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+// =============================================================================
 // audit --signatures — task #174 / certificate-bearing artifacts
 // =============================================================================
 

@@ -1,0 +1,40 @@
+{
+  "term": {
+    "Lam": [
+      {"Universe": 0},
+      {"Lam": [
+        {"Universe": 0},
+        {"Lam": [
+          {"Var": 1},
+          {"Lam": [
+            {"Var": 1},
+            {"Var": 1}
+          ]}
+        ]}
+      ]}
+    ]
+  },
+  "claimed_type": {
+    "Pi": [
+      {"Universe": 0},
+      {"Pi": [
+        {"Universe": 0},
+        {"Pi": [
+          {"Var": 1},
+          {"Pi": [
+            {"Var": 1},
+            {"Var": 3}
+          ]}
+        ]}
+      ]}
+    ]
+  },
+  "metadata": {
+    "name": "k_combinator",
+    "description": "The K combinator (constant function). Term: λ(A:Univ(0)).λ(B:Univ(0)).λ(x:A).λ(_:B).x. Type: Π(A:Univ(0)).Π(B:Univ(0)).Π(_:A).Π(_:B).A.",
+    "source": "core/verify/proof_term_examples/",
+    "kernel_rules_used": "T-Lam-Intro, T-Var, T-Pi-Form (multiple binders)",
+    "complexity": "stress_test_de_bruijn_shifting",
+    "note": "Innermost body Var(1) refers to x (under λ_:B that binds Var(0)). Outermost type body Var(3) refers to A (4 binders out: Pi-_:B, Pi-_:A, Pi-B, Pi-A). Stress-tests de Bruijn arithmetic under deeply nested Pi+Lam."
+  }
+}

@@ -1302,6 +1302,18 @@ enum Commands {
         #[clap(long = "docker")]
         docker: bool,
 
+        /// Verify the canonical proof-term certificate library (#157
+        /// follow-up).  Walks `core/verify/proof_term_examples/*.vproof`
+        /// (or any directory pointed at by `VERUM_PROOF_TERM_EXAMPLES`),
+        /// runs `proof_checker::Certificate::verify()` on each, exits
+        /// non-zero on any rejection.  This is the trust-base
+        /// regression suite — the canonical proofs (identity,
+        /// polymorphic identity, K combinator, transitivity) that
+        /// every kernel implementation claiming Verum compatibility
+        /// must accept.
+        #[clap(long = "proof-term-library")]
+        proof_term_library: bool,
+
         /// Verify provenance signatures on emitted cross-format files
         /// (#174).  Walks the corpus, recomputes each theorem's
         /// expected `verum_signature` header, and compares it to the
@@ -3657,6 +3669,7 @@ fn run_command(cli: Cli) -> Result<()> {
             docker,
             bundle,
             signatures,
+            proof_term_library,
             soundness_iou,
             apply_graph,
             epsilon,
@@ -3718,6 +3731,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_bundle_with_format(output_format)
             } else if signatures {
                 commands::audit::audit_signatures_with_format(output_format)
+            } else if proof_term_library {
+                commands::audit::audit_proof_term_library_with_format(output_format)
             } else if soundness_iou {
                 commands::audit::audit_soundness_iou_with_format(output_format)
             } else if apply_graph {
