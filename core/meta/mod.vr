@@ -155,6 +155,27 @@ public module attribute;
 /// compiler-internal dispatch; advisory markers go through meta).
 public module diakrisis_attrs;
 
+// Compile-time discipline for `@framework` + `@enact` attribute
+// pairs — verifies that every framework citation has a matching
+// enactment and vice versa. Pre-fix the file shipped but the
+// umbrella declaration was missing here, so `mount
+// core.meta.framework_hygiene;` worked via direct file lookup
+// only.
+public module framework_hygiene;
+
+// LLM Oracle Tactic (Phase D.5, experimental) — proof-search
+// integration that consults an external LLM for tactic
+// suggestions, with kernel-replay verification of every
+// returned witness. Experimental; gated behind
+// `@cfg(feature = "oracle")` in production builds.
+public module oracle;
+
+// Tactic metaprogramming (quote / splice / reflect) — first-class
+// composable tactics defined in user code that desugar to
+// quoted ProofTerm trees. Foundation for the V2 user-defined-
+// tactic macro system.
+public module tactic;
+
 // =============================================================================
 // Contexts (Primary API)
 // =============================================================================
