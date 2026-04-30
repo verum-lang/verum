@@ -2200,6 +2200,18 @@ fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Option<Text> {
                             i += 1;
                         }
                     }
+                    // Preserved-whitespace escape: `\<space>` and `\<tab>`
+                    // emit just the space/tab character (the backslash is
+                    // dropped). Used inside continued multi-line strings
+                    // to opt OUT of the `\<newline>` consumer's leading-
+                    // whitespace eating — `\<EOL><spaces>\<spaces><text>`
+                    // produces the spaces verbatim instead of collapsing
+                    // them. Surfaces in `core/verify/kernel_soundness/
+                    // theorems.vr` for Coq-style proof texts where each
+                    // continued line needs explicit indentation.
+                    b' ' | b'\t' => {
+                        i += 1;
+                    }
                     _ => {
                         // Invalid escape sequence - reject the string
                         return None;
@@ -2824,8 +2836,8 @@ pub fn unescape_string(s: &str) -> Text {
                 // value. Used by the stdlib soundness-corpus proof
                 // texts that span many indented lines.
                 Some('\n') => {
-                    let mut peek = chars.clone();
-                    while let Some(c) = peek.next() {
+                    let peek = chars.clone();
+                    for c in peek {
                         if c == ' ' || c == '\t' {
                             chars.next();
                         } else {
@@ -2838,8 +2850,8 @@ pub fn unescape_string(s: &str) -> Text {
                     if let Some('\n') = peek.next() {
                         chars.next();
                     }
-                    let mut peek = chars.clone();
-                    while let Some(c) = peek.next() {
+                    let peek = chars.clone();
+                    for c in peek {
                         if c == ' ' || c == '\t' {
                             chars.next();
                         } else {
@@ -2847,6 +2859,13 @@ pub fn unescape_string(s: &str) -> Text {
                         }
                     }
                 }
+                // Preserved-whitespace escape: `\<space>` and `\<tab>`
+                // emit just the whitespace character (the backslash is
+                // dropped). Lets continued multi-line strings opt OUT
+                // of the `\<newline>` consumer's whitespace-eating —
+                // useful for embedded indentation in literal text.
+                Some(' ') => result.push(' '),
+                Some('\t') => result.push('\t'),
                 Some('x') => {
                     // Hex escape: \xNN
                     let hex: String = chars.by_ref().take(2).collect();
