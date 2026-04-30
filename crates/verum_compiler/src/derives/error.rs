@@ -507,27 +507,135 @@ impl DeriveError {
         result
     }
 
-    /// Generate a format string expression
-    /// This creates an f-string literal for interpolation
+    /// Generate a format string expression for a `@derive(Error)` Display
+    /// arm body.
+    ///
+    /// The template comes from the `@error("file: {path}")` attribute.
+    /// Parses `{ident}` placeholders into the AST's
+    /// `ExprKind::InterpolatedString { handler: "f", parts, exprs }`
+    /// form, which the elaborator already lowers to format-call
+    /// sequences. Each placeholder becomes a `Path(ident)` expression;
+    /// the surrounding variant pattern binds each field by shorthand
+    /// at the same name, so the bindings resolve naturally.
+    ///
+    /// Pre-fix this function returned the template as a plain string
+    /// literal — `Display` for `MyError::FileNotFound { path }` rendered
+    /// the literal `"file: {path}"` instead of substituting the actual
+    /// path. The `_fields` parameter was unused; it's still passed for
+    /// future placeholder-validation work but isn't required for the
+    /// f-string emission itself.
     fn generate_format_string(
         &self,
         template: &Text,
         _fields: &List<super::common::FieldInfo>,
         span: Span,
     ) -> Expr {
-        // Create an f-string literal expression
-        // For now, we'll represent this as a regular string literal that the runtime can interpret
-        // A full implementation would parse the template and generate proper format calls
-        // using the Verum `f"..."` format string syntax
-        use verum_ast::literal::StringLit;
+        let (parts, exprs) = parse_format_template(template.as_str(), span);
+
+        // Pure-text template (no placeholders, or only literal `{{`/`}}`
+        // escapes that resolved to single braces) — fall back to a
+        // plain string literal so we don't burden the elaborator with
+        // a no-interpolation interpolated-string node.
+        if exprs.is_empty() {
+            // parts has exactly one entry in this case; use it as the
+            // literal text (escapes already resolved by the parser).
+            let text = parts.into_iter().next().unwrap_or_default();
+            return string_lit(text.as_str(), span);
+        }
+
         Expr::new(
-            ExprKind::Literal(verum_ast::Literal {
-                kind: verum_ast::LiteralKind::Text(StringLit::Regular(template.to_string().into())),
-                span,
-            }),
+            ExprKind::InterpolatedString {
+                handler: Text::from("f"),
+                parts,
+                exprs,
+            },
             span,
         )
     }
+}
+
+/// Parse an `@error("...")` template into the `(parts, exprs)` shape
+/// that `ExprKind::InterpolatedString` expects.
+///
+/// Recognises:
+///   - `{ident}` → captures the ident as a `Path(ident)` Expr.
+///   - `{{` and `}}` → literal `{` / `}` (Rust-format-string escape).
+///   - Mismatched braces → preserved literally rather than aborting,
+///     which keeps generation resilient and lets the type-checker's
+///     subsequent passes flag the malformed template instead of the
+///     derive macro panicking. (Symmetric with how Rust's `format!`
+///     surface panics at compile time, but here we're inside a derive
+///     and want graceful degradation.)
+///
+/// Invariant: when `exprs.len() == n`, `parts.len() == n + 1`.
+/// `exprs` is empty iff the template has no `{ident}` placeholders.
+fn parse_format_template(template: &str, span: Span) -> (List<Text>, List<Expr>) {
+    let mut parts: List<Text> = List::new();
+    let mut exprs: List<Expr> = List::new();
+    let mut current = String::new();
+    let mut chars = template.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '{' if chars.peek() == Some(&'{') => {
+                // Escaped literal `{`
+                chars.next();
+                current.push('{');
+            }
+            '}' if chars.peek() == Some(&'}') => {
+                // Escaped literal `}`
+                chars.next();
+                current.push('}');
+            }
+            '{' => {
+                // Start of a placeholder. Read the identifier up to
+                // the closing `}` — anything else (or EOF) means
+                // a malformed template; keep the original `{...` as
+                // literal text so generation doesn't panic.
+                let mut ident = String::new();
+                let mut closed = false;
+                for nc in chars.by_ref() {
+                    if nc == '}' {
+                        closed = true;
+                        break;
+                    }
+                    ident.push(nc);
+                }
+
+                let is_ident_shaped = !ident.is_empty()
+                    && ident.chars().next().is_some_and(|c| {
+                        c.is_ascii_alphabetic() || c == '_'
+                    })
+                    && ident.chars().all(|c| {
+                        c.is_ascii_alphanumeric() || c == '_'
+                    });
+
+                if closed && is_ident_shaped {
+                    // Commit current text segment, push placeholder.
+                    parts.push(Text::from(current.as_str()));
+                    current.clear();
+                    exprs.push(super::ident_expr(&ident, span));
+                } else {
+                    // Malformed — recover by treating the whole
+                    // `{...` literally. Keep the original braces and
+                    // ident text so the user-visible Display output
+                    // contains exactly what they wrote.
+                    current.push('{');
+                    current.push_str(&ident);
+                    if closed {
+                        current.push('}');
+                    }
+                }
+            }
+            _ => current.push(c),
+        }
+    }
+
+    // Final tail segment — always pushed, even when empty, to maintain
+    // the parts.len() == exprs.len() + 1 invariant.
+    parts.push(Text::from(current.as_str()));
+
+    (parts, exprs)
 }
 
 /// Generate From implementations for wrapped error types
@@ -839,5 +947,132 @@ mod tests {
 
         let result = derive.can_derive(&ctx);
         assert!(result.is_err());
+    }
+
+    fn parts_as_strs(parts: &List<Text>) -> Vec<&str> {
+        parts.iter().map(|p| p.as_str()).collect()
+    }
+
+    fn expr_as_ident(expr: &Expr) -> Option<&str> {
+        if let ExprKind::Path(path) = &expr.kind {
+            path.as_ident().map(|i| i.as_str())
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn parse_format_template_pure_text() {
+        let span = Span::default();
+        let (parts, exprs) = parse_format_template("file not found", span);
+        assert_eq!(parts_as_strs(&parts), vec!["file not found"]);
+        assert!(exprs.is_empty());
+    }
+
+    #[test]
+    fn parse_format_template_single_placeholder() {
+        let span = Span::default();
+        let (parts, exprs) = parse_format_template("file: {path}", span);
+        assert_eq!(parts_as_strs(&parts), vec!["file: ", ""]);
+        assert_eq!(exprs.len(), 1);
+        assert_eq!(expr_as_ident(&exprs[0]), Some("path"));
+    }
+
+    #[test]
+    fn parse_format_template_multiple_placeholders() {
+        let span = Span::default();
+        let (parts, exprs) = parse_format_template("x={x} y={y}", span);
+        assert_eq!(parts_as_strs(&parts), vec!["x=", " y=", ""]);
+        assert_eq!(exprs.len(), 2);
+        assert_eq!(expr_as_ident(&exprs[0]), Some("x"));
+        assert_eq!(expr_as_ident(&exprs[1]), Some("y"));
+    }
+
+    #[test]
+    fn parse_format_template_escaped_braces() {
+        let span = Span::default();
+        let (parts, exprs) = parse_format_template("literal {{ and }}", span);
+        // Pure-text after escapes resolve — no placeholders.
+        assert_eq!(parts_as_strs(&parts), vec!["literal { and }"]);
+        assert!(exprs.is_empty());
+    }
+
+    #[test]
+    fn parse_format_template_malformed_unclosed_recovers() {
+        let span = Span::default();
+        // Unclosed `{` — graceful recovery: keep `{ident` literally
+        // rather than panicking. The downstream type-checker / user
+        // sees the malformed template in the Display output.
+        let (parts, exprs) = parse_format_template("oops {unclosed", span);
+        assert_eq!(parts_as_strs(&parts), vec!["oops {unclosed"]);
+        assert!(exprs.is_empty());
+    }
+
+    #[test]
+    fn parse_format_template_non_ident_recovers() {
+        let span = Span::default();
+        // `{42}` is closed but the body isn't an ident — preserve
+        // literally, same recovery posture as unclosed braces.
+        let (parts, exprs) = parse_format_template("digit {42} here", span);
+        assert_eq!(parts_as_strs(&parts), vec!["digit {42} here"]);
+        assert!(exprs.is_empty());
+    }
+
+    #[test]
+    fn parse_format_template_underscore_and_alnum_idents() {
+        let span = Span::default();
+        let (parts, exprs) = parse_format_template("{_priv} and {abc123}", span);
+        assert_eq!(parts_as_strs(&parts), vec!["", " and ", ""]);
+        assert_eq!(exprs.len(), 2);
+        assert_eq!(expr_as_ident(&exprs[0]), Some("_priv"));
+        assert_eq!(expr_as_ident(&exprs[1]), Some("abc123"));
+    }
+
+    #[test]
+    fn generate_format_string_pure_text_yields_literal() {
+        // Pure-text templates fall through to a plain string literal
+        // — emitting an InterpolatedString with empty exprs would
+        // burden the elaborator pointlessly.
+        let span = Span::default();
+        let derive = DeriveError;
+        let expr = derive.generate_format_string(
+            &Text::from("plain message"),
+            &List::new(),
+            span,
+        );
+        match &expr.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                verum_ast::LiteralKind::Text(s) => {
+                    assert_eq!(s.as_str(), "plain message");
+                }
+                _ => panic!("expected Text literal"),
+            },
+            other => panic!("pure text must lower to Literal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn generate_format_string_with_placeholder_yields_interpolated() {
+        // Templates with placeholders lower to ExprKind::InterpolatedString
+        // with handler "f" (matching the `f"..."` syntax in source).
+        let span = Span::default();
+        let derive = DeriveError;
+        let expr = derive.generate_format_string(
+            &Text::from("file: {path}"),
+            &List::new(),
+            span,
+        );
+        match &expr.kind {
+            ExprKind::InterpolatedString { handler, parts, exprs } => {
+                assert_eq!(handler.as_str(), "f");
+                assert_eq!(parts_as_strs(parts), vec!["file: ", ""]);
+                assert_eq!(exprs.len(), 1);
+                assert_eq!(expr_as_ident(&exprs[0]), Some("path"));
+            }
+            other => panic!(
+                "placeholder template must lower to InterpolatedString, got {:?}",
+                other
+            ),
+        }
     }
 }
