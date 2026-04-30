@@ -5229,6 +5229,7 @@ dependencies = [
  "verum_diagnostics",
  "verum_error",
  "verum_fast_parser",
+ "verum_kernel",
  "verum_lexer",
  "verum_llvm_sys",
  "verum_modules",
