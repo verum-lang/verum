@@ -91,10 +91,13 @@ public axiom msfs_cubical_hott_in_rich_s<R: RichS>(cubical: &R) -> Bool
     ensures  cubical.n_S() == -1;
 
 /// MSFS §3.2 — `linear logic + ! ∈ R-S`, `n = ∞`.
+/// (Parameter named `lin_logic` rather than `linear` because `linear`
+/// is a reserved keyword in Verum's grammar — using it as a parameter
+/// name confuses the parser at the parameter-pattern position.)
 @framework(msfs, "MSFS §3.2 — linear logic + ! ∈ R-S")
-public axiom msfs_linear_with_bang_in_rich_s<R: RichS>(linear: &R) -> Bool
+public axiom msfs_linear_with_bang_in_rich_s<R: RichS>(lin_logic: &R) -> Bool
     requires true
-    ensures  linear.n_S() == -1;
+    ensures  lin_logic.n_S() == -1;
 
 /// MSFS §3.2 — `Eff (Hyland) internal language ∈ R-S`, `n = ∞`.
 @framework(msfs, "MSFS §3.2 — Eff (Hyland) internal language ∈ R-S")
