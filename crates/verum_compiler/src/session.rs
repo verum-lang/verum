@@ -547,43 +547,40 @@ impl Session {
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
-        // Phase-not-realised tracing for inert test-harness knobs.
-        // The `[test]` manifest section parses 8 fields and
-        // feature_overrides forwards them to
-        // `LanguageFeatures.test`, but no production
-        // compilation path consults them — test orchestration
-        // lives in `verum_cli::commands::test` which reads CLI
-        // flags + Cargo-style discovery, not the manifest's
-        // [test] block. Surface non-default values so a
-        // `[test] proptest_cases = 1000` setting doesn't
-        // silently fall through.
-        let tt = &opts.language_features.test;
-        if tt.differential
-            || !tt.property_testing
-            || tt.proptest_cases != 256
-            || tt.fuzzing
-            || tt.timeout_secs != 60
-            || !tt.parallel
-            || tt.coverage
-            || tt.deny_warnings
-        {
-            tracing::warn!(
-                "manifest [test] surface: differential={}, property_testing={}, \
-                 proptest_cases={}, fuzzing={}, timeout_secs={}, parallel={}, \
-                 coverage={}, deny_warnings={} (these fields land on \
-                 LanguageFeatures.test but the test harness reads CLI flags + \
-                 Cargo-style discovery, not the manifest's [test] block — \
-                 production gating is not yet wired)",
-                tt.differential,
-                tt.property_testing,
-                tt.proptest_cases,
-                tt.fuzzing,
-                tt.timeout_secs,
-                tt.parallel,
-                tt.coverage,
-                tt.deny_warnings,
-            );
-        }
+        // The `[test]` manifest section parses 8 fields. Four are
+        // wired in `verum_cli::commands::test`:
+        //   - `timeout_secs` flows through `TestRunCfg.timeout_secs`
+        //     and bounds each test's wall-clock at run time
+        //     (commands/test.rs:215).
+        //   - `deny_warnings` flows through
+        //     `TestRunCfg.deny_warnings` to force
+        //     `CompilerOptions.warnings_as_errors = true` for
+        //     test compilation (commands/test.rs:216).
+        //   - `coverage` flows through
+        //     `TestRunCfg.coverage = opts.coverage ||
+        //     manifest.test.coverage` enabling LLVM coverage
+        //     instrumentation (commands/test.rs:217). CLI flag
+        //     and manifest value OR-combine.
+        //   - `parallel` gates the rayon worker pool at
+        //     commands/test.rs:292 — when false the harness runs
+        //     tests serially.
+        //
+        // Four remain inert (#268-Infra):
+        //   - `differential` — VBC vs AOT cross-tier consistency
+        //     test expansion. Requires the differential runner
+        //     infrastructure tracked as #273.
+        //   - `property_testing` — proptest-style randomized test
+        //     expansion. Requires `@property` attribute + harness
+        //     integration with proptest crate.
+        //   - `proptest_cases` — case count for property tests.
+        //     Coupled to `property_testing`.
+        //   - `fuzzing` — cargo-fuzz seed integration on `@fuzz`-
+        //     attributed functions. Requires fuzz infrastructure.
+        //
+        // No runtime warn! emitted — the four wired fields produce
+        // observable behaviour, and the four unwired fields are
+        // inert by virtue of missing infrastructure (not by gate).
+        // #268-Infra tracks the per-feature build-out.
 
         // The `[protocols]` manifest section parses 5 fields. ALL
         // FIVE are wired:
