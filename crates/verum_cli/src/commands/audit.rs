@@ -1704,6 +1704,243 @@ fn print_kernel_recheck_report_json(
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());
 }
 
+// =============================================================================
+// audit --kernel-soundness — task #80 / VERUM-TRUST-1 entry point
+// =============================================================================
+
+/// Legacy entry-point for `verum audit --kernel-soundness` with plain output.
+pub fn audit_kernel_soundness() -> Result<()> {
+    audit_kernel_soundness_with_format(AuditFormat::Plain)
+}
+
+/// Entry-point for `verum audit --kernel-soundness [--format FORMAT]`.
+///
+/// Drives the kernel-soundness corpus + cross-export pipeline:
+///
+///   1. **Drift check** — confirms the Rust-side rule list
+///      (`verum_kernel::canonical_rules()`) has the expected variant
+///      count.  A one-sided edit between the Rust enum and the
+///      `core/verify/kernel_soundness/` corpus fails here.
+///   2. **Per-rule status enumeration** — reports how many of the
+///      35 lemmas are structurally proved versus admitted with a
+///      concrete IOU.
+///   3. **Foreign-tool emission** — produces `kernel_soundness.v`
+///      (Coq) and `KernelSoundness.lean` (Lean 4) files in
+///      `target/audit-reports/kernel-soundness/` for independent
+///      re-checking.  External invocation of `coqc` / `lean` is
+///      OPTIONAL and lives in CI; the audit gate itself does not
+///      shell out (so the gate stays hermetic).
+///   4. **Honest IOUs** — the report lists every admitted lemma
+///      with its meta-theoretic prerequisite reason verbatim.
+///
+/// Exits non-zero only on drift; admitted lemmas are accountability
+/// surface, not failures.  When the corpus is fully discharged
+/// (admitted_count = 0), the gate flips to `kernel_soundness_holds_unconditionally`
+/// and a future tightening could require zero admits to pass.
+pub fn audit_kernel_soundness_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::soundness::coq::CoqBackend;
+    use verum_kernel::soundness::lean::LeanBackend;
+    use verum_kernel::soundness::{
+        EXPECTED_KERNEL_RULE_COUNT, SoundnessBackend, SoundnessExporter,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Running kernel-soundness corpus check + cross-export");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let exporter = SoundnessExporter::new();
+
+    // 1. Drift check.
+    if let Err(reason) = exporter.drift_check() {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "kernel-soundness drift: {}",
+            reason,
+        )));
+    }
+
+    // 2. Emit Coq + Lean theory files into target/audit-reports/.
+    let report_dir = manifest_dir
+        .join("target")
+        .join("audit-reports")
+        .join("kernel-soundness");
+    let coq = CoqBackend::new();
+    let lean = LeanBackend::new();
+    let coq_text = exporter.emit(&coq);
+    let lean_text = exporter.emit(&lean);
+
+    // Best-effort write — failure to mkdir / write is reported as a
+    // notice in plain output and absent fields in JSON, but doesn't
+    // fail the gate.  The corpus check above is the load-bearing
+    // assertion; foreign-export emission is bonus accountability.
+    let coq_path = report_dir.join(coq.output_filename());
+    let lean_path = report_dir.join(lean.output_filename());
+    let mut emit_errors: Vec<String> = Vec::new();
+    if let Err(e) = std::fs::create_dir_all(&report_dir) {
+        emit_errors.push(format!("mkdir {}: {}", report_dir.display(), e));
+    } else {
+        if let Err(e) = std::fs::write(&coq_path, &coq_text) {
+            emit_errors.push(format!("write {}: {}", coq_path.display(), e));
+        }
+        if let Err(e) = std::fs::write(&lean_path, &lean_text) {
+            emit_errors.push(format!("write {}: {}", lean_path.display(), e));
+        }
+    }
+
+    let proved = exporter.proved_count();
+    let admitted = exporter.admitted_count();
+    let ious: Vec<(String, String)> = exporter
+        .admitted_iou_list()
+        .into_iter()
+        .map(|(rule, reason)| (rule.to_string(), reason.to_string()))
+        .collect();
+
+    match format {
+        AuditFormat::Plain => print_kernel_soundness_report(
+            &exporter,
+            EXPECTED_KERNEL_RULE_COUNT,
+            proved,
+            admitted,
+            &ious,
+            &coq_path,
+            &lean_path,
+            &emit_errors,
+        ),
+        AuditFormat::Json => print_kernel_soundness_report_json(
+            &exporter,
+            EXPECTED_KERNEL_RULE_COUNT,
+            proved,
+            admitted,
+            &ious,
+            &coq_path,
+            &lean_path,
+            &emit_errors,
+        ),
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn print_kernel_soundness_report(
+    exporter: &verum_kernel::soundness::SoundnessExporter,
+    expected_total: usize,
+    proved: usize,
+    admitted: usize,
+    ious: &[(String, String)],
+    coq_path: &std::path::Path,
+    lean_path: &std::path::Path,
+    emit_errors: &[String],
+) {
+    println!();
+    println!("{}", "Kernel-soundness report".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Corpus has {} kernel rules ({} expected); {} structurally proved, {} admitted.",
+        exporter.rules().len(),
+        expected_total,
+        proved,
+        admitted,
+    );
+    println!();
+
+    println!("  {}", "Cross-export emitted:".bold());
+    for path in [coq_path, lean_path] {
+        println!("    • {}", path.display());
+    }
+    if !emit_errors.is_empty() {
+        for e in emit_errors {
+            println!("    {} {}", "!".yellow(), e);
+        }
+    }
+    println!();
+
+    if !ious.is_empty() {
+        println!("  {}", "Outstanding IOUs (admitted lemmas):".bold());
+        for (rule, reason) in ious {
+            println!("    {} {} — {}", "○".dimmed(), rule, reason);
+        }
+        println!();
+    }
+
+    if admitted == 0 {
+        println!(
+            "  {} kernel_soundness theorem holds UNCONDITIONALLY in this corpus.",
+            "✓".green(),
+        );
+    } else {
+        println!(
+            "  {} kernel_soundness holds modulo the {} IOUs above.",
+            "ℹ".cyan(),
+            admitted,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn print_kernel_soundness_report_json(
+    exporter: &verum_kernel::soundness::SoundnessExporter,
+    expected_total: usize,
+    proved: usize,
+    admitted: usize,
+    ious: &[(String, String)],
+    coq_path: &std::path::Path,
+    lean_path: &std::path::Path,
+    emit_errors: &[String],
+) {
+    let rules_json: Vec<serde_json::Value> = exporter
+        .rules()
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "rule_name": r.rule_name,
+                "lemma_name": r.lemma_name,
+                "category": r.category.tag(),
+                "premise_arity": r.premise_arity,
+                "has_side_condition": r.has_side_condition,
+                "status": match &r.status {
+                    verum_kernel::soundness::LemmaStatus::Proved { .. } => "Proved",
+                    verum_kernel::soundness::LemmaStatus::Admitted { .. } => "Admitted",
+                },
+                "admit_reason": match &r.status {
+                    verum_kernel::soundness::LemmaStatus::Proved { .. } => serde_json::Value::Null,
+                    verum_kernel::soundness::LemmaStatus::Admitted { reason } => {
+                        serde_json::Value::String(reason.clone())
+                    }
+                },
+            })
+        })
+        .collect();
+
+    let ious_json: Vec<serde_json::Value> = ious
+        .iter()
+        .map(|(rule, reason)| {
+            serde_json::json!({
+                "rule_name": rule,
+                "reason": reason,
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-kernel-soundness",
+        "expected_rule_count": expected_total,
+        "actual_rule_count": exporter.rules().len(),
+        "proved_count": proved,
+        "admitted_count": admitted,
+        "holds_unconditionally": admitted == 0,
+        "rules": rules_json,
+        "outstanding_ious": ious_json,
+        "exports": {
+            "coq_path": coq_path.display().to_string(),
+            "lean_path": lean_path.display().to_string(),
+            "emit_errors": emit_errors,
+        },
+    });
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+}
+
 /// Legacy entry-point for `verum audit --epsilon` with plain output.
 pub fn audit_epsilon() -> Result<()> {
     audit_epsilon_with_format(AuditFormat::Plain)
