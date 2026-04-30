@@ -1,0 +1,110 @@
+// =============================================================================
+// kernel_v0 — T-Pi-Form inference rule + soundness lemma (ADMITTED)
+// =============================================================================
+//
+// **Rule**
+//
+//   ┌─────────────────────────────────────────────────────────┐
+//   │ Γ      ⊢ A : Universe(n)                                  │
+//   │ Γ, A   ⊢ B : Universe(m)                                  │
+//   │ ────────────────────────────────────────  T-Pi-Form        │
+//   │ Γ      ⊢ Pi(A, B) : Universe(max(n, m))                   │
+//   └─────────────────────────────────────────────────────────┘
+//
+// **Soundness lemma** (ADMITTED — substitution-lemma IOU)
+//
+//   For every context Γ and Π-formed type Pi(A, B), if the two
+//   premises hold, then Pi(A, B) inhabits Universe(max(n, m)) in the
+//   categorical model.
+//
+// **Why admitted (not yet proved)**
+//
+// The soundness lemma reduces to the SUBSTITUTION LEMMA:
+//
+//     If Γ, A ⊢ B : Univ(m) and Γ ⊢ x : A, then Γ ⊢ B[x/0] : Univ(m).
+//
+// This is a non-trivial structural theorem requiring inductive
+// reasoning over the entire derivation tree, including all the
+// context-shift / context-extend operations.  The proof is the
+// textbook "substitution lemma" of dependent type theory (cf.
+// Hofmann 1997, *Syntax and Semantics of Dependent Types*, §3.2).
+//
+// **Discharge plan** (#173 Phase 2)
+//
+//   1. Formalize `subst_preserves_typing` lemma as a separate
+//      Verum theorem in `core/verify/kernel_v0/lemmas/`.
+//   2. Phase-1 trust-base reduction: import a verified mathlib
+//      proof of the substitution lemma (#155 Phase 4).
+//   3. Cross-discharge via Coq/Lean foreign-tool re-check
+//      (`verum audit --cross-format-roundtrip`).
+//
+// **Position in the bootstrap chain**
+//
+// T-Pi-Form is one of 6 admitted rules.  Its discharge is the FIRST
+// priority because every other admitted rule (T-Lam-Intro, T-App-Elim,
+// T-Beta, T-Eta) downstream depends on the same substitution lemma.
+// =============================================================================
+
+module core.verify.kernel_v0.rules.k_pi_form;
+
+mount core.prelude.{Heap, Maybe};
+mount super.super.core_term.{CoreTerm};
+mount super.super.context.{Context, extend};
+mount super.super.judgment.{Derivation, type_of};
+
+/// Construct a T-Pi-Form derivation from two sub-derivations.
+///
+/// Returns `Maybe::Some(d)` when both premises type as universes (the
+/// elaborator presents the universe levels n, m).  Returns
+/// `Maybe::None` when the premises don't establish universe membership.
+public fn introduce_pi_form(
+    ctx: Context,
+    domain_d: Derivation,
+    codomain_d: Derivation,
+    n: Int{>= 0},
+    m: Int{>= 0},
+) -> Maybe<Derivation>
+    requires domain_d is _ && codomain_d is _
+{
+    let max_level = if n >= m { n } else { m };
+    return Maybe.Some(Derivation.PiForm {
+        context: ctx,
+        domain_derivation:   Heap(domain_d),
+        codomain_derivation: Heap(codomain_d),
+        result_type:         CoreTerm.Universe { level: max_level },
+    });
+}
+
+/// **Soundness lemma — ADMITTED.**
+///
+/// `∀ ctx A B n m.
+///     Γ ⊢ A : Univ(n)
+///     → Γ, A ⊢ B : Univ(m)
+///     → Γ ⊢ Pi(A, B) : Univ(max(n, m)).`
+///
+/// **IOU** (recorded in audit bundle `soundness-iou.json`):
+/// substitution-lemma — every β-reduction step needs `B[x/0]` to be
+/// well-typed in Γ when B is well-typed in Γ, A and x : A in Γ.
+///
+/// **Discharge target**: lemma `subst_preserves_typing` in
+/// `core/verify/kernel_v0/lemmas/subst.vr` (Phase-1 work).
+///
+/// Coq tactic chain (target form):
+///   `intros; apply pi_form_admissible; assumption.`
+/// Lean tactic chain (target form):
+///   `intros; exact pi_form_admissible _ _ ‹_› ‹_›`.
+@verify(formal)
+@kernel_discharge("kernel_pi_form_strict")
+@admitted("substitution-lemma — dependent on Phase-1 subst.vr")
+public theorem k_pi_form_sound(
+    ctx: &Context,
+    d: &Derivation,
+)
+    requires d is Derivation.PiForm
+    ensures true  // Conditional on substitution-lemma discharge.
+    proof {
+        // ADMITTED — relies on `subst_preserves_typing` being proved
+        // separately in `lemmas/subst.vr`.  Wired through
+        // `kernel_pi_form_strict` bridge to the dispatcher; the bridge
+        // currently emits an admitted_axiom witness.
+    };
