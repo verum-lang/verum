@@ -95,21 +95,20 @@ pub mod proof_checker;
 // `proof_checker::*` path so the namespace boundary stays loud.
 
 pub mod tactic_elaborator;
-// Tactic-to-proof-term elaboration (#164 Phase-1).  The missing link
-// from Verum proof bodies (`ProofBody::Tactic(TacticExpr)`) to
-// kernel-checkable [`proof_checker::Certificate`] values.  Without
-// this module, the kernel checker is a *theoretically* trusted base
-// but *practically* unused — no real Verum theorem reduces to a
-// kernel-readable term.  The de Bruijn criterion lives here.
+// Tactic-to-proof-term elaboration: the link from Verum proof
+// bodies (`ProofBody::Tactic(TacticExpr)` / `ProofBody::Term(Expr)`)
+// to kernel-checkable [`proof_checker::Certificate`] values.  Tracks
+// task #164.  Without this module the kernel checker is a trusted
+// base in name only — no Verum theorem reduces to a kernel-readable
+// term.  The de Bruijn criterion lives here.
 
 pub mod verification_goal;
-// Single VerificationGoal type (#167) — the unified verification
-// surface.  Pre-#167 fn-contracts, theorem propositions, and
-// refinement predicates went through three parallel pipelines with
-// no shared type.  Post-#167 every source produces the same
-// `VerificationGoal { hypotheses, conclusion, source }` shape, and
-// every dispatcher consumes it.  Prerequisite for #160
-// (refinement-driven development unification).
+// Unified VerificationGoal type — the verification surface.  Tracks
+// task #167.  Function contracts, theorem propositions, and
+// refinement predicates all produce the same
+// `VerificationGoal { hypotheses, conclusion, source }` shape; every
+// dispatcher consumes it.  Prerequisite for #160 (refinement-driven
+// development unification).
 
 pub mod proof_tree;
 pub use proof_tree::{KernelProofNode, KernelRule, record_inference};

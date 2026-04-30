@@ -421,26 +421,24 @@ enum Commands {
         file: Text,
     },
 
-    /// Elaborate Verum theorems into kernel-checkable certificates
-    /// (#164).  Walks every theorem/lemma/corollary in `<file.vr>`,
-    /// runs `tactic_elaborator::elaborate_theorem` on each, and emits
+    /// Elaborate Verum theorems into kernel-checkable certificates.
+    /// Walks every theorem / lemma / corollary in `<file.vr>`, runs
+    /// `tactic_elaborator::elaborate_theorem` on each, and emits
     /// `<theorem-name>.vproof` files into `<output-dir>` (default:
     /// `<source-dir>/elaborated/`).
     ///
-    /// **The fundamental closure** — pre-#164 the kernel checker
-    /// (`verum check-proof`, 796 LOC trust base) was theoretically
-    /// trustworthy but practically unused: no real Verum theorem
-    /// produced a `Certificate`.  Post-#164 this command produces
-    /// real `.vproof` files from Verum source that
-    /// `verum check-proof` re-verifies independently.  The de Bruijn
-    /// criterion holds end-to-end.
+    /// Together with `verum check-proof`, this command closes the
+    /// round-trip from source theorem to kernel verdict: certificates
+    /// are kernel-checked at construction time and can be
+    /// independently re-verified by `verum check-proof`, whose
+    /// trust base is the 796-LOC `proof_checker.rs`.
     ///
-    /// Phase-1+2 supports `proof { apply <lemma>(args); }` bodies
-    /// (every `kernel_v0/lemmas/` stub + every `@delegate` theorem
-    /// from #146).  Other tactic forms are gracefully skipped with
-    /// a structured `ElabError::UnsupportedTactic(<variant>)`
-    /// diagnostic.  Phase-3 expands coverage to `Seq` / `Intro` /
-    /// `Rewrite`.
+    /// Currently supports `proof { apply <lemma>(args); }` and
+    /// `proof = <expr>` bodies with `Bool` / `Path` / `Call` /
+    /// `Binary` / `Unary` propositions.  Other tactic forms and
+    /// proposition shapes are gracefully skipped with a structured
+    /// `ElabError` diagnostic (UnsupportedTactic /
+    /// UndeclaredApplyTarget / UnsupportedExpression).
     ElaborateProof {
         /// Path to the `.vr` source file.
         #[clap(value_name = "FILE")]
@@ -1357,8 +1355,8 @@ enum Commands {
         #[clap(long = "signatures")]
         signatures: bool,
 
-        /// Run the kernel-soundness IOU dashboard (#152 / Phase-1 of
-        /// trust-base reduction).  Enumerates every kernel rule whose
+        /// Run the kernel-soundness IOU dashboard.  Enumerates
+        /// every kernel rule whose
         /// soundness lemma is admitted with an IOU reason in
         /// `core/verify/kernel_soundness/`; groups by RuleCategory
         /// (Structural / Cubical / Refinement / Quotient / Inductive /
