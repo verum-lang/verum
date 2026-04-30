@@ -819,6 +819,60 @@ impl<'ctx> PlatformIR<'ctx> {
             let handle = builder.build_call(get_std_handle, &[neg_handle.into()], "handle").or_llvm_err()?
                 .try_as_basic_value().basic().or_internal("expected basic value")?;
 
+            // GUI-subsystem degradation: when the process has no
+            // console (Win32 app launched with `/SUBSYSTEM:WINDOWS`),
+            // `GetStdHandle` returns NULL or `INVALID_HANDLE_VALUE`
+            // (-1 cast to HANDLE).  Calling `WriteFile` on either
+            // would block / fail.  Short-circuit to "wrote count
+            // bytes" so library code that incidentally `print()`s
+            // (logging, telemetry) does not block the GUI thread.
+            //
+            // We branch on `handle == NULL` only — `INVALID_HANDLE_VALUE`
+            // (= 0xFFFF...FFFF) is also a non-NULL pointer in LLVM IR
+            // terms, but Microsoft documents both NULL and
+            // INVALID_HANDLE_VALUE as failure modes for
+            // `GetStdHandle`.  We test both: NULL via `is_null`,
+            // INVALID_HANDLE_VALUE via ptr-to-int compare against -1.
+            let handle_ptr = match handle {
+                BasicValueEnum::PointerValue(p) => p,
+                _ => return Err(super::error::LlvmLoweringError::internal(
+                    "GetStdHandle did not return a pointer".to_string(),
+                )),
+            };
+            let is_null = builder
+                .build_is_null(handle_ptr, "h_null")
+                .or_llvm_err()?;
+            let h_as_int = builder
+                .build_ptr_to_int(handle_ptr, i64_type, "h_int")
+                .or_llvm_err()?;
+            let is_invalid = builder
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    h_as_int,
+                    i64_type.const_all_ones(),
+                    "h_invalid",
+                )
+                .or_llvm_err()?;
+            let bad_handle = builder
+                .build_or(is_null, is_invalid, "h_bad")
+                .or_llvm_err()?;
+
+            let bb_skip = ctx.append_basic_block(func, "no_console_skip");
+            let bb_write = ctx.append_basic_block(func, "do_write");
+            builder
+                .build_conditional_branch(bad_handle, bb_skip, bb_write)
+                .or_llvm_err()?;
+
+            // No-console branch: pretend the write succeeded.  The
+            // caller treats the return value as bytes-written, so
+            // returning `count` makes `print()` look like it wrote
+            // everything (which is the correct semantics for a UI
+            // app that has no place to display the bytes).
+            builder.position_at_end(bb_skip);
+            builder.build_return(Some(&count.into_int_value())).or_llvm_err()?;
+
+            // Real-write branch.
+            builder.position_at_end(bb_write);
             // Stack-allocate bytes_written
             let written_ptr = builder.build_alloca(i32_type, "written").or_llvm_err()?;
             builder.build_store(written_ptr, i32_type.const_zero()).or_llvm_err()?;

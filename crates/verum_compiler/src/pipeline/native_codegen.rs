@@ -528,6 +528,40 @@ impl<'s> CompilationPipeline<'s> {
             linker_config.use_llvm_linker = true;
         }
 
+        // Wire Windows subsystem (console / GUI) into linker config.
+        // The CLI (`--windows-subsystem`) and manifest
+        // (`[build].windows_subsystem`) get resolved into
+        // `options.windows_subsystem` upstream by `verum_cli::commands::build`.
+        // Here we apply it to the no-libc Windows configuration so the
+        // produced .exe carries `/SUBSYSTEM:WINDOWS` (GUI) instead of
+        // the default `/SUBSYSTEM:CONSOLE`.  Ignored on non-Windows
+        // targets — the linker config's flags table is unchanged when
+        // `for_platform` returns a non-Windows variant.
+        if let Some(ref subsystem_flag) = self.session.options().windows_subsystem {
+            // Only apply when we have a no-libc config AND it's a
+            // Windows config (otherwise the flag would be a silent
+            // no-op).  Detect via the platform field on the existing
+            // config, falling back to inspection of the target triple.
+            let is_windows_target = match &linker_config.no_libc_config {
+                Some(cfg) => matches!(cfg.platform, verum_codegen::link::Platform::Windows),
+                None => self
+                    .session
+                    .options()
+                    .target_triple
+                    .as_ref()
+                    .map(|t| t.as_str().contains("windows")
+                        || t.as_str().contains("msvc")
+                        || t.as_str().contains("mingw"))
+                    .unwrap_or(false),
+            };
+            if is_windows_target {
+                use verum_codegen::link::NoLibcConfig;
+                linker_config.no_libc_config = Some(
+                    NoLibcConfig::windows_with_subsystem(subsystem_flag.as_str()),
+                );
+            }
+        }
+
         // Add Metal/Foundation frameworks for macOS GPU support (LLD path)
         #[cfg(target_os = "macos")]
         {

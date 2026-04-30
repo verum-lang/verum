@@ -212,6 +212,27 @@ pub struct CompilerOptions {
     /// Strip debug info only (keep function names)
     pub strip_debug: bool,
 
+    /// Windows PE subsystem selection.  `Some("CONSOLE")` (default
+    /// when None) emits `/SUBSYSTEM:CONSOLE` so the loader allocates
+    /// a console window for the resulting `.exe`; `Some("WINDOWS")`
+    /// emits `/SUBSYSTEM:WINDOWS` so the loader skips console
+    /// allocation (Win32 GUI app — required for desktop applications
+    /// to avoid a console flash on launch).
+    ///
+    /// Ignored on non-Windows targets.  Resolution order, highest
+    /// precedence first:
+    ///   1. CLI `--windows-subsystem={console|gui}` flag.
+    ///   2. Source-level `@gui` / `@console` attribute on `fn main`.
+    ///   3. Manifest `[build].windows_subsystem = "console" | "gui"`.
+    ///   4. Default `Console`.
+    ///
+    /// The runtime helpers (`platform_ir.rs::emit_verum_os_write`)
+    /// gracefully degrade under `Gui`: when `GetStdHandle(STD_OUTPUT_HANDLE)`
+    /// returns `INVALID_HANDLE_VALUE` (no console available), the
+    /// helper short-circuits to a no-op rather than blocking on
+    /// `WriteFile`.
+    pub windows_subsystem: Option<Text>,
+
     // Compilation Options
     /// Continue compilation after errors
     pub continue_on_error: bool,
@@ -410,6 +431,7 @@ impl Default for CompilerOptions {
             static_link: false,
             strip_symbols: false,
             strip_debug: false,
+            windows_subsystem: None,
             continue_on_error: false,
             check_only: false,
             output_format: OutputFormat::default(),

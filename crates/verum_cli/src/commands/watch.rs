@@ -50,6 +50,7 @@ pub fn execute(command: &str, clear: bool) -> Result<()> {
                 false, // emit_bc
                 false, // emit_types
                 false, // emit_vbc
+                None,  // windows_subsystem_cli
                 // Lint options (use defaults for watch command)
                 false,     // deny_warnings
                 false,     // strict_intrinsics

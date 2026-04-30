@@ -107,6 +107,7 @@ pub fn execute(
                 false, // emit_bc
                 false, // emit_types
                 false, // emit_vbc
+                None,  // windows_subsystem_cli
                 false, // deny_warnings
                 false, // strict_intrinsics
                 Vec::new(), // deny_lint

@@ -227,6 +227,15 @@ enum Commands {
         #[clap(long, help = "Emit VBC bytecode dump (.vbc.txt)")]
         emit_vbc: bool,
 
+        /// Windows PE subsystem.  `console` (default) produces a
+        /// standard CLI app that allocates a console window when
+        /// launched.  `gui` produces a Win32 GUI app — no console
+        /// flashes on launch, suitable for desktop applications.
+        /// Ignored on non-Windows targets.  Overrides the manifest
+        /// `[build].windows_subsystem` setting if present.
+        #[clap(long, value_name = "MODE", help = "Windows subsystem: console|gui (Windows targets only)")]
+        windows_subsystem: Option<Text>,
+
         // Lint configuration options
         /// Treat all warnings as errors
         #[clap(long, help = "Treat all warnings as errors")]
@@ -2526,6 +2535,7 @@ fn run_command(cli: Cli) -> Result<()> {
             emit_bc,
             emit_types,
             emit_vbc,
+            windows_subsystem,
             deny_warnings,
             strict_intrinsics,
             deny_lint,
@@ -2575,6 +2585,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 emit_bc,
                 emit_types,
                 emit_vbc,
+                windows_subsystem,
                 // Lint options
                 deny_warnings,
                 strict_intrinsics,

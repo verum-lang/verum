@@ -287,10 +287,37 @@ impl NoLibcConfig {
     }
 
     /// Create Windows linking configuration for GUI (no console window).
+    ///
+    /// Used when the binary is a Win32 GUI application — `/SUBSYSTEM:WINDOWS`
+    /// tells the loader to skip console allocation, so launching the
+    /// .exe by double-clicking or via `CreateProcess` does not flash
+    /// a console window.  The runtime's `print()` / stdout helpers
+    /// gracefully degrade in this mode (see `verum_os_write` IR in
+    /// `platform_ir.rs::emit_verum_os_write` — null/invalid stdout
+    /// handle short-circuits to a no-op rather than blocking).
     pub fn windows_gui() -> Self {
         let mut cfg = Self::windows();
         cfg.flags.retain(|f| !f.starts_with("/SUBSYSTEM:"));
         cfg.flags.push("/SUBSYSTEM:WINDOWS".to_string());
+        cfg
+    }
+
+    /// Create a Windows linking configuration with an explicit
+    /// subsystem flag.
+    ///
+    /// `subsystem_flag` must be either `"CONSOLE"` or `"WINDOWS"` (the
+    /// literals accepted by `link.exe` / `lld-link`'s `/SUBSYSTEM:`
+    /// argument).  Other values are passed through verbatim — keep
+    /// the manifest / CLI parser tight upstream so this stays a
+    /// closed enum in practice.
+    ///
+    /// The CLI's `WindowsSubsystem` enum (`verum_cli::config`)
+    /// produces these flags via `WindowsSubsystem::as_link_flag`;
+    /// see #29 for the end-to-end manifest-knob + CLI-flag wiring.
+    pub fn windows_with_subsystem(subsystem_flag: &str) -> Self {
+        let mut cfg = Self::windows();
+        cfg.flags.retain(|f| !f.starts_with("/SUBSYSTEM:"));
+        cfg.flags.push(format!("/SUBSYSTEM:{}", subsystem_flag));
         cfg
     }
 
@@ -739,6 +766,25 @@ impl LinkSession {
     /// Apply no-libc configuration for the host platform.
     pub fn with_no_libc_host(self) -> Self {
         self.apply_no_libc_config(NoLibcConfig::for_host())
+    }
+
+    /// Apply no-libc configuration with an explicit Windows subsystem
+    /// flag.  On non-Windows platforms `subsystem_flag` is ignored
+    /// (the same `for_platform` config applies).  On Windows the
+    /// flag selects between `/SUBSYSTEM:CONSOLE` (default,
+    /// `subsystem_flag = "CONSOLE"`) and `/SUBSYSTEM:WINDOWS`
+    /// (`subsystem_flag = "WINDOWS"`).
+    ///
+    /// The CLI / manifest pipeline routes through this entry point
+    /// so a single `verum build` invocation produces the correct
+    /// `.exe` for either subsystem without further branching.
+    pub fn with_no_libc_subsystem(self, platform: Platform, subsystem_flag: &str) -> Self {
+        let cfg = if matches!(platform, Platform::Windows) {
+            NoLibcConfig::windows_with_subsystem(subsystem_flag)
+        } else {
+            NoLibcConfig::for_platform(platform)
+        };
+        self.apply_no_libc_config(cfg)
     }
 
     /// Apply a custom no-libc configuration.
