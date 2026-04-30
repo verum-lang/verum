@@ -285,6 +285,62 @@ impl EnterpriseClient {
         true
     }
 
+    /// Whether the license-compliance gate is enabled at the
+    /// compliance layer. When `false` (the default) the install
+    /// pipeline must skip license checks entirely so a project
+    /// without an explicit compliance policy doesn't accidentally
+    /// reject cogs whose licenses happen to match a partial-string
+    /// rule in `allowed_licenses`.
+    ///
+    /// Pre-fix this field was set in defaults / parsed from
+    /// `enterprise.toml` but no consumer read it — the license check
+    /// in `CogManager::install` always fired when `enterprise` was
+    /// configured, regardless of whether the operator opted into
+    /// license compliance. Wiring lets the field act as the
+    /// documented kill-switch.
+    pub fn license_compliance_enabled(&self) -> bool {
+        self.config.compliance.license_compliance
+    }
+
+    /// Whether a vulnerability of the given severity exceeds the
+    /// `compliance.max_severity` policy.
+    ///
+    /// `max_severity` (default `"high"`) caps the SEVERITY allowed
+    /// through the install gate when `require_vulnerability_scan`
+    /// is also true. Returns `true` (= blocked) when:
+    ///
+    /// * the actual severity rank > the configured ceiling, or
+    /// * the configured ceiling string is not a recognised severity
+    ///   (fail-closed: an unrecognised policy value blocks everything
+    ///   so a typo doesn't silently disable the gate).
+    ///
+    /// Pre-fix the install path treated `require_vulnerability_scan
+    /// = true` as "block on ANY vulnerability". Now `max_severity =
+    /// "high"` means Low/Medium/High vulnerabilities pass through
+    /// (the operator was warned but the install isn't blocked) and
+    /// only Critical vulnerabilities trip the gate. Operators who
+    /// want strict mode set `max_severity = "low"` to revert.
+    pub fn vulnerability_exceeds_policy(
+        &self,
+        severity: &super::types::Severity,
+    ) -> bool {
+        use super::types::Severity;
+        let ceiling = match self.config.compliance.max_severity.as_str().to_ascii_lowercase().as_str() {
+            "low" => 1u8,
+            "medium" => 2,
+            "high" => 3,
+            "critical" => 4,
+            _ => return true, // fail-closed on unrecognised policy string
+        };
+        let actual = match severity {
+            Severity::Low => 1u8,
+            Severity::Medium => 2,
+            Severity::High => 3,
+            Severity::Critical => 4,
+        };
+        actual > ceiling
+    }
+
     /// Get best mirror for package
     pub fn get_mirror_url(&self, cog_name: &str) -> Option<Text> {
         let mut applicable_mirrors: List<_> = self
@@ -533,5 +589,118 @@ mod tests {
             !client.is_cog_allowed_with_signature("forbidden-cog", true),
             "deny list trumps signature verification",
         );
+    }
+
+    #[test]
+    fn license_compliance_disabled_by_default() {
+        // Pin: the default `enterprise.toml` shape carries
+        // `compliance.license_compliance = false`, so the gate is
+        // OFF for projects that ship enterprise.toml only for proxy
+        // / audit purposes. Without this gate the install pipeline
+        // would fire the license check on EVERY enterprise project.
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(
+            !client.license_compliance_enabled(),
+            "license compliance must default to OFF",
+        );
+    }
+
+    #[test]
+    fn license_compliance_enabled_mirrors_config() {
+        // Pin: when `compliance.license_compliance = true` is set
+        // in enterprise.toml, the accessor reflects it.
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        cfg.compliance.license_compliance = true;
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(client.license_compliance_enabled());
+    }
+
+    #[test]
+    fn vulnerability_policy_default_high_blocks_only_critical() {
+        // Pin: with the default `max_severity = "high"`, only
+        // Critical vulnerabilities exceed the policy. This is the
+        // documented permissive default — Low/Medium/High pass
+        // through with a warning, only Critical hard-blocks.
+        use super::super::types::Severity;
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(!client.vulnerability_exceeds_policy(&Severity::Low));
+        assert!(!client.vulnerability_exceeds_policy(&Severity::Medium));
+        assert!(!client.vulnerability_exceeds_policy(&Severity::High));
+        assert!(client.vulnerability_exceeds_policy(&Severity::Critical));
+    }
+
+    #[test]
+    fn vulnerability_policy_low_blocks_everything_above() {
+        // Pin: with `max_severity = "low"`, only Low-severity vulns
+        // pass through; Medium/High/Critical all block. Strictest
+        // operator-configurable policy.
+        use super::super::types::Severity;
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        cfg.compliance.max_severity = "low".into();
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(!client.vulnerability_exceeds_policy(&Severity::Low));
+        assert!(client.vulnerability_exceeds_policy(&Severity::Medium));
+        assert!(client.vulnerability_exceeds_policy(&Severity::High));
+        assert!(client.vulnerability_exceeds_policy(&Severity::Critical));
+    }
+
+    #[test]
+    fn vulnerability_policy_critical_allows_everything() {
+        // Pin: with `max_severity = "critical"`, no severity
+        // exceeds the ceiling — `require_vulnerability_scan`
+        // becomes a soft warning only.
+        use super::super::types::Severity;
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        cfg.compliance.max_severity = "critical".into();
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        for sev in &[Severity::Low, Severity::Medium, Severity::High, Severity::Critical] {
+            assert!(
+                !client.vulnerability_exceeds_policy(sev),
+                "max_severity=critical must accept {:?}",
+                sev,
+            );
+        }
+    }
+
+    #[test]
+    fn vulnerability_policy_unrecognised_string_fails_closed() {
+        // Pin: a typo in `max_severity` (e.g. "hgih") does NOT
+        // silently disable the gate — the policy fails closed and
+        // every severity is blocked. This is the safer failure
+        // mode for a security policy.
+        use super::super::types::Severity;
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        cfg.compliance.max_severity = "hgih".into(); // typo
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        for sev in &[Severity::Low, Severity::Medium, Severity::High, Severity::Critical] {
+            assert!(
+                client.vulnerability_exceeds_policy(sev),
+                "unrecognised max_severity must fail closed for {:?}",
+                sev,
+            );
+        }
+    }
+
+    #[test]
+    fn vulnerability_policy_case_insensitive() {
+        // Pin: `max_severity` parsing is case-insensitive — uppercase
+        // / mixed-case values accepted so operators don't get bitten
+        // by `Critical` vs `critical` discrepancies.
+        use super::super::types::Severity;
+        let mut cfg = EnterpriseConfig::default();
+        cfg.offline = true;
+        cfg.compliance.max_severity = "Medium".into();
+        let client = EnterpriseClient::new(cfg).expect("offline client builds");
+        assert!(!client.vulnerability_exceeds_policy(&Severity::Low));
+        assert!(!client.vulnerability_exceeds_policy(&Severity::Medium));
+        assert!(client.vulnerability_exceeds_policy(&Severity::High));
     }
 }
