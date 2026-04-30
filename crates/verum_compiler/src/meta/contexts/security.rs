@@ -209,6 +209,41 @@ impl SecurityContext {
     /// Set resource limits
     #[inline]
     pub fn set_limits(&mut self, limits: ResourceLimits) {
+        // Phase-not-realised tracing: SecurityContext is exported
+        // (`pub use security::SecurityContext` in contexts/mod.rs:36)
+        // and offers a complete limits accessor surface, but it is
+        // not embedded in MetaContext — the meta evaluator's actual
+        // recursion gate at `MetaContext::execute_user_meta_fn`
+        // (evaluator.rs:2237) consults `MetaContext.recursion_limit`
+        // directly, and the iteration / memory / timeout limits are
+        // enforced by `meta::sandbox::resource_limits::ResourceLimiter`,
+        // which constructs its own ResourceLimits at sandbox creation.
+        // Embedders calling `SecurityContext::set_limits` get a
+        // documented-but-unused limit surface — the values land on
+        // the SecurityContext but never reach the evaluator or
+        // sandbox limiter. Surface a debug trace so the gap is
+        // visible in logs rather than silently no-op'd. The default
+        // ResourceLimits is the marker for "user did not opt in".
+        let default_limits = ResourceLimits::default();
+        if limits.iteration_limit != default_limits.iteration_limit
+            || limits.recursion_limit != default_limits.recursion_limit
+            || limits.memory_limit != default_limits.memory_limit
+            || limits.timeout_ms != default_limits.timeout_ms
+        {
+            tracing::debug!(
+                "SecurityContext::set_limits called with non-default values \
+                 (iteration={}, recursion={}, memory={} bytes, timeout={} ms) — \
+                 SecurityContext is not embedded in MetaContext; the actual gates \
+                 live on MetaContext.recursion_limit (evaluator.rs:2237) and \
+                 sandbox::ResourceLimiter (separate ResourceLimits). Apply the \
+                 limits via MacroExpansionPhase::with_macro_recursion_limit and \
+                 MetaSandbox configuration to actually constrain meta execution",
+                limits.iteration_limit,
+                limits.recursion_limit,
+                limits.memory_limit,
+                limits.timeout_ms,
+            );
+        }
         self.limits = limits;
     }
 
