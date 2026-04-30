@@ -31102,7 +31102,26 @@ impl TypeChecker {
                             .map(|t| self.ast_to_type(t).unwrap_or_else(|_| self.ast_to_type_lenient(t)))
                             .unwrap_or(Type::Unit);
 
-                        let func_ty = Type::function(param_types, return_type);
+                        // Throws → generator → async wrap via the
+                        // unified helper so an `async fn* foo() -> Y`
+                        // imported from a cross-file impl block lands
+                        // as `Future<Generator<Y, Unit>>` (not raw
+                        // `Y`).  Pre-fix this was a bare
+                        // `Type::function(_, return_type)` that silently
+                        // dropped all three wraps — manifested at
+                        // `for await line in cmd.stream_lines()` call
+                        // sites with "got Result<Text, …>" instead of
+                        // the expected `Future<Generator<Result<…>,
+                        // Unit>>` (SHELL-5a follow-up — closes the
+                        // gap left after fixing
+                        // `extract_function_type_from_module`).
+                        let final_return_type = self.wrap_return_type_for_sig_full(
+                            return_type,
+                            &func.throws_clause,
+                            func.is_async,
+                            func.is_generator,
+                        );
+                        let func_ty = Type::function(param_types, final_return_type);
 
                         // Prepare registration for after scope exit
                         // Create a properly quantified type scheme over the impl's type variables
@@ -31182,7 +31201,16 @@ impl TypeChecker {
                             .map(|t| self.ast_to_type_lenient(t))
                             .unwrap_or(Type::Unit);
 
-                        let method_ty = Type::function(param_types, return_type);
+                        // Throws → generator → async wrap via the
+                        // unified helper.  See sibling static-method
+                        // branch above for the SHELL-5a rationale.
+                        let final_return_type = self.wrap_return_type_for_sig_full(
+                            return_type,
+                            &func.throws_clause,
+                            func.is_async,
+                            func.is_generator,
+                        );
+                        let method_ty = Type::function(param_types, final_return_type);
                         let type_name_text = verum_common::Text::from(type_name);
                         let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
@@ -31293,9 +31321,21 @@ impl TypeChecker {
                             .map(|t| self.ast_to_type_lenient(t))
                             .unwrap_or(Type::Unit);
 
+                        // Throws → generator → async wrap via the
+                        // unified helper so cross-module protocol-impl
+                        // methods (`async fn* foo() -> Y`) land as
+                        // `Future<Generator<Y, Unit>>` rather than the
+                        // bare body type.  Same SHELL-5a rationale.
+                        let final_return_type = self.wrap_return_type_for_sig_full(
+                            return_type,
+                            &func.throws_clause,
+                            func.is_async,
+                            func.is_generator,
+                        );
+
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG import_impl_blocks] Added method '{}' with return_type={}", method_name, return_type.to_text());
-                        methods.insert(method_name, Type::function(param_types, return_type));
+                        methods.insert(method_name, Type::function(param_types, final_return_type));
                     }
                 }
 
@@ -52188,10 +52228,18 @@ impl TypeChecker {
                                     .map(|t| self.ast_to_type(t))
                                     .unwrap_or(Ok(Type::Unit))?;
 
-                                let final_return_type = self.wrap_return_type_for_sig(
+                                // SHELL-5a — protocol-impl instance
+                                // methods need the SAME throws →
+                                // generator → async wrap order as
+                                // every other function-decl path so
+                                // an `async fn* m() -> Y` lands as
+                                // `Future<Generator<Y, Unit>>` (not
+                                // `Future<Y>` or raw `Y`).
+                                let final_return_type = self.wrap_return_type_for_sig_full(
                                     return_type,
                                     &func.throws_clause,
                                     func.is_async,
+                                    func.is_generator,
                                 );
 
                                 let method_ty = Type::function(param_types, final_return_type);
@@ -52309,10 +52357,14 @@ impl TypeChecker {
                                     .map(|t| self.ast_to_type(t))
                                     .unwrap_or(Ok(Type::Unit))?;
 
-                                let final_return_type = self.wrap_return_type_for_sig(
+                                // SHELL-5a — protocol-impl static
+                                // methods get the same throws →
+                                // generator → async wrap order.
+                                let final_return_type = self.wrap_return_type_for_sig_full(
                                     return_type,
                                     &func.throws_clause,
                                     func.is_async,
+                                    func.is_generator,
                                 );
 
                                 let method_ty = Type::function(param_types, final_return_type);

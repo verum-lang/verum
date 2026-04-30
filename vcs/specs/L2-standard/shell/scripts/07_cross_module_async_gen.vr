@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, async, generator, cross-module, regression
+// @description: Real-world shell script — `for await line in foo()` where
+// `foo` is an `async fn*` (async generator) MOUNTED from another module.
+//
+// Locks the SHELL-5a regression: `extract_function_type_from_module`
+// in `verum_types::infer` previously dropped the `Generator<_, _>`
+// wrap on cross-module imports, so an `async fn* foo() -> Y`
+// registered as `Future<Y>` instead of `Future<Generator<Y, Unit>>`,
+// failing every cross-module `for await x in foo()` call site at
+// type-check time with "for await requires AsyncIterator … got
+// Future<Y>".
+//
+// This script reproduces that exact pattern by mounting the shell
+// stream API (whose `stream_lines` is an `async fn*` declared in
+// `core.shell.stream` and re-exported via `core.shell.command`) and
+// driving it inside a `for await` loop.  If SHELL-5a regresses, this
+// file fails type-check before any subprocess ever spawns.
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellError};
+
+/// Stream the lines of `git status --porcelain` through the
+/// cross-module `ShellCommand.stream_lines` async generator.  The
+/// `for await` desugars to the `AsyncIterator` protocol resolution,
+/// which can only succeed when the generator wrapper is preserved
+/// across the mount boundary.
+async fn count_status_lines() -> Int {
+    let mut n: Int = 0;
+    for await line in sh#"git status --porcelain".stream_lines() {
+        match line {
+            Ok(_)  => n = n + 1,
+            Err(_) => break,
+        }
+    }
+    n
+}
+
+async fn main() -> Int {
+    let _ = count_status_lines().await;
+    0
+}
