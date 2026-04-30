@@ -429,6 +429,33 @@ impl Session {
             );
         }
 
+        // Honest production diagnostic for #271 (multi-threaded async
+        // scheduler).  The manifest→runtime bridge already flows
+        // `async_worker_threads` from Verum.toml → LLVM globals →
+        // stdlib's `AsyncRuntimeConfig` (#258 / #259 / #261), but
+        // the .vr-side `AsyncRuntime` in `core/async/executor.vr`
+        // still runs a single-threaded cooperative event loop.  A
+        // user setting `async_worker_threads = 4` therefore sees
+        // single-threaded behaviour today.
+        //
+        // Rather than silently accept a non-functional setting,
+        // surface a clear diagnostic pointing at the architectural
+        // design document.  When Phase 1 of #271 lands (worker pool
+        // foundation), this warning is removed and the field
+        // becomes load-bearing.
+        if rt.async_worker_threads > 1 {
+            tracing::warn!(
+                "manifest [runtime].async_worker_threads={} requested but the \
+                 stdlib's AsyncRuntime is single-threaded today.  The manifest→runtime \
+                 bridge plumbs the value through to LLVM globals (#258/#259/#261) but \
+                 the worker pool consumer is not yet implemented.  Architecture is \
+                 documented at docs/architecture/multi-threaded-async-scheduler.md \
+                 (#271).  Programs run as if `async_worker_threads = 0` until Phase 1 \
+                 lands.",
+                rt.async_worker_threads,
+            );
+        }
+
         // The `[codegen]` manifest section parses four fields. ALL
         // FOUR are wired:
         //   - `monomorphization_cache` flows through pipeline.rs:
