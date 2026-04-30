@@ -443,6 +443,33 @@ fn coerce_to_i64_for_switch<'ctx>(
 impl<'ctx> VbcToLlvmLowering<'ctx> {
     /// Create a new VBC → LLVM lowering context.
     pub fn new(context: &'ctx Context, config: LoweringConfig) -> Self {
+        // Phase-not-realised tracing: two LoweringConfig fields
+        // are inert at this layer — `inline_threshold` (default
+        // 100) is a forward-looking knob for a function-inlining
+        // pass that the VBC→LLVM lowering does not currently
+        // run (LLVM's own inliner runs later in the optimization
+        // pipeline driven by `opt_level`, but it doesn't consult
+        // this Verum-side threshold), and `cbgr_elimination`
+        // (default true) is set by callers but the elimination
+        // decisions are made upstream in the tier-analysis cache
+        // (cbgr_elimination_stats() at line ~2953 reports the
+        // outcome — not gates the dataflow). Surface a warning
+        // when either is non-default so a `[codegen.llvm]
+        // inline_threshold = 50` setting in verum.toml doesn't
+        // silently produce identical output to the default.
+        if config.inline_threshold != 100 || !config.cbgr_elimination {
+            tracing::warn!(
+                "LoweringConfig surface: inline_threshold={}, \
+                 cbgr_elimination={} (these fields land on the lowering \
+                 config but the VBC→LLVM path does not gate on them — \
+                 inlining is driven by opt_level through LLVM's own \
+                 inliner, and CBGR elimination decisions are made \
+                 upstream in the tier-analysis cache)",
+                config.inline_threshold,
+                config.cbgr_elimination,
+            );
+        }
+
         let module = context.create_module(&config.module_name);
 
         // Set target triple and data layout.
