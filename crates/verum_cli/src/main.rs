@@ -400,6 +400,27 @@ enum Commands {
         feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
+    /// Re-verify a proof-term certificate via the minimal kernel
+    /// (#157).  Reads a `.vproof` JSON file containing
+    /// `{ term, claimed_type, metadata }`; runs the 6-rule kernel in
+    /// `verum_kernel::proof_checker`; exits 0 iff the term has the
+    /// claimed type.
+    ///
+    /// **The trusted-base reference command.**  Users who want to
+    /// verify a Verum proof from first principles run this command
+    /// against a published `.vproof` artifact — the verdict depends
+    /// only on the 633-LOC `proof_checker.rs` module, not on the rest
+    /// of Verum's pipeline.  Compare: Coq's `coqchk`, Lean 4's
+    /// independent re-checker, HOL Light's article verifier.  Verum's
+    /// `check-proof` has the smallest production-shippable trust base
+    /// in the proof-assistant world (633 LOC vs Coq ~10K, Lean ~5K,
+    /// HOL Light ~5K).
+    CheckProof {
+        /// Path to the `.vproof` certificate file.
+        #[clap(value_name = "FILE")]
+        file: Text,
+    },
+
     /// Format source code
     Fmt {
         #[clap(long)]
@@ -2724,6 +2745,9 @@ fn run_command(cli: Cli) -> Result<()> {
                     commands::check::execute(workspace, false, false)
                 }
             }
+        }
+        Commands::CheckProof { file } => {
+            commands::check_proof::execute(file.as_str())
         }
         Commands::Fmt {
             check,
