@@ -271,6 +271,10 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
         "EV_EOF" => 0x8000_i64, "EV_ERROR" => 0x4000,
         // Once-init states
         "ONCE_INIT" => 0, "ONCE_RUNNING" => 1, "ONCE_DONE" => 2,
+        // Per-thread context slot table (core/sys/common.vr).
+        // Mirrored in `register_stdlib_constants` (codegen/mod.rs).
+        "CONTEXT_SLOT_COUNT" | "MAX_CONTEXT_SLOTS" => 256,
+        "CONTEXT_STACK_DEPTH" => 8,
         // Default: 0 for unknown constants
         _ => 0,
     }
