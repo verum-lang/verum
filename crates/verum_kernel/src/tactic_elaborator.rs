@@ -555,9 +555,39 @@ pub fn elaborate_tactic(
             Ok(Term::Var(0))
         }
         TacticExpr::Exact(expr) => expr_to_term(expr, ctx),
+        TacticExpr::Intro(idents) => {
+            // `intro x` (or `intro x y z`) peels Pi-binders off the
+            // goal and introduces them as local hypotheses.  The
+            // proof term is `λx.body` where `body` is `Var(0)` —
+            // the just-introduced binder.
+            //
+            // Standalone Intro produces `λx_0. λx_1. ... Var(0)`
+            // (the innermost binder).  This handles the common
+            // `theorem id<A>(x: A): A { proof { intro a; } }`
+            // shape where the witness is the introduced binder.
+            //
+            // To compose Intro with subsequent tactics, use
+            // `TacticExpr::Seq([Intro(_), <continuation>])`.
+            let mut depth = 0;
+            for ident in idents.iter() {
+                ctx.push_binder(ident.name.to_string());
+                depth += 1;
+            }
+            let mut term = Term::Var(0);
+            for _ in 0..depth {
+                term = Term::Lam(
+                    Box::new(Term::Universe(0)),
+                    Box::new(term),
+                );
+            }
+            for _ in 0..depth {
+                ctx.pop_binder();
+            }
+            Ok(term)
+        }
+        TacticExpr::Seq(steps) => elaborate_tactic_seq(steps, ctx),
         TacticExpr::Trivial => Err(ElabError::UnsupportedTactic("Trivial".into())),
         TacticExpr::Assumption => Err(ElabError::UnsupportedTactic("Assumption".into())),
-        TacticExpr::Intro(_) => Err(ElabError::UnsupportedTactic("Intro".into())),
         TacticExpr::Rewrite { .. } => Err(ElabError::UnsupportedTactic("Rewrite".into())),
         TacticExpr::Simp { .. } => Err(ElabError::UnsupportedTactic("Simp".into())),
         TacticExpr::Ring => Err(ElabError::UnsupportedTactic("Ring".into())),
@@ -577,7 +607,6 @@ pub fn elaborate_tactic(
         TacticExpr::Try(_) => Err(ElabError::UnsupportedTactic("Try".into())),
         TacticExpr::TryElse { .. } => Err(ElabError::UnsupportedTactic("TryElse".into())),
         TacticExpr::Repeat(_) => Err(ElabError::UnsupportedTactic("Repeat".into())),
-        TacticExpr::Seq(_) => Err(ElabError::UnsupportedTactic("Seq".into())),
         TacticExpr::Alt(_) => Err(ElabError::UnsupportedTactic("Alt".into())),
         TacticExpr::AllGoals(_) => Err(ElabError::UnsupportedTactic("AllGoals".into())),
         TacticExpr::Focus(_) => Err(ElabError::UnsupportedTactic("Focus".into())),
@@ -586,6 +615,119 @@ pub fn elaborate_tactic(
         _ => Err(ElabError::UnsupportedTactic(
             "unknown TacticExpr variant".into(),
         )),
+    }
+}
+
+/// **Elaborate a sequenced tactic chain.**
+///
+/// `Seq(steps)` represents `tactic_1; tactic_2; ...; tactic_n` —
+/// a sequence whose intermediate steps modify the elaboration
+/// context (typically by introducing binders) and whose final
+/// step produces the proof term.
+///
+/// Currently supports:
+///
+///   - Intermediate `Intro(idents)` steps — push binders onto the
+///     local context.  Other intermediate-step forms return
+///     [`ElabError::UnsupportedTactic`].
+///   - A single final step (any tactic that
+///     [`elaborate_tactic`] handles).
+///
+/// The result is wrapped in a `Lam`-chain matching the introduced
+/// binders, and the binders are popped before returning so the
+/// context remains balanced for the surrounding scope.
+fn elaborate_tactic_seq(
+    steps: &verum_common::List<TacticExpr>,
+    ctx: &mut ElabContext,
+) -> Result<Term, ElabError> {
+    if steps.is_empty() {
+        return Err(ElabError::UnsupportedTactic("Seq of length 0".into()));
+    }
+    // Collect intro'd binder names so we can pop them and wrap the
+    // result in a matching Lam-chain.
+    let mut introduced: Vec<String> = Vec::new();
+    let last_index = steps.len() - 1;
+    for (i, step) in steps.iter().enumerate() {
+        if i == last_index {
+            // Final step produces the term; intermediate intro
+            // binders are still in scope.
+            let body = elaborate_tactic(step, ctx)?;
+            // Wrap from innermost outwards.
+            let mut term = body;
+            for _ in 0..introduced.len() {
+                term = Term::Lam(
+                    Box::new(Term::Universe(0)),
+                    Box::new(term),
+                );
+            }
+            // Restore the context for the caller.
+            for _ in 0..introduced.len() {
+                ctx.pop_binder();
+            }
+            return Ok(term);
+        }
+        // Intermediate step.
+        match step {
+            TacticExpr::Intro(idents) => {
+                for ident in idents.iter() {
+                    let name = ident.name.to_string();
+                    ctx.push_binder(name.clone());
+                    introduced.push(name);
+                }
+            }
+            other => {
+                // Roll back the introduced binders before propagating
+                // the error so the caller's context is untouched.
+                for _ in 0..introduced.len() {
+                    ctx.pop_binder();
+                }
+                return Err(ElabError::UnsupportedTactic(format!(
+                    "Seq intermediate step: {} (only Intro is currently supported as a non-final step)",
+                    tactic_variant_name(other),
+                )));
+            }
+        }
+    }
+    // Unreachable: the loop returns or errors on the last index.
+    Err(ElabError::UnsupportedTactic("Seq fell through".into()))
+}
+
+/// Diagnostic-only tag for a `TacticExpr` variant.  Used by error
+/// messages to name the unsupported tactic form.
+fn tactic_variant_name(t: &TacticExpr) -> &'static str {
+    match t {
+        TacticExpr::Trivial => "Trivial",
+        TacticExpr::Assumption => "Assumption",
+        TacticExpr::Reflexivity => "Reflexivity",
+        TacticExpr::Intro(_) => "Intro",
+        TacticExpr::Apply { .. } => "Apply",
+        TacticExpr::Rewrite { .. } => "Rewrite",
+        TacticExpr::Simp { .. } => "Simp",
+        TacticExpr::Ring => "Ring",
+        TacticExpr::Field => "Field",
+        TacticExpr::Omega => "Omega",
+        TacticExpr::Auto { .. } => "Auto",
+        TacticExpr::Blast => "Blast",
+        TacticExpr::Smt { .. } => "Smt",
+        TacticExpr::Split => "Split",
+        TacticExpr::Left => "Left",
+        TacticExpr::Right => "Right",
+        TacticExpr::Exists(_) => "Exists",
+        TacticExpr::CasesOn(_) => "CasesOn",
+        TacticExpr::InductionOn(_) => "InductionOn",
+        TacticExpr::Exact(_) => "Exact",
+        TacticExpr::Unfold(_) => "Unfold",
+        TacticExpr::Compute => "Compute",
+        TacticExpr::Try(_) => "Try",
+        TacticExpr::TryElse { .. } => "TryElse",
+        TacticExpr::Repeat(_) => "Repeat",
+        TacticExpr::Seq(_) => "Seq",
+        TacticExpr::Alt(_) => "Alt",
+        TacticExpr::AllGoals(_) => "AllGoals",
+        TacticExpr::Focus(_) => "Focus",
+        TacticExpr::Named { .. } => "Named",
+        TacticExpr::Let { .. } => "Let",
+        _ => "<unknown>",
     }
 }
 
@@ -1106,6 +1248,131 @@ mod tests {
             Err(ElabError::UndeclaredApplyTarget(name)) => assert_eq!(name, "nope"),
             other => panic!("expected UndeclaredApplyTarget, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn elaborate_tactic_intro_single_binder_produces_lam() {
+        // `intro x` with one binder produces `λx. Var(0)` —
+        // identity-like at the witness level.
+        let mut ctx = ElabContext::new();
+        let span = Span::dummy();
+        let mut idents = List::new();
+        idents.push(Ident { name: "x".into(), span });
+        let term = elaborate_tactic(&TacticExpr::Intro(idents), &mut ctx).unwrap();
+        assert_eq!(
+            term,
+            Term::Lam(
+                Box::new(Term::Universe(0)),
+                Box::new(Term::Var(0)),
+            ),
+        );
+        // Context restored — Intro doesn't leak binders.
+        assert_eq!(ctx.depth(), 0);
+    }
+
+    #[test]
+    fn elaborate_tactic_intro_multi_binder_produces_lam_chain() {
+        // `intro x y z` produces `λ. λ. λ. Var(0)` (innermost).
+        let mut ctx = ElabContext::new();
+        let span = Span::dummy();
+        let mut idents = List::new();
+        for n in &["x", "y", "z"] {
+            idents.push(Ident { name: (*n).into(), span });
+        }
+        let term = elaborate_tactic(&TacticExpr::Intro(idents), &mut ctx).unwrap();
+        assert_eq!(
+            term,
+            Term::Lam(
+                Box::new(Term::Universe(0)),
+                Box::new(Term::Lam(
+                    Box::new(Term::Universe(0)),
+                    Box::new(Term::Lam(
+                        Box::new(Term::Universe(0)),
+                        Box::new(Term::Var(0)),
+                    )),
+                )),
+            ),
+        );
+        assert_eq!(ctx.depth(), 0, "Intro pops all binders before returning");
+    }
+
+    #[test]
+    fn elaborate_tactic_seq_intro_then_apply_uses_introduced_binder() {
+        // `intro x; apply x` — the witness is the just-introduced
+        // binder.  Term shape: `λx. Var(0)`.
+        let mut ctx = ElabContext::new();
+        let span = Span::dummy();
+        let mut idents = List::new();
+        idents.push(Ident { name: "x".into(), span });
+        let mut steps = List::new();
+        steps.push(TacticExpr::Intro(idents));
+        steps.push(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("x")),
+            args: List::new(),
+        });
+        let term = elaborate_tactic(&TacticExpr::Seq(steps), &mut ctx).unwrap();
+        assert_eq!(
+            term,
+            Term::Lam(
+                Box::new(Term::Universe(0)),
+                Box::new(Term::Var(0)),
+            ),
+        );
+        assert_eq!(ctx.depth(), 0, "Seq restores context after binder pop");
+    }
+
+    #[test]
+    fn elaborate_tactic_seq_intermediate_non_intro_rejected() {
+        // `apply foo; apply bar` — the intermediate step is Apply,
+        // not Intro.  Reject with a diagnostic naming the offending
+        // step.
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::Universe(0));
+        ctx.register_axiom("bar", Term::Universe(0));
+        let mut steps = List::new();
+        steps.push(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("foo")),
+            args: List::new(),
+        });
+        steps.push(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("bar")),
+            args: List::new(),
+        });
+        match elaborate_tactic(&TacticExpr::Seq(steps), &mut ctx) {
+            Err(ElabError::UnsupportedTactic(msg)) => {
+                assert!(
+                    msg.contains("Apply"),
+                    "diagnostic should name the offending tactic: {}",
+                    msg,
+                );
+            }
+            other => panic!("expected UnsupportedTactic, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn elaborate_tactic_seq_empty_rejected() {
+        let mut ctx = ElabContext::new();
+        match elaborate_tactic(&TacticExpr::Seq(List::new()), &mut ctx) {
+            Err(ElabError::UnsupportedTactic(msg)) => {
+                assert!(msg.contains("length 0"), "got: {}", msg);
+            }
+            other => panic!("expected UnsupportedTactic, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn elaborate_tactic_seq_single_step_works() {
+        // A single Apply wrapped in Seq behaves like the Apply alone.
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("witness", Term::Universe(0));
+        let mut steps = List::new();
+        steps.push(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("witness")),
+            args: List::new(),
+        });
+        let term = elaborate_tactic(&TacticExpr::Seq(steps), &mut ctx).unwrap();
+        assert_eq!(term, Term::Var(0));
     }
 
     #[test]
