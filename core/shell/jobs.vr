@@ -98,7 +98,7 @@ public fn background_with_grace(cmd_text: &Text, grace: Duration)
     -> JobHandle
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     let cmd = cmd_text.clone();
     let cancel = CancellationTokenSource.new();
     let token = cancel.token();
@@ -107,7 +107,7 @@ public fn background_with_grace(cmd_text: &Text, grace: Duration)
     // even when the shell is later mutated locally.
     let captured_ctx = ctx.clone();
     let task = spawn(async move {
-        provide ShellContext = captured_ctx;
+
         sh_with_cancel(&cmd, &token, g).await
     });
     JobHandle {

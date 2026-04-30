@@ -49,7 +49,7 @@ public fn glob_with_hidden(pattern: &Text, include_hidden: Bool)
     -> Result<List<PathBuf>, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     let base = match ctx.effective_cwd() {
         Some(c) => PathBuf.from(c),
         None    => PathBuf.from("."),

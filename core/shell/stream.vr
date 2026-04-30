@@ -183,7 +183,7 @@ public async fn* stream_lines(cmd_text: &Text)
     -> Result<Text, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();
     let flag = ctx.shell_command_flag();
 
@@ -251,7 +251,7 @@ pub async fn stream_lines_bounded(
 ) -> Result<LineStream, ShellError>
     using [ShellContext]
 {
-    let ctx = provide ShellContext;
+    let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();
     let flag = ctx.shell_command_flag();
 
@@ -287,7 +287,7 @@ pub async fn stream_lines_bounded(
         let mut sample_counter: Int = 0;
         loop {
             select {
-                line = reader.read_line_async() => match line {
+                line = reader.read_line_async().await => match line {
                     Ok(None)       => break,
                     Ok(Some(s))    => {
                         let stripped = strip_trailing_newline(s);
@@ -311,7 +311,7 @@ pub async fn stream_lines_bounded(
                         break;
                     }
                 },
-                _ = token.cancelled() => {
+                _ = token.cancelled().await => {
                     let _ = child.kill();
                     break;
                 },
