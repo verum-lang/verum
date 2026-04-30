@@ -218,44 +218,26 @@ impl EnterpriseClient {
             None
         };
 
-        // Phase-not-realised tracing for the two AuditConfig fields
-        // that remain inert. `audit.enabled` IS consumed at
-        // cog_manager.rs:190/263/332 (gates `security::log_action`
-        // calls), and `audit.log_level` IS now consumed by
-        // `SecurityScanner` via `with_audit_level` — see
-        // `cog_manager.rs::CogManager::new`. Two companion fields
-        // remain inert:
+        // All four AuditConfig fields are now load-bearing:
         //
-        // - `audit.log_file` (PathBuf) — `security::save_audit_log`
-        //   takes a path argument from the caller; no caller threads
-        //   the manifest's value through. Audit entries currently
-        //   live in-memory only (Vec<AuditEntry>) and never flush
-        //   to the configured file.
+        //   * `audit.enabled` — gates log_action calls at
+        //     cog_manager.rs:190/263/332.
+        //   * `audit.log_level` — wired via
+        //     `SecurityScanner::with_audit_level`; filters
+        //     log_action by AuditLevel category.
+        //   * `audit.log_file` — `CogManager::new` calls
+        //     `security.load_audit_log(path)` at startup and
+        //     `flush_audit_log()` after every state-changing
+        //     operation. Persistence is atomic via tmp+rename.
+        //   * `audit.retention_days` — `CogManager::new` calls
+        //     `security.evict_older_than(days)` at startup so
+        //     entries past the retention window are dropped from
+        //     the in-memory log AND flushed away on the next save.
+        //     `0` is a sentinel meaning "never evict".
         //
-        // - `audit.retention_days` (u32) — no rotation/eviction
-        //   pass exists; old entries persist indefinitely.
-        //
-        // Surface a debug trace when the user has set either of
-        // these to a non-default-equivalent value so embedders
-        // writing `[audit] log_file = "/var/log/verum.log"` see
-        // the value was observed but not threaded through.
-        if config.audit.enabled {
-            let default_log_file = std::path::PathBuf::from("verum-audit.log");
-            let log_file_overridden = config.audit.log_file != default_log_file;
-            let retention_overridden = config.audit.retention_days != 90;
-            if log_file_overridden || retention_overridden {
-                tracing::debug!(
-                    "EnterpriseConfig.audit surface: log_file={:?}, retention_days={} \
-                     (these fields land on the AuditConfig and are parsed from the \
-                     manifest, but `security::log_action` records in-memory only — \
-                     no caller flushes to log_file, and no rotation pass honours \
-                     retention_days. Forward-looking. The sister field `log_level` \
-                     IS now wired via `SecurityScanner::with_audit_level`.)",
-                    config.audit.log_file,
-                    config.audit.retention_days,
-                );
-            }
-        }
+        // Pre-fix log_file and retention_days were forward-looking
+        // knobs documented as observed-but-unused in this same
+        // location; they reach production code paths now.
 
         Ok(Self { config, client })
     }

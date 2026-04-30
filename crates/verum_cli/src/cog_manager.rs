@@ -28,6 +28,13 @@ pub struct CogManager {
 
     /// Working directory
     work_dir: PathBuf,
+
+    /// Configured audit-log file path. `Some(path)` when the
+    /// enterprise manifest set `[audit] enabled = true`; the
+    /// `flush_audit_log` helper writes there atomically after
+    /// every state-changing operation. `None` when audit is
+    /// disabled — the in-memory log is the only record.
+    audit_log_file: Option<PathBuf>,
 }
 
 impl CogManager {
@@ -38,19 +45,69 @@ impl CogManager {
         let cache = CacheManager::new(cache_dir)?;
 
         // Load enterprise config if available — and capture
-        // `[audit] log_level` BEFORE constructing the scanner so
-        // the audit-level filter is wired into `log_action`. Pre-fix
-        // the scanner was constructed with the default `All` level
-        // and the manifest's choice was inert.
+        // `[audit] log_level`, `log_file`, `retention_days` BEFORE
+        // constructing the scanner so the audit-level filter and
+        // persistence wiring lands at startup.
         let enterprise_config_path = work_dir.join(".verum").join("enterprise.toml");
-        let (enterprise, audit_level) = if enterprise_config_path.exists() {
-            let config = EnterpriseClient::load_config(&enterprise_config_path)?;
-            let level = config.audit.log_level.clone();
-            (Some(EnterpriseClient::new(config)?), level)
-        } else {
-            (None, AuditLevel::default())
-        };
-        let security = SecurityScanner::new().with_audit_level(audit_level);
+        let (enterprise, audit_level, audit_log_file, audit_retention_days) =
+            if enterprise_config_path.exists() {
+                let config = EnterpriseClient::load_config(&enterprise_config_path)?;
+                let level = config.audit.log_level.clone();
+                let log_file = if config.audit.enabled {
+                    Some(config.audit.log_file.clone())
+                } else {
+                    None
+                };
+                let retention = config.audit.retention_days;
+                (
+                    Some(EnterpriseClient::new(config)?),
+                    level,
+                    log_file,
+                    retention,
+                )
+            } else {
+                (None, AuditLevel::default(), None, 90)
+            };
+        let mut security = SecurityScanner::new().with_audit_level(audit_level);
+
+        // Persistence wiring — closes the in-memory-only audit gap
+        // documented in `enterprise.rs:213`. Three operations on
+        // startup:
+        //   1. `load_audit_log(path)` — restore the on-disk audit
+        //      history so the in-memory log carries entries from
+        //      prior CogManager invocations.
+        //   2. `evict_older_than(retention_days)` — rotate stale
+        //      entries past the configured retention window.
+        //      `retention_days = 0` is a sentinel meaning "never
+        //      evict" (preserves entries indefinitely).
+        //   3. The atomic-rename `save_audit_log` (also called by
+        //      every state-changing operation in this module) keeps
+        //      the on-disk file in sync with in-memory state across
+        //      crashes and concurrent invocations.
+        if let Some(ref log_file) = audit_log_file {
+            // Best-effort load — a corrupt audit file shouldn't
+            // block the cog manager from starting up. Surface the
+            // error via tracing so operators see it; the in-memory
+            // log starts empty (the corrupt file is left in place
+            // for forensics; the next save will overwrite it
+            // atomically).
+            if let Err(e) = security.load_audit_log(log_file) {
+                tracing::warn!(
+                    "audit log load failed at {} ({}); continuing with empty in-memory log",
+                    log_file.display(),
+                    e
+                );
+            }
+            let evicted = security.evict_older_than(audit_retention_days);
+            if evicted > 0 {
+                tracing::info!(
+                    "evicted {} audit entries older than {} day(s) from {}",
+                    evicted,
+                    audit_retention_days,
+                    log_file.display(),
+                );
+            }
+        }
 
         Ok(Self {
             registry,
@@ -58,7 +115,30 @@ impl CogManager {
             security,
             enterprise,
             work_dir,
+            audit_log_file,
         })
+    }
+
+    /// Flush the in-memory audit log to the configured `log_file`,
+    /// if persistence is enabled. Called after every state-changing
+    /// install/update/remove/publish/yank operation so a crash
+    /// doesn't lose audit history.
+    ///
+    /// Failures are logged via `tracing::warn!` — they don't
+    /// propagate as `CliError` because audit persistence is a
+    /// best-effort cross-cut, not a load-bearing primary
+    /// operation. A user installing a cog should still see "ok"
+    /// when the install succeeds even if the audit-flush failed.
+    pub(crate) fn flush_audit_log(&self) {
+        if let Some(ref path) = self.audit_log_file {
+            if let Err(e) = self.security.save_audit_log(path) {
+                tracing::warn!(
+                    "audit log flush failed at {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+        }
     }
 
     /// Install cog and all dependencies
@@ -201,6 +281,7 @@ impl CogManager {
                 Some(version_str.clone()),
                 format!("Installed {} dependencies", resolved.len()).into(),
             );
+            self.flush_audit_log();
         }
 
         ui::success(&format!("Successfully installed {}", name.cyan()));
@@ -274,6 +355,7 @@ impl CogManager {
                     None,
                     "Cog removed".into(),
                 );
+                self.flush_audit_log();
             }
 
             ui::success(&format!("Removed {}", name.cyan()));
@@ -343,6 +425,7 @@ impl CogManager {
                 Some(manifest.cog.version.clone()),
                 "Cog published".into(),
             );
+            self.flush_audit_log();
         }
 
         ui::success(&format!(
