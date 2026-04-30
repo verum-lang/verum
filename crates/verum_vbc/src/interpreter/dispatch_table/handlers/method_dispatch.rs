@@ -5756,6 +5756,107 @@ pub(super) fn dispatch_variant_method(
             }
         }
 
+        // Result / Maybe combinators that take a closure.
+        //
+        // These are defined generically in `core/base/result.vr` and
+        // `core/base/maybe.vr` with `<T, E, F, U>`-quantified bodies.
+        // VBC monomorphisation does not eagerly produce instances for
+        // every concrete `Result<T, E>` reachable from runtime IO
+        // paths — most prominently `core/net/tcp.vr:321` calling
+        // `socket(...).map_err(IoError.from_os)?`, which led to
+        // `Panic: method 'Result.map_err' not found on value` at the
+        // catch-all below. Native dispatch is monomorphisation-free
+        // because the variant layout is type-erased at runtime; the
+        // closure handles the type-specific work.
+        //
+        // Semantics (Result):
+        //   Ok(v).map(f)         = Ok(f(v))
+        //   Err(e).map(_)        = Err(e)               (identity)
+        //   Ok(v).map_err(_)     = Ok(v)                (identity)
+        //   Err(e).map_err(f)    = Err(f(e))
+        //   Ok(v).and_then(f)    = f(v)                 (f returns Result)
+        //   Err(e).and_then(_)   = Err(e)               (identity)
+        //   Ok(v).or_else(_)     = Ok(v)                (identity)
+        //   Err(e).or_else(f)    = f(e)                 (f returns Result)
+        //
+        // Semantics (Maybe / Option) — same code path because the
+        // variant tag layout is identical (None = tag 0, fc = 0;
+        // Some(v) = tag 1, fc = 1; Ok / Err follow the same shape).
+        // For `map_err` on Maybe the call is a no-op (Maybe has no
+        // error track) — handled by the Ok-branch identity.
+        //
+        // Failure modes preserved: closure panics propagate; closure
+        // captures live through `call_closure_sync` exactly as if the
+        // user had written the match in source.
+        "map" | "map_err" | "and_then" | "or_else" => {
+            // Closure / function-value sits at the first arg slot.
+            if args.count == 0 {
+                return Ok(None); // shape mismatch — let user-compiled fallback try
+            }
+            let caller_base = state.reg_base();
+            let closure_val = state.registers.get(caller_base, Reg(args.start.0));
+
+            // Guard: receiver must be a `(tag, fc=1)`-shaped variant
+            // for the closure-applying branches; otherwise pass-through
+            // on identity. `tag == 0` is Ok / Some; `tag != 0` is Err / None.
+            // (method, tag) → "apply closure" vs "identity pass-through":
+            //   "map"      / 0  (Ok/Some): apply, wrap with same tag
+            //   "map"      / != 0       : identity
+            //   "map_err"  / 0          : identity
+            //   "map_err"  / != 0 (Err) : apply, wrap with same tag
+            //   "and_then" / 0          : closure already returns Result → return raw
+            //   "and_then" / != 0       : identity
+            //   "or_else"  / 0          : identity
+            //   "or_else"  / != 0       : closure already returns Result → return raw
+            let apply_branch = match (method, tag) {
+                ("map", 0) => true,
+                ("map", _) => false,
+                ("map_err", 0) => false,
+                ("map_err", _) => true,
+                ("and_then", 0) => true,
+                ("and_then", _) => false,
+                ("or_else", 0) => false,
+                ("or_else", _) => true,
+                _ => return Ok(None), // unreachable for the outer match arm
+            };
+
+            if !apply_branch {
+                // Identity branch — return receiver as-is.
+                return Ok(Some(receiver));
+            }
+
+            // Pull payload (Value at base + header + 8). For tag=0 / fc=0
+            // (None) and Maybe semantics, callers shouldn't reach this
+            // branch via map/and_then on None — that's the identity
+            // case handled above. For (tag=0, fc=0) Ordering variants
+            // we never enter this match arm because the type is not Result/Maybe.
+            if field_count == 0 {
+                // Defensive fall-through: malformed variant data.
+                return Ok(None);
+            }
+            let payload_ptr = unsafe {
+                base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
+            };
+            let payload = unsafe { *payload_ptr };
+
+            // Invoke the closure synchronously with the payload.
+            let result_val = call_closure_sync(state, closure_val, &[payload])?;
+
+            // For `and_then` / `or_else` the closure already returns
+            // a Result/Maybe-shaped variant — return it directly.
+            // For `map` / `map_err` we wrap the closure output back
+            // into a same-tag variant.
+            match method {
+                "and_then" | "or_else" => Ok(Some(result_val)),
+                "map" | "map_err" => {
+                    // Re-emit with the same tag the receiver carried.
+                    let wrapped = make_result_variant(state, tag, result_val)?;
+                    Ok(Some(wrapped))
+                }
+                _ => unreachable!(),
+            }
+        }
+
         _ => Ok(None), // Not a variant method we handle - fall through to user-defined methods
     }
 }
@@ -6686,6 +6787,41 @@ pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult
             }
         },
     )?;
+    state.record_allocation();
+    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+}
+
+/// Create a Result variant carrying `payload` with the given tag
+/// (0 = Ok, 1 = Err). Used by Result combinator handlers
+/// (`map_err`, `map`, …) to wrap the closure result without going
+/// through user-compiled code paths.
+///
+/// Layout matches `MakeVariant` (`pattern_matching::handle_make_variant`)
+/// and `make_some_value` / `make_none_value` above:
+///   `[ObjectHeader][tag: u32][field_count: u32][payload: Value]`.
+fn make_result_variant(
+    state: &mut InterpreterState,
+    tag: u32,
+    payload: Value,
+) -> InterpreterResult<Value> {
+    let data_size = 8 + std::mem::size_of::<Value>();
+    let type_id = TypeId(0x8000 + tag);
+    let obj = state.heap.alloc_with_init(
+        type_id,
+        data_size,
+        |data| {
+            let tag_ptr = data.as_mut_ptr() as *mut u32;
+            unsafe {
+                *tag_ptr = tag;
+                *tag_ptr.add(1) = 1; // field_count = 1 (Ok(T) / Err(E))
+            }
+        },
+    )?;
+    unsafe {
+        let base = obj.as_ptr() as *mut u8;
+        let payload_ptr = base.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
+        std::ptr::write(payload_ptr, payload);
+    }
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
