@@ -28,15 +28,17 @@ use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
 use verum_ast::Module;
+use verum_common::List;
 
-use crate::phases::linking::LinkingConfig;
+use crate::linker_config::ProjectConfig;
+use crate::phases::linking::{FinalLinker, LinkingConfig, ObjectFile};
+use crate::phases::ExecutionTier;
 
 use super::CompilationPipeline;
 
 impl<'s> CompilationPipeline<'s> {
-    }
-    /// Phase 6: Generate native executable
-    fn phase_generate_native(&mut self, module: &Module) -> Result<PathBuf> {
+    /// Phase 6: Generate native executable.
+    pub(super) fn phase_generate_native(&mut self, module: &Module) -> Result<PathBuf> {
         info!("Generating native executable");
         let start = Instant::now();
 
@@ -201,12 +203,26 @@ impl<'s> CompilationPipeline<'s> {
             self.session.options().language_features.runtime.panic.as_str(),
         );
 
+        // Resolve `[codegen].tail_call_optimization` from
+        // Verum.toml.  When false, every emitted function gets
+        // `disable-tail-calls=true` so the LLVM backend skips TCO.
+        // Pre-fix the manifest field was tracing-only at
+        // session.rs:432; setting it false had zero effect on
+        // generated code.
+        let tail_call_optimization = self
+            .session
+            .options()
+            .language_features
+            .codegen
+            .tail_call_optimization;
+
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage)
             .with_permission_policy(self.session.aot_permission_policy())
-            .with_panic_strategy(panic_strategy);
+            .with_panic_strategy(panic_strategy)
+            .with_tail_call_optimization(tail_call_optimization);
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,
@@ -507,7 +523,7 @@ impl<'s> CompilationPipeline<'s> {
     /// Searches for Verum.toml starting from the input file's directory
     /// and walking up the directory tree. Falls back to input file's parent
     /// or current working directory if no Verum.toml is found.
-    fn get_project_root(&self, input_path: &PathBuf) -> PathBuf {
+    pub(super) fn get_project_root(&self, input_path: &PathBuf) -> PathBuf {
         // Canonicalize the input path to get absolute path
         let abs_path = if input_path.is_absolute() {
             input_path.clone()
@@ -537,7 +553,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Generate C runtime stubs for CBGR and stdlib functions
-    fn generate_runtime_stubs(&self, temp_dir: &Path) -> Result<PathBuf> {
+    pub(super) fn generate_runtime_stubs(&self, temp_dir: &Path) -> Result<PathBuf> {
         let stubs_path = temp_dir.join("verum_runtime_stubs.c");
 
         // Use the extracted C runtime from verum_codegen
@@ -552,7 +568,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Compile a C file to object file
-    fn compile_c_file(&self, source_path: &Path, output_dir: &Path) -> Result<PathBuf> {
+    pub(super) fn compile_c_file(&self, source_path: &Path, output_dir: &Path) -> Result<PathBuf> {
         let output_path = output_dir
             .join(
                 source_path
@@ -607,7 +623,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Detect available C compiler
-    fn detect_c_compiler(&self) -> Result<String> {
+    pub(super) fn detect_c_compiler(&self) -> Result<String> {
         let compilers = ["clang", "gcc", "cc"];
 
         for compiler in &compilers {
@@ -627,7 +643,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Link object files into executable
-    fn link_executable(&self, object_files: &[PathBuf], output_path: &PathBuf) -> Result<()> {
+    pub(super) fn link_executable(&self, object_files: &[PathBuf], output_path: &PathBuf) -> Result<()> {
         let linker = self.detect_c_compiler()?;
 
         debug!("Linking with {}: {}", linker, output_path.display());
@@ -709,7 +725,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Reads the [linker] section from Verum.toml and merges with profile-specific
     /// settings. Falls back to defaults if no Verum.toml is found.
-    fn load_linker_config(&self, project_root: &Path, profile: &str) -> Result<LinkingConfig> {
+    pub(super) fn load_linker_config(&self, project_root: &Path, profile: &str) -> Result<LinkingConfig> {
         let verum_toml = project_root.join("Verum.toml");
 
         if verum_toml.exists() {
@@ -741,7 +757,7 @@ impl<'s> CompilationPipeline<'s> {
     /// - `strip`: strip debug symbols
     /// - `libraries`: additional libraries to link
     /// - `extra_flags`: raw linker flags
-    fn link_with_config(
+    pub(super) fn link_with_config(
         &self,
         object_files: &[PathBuf],
         output_path: &PathBuf,
@@ -776,7 +792,7 @@ impl<'s> CompilationPipeline<'s> {
     /// - LTO support (Thin/Full)
     /// - CBGR runtime integration
     /// - Multi-platform support (ELF, MachO, COFF, Wasm)
-    fn link_with_lld(&self, object_files: &[PathBuf], config: &LinkingConfig) -> Result<()> {
+    pub(super) fn link_with_lld(&self, object_files: &[PathBuf], config: &LinkingConfig) -> Result<()> {
         // Convert PathBuf array to ObjectFile list
         let obj_files: List<ObjectFile> = object_files
             .iter()
@@ -814,24 +830,4 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(())
     }
-
-    // ==================== PHASE 0: stdlib COMPILATION ====================
-
-    /// Phase 0: stdlib Compilation & Preparation
-    ///
-    /// This phase runs once per build and compiles the Verum standard library
-    /// from Rust source to static library, generating FFI exports and symbol
-    /// registries for consumption by all execution tiers.
-    ///
-    /// Outputs are cached and reused across compilations unless verum_std
-    /// source files change.
-    ///
-    /// **Mode-specific behavior:**
-    /// - `Interpret` mode: SKIPPED - interpreter uses Rust native execution
-    /// - `Check` mode: SKIPPED - type checking uses built-in type definitions
-    /// - `Aot` mode: REQUIRED - static library for native linking
-    /// - `Jit` mode: REQUIRED - symbol registry for JIT compilation
-    ///
-    /// Phase 0: Compile verum_std to static lib, generate C-compatible FFI exports,
-    /// build symbol registry, prepare LLVM bitcode for LTO, cache monomorphized generics.
 }
