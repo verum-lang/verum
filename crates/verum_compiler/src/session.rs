@@ -399,6 +399,52 @@ impl Session {
             );
         }
 
+        // Phase-not-realised tracing for inert type-system
+        // knobs. The `[types]` manifest section parses 7 bool
+        // fields beyond `refinement` (which IS wired via
+        // `refinement_typing_on`) and `coherence_check_depth`
+        // (which IS wired in semantic_analysis):
+        // `dependent`, `cubical`, `higher_kinded`,
+        // `universe_polymorphism`, `coinductive`, `quotient`,
+        // `instance_search`. feature_overrides forwards them to
+        // `LanguageFeatures.types` and `validate()` enforces a
+        // small coherence lattice (e.g., cubical requires
+        // dependent), but no production type-checker pass gates
+        // on any of them — dependent / cubical / quotient
+        // syntactic forms parse and elaborate regardless of the
+        // flag, and instance-search runs unconditionally.
+        //
+        // Surface a warning when any of these is set to a
+        // non-default value so a `[types] dependent = false`
+        // setting in verum.toml doesn't silently elaborate
+        // dependent types anyway. Default-valued configs stay
+        // log-quiet.
+        let ty = &opts.language_features.types;
+        if !ty.dependent
+            || !ty.cubical
+            || !ty.higher_kinded
+            || ty.universe_polymorphism
+            || !ty.coinductive
+            || !ty.quotient
+            || !ty.instance_search
+        {
+            tracing::warn!(
+                "manifest [types] surface: dependent={}, cubical={}, higher_kinded={}, \
+                 universe_polymorphism={}, coinductive={}, quotient={}, instance_search={} \
+                 (these fields land on LanguageFeatures.types and validate() enforces \
+                 their coherence lattice, but no production type-check pass currently \
+                 gates on them — dependent/cubical/quotient/coinductive syntactic forms \
+                 parse and elaborate regardless; instance-search runs unconditionally)",
+                ty.dependent,
+                ty.cubical,
+                ty.higher_kinded,
+                ty.universe_polymorphism,
+                ty.coinductive,
+                ty.quotient,
+                ty.instance_search,
+            );
+        }
+
         // Phase-not-realised tracing for inert protocol-resolution
         // knobs. The `[protocols]` manifest section parses
         // `coherence`, `resolution_strategy`, `blanket_impls`,
