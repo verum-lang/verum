@@ -109,6 +109,15 @@ pub mod framework_citation;
 // enumerate the trust extension or verify upstream paths.
 
 pub mod foreign_system;
+
+pub mod separation_logic;
+// Separation-logic verification surface (#161).  Pure-theorem
+// verification ([`verification_goal`]) covers functional values;
+// this module extends the surface to stateful programs (mutation,
+// concurrency, IO).  Provides `HeapPredicate`, `HoareTriple`,
+// `SeparationGoal`, `Capability` data types + an adapter that
+// lifts pure separation goals to the unified verification surface
+// so the two coexist cleanly.
 // Canonical `ForeignSystem` enum (#166) — the single source of truth
 // for the external proof systems Verum interacts with.  Lives in
 // verum_kernel because that's the lowest-level domain crate every
