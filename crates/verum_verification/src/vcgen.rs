@@ -1534,10 +1534,23 @@ impl VCGenerator {
                 // For now, assume they don't affect postcondition
                 self.wp_expr(expr, postcondition)
             }
-            StmtKind::Errdefer(expr) => {
-                // Errdefer only executes on error paths
-                // For normal path verification, treat similarly to defer
-                self.wp_expr(expr, postcondition)
+            StmtKind::Errdefer(_expr) => {
+                // Errdefer registers a cleanup that runs ONLY on the
+                // error exit path. On the normal path it is a no-op,
+                // so the precondition just propagates the postcondition
+                // unchanged.
+                //
+                // Pre-fix this called `wp_expr(expr, postcondition)` —
+                // the semantics of `defer` (always runs) — which
+                // wrongly threaded the cleanup's effects through every
+                // normal exit. Same defect as in
+                // `verum_smt::wp_calculus` (fixed in fc02bfc9).
+                //
+                // Error-path WP modeling — what postcondition the
+                // cleanup must establish IF the function exits
+                // abnormally — is a separate phase needing split
+                // normal/error path tracking; not modeled here.
+                postcondition.clone()
             }
             StmtKind::Provide { .. } => {
                 // Context provision doesn't affect wp directly

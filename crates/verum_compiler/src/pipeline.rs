@@ -7727,6 +7727,20 @@ impl<'s> CompilationPipeline<'s> {
         register_module_lemmas(module, &mut hints_db);
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
+        // Honour `CompilerOptions.smt_timeout_secs` (default 30s,
+        // sourced from `--smt-timeout` / manifest
+        // `[verify].solver_timeout_ms`) on the proof search engine.
+        // Pre-fix `ProofSearchEngine::with_hints` defaulted to 5s
+        // regardless of what the user configured — the SMT context
+        // got the right timeout (line ~7765), but the proof-search
+        // engine's own internal timeout (consulted at depth-bounded
+        // search entry points) silently used the 5s default. Now
+        // both layers agree on the user's configured value.
+        // The `set_timeout` setter existed at proof_search.rs:2463
+        // but had no production caller — closes the inert-setter
+        // pattern by threading the session value through.
+        proof_engine.set_timeout(timeout);
+
         // Refinement reflection: scan the module for pure,
         // single-expression functions and translate their bodies
         // to SMT-LIB via the Expr→SMT-LIB translator. Successfully
