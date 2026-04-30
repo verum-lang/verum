@@ -198,6 +198,20 @@ impl MacroExpansionPhase {
 
     pub fn with_macro_recursion_limit(mut self, limit: u32) -> Self {
         self.macro_recursion_limit = limit;
+        // Propagate the limit into the embedded MetaContext so the
+        // meta evaluator's `current_recursion_depth >= recursion_limit`
+        // gate (evaluator.rs:2237 in `MetaContext::execute_user_meta_fn`)
+        // honours the manifest's `[meta] macro_recursion_limit`
+        // setting. The gate consults `self.recursion_limit` on the
+        // MetaContext directly — `MetaContext::new()` defaults to
+        // 50. Pre-fix the builder updated only the local
+        // `macro_recursion_limit` field, so the configured value
+        // never reached the runtime gate. Also mirror into
+        // `runtime_info.recursion_limit` (different type/struct,
+        // surfaced by the `@runtime_info` reflection builtin) so
+        // both read paths see the same configured value.
+        self.meta_context.recursion_limit = limit as u64;
+        self.meta_context.runtime_info.recursion_limit = limit as usize;
         self
     }
 
