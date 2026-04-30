@@ -1,0 +1,30 @@
+// =============================================================================
+// core/security/cipher/mod.vr — Symmetric block + stream ciphers
+// =============================================================================
+// Layer: Standard Library / Security / Cipher
+// =============================================================================
+//
+// Bare symmetric-cipher primitives — confidentiality only, no
+// authentication. For most applications, prefer the AEAD layer
+// (`core.security.aead`) which composes these ciphers with
+// authentication tags. These modules are surfaced for callers
+// who need to compose ciphers with externally-managed
+// authentication (e.g. TLS record layer, Noise protocol
+// framework, custom AEAD constructions).
+//
+//   * `aes.vr`     — AES-128 / AES-192 / AES-256 block cipher
+//                    (FIPS 197). Bit-sliced constant-time
+//                    implementation; AES-NI accelerated where
+//                    available.
+//   * `chacha20.vr` — ChaCha20 stream cipher (RFC 7539). 256-bit
+//                     key, 96-bit nonce, 32-bit counter.
+//
+// Direct use of these without authentication is a footgun — the
+// AEAD layer composes them with Poly1305 / GCM tags for the
+// production recommendation.
+// =============================================================================
+
+module core.security.cipher;
+
+public module aes;
+public module chacha20;
