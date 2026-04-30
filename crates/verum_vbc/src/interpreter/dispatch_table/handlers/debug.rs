@@ -312,21 +312,78 @@ fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8,
     }
     let data_offset = heap::OBJECT_HEADER_SIZE;
     unsafe {
+        // Read the value's TYPE id from the heap header — required to
+        // disambiguate the variant tag, which is only unique per-type.
+        // Pre-fix this lookup walked EVERY type in the module and
+        // returned the first variant matching the tag; in practice the
+        // first match was almost never the right one (e.g., printing a
+        // `ShellError.SpawnFailed` { tag=1 } rendered as
+        // `file_write_all(...)` because some earlier-indexed sum type
+        // happened to have a `tag=1` variant called `file_write_all`).
+        // Reading `header.type_id` and scoping the lookup to that type
+        // alone is both correct AND faster (one `types[i]` indexed
+        // access instead of an O(N_types · N_variants) scan).
+        let header = &*(base_ptr as *const heap::ObjectHeader);
+        let type_id = header.type_id;
+
         let tag_ptr = base_ptr.add(data_offset) as *const u32;
         let tag = *tag_ptr;
         let field_count = *tag_ptr.add(1) as usize;
 
-        // Look up variant name from module type metadata.
-        // Scan the module's type descriptors for a variant with this tag.
-        let name_from_metadata = state.module.types.iter().find_map(|td| {
-            td.variants.iter().find_map(|v| {
-                if v.tag == tag {
-                    state.module.get_string(v.name)
-                } else {
-                    None
-                }
+        // Type-scoped variant-name lookup.  Falls back to the legacy
+        // global scan ONLY when the type-scoped lookup misses (header
+        // type_id == UNIT — happens for runtime-synthesised values
+        // that don't carry a real type_id, like raw closure invocations
+        // from the FFI bridge).  This preserves the legacy display
+        // for those edge cases without compromising correctness for
+        // user-defined sum types, which always carry a real type_id.
+        let name_from_metadata = state.module
+            .types
+            .iter()
+            .find(|td| td.id == type_id)
+            .and_then(|td| {
+                td.variants.iter().find_map(|v| {
+                    if v.tag == tag {
+                        state.module.get_string(v.name)
+                    } else {
+                        None
+                    }
+                })
             })
-        });
+            .or_else(|| {
+                // Fallback: scoped scan limited to sum-type
+                // descriptors.  `MakeVariant` synthesises a sentinel
+                // type_id of `0x8000 + tag`, so the type-scoped
+                // lookup above misses for every variant emitted via
+                // that path; we then walk the type table looking for
+                // a sum-kind type with a matching variant.
+                //
+                // CRITICAL: Protocol-kind types ALSO carry per-method
+                // entries in their `variants` list (registered at
+                // `vbc/codegen/mod.rs:1144` as the dyn: dispatch
+                // vtable keying — method NAMES are stored as
+                // variants whose `tag` is the method's index in
+                // `ctx_decl.methods`).  Including them in this fallback
+                // walk causes a sum-type variant tag (e.g.
+                // `ShellError.SpawnFailed` tag=1) to misread as a
+                // protocol method name (e.g. `file_write_all` for the
+                // RuntimeIo context's 7th method) — the bug that
+                // produced "file_write_all(echo hello, …)" instead
+                // of the proper "SpawnFailed(echo hello, …)" display
+                // for shell-script panics.  Filter them out.
+                use crate::types::TypeKind;
+                state.module.types.iter()
+                    .filter(|td| !matches!(td.kind, TypeKind::Protocol))
+                    .find_map(|td| {
+                        td.variants.iter().find_map(|v| {
+                            if v.tag == tag {
+                                state.module.get_string(v.name)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+            });
         let name = name_from_metadata.unwrap_or("");
 
         if field_count == 0 {
