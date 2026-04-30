@@ -430,38 +430,40 @@ impl Session {
         }
 
         // Phase-not-realised tracing for inert codegen knobs.
-        // The `[codegen]` manifest section parses three fields
-        // — `tail_call_optimization`, `vectorize`,
-        // `monomorphization_cache` — and `inline_depth`. They
-        // land on `LanguageFeatures.codegen` but the actual
-        // codegen path doesn't gate on any of them: TCO is
-        // driven by LLVM's `-O` level and `noinline` attrs;
-        // loop vectorization is controlled by LLVM's loop-
-        // vectorize pass (driven by opt_level + per-loop
-        // attribute hints, not the global feature flag); the
-        // VBC mono phase has no caching toggle; the LLVM
-        // inliner consults its own threshold heuristic, not
-        // `inline_depth`.
+        // The `[codegen]` manifest section parses four fields. One
+        // is wired:
+        //   - `monomorphization_cache` flows through pipeline.rs:
+        //     10630 / 12161 to `VbcMonomorphizationPhase::without_
+        //     cache()` — manifest `false` actually disables the
+        //     cache.
+        // Three remain inert:
+        //   - `tail_call_optimization`: TCO is driven by LLVM's
+        //     `-O` level and `noinline` attrs; the global flag
+        //     has no consumer.
+        //   - `vectorize`: loop vectorization is controlled by
+        //     LLVM's loop-vectorize pass (driven by opt_level +
+        //     per-loop attribute hints, not the global feature
+        //     flag).
+        //   - `inline_depth`: the LLVM inliner consults its own
+        //     threshold heuristic.
         //
-        // Surface a warning when any of these is set to a
+        // Surface a warning when any of these three is set to a
         // non-default value so a `[codegen] vectorize = false`
-        // setting in verum.toml doesn't silently produce
-        // identically-vectorised output. Default-valued
-        // configs stay quiet.
+        // setting in Verum.toml doesn't silently produce
+        // identically-vectorised output. Default-valued configs
+        // stay quiet.
         let cg = &opts.language_features.codegen;
         if !cg.tail_call_optimization
             || !cg.vectorize
-            || !cg.monomorphization_cache
             || cg.inline_depth != 3
         {
             tracing::warn!(
                 "manifest [codegen] surface: tail_call_optimization={}, vectorize={}, \
-                 monomorphization_cache={}, inline_depth={} (these fields land on \
-                 LanguageFeatures.codegen but no production codegen path consults \
-                 them — LLVM's own pass pipeline is driven by opt_level)",
+                 inline_depth={} (these fields land on LanguageFeatures.codegen but no \
+                 production codegen path consults them — LLVM's own pass pipeline is \
+                 driven by opt_level)",
                 cg.tail_call_optimization,
                 cg.vectorize,
-                cg.monomorphization_cache,
                 cg.inline_depth,
             );
         }
