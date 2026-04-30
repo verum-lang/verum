@@ -228,6 +228,20 @@ impl<'s> CompilationPipeline<'s> {
             .codegen
             .vectorize;
 
+        // Resolve manifest-driven runtime-bridge values
+        // (architectural prerequisite #261).  Each field flows
+        // through to a `__verum_runtime_*` LLVM global at codegen
+        // time and reaches stdlib code through the
+        // `verum_get_runtime_*` getter functions.  Default 0 keeps
+        // the historical stdlib defaults (auto-detect via
+        // num_cpus, platform stack size).
+        let rt = &self.session.options().language_features.runtime;
+        let runtime_bridge =
+            verum_codegen::llvm::platform_ir::RuntimeBridgeValues {
+                async_worker_threads: rt.async_worker_threads,
+                task_stack_size: rt.task_stack_size,
+            };
+
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
@@ -235,7 +249,8 @@ impl<'s> CompilationPipeline<'s> {
             .with_permission_policy(self.session.aot_permission_policy())
             .with_panic_strategy(panic_strategy)
             .with_tail_call_optimization(tail_call_optimization)
-            .with_vectorize(vectorize);
+            .with_vectorize(vectorize)
+            .with_runtime_bridge(runtime_bridge);
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,

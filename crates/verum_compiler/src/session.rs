@@ -387,7 +387,7 @@ impl Session {
         //    Abort).  No longer tracing-only.
 
         // Phase-not-realised tracing for inert runtime knobs.
-        // The `[runtime]` manifest section parses 8 fields. Four
+        // The `[runtime]` manifest section parses 8 fields. Six
         // are wired:
         //   - `cbgr_mode`, `async_scheduler`, `heap_policy` flow
         //     through pipeline.rs:9401/11430/11435 to the VBC
@@ -396,36 +396,36 @@ impl Session {
         //     `LoweringConfig.panic_strategy` → `PlatformIR::
         //     emit_panic_ir` (commit 85090093) and selects the
         //     `verum_panic` body shape (Unwind / Abort).
-        // Three remain inert:
+        //   - `async_worker_threads` + `task_stack_size` flow
+        //     through `pipeline/native_codegen.rs` →
+        //     `LoweringConfig.runtime_bridge` →
+        //     `PlatformIR.emit_runtime_globals` /
+        //     `emit_runtime_bridge_getters` (architectural
+        //     prerequisite #261) — manifest values land in
+        //     `__verum_runtime_*` LLVM globals at codegen time
+        //     and reach stdlib code via `verum_get_runtime_*`
+        //     getters.  Default 0 keeps stdlib auto-detection
+        //     (num_cpus, platform stack size).  Stdlib-side
+        //     consumption is the second half of #258 / #259 —
+        //     wired separately as the .vr-side stdlib intrinsic
+        //     calls drop in cleanly atop this LLVM-side bridge.
+        // Two remain inert:
         //   - `futures` / `nurseries`: the async runtime is
         //     compiled in unconditionally; toggling these in
         //     Verum.toml has no effect on whether `async fn` /
         //     `nursery {}` parse and elaborate.
-        //   - `task_stack_size`: the work-stealing scheduler
-        //     uses platform-default thread stacks; this number
-        //     is not consulted at task spawn.
-        //   - `async_worker_threads`: the scheduler picks worker
-        //     count from `num_cpus::get()` and ignores this
-        //     override.
         //
-        // Surface a warning when any of these three is set to a
+        // Surface a warning when either of these two is set to a
         // non-default value so they don't silently fall through.
         let rt = &opts.language_features.runtime;
-        if !rt.futures
-            || !rt.nurseries
-            || rt.task_stack_size != 0
-            || rt.async_worker_threads != 0
-        {
+        if !rt.futures || !rt.nurseries {
             tracing::warn!(
-                "manifest [runtime] surface: futures={}, nurseries={}, task_stack_size={}, \
-                 async_worker_threads={} (these fields land on \
-                 LanguageFeatures.runtime but no production scheduler path consults them \
-                 — the async runtime is compiled in unconditionally and uses platform \
-                 defaults for thread stacks / num_cpus())",
+                "manifest [runtime] surface: futures={}, nurseries={} (these fields \
+                 land on LanguageFeatures.runtime but no production gate consults them \
+                 — the async runtime is compiled in unconditionally regardless of \
+                 these flags)",
                 rt.futures,
                 rt.nurseries,
-                rt.task_stack_size,
-                rt.async_worker_threads,
             );
         }
 
