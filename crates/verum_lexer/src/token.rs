@@ -2178,6 +2178,28 @@ fn parse_string(lex: &mut logos::Lexer<TokenKind>) -> Option<Text> {
                     b'n' | b'r' | b't' | b'0' | b'a' | b'b' | b'f' | b'v' | b'\\' | b'"' | b'\'' => {
                         i += 1;
                     }
+                    // Line continuation: `\<newline>` (LF) or
+                    // `\<CR><LF>`. Consumes the backslash + newline
+                    // sequence; `unescape_string` collapses it plus
+                    // any following whitespace into nothing (Python /
+                    // shell-style continued line). Pre-fix the lexer
+                    // rejected `\<newline>` as an unknown escape,
+                    // forcing stdlib code to use either single-line
+                    // strings or string concatenation. Reject pattern
+                    // surfaced in `core/verify/kernel_soundness/
+                    // theorems.vr` (48 line-continuation strings) and
+                    // is a standard escape every C-family language
+                    // supports.
+                    b'\n' => {
+                        i += 1;
+                    }
+                    b'\r' => {
+                        i += 1;
+                        // Optional LF after CR (Windows line endings)
+                        if i < bytes.len() && bytes[i] == b'\n' {
+                            i += 1;
+                        }
+                    }
                     _ => {
                         // Invalid escape sequence - reject the string
                         return None;
@@ -2793,6 +2815,38 @@ pub fn unescape_string(s: &str) -> Text {
                 Some('\\') => result.push('\\'),
                 Some('"') => result.push('"'),
                 Some('\'') => result.push('\''),
+                // `\<newline>` line continuation: consume the newline
+                // AND any following whitespace (matches Python / shell
+                // semantics — the continuation collapses indentation so
+                // the joined string reads as one logical sentence).
+                // Lexer-side `parse_string` already validated this is a
+                // legal escape; here we strip it from the materialised
+                // value. Used by the stdlib soundness-corpus proof
+                // texts that span many indented lines.
+                Some('\n') => {
+                    let mut peek = chars.clone();
+                    while let Some(c) = peek.next() {
+                        if c == ' ' || c == '\t' {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Some('\r') => {
+                    let mut peek = chars.clone();
+                    if let Some('\n') = peek.next() {
+                        chars.next();
+                    }
+                    let mut peek = chars.clone();
+                    while let Some(c) = peek.next() {
+                        if c == ' ' || c == '\t' {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
                 Some('x') => {
                     // Hex escape: \xNN
                     let hex: String = chars.by_ref().take(2).collect();
