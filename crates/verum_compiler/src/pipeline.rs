@@ -11750,11 +11750,23 @@ impl<'s> CompilationPipeline<'s> {
 
         let llvm_ctx = verum_codegen::llvm::verum_llvm::context::Context::create();
 
+        // Resolve the panic strategy from `[runtime].panic` in
+        // Verum.toml (defaults to "unwind" — see RuntimeFeatures::
+        // default()).  Threading this through here makes the
+        // manifest setting actually drive emission of `verum_panic`
+        // body shape — pre-fix the field was tracing-only at
+        // session.rs:390 and the panic body always took the abort
+        // path regardless.
+        let panic_strategy = verum_codegen::llvm::PanicStrategy::from_manifest_text(
+            self.session.options().language_features.runtime.panic.as_str(),
+        );
+
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage)
-            .with_permission_policy(self.session.aot_permission_policy());
+            .with_permission_policy(self.session.aot_permission_policy())
+            .with_panic_strategy(panic_strategy);
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,

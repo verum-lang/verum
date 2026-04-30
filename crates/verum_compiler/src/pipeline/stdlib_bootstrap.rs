@@ -22,11 +22,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context as AnyhowContext, Result};
-use tracing::{debug, info, warn};
+use anyhow::Result;
+use tracing::debug;
 
-use verum_ast::Module;
-use verum_common::{List, Map, Text};
+use verum_common::Text;
 use verum_modules::{
     ModuleInfo, ModulePath, extract_exports_from_module, resolve_glob_reexports,
     resolve_specific_reexport_kinds,
