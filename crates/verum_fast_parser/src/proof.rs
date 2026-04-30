@@ -702,6 +702,23 @@ impl<'a> RecursiveParser<'a> {
             // the surface name of the meta-programming primitive — same
             // override pattern as the other reserved tactic keywords above.
             Some(TokenKind::QuoteKeyword) => { self.stream.advance(); Text::from("quote") }
+            // Structured-proof step keywords — `have`, `show`, `suffices`,
+            // `obtain`, `calc` are reserved for the proof_step grammar
+            // (`have h: P by tac`, `show P by tac`, …) but the stdlib
+            // declares user-tactic wrappers with the SAME surface name
+            // (`tactic have(name, ty, proof) { forward_have(name, ty, proof) }`
+            // in `core/proof/tactics/forward.vr`) so user code can write
+            // `have x: Foo by tac` and have it desugar to the stdlib
+            // tactic. Pre-fix this declaration silently failed to parse
+            // (caught by the lenient-skip codegen as warnings) which
+            // prevented the stdlib's structured-proof tactic library
+            // from loading. Same override pattern as the other reserved
+            // tactic keywords above.
+            Some(TokenKind::Have) => { self.stream.advance(); Text::from("have") }
+            Some(TokenKind::Show) => { self.stream.advance(); Text::from("show") }
+            Some(TokenKind::Suffices) => { self.stream.advance(); Text::from("suffices") }
+            Some(TokenKind::Obtain) => { self.stream.advance(); Text::from("obtain") }
+            Some(TokenKind::Calc) => { self.stream.advance(); Text::from("calc") }
             _ => self.consume_ident()?,
         };
 
@@ -799,8 +816,31 @@ impl<'a> RecursiveParser<'a> {
     fn parse_tactic_param(&mut self) -> ParseResult<TacticParam> {
         let start_pos = self.stream.position();
 
-        // Parameter name
-        let name = self.consume_ident()?;
+        // Parameter name. Accept reserved proof-keyword surface names
+        // (`have`, `show`, `proof`, `obtain`, `suffices`, `calc`) — the
+        // stdlib's `core.proof.tactics.forward` declares wrapper tactics
+        // like `tactic have(name: Text, ty: Type, proof: Tactic)` where
+        // BOTH the tactic name AND a parameter name use reserved
+        // proof-step keywords. Pre-fix the strict `consume_ident()`
+        // rejected `proof` as a parameter name; lenient-skip codegen
+        // swallowed the warnings so the structured-proof tactic library
+        // failed to load silently. Same override pattern as the
+        // tactic-decl name handler.
+        let name = match self.stream.peek_kind() {
+            Some(TokenKind::Have) => { self.stream.advance(); Text::from("have") }
+            Some(TokenKind::Show) => { self.stream.advance(); Text::from("show") }
+            Some(TokenKind::Proof) => { self.stream.advance(); Text::from("proof") }
+            Some(TokenKind::Obtain) => { self.stream.advance(); Text::from("obtain") }
+            Some(TokenKind::Suffices) => { self.stream.advance(); Text::from("suffices") }
+            Some(TokenKind::Calc) => { self.stream.advance(); Text::from("calc") }
+            // Theorem-decl keywords (`lemma`, `theorem`, `axiom`,
+            // `corollary`) intentionally NOT accepted here: parameter
+            // names are referenced inside the tactic body as expressions,
+            // and the expression parser doesn't recognise them as
+            // identifiers (only as theorem-decl heads). Stdlib tactic
+            // authors rename to `lemma_name` etc. instead.
+            _ => self.consume_ident()?,
+        };
         let name_span = self.stream.current_span();
 
         // Colon

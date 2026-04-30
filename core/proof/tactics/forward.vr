@@ -41,6 +41,10 @@ tactic have(name: Text, ty: Type, proof: Tactic) {
 //
 // Catalogue id: `apply_with`. See `verum tactic explain
 // apply_with` for the full doc.
-tactic apply_with(lemma: Text, args: List<Expr>) {
-    apply(lemma, args)
+// Note: parameter is `lemma_name` rather than `lemma` because `lemma`
+// is a reserved keyword (theorem-decl form), and using it as a
+// parameter name leaves the expression parser unable to resolve the
+// `lemma` reference inside the body.
+tactic apply_with(lemma_name: Text, args: List<Expr>) {
+    apply(lemma_name, args)
 }
