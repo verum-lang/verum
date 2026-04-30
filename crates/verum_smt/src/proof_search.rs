@@ -2433,6 +2433,19 @@ impl ProofSearchEngine {
         self.variant_map.insert(type_name, ctors);
     }
 
+    /// Public reflection over the goal-aware variable-type inference
+    /// added in task #34. Resolves `var` against the goal's
+    /// constructor occurrences using `variant_map` (no name
+    /// heuristics, no compiler-side stdlib type knowledge).
+    /// Errors if no constructor for `var` is observable.
+    pub fn infer_variable_type_for_test(
+        &self,
+        var: &Text,
+        goal: &ProofGoal,
+    ) -> Result<Text, ProofError> {
+        self.infer_variable_type(var, goal)
+    }
+
     /// Mark a hypothesis identifier as Bool-typed so `cases_on h` can
     /// split it into the two boolean cases (h := true / h := false).
     /// Idempotent — re-registering the same name has no effect.
@@ -3588,22 +3601,122 @@ impl ProofSearchEngine {
         Ok(subgoals)
     }
 
-    /// Infer the type of a variable from the goal context
+    /// Infer the type of a variable from the goal context.
     ///
-    /// This is a heuristic implementation. In a full system, this would
-    /// query the type inference engine.
-    fn infer_variable_type(&self, var: &Text, _goal: &ProofGoal) -> Result<Text, ProofError> {
-        // Common inductive types by variable naming convention
-        match var.as_str() {
-            name if name.starts_with('n') || name.ends_with("_nat") => Ok("Nat".into()),
-            name if name.starts_with('l') || name.contains("list") => Ok("List".into()),
-            name if name.starts_with('t') || name.contains("tree") => Ok("Tree".into()),
-            name if name.contains("vec") => Ok("Vec".into()),
-            _ => {
-                // Default to Nat for numeric-looking variables
-                Ok("Nat".into())
+    /// Pre-fix this function used hardcoded naming heuristics ("starts
+    /// with `n` → Nat", "contains `list` → List", etc.) — a textbook
+    /// instance of compiler-side stdlib-type-name knowledge that
+    /// CLAUDE.md forbids. The fallback default of "Nat" silently
+    /// misclassified any non-numeric variable as natural-number-typed
+    /// induction.
+    ///
+    /// Post-fix: walk the goal looking for an equality `var == Ctor(...)`
+    /// or `var == Ctor`. Resolve the constructor through the existing
+    /// `variant_map` registry (populated externally via
+    /// `register_variant_type`). The parent type's name comes from
+    /// metadata, never from string matching.
+    ///
+    /// Returns `ProofError::TacticFailed` when no constructor for `var`
+    /// is observable in the goal — the caller is expected to either
+    /// register the type via `register_variant_type` or provide an
+    /// explicit type annotation. No silent fallback.
+    fn infer_variable_type(&self, var: &Text, goal: &ProofGoal) -> Result<Text, ProofError> {
+        if let Some(ty) = self.find_variant_type_for_var(var, &goal.goal) {
+            return Ok(ty);
+        }
+        for hyp in goal.hypotheses.iter() {
+            if let Some(ty) = self.find_variant_type_for_var(var, hyp) {
+                return Ok(ty);
             }
         }
+        Err(ProofError::TacticFailed(
+            format!(
+                "induction: cannot infer type of variable '{}'. Register the \
+                 variant type via register_variant_type, or attach the type \
+                 to a hypothesis like `{} == SomeCtor(...)`.",
+                var, var
+            )
+            .into(),
+        ))
+    }
+
+    /// Walk an expression looking for `var == Ctor(...)` or
+    /// `var == Ctor` patterns; return the parent type of the first
+    /// matching constructor found in `variant_map`.
+    fn find_variant_type_for_var(&self, var: &Text, expr: &Expr) -> Option<Text> {
+        match &expr.kind {
+            ExprKind::Binary {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => {
+                if Self::path_is_var(left, var) {
+                    if let Some(ty) = self.lookup_type_for_ctor_expr(right) {
+                        return Some(ty);
+                    }
+                }
+                if Self::path_is_var(right, var) {
+                    if let Some(ty) = self.lookup_type_for_ctor_expr(left) {
+                        return Some(ty);
+                    }
+                }
+                self.find_variant_type_for_var(var, left)
+                    .or_else(|| self.find_variant_type_for_var(var, right))
+            }
+            ExprKind::Binary { left, right, .. } => self
+                .find_variant_type_for_var(var, left)
+                .or_else(|| self.find_variant_type_for_var(var, right)),
+            ExprKind::Unary { expr: inner, .. } | ExprKind::Paren(inner) => {
+                self.find_variant_type_for_var(var, inner)
+            }
+            ExprKind::Call { args, .. } => args
+                .iter()
+                .find_map(|a| self.find_variant_type_for_var(var, a)),
+            _ => None,
+        }
+    }
+
+    /// Check whether `expr` is a Path expression whose identifier is
+    /// `var`.
+    fn path_is_var(expr: &Expr, var: &Text) -> bool {
+        match &expr.kind {
+            ExprKind::Path(p) => match p.as_ident() {
+                Maybe::Some(ident) => ident.as_str() == var.as_str(),
+                Maybe::None => false,
+            },
+            ExprKind::Paren(inner) => Self::path_is_var(inner, var),
+            _ => false,
+        }
+    }
+
+    /// Resolve an expression that looks like `Ctor` or `Ctor(...)` to
+    /// the parent type registered in `variant_map`. Returns `None`
+    /// when the expression isn't constructor-shaped or no
+    /// registration matches.
+    fn lookup_type_for_ctor_expr(&self, expr: &Expr) -> Option<Text> {
+        fn ident_name_of(expr: &Expr) -> Option<String> {
+            match &expr.kind {
+                ExprKind::Path(p) => match p.as_ident() {
+                    Maybe::Some(ident) => Some(ident.as_str().to_string()),
+                    Maybe::None => None,
+                },
+                ExprKind::Paren(inner) => ident_name_of(inner),
+                _ => None,
+            }
+        }
+
+        let ctor_name = match &expr.kind {
+            ExprKind::Path(_) => ident_name_of(expr),
+            ExprKind::Call { func, .. } => ident_name_of(func),
+            ExprKind::Paren(inner) => return self.lookup_type_for_ctor_expr(inner),
+            _ => None,
+        }?;
+        for (type_name, ctors) in self.variant_map.iter() {
+            if ctors.iter().any(|c| c.as_str() == ctor_name) {
+                return Some(type_name.clone());
+            }
+        }
+        None
     }
 
     /// Get constructors for an inductive type
