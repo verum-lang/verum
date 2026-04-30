@@ -15,11 +15,15 @@
 //!     explicit-tier path).
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use anyhow::Result;
+use tracing::info;
+
+use crate::compilation_path::TargetConfig as PathTargetConfig;
+use crate::session::Session;
 
 use super::{CompilationMode, CompilationPipeline};
-use crate::session::Session;
 
 impl<'s> CompilationPipeline<'s> {
 
@@ -204,10 +208,4 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(output_path)
     }
-
-    /// Lower a VBC module to LLVM IR.
-    ///
-    /// This is the core of the CPU compilation path. It translates VBC bytecode
-    /// instructions to LLVM IR, applying tier-aware CBGR optimizations.
-    fn lower_vbc_to_llvm<'ctx>(
 }
