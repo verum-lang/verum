@@ -102,6 +102,13 @@ pub mod tactic_elaborator;
 // base in name only — no Verum theorem reduces to a kernel-readable
 // term.  The de Bruijn criterion lives here.
 
+pub mod foreign_system;
+// Canonical `ForeignSystem` enum (#166) — the single source of truth
+// for the external proof systems Verum interacts with.  Lives in
+// verum_kernel because that's the lowest-level domain crate every
+// other layer depends on; placing it elsewhere creates dependency
+// cycles or pollutes the foundation crate with domain concepts.
+
 pub mod verification_goal;
 // Unified VerificationGoal type — the verification surface.  Tracks
 // task #167.  Function contracts, theorem propositions, and
