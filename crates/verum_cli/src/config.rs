@@ -1621,6 +1621,30 @@ impl Manifest {
             );
         }
 
+        // Surface inert `[verify.modules.<path>]` per-module
+        // overrides. The `with_profile()` builder at line 452
+        // applies named profile overrides on top of base values
+        // (consumed downstream), but the per-module `modules`
+        // map has NO consumer — `VerifyConfig.modules` is
+        // populated from manifest parsing yet no per-function
+        // verification dispatch site looks up the module path
+        // to apply the override. The struct doc at line 528
+        // promises module-path-keyed strategy / timeout overrides;
+        // until task #81 follow-up wires that lookup into the
+        // verification phase, the only honest signal is a
+        // tracing surface so an embedder's `[verify.modules.
+        // "crypto.signing"] strategy = "certified"` setting
+        // doesn't silently fall back to the base default.
+        if !self.verify.modules.is_empty() {
+            tracing::debug!(
+                "manifest [verify.modules.*] section observed ({} per-module overrides) — \
+                 these fields are forward-looking; per-module verification dispatch does \
+                 not yet honour them. Profile overrides via [verify.profiles.<name>] ARE \
+                 wired and reach the verification path",
+                self.verify.modules.len(),
+            );
+        }
+
         Ok(())
     }
 }
