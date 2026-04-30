@@ -28,7 +28,6 @@ mount core.database.sqlite.native.l1_pager.{
     pager_read, pager_write, pager_commit, pager_flush,
 };
 mount collections.List;
-mount base.{Result, Ok, Err};
 
 fn make_page(page_no: Int, fill: Byte, page_size: Int) -> PageFrame {
     let mut data: List<Byte> = List.new();
