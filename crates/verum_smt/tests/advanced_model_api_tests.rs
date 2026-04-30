@@ -1,4 +1,8 @@
 #![allow(clippy::assertions_on_constants)] // tests use assert!(true) placeholders
+// `len() >= 0` (usize) is tautological; clippy 1.80+ promotes it to a
+// deny-by-default error. The tests use it as a "ran without panic"
+// smoke check; silence the lint at file scope rather than rewrite.
+#![allow(clippy::absurd_extreme_comparisons)]
 #![allow(
     dead_code,
     unused_imports,
