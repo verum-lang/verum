@@ -209,6 +209,15 @@ pub trait ProofReplayBackend: Send + Sync {
         cert: &SmtCertificate,
         decl: &DeclarationHeader,
     ) -> Result<TargetTactic, ReplayError>;
+
+    /// Canonical foreign-system handle.  Default implementation
+    /// resolves [`target_name`](Self::target_name) via
+    /// [`ForeignSystem::from_name`]; override when the backend's
+    /// name doesn't match the canonical alias set.  Lets consumers
+    /// dispatch by typed enum rather than string comparison.
+    fn foreign_system(&self) -> Option<verum_kernel::foreign_system::ForeignSystem> {
+        verum_kernel::foreign_system::ForeignSystem::from_name(self.target_name())
+    }
 }
 
 /// per-target lookup. The registry is keyed

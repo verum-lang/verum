@@ -412,6 +412,15 @@ pub trait SoundnessBackend {
     /// in audit reports and in output filenames.
     fn id(&self) -> &'static str;
 
+    /// Canonical foreign-system handle.  Default implementation
+    /// resolves [`id`](Self::id) via [`ForeignSystem::from_name`];
+    /// override when the backend's ID doesn't match the canonical
+    /// alias set.  Lets consumers dispatch by typed enum rather
+    /// than string comparison.
+    fn foreign_system(&self) -> Option<crate::foreign_system::ForeignSystem> {
+        crate::foreign_system::ForeignSystem::from_name(self.id())
+    }
+
     /// Output filename for the emitted theory file.  Examples:
     /// `"kernel_soundness.v"` (Coq), `"KernelSoundness.lean"` (Lean).
     fn output_filename(&self) -> &'static str;

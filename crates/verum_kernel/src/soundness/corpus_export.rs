@@ -251,6 +251,15 @@ pub trait CorpusBackend {
     /// Render a single theorem as a self-contained foreign-tool
     /// source file ready for `coqc` / `lean` invocation.
     fn render_theorem(&self, spec: &TheoremSpec) -> RenderedTheorem;
+
+    /// Canonical foreign-system handle.  Default implementation
+    /// resolves [`id`](Self::id) via [`ForeignSystem::from_name`];
+    /// override when the backend's ID doesn't match the canonical
+    /// alias set.  Lets consumers dispatch by typed enum rather
+    /// than string comparison.
+    fn foreign_system(&self) -> Option<crate::foreign_system::ForeignSystem> {
+        crate::foreign_system::ForeignSystem::from_name(self.id())
+    }
 }
 
 // =============================================================================
