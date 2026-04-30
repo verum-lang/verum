@@ -1485,15 +1485,102 @@ impl HintsDatabase {
     /// ```
     fn extract_quantifiers(expr: &Expr) -> (List<Text>, Expr) {
         let mut vars = List::new();
-        let mut current = expr;
+        let mut current = expr.clone();
 
-        // For now, we don't have explicit forall syntax in ExprKind
-        // In a full implementation, this would parse quantifiers
-        // For demonstration, we'll extract variables from patterns
+        // Walk nested Forall / Exists chains. Each binding's pattern
+        // contributes one variable name (or several, for tuple/record
+        // patterns) to the quantifier-variable list. Mixed nesting is
+        // handled — `forall x. exists y. forall z. P(x, y, z)` yields
+        // ["x", "y", "z"] in that order.
+        loop {
+            let next = match &current.kind {
+                ExprKind::Forall { bindings, body } | ExprKind::Exists { bindings, body } => {
+                    for binding in bindings.iter() {
+                        Self::collect_pattern_idents(&binding.pattern, &mut vars);
+                    }
+                    (**body).clone()
+                }
+                _ => break,
+            };
+            current = next;
+        }
 
-        // If lemma is in form: premises => conclusion,
-        // variables are inferred from the pattern
-        (vars, current.clone())
+        (vars, current)
+    }
+
+    /// Walk a quantifier-binding pattern and collect every bound
+    /// identifier into `vars`. Handles `x`, `(x, y)`, `Point { x, y }`,
+    /// and nested forms. Wildcards and literals contribute nothing.
+    fn collect_pattern_idents(pattern: &verum_ast::Pattern, vars: &mut List<Text>) {
+        use verum_ast::pattern::{PatternKind, VariantPatternData};
+        match &pattern.kind {
+            PatternKind::Ident { name, subpattern, .. } => {
+                vars.push(Text::from(name.as_str()));
+                if let Maybe::Some(sub) = subpattern {
+                    Self::collect_pattern_idents(sub, vars);
+                }
+            }
+            PatternKind::Tuple(elems) | PatternKind::Array(elems) => {
+                for elem in elems.iter() {
+                    Self::collect_pattern_idents(elem, vars);
+                }
+            }
+            PatternKind::Slice { before, rest, after } => {
+                for elem in before.iter() {
+                    Self::collect_pattern_idents(elem, vars);
+                }
+                if let Maybe::Some(rest_pat) = rest {
+                    Self::collect_pattern_idents(rest_pat, vars);
+                }
+                for elem in after.iter() {
+                    Self::collect_pattern_idents(elem, vars);
+                }
+            }
+            PatternKind::Record { fields, .. } => {
+                for field in fields.iter() {
+                    Self::collect_field_idents(field, vars);
+                }
+            }
+            PatternKind::Variant { data: Maybe::Some(data), .. } => match data {
+                VariantPatternData::Tuple(elems) => {
+                    for elem in elems.iter() {
+                        Self::collect_pattern_idents(elem, vars);
+                    }
+                }
+                VariantPatternData::Record { fields, .. } => {
+                    for field in fields.iter() {
+                        Self::collect_field_idents(field, vars);
+                    }
+                }
+            },
+            PatternKind::Or(alts) | PatternKind::And(alts) => {
+                // For Or/And the same binders must appear in every
+                // branch — collecting from the first is sufficient
+                // and avoids duplicates.
+                if let Some(first) = alts.iter().next() {
+                    Self::collect_pattern_idents(first, vars);
+                }
+            }
+            PatternKind::Reference { inner, .. } | PatternKind::Paren(inner) => {
+                Self::collect_pattern_idents(inner, vars);
+            }
+            PatternKind::TypeTest { binding, .. } => {
+                vars.push(Text::from(binding.as_str()));
+            }
+            // Wildcard / Literal / Path / Range / Stream / Cons / Guard /
+            // View / Active / Rest contribute no fresh binders for the
+            // purposes of quantifier-variable extraction.
+            _ => {}
+        }
+    }
+
+    /// FieldPattern has shorthand form `{ x }` (pattern = None ⇒ name
+    /// is the binder) and explicit form `{ x: pat }` — handle both.
+    fn collect_field_idents(field: &verum_ast::pattern::FieldPattern, vars: &mut List<Text>) {
+        match &field.pattern {
+            Maybe::Some(pat) => Self::collect_pattern_idents(pat, vars),
+            Maybe::None => vars.push(Text::from(field.name.as_str())),
+        }
     }
 
     /// Get all registered lemma names
