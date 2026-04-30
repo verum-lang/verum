@@ -6152,25 +6152,167 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     /// Get or declare strlen function.
+    /// Get or declare a libc-free `strlen` wrapper.
+    ///
+    /// **Libc-free**: emits a small open-coded null-byte scan loop
+    /// instead of declaring `extern "C" fn strlen`.  Internal-linkage
+    /// so the symbol doesn't escape into the produced object file.
+    /// LLVM's optimiser typically inlines the body into call sites
+    /// at -O2+ so the wrapper has zero runtime cost.
+    ///
+    /// Loop body:
+    ///
+    ///   entry:           br loop_check
+    ///   loop_check:      %i  = phi i64 [0, entry], [%i_next, loop_body]
+    ///                    %c  = load i8, ptr %s+%i
+    ///                    %z  = icmp eq i8 %c, 0
+    ///                    br i1 %z, return_label, loop_body
+    ///   loop_body:       %i_next = add i64 %i, 1
+    ///                    br loop_check
+    ///   return_label:    ret i64 %i
+    ///
+    /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_strlen(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("strlen") {
+        let wrapper_name = "verum_internal_strlen";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
+        let i8_type = self.context.i8_type();
+
         let fn_type = i64_type.fn_type(&[ptr_type.into()], false);
-        module.add_function("strlen", fn_type, None)
+        let func = module.add_function(wrapper_name, fn_type, None);
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(func, "entry");
+        let loop_check = self.context.append_basic_block(func, "loop_check");
+        let loop_body = self.context.append_basic_block(func, "loop_body");
+        let return_lbl = self.context.append_basic_block(func, "return");
+
+        let builder = self.context.create_builder();
+
+        // entry → loop_check
+        builder.position_at_end(entry);
+        builder
+            .build_unconditional_branch(loop_check)
+            .expect("strlen entry branch");
+
+        // loop_check: phi(0 from entry, i_next from loop_body)
+        builder.position_at_end(loop_check);
+        let phi = builder
+            .build_phi(i64_type, "i")
+            .expect("strlen phi alloc");
+        phi.add_incoming(&[(&i64_type.const_zero(), entry)]);
+
+        let s_param = func
+            .get_first_param()
+            .expect("strlen has 1 param")
+            .into_pointer_value();
+        let i_val = phi.as_basic_value().into_int_value();
+
+        // SAFETY: pointer arithmetic over a caller-supplied C string.
+        // Caller must guarantee s is null-terminated; we don't bound
+        // the loop here because the loop terminates at the first NUL.
+        let p = unsafe {
+            builder
+                .build_gep(i8_type, s_param, &[i_val], "p")
+                .expect("strlen gep")
+        };
+        let c = builder
+            .build_load(i8_type, p, "c")
+            .expect("strlen load")
+            .into_int_value();
+        let zero = i8_type.const_zero();
+        let is_null = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, c, zero, "is_null")
+            .expect("strlen icmp");
+        builder
+            .build_conditional_branch(is_null, return_lbl, loop_body)
+            .expect("strlen cond_br");
+
+        // loop_body: i_next = i + 1; br loop_check
+        builder.position_at_end(loop_body);
+        let one = i64_type.const_int(1, false);
+        let i_next = builder
+            .build_int_add(i_val, one, "i_next")
+            .expect("strlen add");
+        builder
+            .build_unconditional_branch(loop_check)
+            .expect("strlen back-edge");
+        phi.add_incoming(&[(&i_next, loop_body)]);
+
+        // return: ret i64 %i
+        builder.position_at_end(return_lbl);
+        builder
+            .build_return(Some(&i_val))
+            .expect("strlen return");
+
+        func
     }
 
-    /// Get or declare memcpy function.
+    /// Get or declare a libc-free `memcpy` wrapper.
+    ///
+    /// **Libc-free**: declares an internal-linkage wrapper with the
+    /// historical libc 3-arg shape, body calls
+    /// `llvm.memcpy.p0.p0.i64(dst, src, size, isvolatile=false)` —
+    /// the LLVM intrinsic lowers to inline code, NOT a libc symbol.
+    /// Pattern parallels `get_or_declare_memset` above.
     fn get_or_declare_memcpy(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("memcpy") {
+        let wrapper_name = "verum_internal_memcpy";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
-        let fn_type = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
-        module.add_function("memcpy", fn_type, None)
+        let bool_type = self.context.bool_type();
+
+        // Declare the underlying intrinsic.
+        let intrinsic_name = "llvm.memcpy.p0.p0.i64";
+        let intrinsic_fn_type = self.context.void_type().fn_type(
+            &[ptr_type.into(), ptr_type.into(), i64_type.into(), bool_type.into()],
+            false,
+        );
+        let intrinsic_fn = module.get_function(intrinsic_name).unwrap_or_else(|| {
+            module.add_function(intrinsic_name, intrinsic_fn_type, None)
+        });
+
+        // Wrapper signature matches historical libc memcpy.
+        let wrapper_fn_type =
+            ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
+        let wrapper = module.add_function(wrapper_name, wrapper_fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let dst = wrapper
+            .get_nth_param(0)
+            .expect("memcpy wrapper missing param 0")
+            .into_pointer_value();
+        let src = wrapper
+            .get_nth_param(1)
+            .expect("memcpy wrapper missing param 1")
+            .into_pointer_value();
+        let size = wrapper
+            .get_nth_param(2)
+            .expect("memcpy wrapper missing param 2")
+            .into_int_value();
+        let is_volatile = bool_type.const_int(0, false);
+
+        builder
+            .build_call(
+                intrinsic_fn,
+                &[dst.into(), src.into(), size.into(), is_volatile.into()],
+                "",
+            )
+            .expect("memcpy call");
+        builder
+            .build_return(Some(&dst))
+            .expect("memcpy return");
+
+        wrapper
     }
 
     /// Get or declare malloc function.
