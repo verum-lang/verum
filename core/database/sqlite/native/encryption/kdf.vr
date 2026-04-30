@@ -22,6 +22,7 @@ module core.database.sqlite.native.encryption.kdf;
 mount core.*;
 mount base.{Text, Bool, Result, Ok, Err};
 mount collections.List;
+mount core.security.kdf.pbkdf2.{pbkdf2_hmac_sha256, Pbkdf2Error};
 
 // -----------------------------------------------------------------------------
 // KdfError
@@ -150,20 +151,22 @@ implement KeyDerivation for Pbkdf2Sha256 {
     fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
         if params.cost < 1000 { return Err(KeBadParams("PBKDF2 iteration count < 1000".clone())); }
         if params.key_len <= 0 { return Err(KeBadParams("zero key_len".clone())); }
-        // Real implementation calls core.security.kdf.pbkdf2_hmac_sha256;
-        // contract-only stub here: derive a key by repeated XOR of
-        // (secret, salt, iteration index) — NOT cryptographically
-        // safe; replaced when wired to the security crate.
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = 0;
-        while i < params.key_len {
-            let s: Byte = if i < secret.len() { secret[i] } else { 0 as Byte };
-            let salt: Byte = if i < params.salt.len() { params.salt[i] } else { 0 as Byte };
-            let cost_byte: Byte = ((params.cost >> ((i % 4) * 8)) & 255) as Byte;
-            out.push(s ^ salt ^ cost_byte);
-            i = i + 1;
+        // Wire to the real PBKDF2-HMAC-SHA256 in core.security.kdf.pbkdf2.
+        // Pre-fix this was an XOR-only "contract-only stub" labeled
+        // "NOT cryptographically safe" — using it as the SQLCipher v3
+        // key-derivation primitive would have produced trivially
+        // recoverable database keys regardless of cost setting.  Now
+        // the real RFC 8018 §5.2 PBKDF2 with HMAC-SHA256 PRF is used,
+        // matching SQLCipher v3 default behaviour.
+        match pbkdf2_hmac_sha256(
+            secret.as_slice(),
+            params.salt.as_slice(),
+            params.cost as UInt32,
+            params.key_len,
+        ) {
+            Ok(bytes) => Ok(bytes),
+            Err(e) => Err(KeBadParams(f"pbkdf2_hmac_sha256 rejected params: {e:?}".into())),
         }
-        Ok(out)
     }
 }
 
@@ -176,18 +179,20 @@ public fn scrypt_simple() -> ScryptSimple { ScryptSimple { unit: true } }
 
 implement KeyDerivation for ScryptSimple {
     fn name(&self) -> Text { "scrypt".clone() }
-    fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
+    fn derive(&self, _secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
         if params.cost < 16 { return Err(KeBadParams("scrypt N too small".clone())); }
         if params.key_len <= 0 { return Err(KeBadParams("zero key_len".clone())); }
-        // Same shape as PBKDF2 stub.
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = 0;
-        while i < params.key_len {
-            let s: Byte = if i < secret.len() { secret[i] } else { 0 as Byte };
-            let salt: Byte = if i < params.salt.len() { params.salt[i] } else { 0 as Byte };
-            out.push(s ^ salt);
-            i = i + 1;
-        }
-        Ok(out)
+        // No real scrypt implementation in core.security yet — the
+        // legacy XOR-only stub was REMOVED here because returning
+        // weakly-derived keys from a "scrypt" surface is worse than
+        // returning a typed error: callers that ask for scrypt and
+        // get back garbage cannot detect the lie, and the resulting
+        // database files would be trivially decryptable.  Refuse the
+        // call instead until a real scrypt lands; downstream callers
+        // either fall back to PBKDF2 (which IS correctly wired) or
+        // surface the unsupported-algorithm error to the user.
+        Err(KeUnsupported(
+            "scrypt is not yet implemented in core.security.kdf — use Pbkdf2Sha256".clone()
+        ))
     }
 }
