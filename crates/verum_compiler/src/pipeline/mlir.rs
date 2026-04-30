@@ -19,11 +19,12 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::{Context as AnyhowContext, Result};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use verum_common::{List, Text};
+use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
-use super::CompilationPipeline;
+use super::{CompilationMode, CompilationPipeline};
 
 impl<'s> CompilationPipeline<'s> {
 
