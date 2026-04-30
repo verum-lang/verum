@@ -430,13 +430,15 @@ fn meta_compile_error(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<C
     // Record the error in the context
     ctx.error_count += 1;
 
-    // Also emit a diagnostic if we have the diagnostics infrastructure
-    let span = verum_common::LineColSpan::new(
-        "<meta>",
-        ctx.call_site_span.start as usize,
-        1,
-        ctx.call_site_span.end as usize,
-    );
+    // Resolve `ctx.call_site_span` (AST Span = byte offsets) into a
+    // proper LineColSpan via the global source-file registry so the
+    // emitted diagnostic anchors at the user's invocation site
+    // (file path + line:column) instead of the file="<meta>",
+    // line=byte-offset, column=1 garbage the previous construction
+    // produced.  Closes #239 (compile-error span fidelity) for the
+    // code_gen `meta_compile_error` builtin (sibling to the
+    // identical fix in `tier1/diagnostics.rs`).
+    let span = verum_common::global_span_to_line_col(ctx.call_site_span);
     let diagnostic = verum_diagnostics::Diagnostic::new_error(
         message.to_string(),
         span,
@@ -461,13 +463,10 @@ fn meta_compile_warning(ctx: &mut MetaContext, args: List<ConstValue>) -> Result
     // Record the warning in the context
     ctx.warning_count += 1;
 
-    // Emit diagnostic
-    let span = verum_common::LineColSpan::new(
-        "<meta>",
-        ctx.call_site_span.start as usize,
-        1,
-        ctx.call_site_span.end as usize,
-    );
+    // Resolve `ctx.call_site_span` via the global source-file
+    // registry — sibling fix to `meta_compile_error`.  See its
+    // comment for the rationale.
+    let span = verum_common::global_span_to_line_col(ctx.call_site_span);
     let diagnostic = verum_diagnostics::Diagnostic::new_warning(
         message.to_string(),
         span,

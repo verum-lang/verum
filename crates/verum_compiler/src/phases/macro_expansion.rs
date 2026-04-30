@@ -764,7 +764,19 @@ impl MacroExpansionPhase {
                             handler_key.as_str()
                         );
                         let args = vec![ConstValue::Text(content.clone())];
-                        match self.meta_context.execute_user_meta_fn(&meta_fn, args) {
+                        // Anchor compile_error / compile_warning
+                        // diagnostics emitted from inside the handler
+                        // at the user's invocation site (the literal
+                        // span) by setting MetaContext.call_site_span
+                        // around the call.  Restored afterwards so
+                        // outer macro frames see their own call site.
+                        // Closes #239 for tagged-literal handlers.
+                        let prev_call_site = self.meta_context.call_site_span;
+                        self.meta_context.call_site_span = span;
+                        let exec_result =
+                            self.meta_context.execute_user_meta_fn(&meta_fn, args);
+                        self.meta_context.call_site_span = prev_call_site;
+                        match exec_result {
                             Ok(result) => self.const_value_to_expr(result, span),
                             Err(meta_err) => Err(DiagnosticBuilder::error()
                                 .message(Text::from(format!(
@@ -1140,7 +1152,20 @@ impl MacroExpansionPhase {
                         );
                         let args = vec![parts_val, exprs_val];
 
-                        match self.meta_context.execute_user_meta_fn(&meta_fn, args) {
+                        // Anchor compile_error / compile_warning
+                        // diagnostics from the handler at the user's
+                        // invocation site (the interpolated-string
+                        // span).  Restore the prior call_site_span
+                        // afterwards so outer frames keep their own
+                        // anchor.  Sibling to the tagged-literal
+                        // handler wrapping above; closes #239 for
+                        // interpolation handlers.
+                        let prev_call_site = self.meta_context.call_site_span;
+                        self.meta_context.call_site_span = span;
+                        let exec_result =
+                            self.meta_context.execute_user_meta_fn(&meta_fn, args);
+                        self.meta_context.call_site_span = prev_call_site;
+                        match exec_result {
                             Ok(result) => self.const_value_to_expr(result, span),
                             Err(meta_err) => Err(DiagnosticBuilder::error()
                                 .message(Text::from(format!(
