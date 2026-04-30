@@ -543,6 +543,43 @@ impl MetaContext {
         }
     }
 
+    // ======== Sandbox: Memory Tracking ========
+
+    /// Account for a fresh allocation against the memory budget.
+    ///
+    /// Updates `memory_used` (running total) and `peak_memory`
+    /// (high-water mark for telemetry). Trips with
+    /// `MetaError::MemoryLimitExceeded` when `memory_used`
+    /// passes `memory_limit` after the increment. `memory_limit
+    /// = 0` is a sentinel meaning "never trip" (preserves the
+    /// legacy unbounded behaviour for embedders that don't opt
+    /// in — symmetric with `timeout_ms = 0` and
+    /// `iteration_limit = 0` patterns elsewhere in the meta
+    /// system).
+    ///
+    /// Called from container-constructing arms in
+    /// `eval_meta_expr` (ListComp result, Record→Tuple result,
+    /// future builtins that materialise large structures).
+    /// Used at the SINGLE construction site so each freshly-
+    /// allocated value counts once — passthroughs (Variable
+    /// lookup, function return) don't double-count.
+    pub fn track_allocation(
+        &mut self,
+        bytes: usize,
+    ) -> Result<(), super::error::MetaError> {
+        self.memory_used = self.memory_used.saturating_add(bytes as u64);
+        if self.peak_memory < self.memory_used {
+            self.peak_memory = self.memory_used;
+        }
+        if self.memory_limit > 0 && self.memory_used > self.memory_limit {
+            return Err(super::error::MetaError::MemoryLimitExceeded {
+                allocated: self.memory_used as usize,
+                limit: self.memory_limit as usize,
+            });
+        }
+        Ok(())
+    }
+
     // ======== Binding Operations ========
 
     /// Bind a variable to a value
