@@ -1,59 +1,49 @@
-//! Single `VerificationGoal` type — the unified verification surface (#167).
+//! Unified `VerificationGoal` type — the single verification surface.
 //!
 //! # The unification
 //!
-//! Pre-#167, Verum had **three parallel** notions of "the thing we
-//! verify":
+//! Verum has three notions of "the thing we verify":
 //!
 //!   1. **Function contracts** — `fn f(x: T) requires P ensures Q`
-//!      generates a verification obligation handled by the
-//!      verum_smt SMT-dispatch path.
-//!
-//!   2. **Theorem propositions** — `theorem T(...) ensures Q
-//!      { proof { ... } }` generates a tactic-mode obligation handled
-//!      by the kernel + tactic_elaborator.
-//!
+//!      produces an obligation that the SMT-dispatch path discharges.
+//!   2. **Theorem propositions** — `theorem T(...) ensures Q { proof }`
+//!      produces an obligation discharged by the kernel +
+//!      tactic_elaborator.
 //!   3. **Refinement-type predicates** — `let x: Int{>= 0} = expr`
-//!      generates a one-off obligation handled at type-application
-//!      time.
+//!      produces an obligation checked at type-application time.
 //!
-//! These three pipelines have no shared type, no shared discharge
-//! mechanism, and no shared audit-gate surface.  A reviewer asking
-//! "what is Verum proving about this program?" gets three different
-//! answers depending on the source.
-//!
-//! Post-#167: ONE [`VerificationGoal`] type carries
-//! `hypotheses: Vec<Term> + conclusion: Term + source: GoalSource`.
-//! Every verification pipeline (SMT, kernel, refinement-check)
-//! consumes goals of this shape.  The audit gate's
-//! `--soundness-iou` dashboard can enumerate goals uniformly across
-//! all sources.
+//! Without a shared representation, "what is Verum proving about
+//! this program?" has three different answers depending on the
+//! source, and the audit gate cannot enumerate the trust extension
+//! uniformly.  This module supplies the shared representation:
+//! every source produces a `VerificationGoal { hypotheses,
+//! conclusion, source }`, and every dispatcher consumes one.
 //!
 //! # Architectural alignment with Verum philosophy
 //!
 //! - **Semantic honesty**: a goal IS what we're proving — not "the
 //!   thing the SMT layer wants" or "the thing the kernel checks".
 //!   One concept, one type.
-//! - **No magic**: every goal has explicit `hypotheses`, `conclusion`,
-//!   and `source`.  Nothing implicit.
-//! - **Foundation-neutral**: the goal's hypotheses and conclusion
-//!   are kernel `Term` values — they live in the same trust base as
-//!   the proof_checker.
+//! - **No magic**: every goal has explicit `hypotheses`,
+//!   `conclusion`, `source`.  Nothing implicit.
+//! - **Foundation-neutral**: hypotheses + conclusion are kernel
+//!   `Term` values — they live in the same trust base as
+//!   `proof_checker`.
 //!
-//! # Phase-1 scope (this commit)
+//! # Surface
 //!
-//!   - `VerificationGoal` struct + `GoalSource` enum.
-//!   - Converter `from_theorem_decl(theorem) -> VerificationGoal`.
-//!   - Converter `from_fn_decl(fn_decl) -> VerificationGoal` for
-//!     functions with requires/ensures clauses.
-//!   - Converter `from_refinement(base, predicate) -> VerificationGoal`.
-//!   - Helper: turn a `VerificationGoal` into a closed kernel
-//!     `Term` (Π over hypotheses, conclusion as body).
+//!   - [`VerificationGoal`] + [`GoalSource`].
+//!   - [`from_theorem_decl`] / [`from_fn_decl`] / [`from_refinement`]
+//!     — AST-to-goal converters for the three sources.
+//!   - [`VerificationGoal::to_term`] — encode as a closed
+//!     `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))` for direct kernel use.
+//!   - [`VerificationGoal::audit_metadata`] — JSON-ready projection
+//!     for audit-gate dashboards.
 //!
-//! Phase-2 (#160 follow-up): wire SMT dispatch + refinement check
-//! to consume `VerificationGoal` directly, replacing the per-source
-//! pathways.  Multi-week migration; this module establishes the
-//! target shape now.
+//! The SMT dispatch and refinement-check pathways still own their
+//! own internal pipelines; routing them through `VerificationGoal`
+//! is a separate migration.  This module establishes the target
+//! shape so that migration can land incrementally.
 
 use std::collections::BTreeMap;
 
@@ -281,11 +271,10 @@ pub enum TheoremKind {
 ///   `Universe(0)` (vacuously true).
 /// - Source: `GoalSource::FnContract { fn_name }`.
 ///
-/// **Phase-1 limitation**: the function body's verification (showing
-/// the implementation actually satisfies `ensures` under `requires`)
-/// is the SMT-layer's job.  This converter produces the *contract*
-/// goal; the actual proof obligation against the body is a separate
-/// pipeline.
+/// **Limitation**: the function body's verification (showing the
+/// implementation actually satisfies `ensures` under `requires`) is
+/// the SMT-layer's job.  This converter produces the *contract*
+/// goal; the obligation against the body is a separate pipeline.
 pub fn from_fn_decl(
     fn_decl: &FunctionDecl,
     ctx: &ElabContext,
@@ -375,7 +364,7 @@ fn translate_clauses<'a>(
 }
 
 // =============================================================================
-// Tests — Phase-1 contract pins
+// Tests — contract pins for the verification-goal surface
 // =============================================================================
 
 #[cfg(test)]

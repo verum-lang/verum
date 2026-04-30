@@ -1,47 +1,32 @@
-//! `verum elaborate-proof <file.vr>` — elaborate Verum theorems to
-//! kernel-checkable certificates (#164 Phase-3).
+//! `verum elaborate-proof <file.vr>` — walk Verum source and emit
+//! kernel-checkable certificates.
 //!
 //! ## What this command does
 //!
-//! Walks every theorem/lemma/corollary in a Verum source file
-//! (`.vr`).  For each declaration with a supported proof body
-//! (Phase-1+2: `proof { apply <lemma>(args); }`), runs
+//! Walks every theorem / lemma / corollary in a `.vr` source file.
+//! For each declaration with a supported proof body, runs
 //! [`verum_kernel::tactic_elaborator::elaborate_theorem`] to construct
 //! a [`Certificate`] and writes it to disk as a `.vproof` file.
 //!
-//! The emitted `.vproof` files are **kernel-checked at construction
-//! time** by the elaborator — the de Bruijn criterion is enforced
-//! before the file is written.  Independent re-verification is
-//! available via the existing `verum check-proof <file.vproof>`
-//! command (#157 follow-up).
+//! The emitted `.vproof` files are kernel-checked at construction
+//! time — the de Bruijn criterion is enforced before the file is
+//! written.  Independent re-verification is available via
+//! `verum check-proof <file.vproof>`.
 //!
-//! ## The fundamental closure
-//!
-//! Pre-this-command: the `tactic_elaborator` module existed in
-//! isolation.  Tests proved it could elaborate hand-built ASTs;
-//! nothing ran on real Verum source.
-//!
-//! Post-this-command: `verum elaborate-proof core/verify/kernel_v0/lemmas/beta.vr`
-//! walks the file, finds `church_rosser_confluence`, and either
-//!
-//!   - succeeds → emits `church_rosser_confluence.vproof` that
-//!     `verum check-proof` re-verifies, OR
-//!   - fails with a concrete `ElabError` (UnsupportedTactic /
-//!     UndeclaredApplyTarget / KernelRejection) pinpointing the gap.
-//!
-//! Together with `verum check-proof`, this completes the round-trip
-//! from source theorem to kernel verdict.
+//! Together with `verum check-proof`, this command closes the
+//! round-trip from source theorem to kernel verdict: the elaborator
+//! exercises the tactic_elaborator on real Verum source rather than
+//! the hand-built ASTs the unit tests use.
 //!
 //! ## Output
 //!
-//! Per-theorem `.vproof` files written next to the source file
-//! (in `<source-dir>/elaborated/<theorem-name>.vproof`).  The
-//! `--output-dir` flag overrides the destination.
-//!
-//! Stdout: per-theorem result (✓ verified / ✗ failed-reason / ⊘ skipped-unsupported).
-//! Exit code: 0 if all supported theorems verified; non-zero on
-//! `ElabError::KernelRejection` (the elaborator produced an
-//! ill-typed term — a contract violation, not a graceful skip).
+//! Per-theorem `.vproof` files in `<source-dir>/elaborated/` (the
+//! `--output-dir` flag overrides the destination).  Stdout reports
+//! per-theorem outcomes: `✓ verified` / `✗ FAILED <reason>` /
+//! `⊘ skipped <reason>`.  Exit code is non-zero only on
+//! [`ElabError::KernelRejection`] (the elaborator produced an
+//! ill-typed term — a contract violation); UnsupportedTactic and
+//! UndeclaredApplyTarget are graceful skips.
 
 use crate::error::{CliError, Result};
 use crate::ui;
@@ -68,7 +53,8 @@ pub enum ElaborationStatus {
     /// `.vproof` file.
     Verified { vproof_path: PathBuf },
     /// Tactic form not yet supported by the elaborator (graceful
-    /// skip — Phase-3 limitations are tracked).
+    /// skip — `UnsupportedTactic`, `UndeclaredApplyTarget`, or
+    /// `UnsupportedExpression`).  Reason carries the diagnostic.
     Skipped { reason: String },
     /// Elaborator produced a term that the kernel rejected.  This
     /// is a CONTRACT VIOLATION (the elaborator is supposed to
@@ -198,9 +184,10 @@ fn walk_and_elaborate(
         };
 
         let mut ctx = ElabContext::new();
-        // Phase-5: pre-register propositional connectives so theorems
-        // with `Binary`/`Unary` propositions (a == b, a && b, !x) can
-        // be translated rather than falling back to placeholder.
+        // Pre-register propositional connectives so theorems with
+        // `Binary` / `Unary` propositions (`a == b`, `a && b`, `!x`)
+        // translate via the connective-axiom encoding rather than
+        // falling back to the placeholder.
         register_propositional_connectives(&mut ctx);
         let row = match elaborate_theorem(theorem, &mut ctx) {
             Ok(cert) => {
