@@ -102,6 +102,12 @@ pub mod tactic_elaborator;
 // base in name only — no Verum theorem reduces to a kernel-readable
 // term.  The de Bruijn criterion lives here.
 
+pub mod foundation_profile;
+// Foundation profile classifier (#163).  Multi-foundation
+// classification of corpus theorems: ZFC family / MLTT / HoTT /
+// Cubical / CIC.  Plugs into zfc_self_recognition for
+// foundation-aware audit reports and conflict detection.
+
 pub mod framework_citation;
 // Framework-citation manifest collector (#155).  Walks AST items and
 // extracts every `@framework(<system>, "<path>")` citation into a
