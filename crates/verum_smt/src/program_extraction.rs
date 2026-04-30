@@ -455,6 +455,54 @@ impl ProgramExtractor {
         }
     }
 
+    /// Create a new program extractor honouring the supplied
+    /// extraction configuration.
+    ///
+    /// `ExtractionConfig` is documented and populated by callers
+    /// (test suites + future @extract pipeline integration) but
+    /// `ProgramExtractor::extract_program` does not currently
+    /// gate on any of its fields — `optimize` /
+    /// `inline_small_functions` / `inline_threshold` /
+    /// `generate_contracts` / `generate_docs` would each drive a
+    /// separate post-extraction pass that has not yet been wired
+    /// (the `target` field IS consumed via `CodeGenerator::new`,
+    /// and `erase_proofs` IS consumed via `ProofEraser`, but
+    /// those are downstream consumers — neither walks back
+    /// through `ProgramExtractor`).
+    ///
+    /// Surface a warning when any forward-looking field is set
+    /// to a non-default value so a `[smt.extract] optimize =
+    /// false` setting in verum.toml doesn't silently produce
+    /// the same output as the default.
+    pub fn with_config(config: ExtractionConfig) -> Self {
+        if !config.optimize
+            || !config.inline_small_functions
+            || config.inline_threshold != 20
+            || !config.generate_contracts
+            || !config.generate_docs
+        {
+            tracing::warn!(
+                "ExtractionConfig surface: optimize={}, inline_small_functions={}, \
+                 inline_threshold={}, generate_contracts={}, generate_docs={} \
+                 (these fields land on the config but ProgramExtractor::\
+                 extract_program does not currently gate on them — they're \
+                 forward-looking knobs for post-extraction passes that have \
+                 not yet been wired)",
+                config.optimize,
+                config.inline_small_functions,
+                config.inline_threshold,
+                config.generate_contracts,
+                config.generate_docs,
+            );
+        }
+        // The `target` and `erase_proofs` fields ARE consumed by
+        // downstream `CodeGenerator` / `ProofEraser` callers. The
+        // current `ProgramExtractor` itself doesn't need to hold
+        // a copy.
+        let _ = config;
+        Self::new()
+    }
+
     /// Extract program from a proof term
     ///
     /// Returns Some(program) if the proof is constructive and can be extracted,
