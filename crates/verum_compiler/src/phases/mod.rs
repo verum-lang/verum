@@ -141,6 +141,86 @@ pub struct PhaseInput {
     pub context: PhaseContext,
 }
 
+/// **Pipeline track** for a [`PhaseData`] payload.  Verum has two
+/// parallel paths through the compilation pipeline:
+///
+///   - **Compilation track** (TypedAST → VBC): the canonical
+///     execution path.  HIR / VBC are this track's IRs.
+///   - **Verification track** (TypedAST → MIR → SMT / CBGR): the
+///     sidecar IR path used for verification, optimization, and
+///     CBGR bounds elimination.  MIR / OptimizedMir live here.
+///
+/// `PhaseData::pipeline_track()` classifies any phase data by its
+/// track so consumers (audit gates, diagnostics, dependency
+/// analysis) can route uniformly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PipelineTrack {
+    /// Source / AST — pre-pipeline, applies to both tracks.
+    Frontend,
+    /// HIR / VBC — main compilation path (TypedAST → VBC → execute).
+    Compilation,
+    /// MIR / OptimizedMir — verification + optimization sidecar.
+    Verification,
+}
+
+impl PipelineTrack {
+    /// Stable diagnostic tag.
+    pub fn tag(self) -> &'static str {
+        match self {
+            PipelineTrack::Frontend => "frontend",
+            PipelineTrack::Compilation => "compilation",
+            PipelineTrack::Verification => "verification",
+        }
+    }
+}
+
+/// Payload-free **discriminator** for [`PhaseData`].  Surfaces the
+/// 7 variants as a single typed enum for audit gates and
+/// diagnostics that classify phase data by IR shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PhaseDataKind {
+    /// `PhaseData::SourceFiles`.
+    SourceFiles,
+    /// `PhaseData::AstModules`.
+    AstModules,
+    /// `PhaseData::AstModulesWithContracts`.
+    AstModulesWithContracts,
+    /// `PhaseData::Hir`.
+    Hir,
+    /// `PhaseData::Mir`.
+    Mir,
+    /// `PhaseData::OptimizedMir`.
+    OptimizedMir,
+    /// `PhaseData::Vbc`.
+    Vbc,
+}
+
+impl PhaseDataKind {
+    /// Stable diagnostic tag (snake_case).
+    pub fn tag(self) -> &'static str {
+        match self {
+            PhaseDataKind::SourceFiles => "source_files",
+            PhaseDataKind::AstModules => "ast_modules",
+            PhaseDataKind::AstModulesWithContracts => "ast_modules_with_contracts",
+            PhaseDataKind::Hir => "hir",
+            PhaseDataKind::Mir => "mir",
+            PhaseDataKind::OptimizedMir => "optimized_mir",
+            PhaseDataKind::Vbc => "vbc",
+        }
+    }
+
+    /// Which pipeline track this kind belongs to.  See [`PipelineTrack`].
+    pub fn track(self) -> PipelineTrack {
+        match self {
+            PhaseDataKind::SourceFiles
+            | PhaseDataKind::AstModules
+            | PhaseDataKind::AstModulesWithContracts => PipelineTrack::Frontend,
+            PhaseDataKind::Hir | PhaseDataKind::Vbc => PipelineTrack::Compilation,
+            PhaseDataKind::Mir | PhaseDataKind::OptimizedMir => PipelineTrack::Verification,
+        }
+    }
+}
+
 /// Phase-specific data
 #[derive(Debug, Clone)]
 pub enum PhaseData {
@@ -159,12 +239,21 @@ pub enum PhaseData {
     /// High-level IR (Phase 4-5)
     Hir(List<HirModule>),
 
-    /// Mid-level IR (Phase 6)
-    /// Uses the full internal MIR structure from mir_lowering for proper optimization
+    /// Mid-level IR (Phase 6) — verification-track sidecar.
+    ///
+    /// **NOT in the main TypedAST → VBC compilation path.** MIR is
+    /// produced and consumed only by:
+    ///
+    ///   - `phases::optimization` — optimization passes.
+    ///   - `phases::verification_phase` — SMT-based verification.
+    ///   - `passes::cbgr_integration` — CBGR bounds elimination.
+    ///
+    /// The compilation pipeline goes TypedAST → VBC directly.  See
+    /// [`PipelineTrack`] for the architectural classification.
     Mir(List<mir_lowering::MirModule>),
 
-    /// Optimized IR (Phase 7)
-    /// Uses the full internal MIR structure from mir_lowering
+    /// Optimized IR (Phase 7) — verification-track sidecar.
+    /// Same isolation as `Mir`.
     OptimizedMir(List<mir_lowering::MirModule>),
 
     /// VBC bytecode modules (VBC-first pipeline)
@@ -173,6 +262,58 @@ pub enum PhaseData {
     /// instead of going through MIR. All tier analysis happens before
     /// VBC generation, and the bytecode includes tier-aware instructions.
     Vbc(List<VbcModuleData>),
+}
+
+impl PhaseData {
+    /// Project the discriminator without inspecting payload contents.
+    /// Constant-time; used by audit gates, dependency-graph builders,
+    /// and pipeline-routing diagnostics.
+    pub fn kind(&self) -> PhaseDataKind {
+        match self {
+            PhaseData::SourceFiles(_) => PhaseDataKind::SourceFiles,
+            PhaseData::AstModules(_) => PhaseDataKind::AstModules,
+            PhaseData::AstModulesWithContracts { .. } => PhaseDataKind::AstModulesWithContracts,
+            PhaseData::Hir(_) => PhaseDataKind::Hir,
+            PhaseData::Mir(_) => PhaseDataKind::Mir,
+            PhaseData::OptimizedMir(_) => PhaseDataKind::OptimizedMir,
+            PhaseData::Vbc(_) => PhaseDataKind::Vbc,
+        }
+    }
+
+    /// Pipeline track this phase data belongs to.  Frontend (Source /
+    /// AST), Compilation (HIR / VBC), or Verification (MIR /
+    /// OptimizedMir).  Routes the architectural separation between
+    /// the main compilation pipeline and the verification sidecar.
+    pub fn track(&self) -> PipelineTrack {
+        self.kind().track()
+    }
+
+    /// Whether this phase data lives on the main compilation path
+    /// (TypedAST → VBC).  False for MIR / OptimizedMir which are
+    /// verification-track sidecar IRs.
+    pub fn is_compilation_track(&self) -> bool {
+        matches!(self.track(), PipelineTrack::Compilation)
+    }
+
+    /// Whether this phase data lives on the verification track
+    /// (MIR / OptimizedMir for SMT / optimization / CBGR).  False
+    /// for the compilation track.  An audit assertion that an
+    /// optimization pass receives only `Mir` / `OptimizedMir` data
+    /// can call `assert!(input.data.is_verification_track())`.
+    pub fn is_verification_track(&self) -> bool {
+        matches!(self.track(), PipelineTrack::Verification)
+    }
+
+    /// Whether this phase data is frontend (source or AST).
+    pub fn is_frontend(&self) -> bool {
+        matches!(self.track(), PipelineTrack::Frontend)
+    }
+
+    /// Whether this is one of the MIR-based variants.  Convenience
+    /// for verification-track guards.
+    pub fn is_mir_based(&self) -> bool {
+        matches!(self.kind(), PhaseDataKind::Mir | PhaseDataKind::OptimizedMir)
+    }
 }
 
 /// VBC module data with tier analysis results.
@@ -674,5 +815,101 @@ pub fn type_error_to_diagnostic(
     } else {
         // Fallback to diagnostic without span information
         error.to_diagnostic()
+    }
+}
+
+#[cfg(test)]
+mod ir_track_tests {
+    use super::*;
+
+    #[test]
+    fn phase_data_kind_classifies_each_variant() {
+        let source = PhaseData::SourceFiles(List::new());
+        assert_eq!(source.kind(), PhaseDataKind::SourceFiles);
+        let ast = PhaseData::AstModules(List::new());
+        assert_eq!(ast.kind(), PhaseDataKind::AstModules);
+        let hir = PhaseData::Hir(List::new());
+        assert_eq!(hir.kind(), PhaseDataKind::Hir);
+        let mir = PhaseData::Mir(List::new());
+        assert_eq!(mir.kind(), PhaseDataKind::Mir);
+        let opt_mir = PhaseData::OptimizedMir(List::new());
+        assert_eq!(opt_mir.kind(), PhaseDataKind::OptimizedMir);
+        let vbc = PhaseData::Vbc(List::new());
+        assert_eq!(vbc.kind(), PhaseDataKind::Vbc);
+    }
+
+    #[test]
+    fn pipeline_track_separates_compilation_and_verification() {
+        // Frontend
+        assert_eq!(
+            PhaseData::SourceFiles(List::new()).track(),
+            PipelineTrack::Frontend,
+        );
+        assert_eq!(
+            PhaseData::AstModules(List::new()).track(),
+            PipelineTrack::Frontend,
+        );
+        // Compilation
+        assert_eq!(
+            PhaseData::Hir(List::new()).track(),
+            PipelineTrack::Compilation,
+        );
+        assert_eq!(
+            PhaseData::Vbc(List::new()).track(),
+            PipelineTrack::Compilation,
+        );
+        // Verification
+        assert_eq!(
+            PhaseData::Mir(List::new()).track(),
+            PipelineTrack::Verification,
+        );
+        assert_eq!(
+            PhaseData::OptimizedMir(List::new()).track(),
+            PipelineTrack::Verification,
+        );
+    }
+
+    #[test]
+    fn track_predicates_match_classification() {
+        assert!(PhaseData::SourceFiles(List::new()).is_frontend());
+        assert!(PhaseData::Vbc(List::new()).is_compilation_track());
+        assert!(PhaseData::Mir(List::new()).is_verification_track());
+        assert!(PhaseData::OptimizedMir(List::new()).is_verification_track());
+        assert!(!PhaseData::Vbc(List::new()).is_verification_track());
+        assert!(!PhaseData::Mir(List::new()).is_compilation_track());
+    }
+
+    #[test]
+    fn is_mir_based_only_for_mir_and_optimized_mir() {
+        assert!(PhaseData::Mir(List::new()).is_mir_based());
+        assert!(PhaseData::OptimizedMir(List::new()).is_mir_based());
+        assert!(!PhaseData::Vbc(List::new()).is_mir_based());
+        assert!(!PhaseData::Hir(List::new()).is_mir_based());
+    }
+
+    #[test]
+    fn phase_data_kind_tags_distinct() {
+        let kinds = [
+            PhaseDataKind::SourceFiles,
+            PhaseDataKind::AstModules,
+            PhaseDataKind::AstModulesWithContracts,
+            PhaseDataKind::Hir,
+            PhaseDataKind::Mir,
+            PhaseDataKind::OptimizedMir,
+            PhaseDataKind::Vbc,
+        ];
+        let tags: std::collections::BTreeSet<_> = kinds.iter().map(|k| k.tag()).collect();
+        assert_eq!(tags.len(), 7);
+    }
+
+    #[test]
+    fn pipeline_track_tags_distinct() {
+        let tracks = [
+            PipelineTrack::Frontend,
+            PipelineTrack::Compilation,
+            PipelineTrack::Verification,
+        ];
+        let tags: std::collections::BTreeSet<_> = tracks.iter().map(|t| t.tag()).collect();
+        assert_eq!(tags.len(), 3);
     }
 }
