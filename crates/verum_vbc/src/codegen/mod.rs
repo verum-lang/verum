@@ -179,6 +179,63 @@ pub struct FfiContractExprs {
     pub function_name: String,
 }
 
+/// Detailed report of `MakeVariant` / `MakeVariantTyped`
+/// emissions across a module's bytecode (#146 Phase 3e).
+///
+/// Returned by `VbcCodegen::collect_make_variant_report` to give
+/// downstream tooling (audit gates, regression ratchets, post-
+/// Phase-3 codegen telemetry) a structural view of variant
+/// construction quality:
+///
+///   - `typed_emissions / untyped_emissions` — total counts per
+///     instruction class.  Post-Phase-3c clean compilation should
+///     drive `untyped_emissions` toward zero (only fallback paths
+///     for cross-cog forward refs / mid-pass-1 lookups remain
+///     untyped).
+///   - `typed_inconsistencies / untyped_inconsistencies` —
+///     emissions whose layout doesn't match a module-declared
+///     variant.  Untyped: the legacy Phase-2 cross-module
+///     false-positive signal.  Typed: stronger — pinned by
+///     operand-supplied type_id, so a mismatch is genuine
+///     codegen drift.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MakeVariantReport {
+    /// Number of legacy `MakeVariant` instructions emitted.
+    pub untyped_emissions: usize,
+    /// Number of `MakeVariantTyped` instructions emitted.
+    pub typed_emissions: usize,
+    /// Untyped emissions whose `(tag, field_count)` doesn't match
+    /// any module-local declared variant (legacy Phase-2 signal —
+    /// cross-module emissions show up here as false positives).
+    pub untyped_inconsistencies: usize,
+    /// Typed emissions whose `(type_id, tag, field_count)`
+    /// disagrees with the declared variant of that type_id.
+    /// These are stronger signals than the untyped class — the
+    /// operand-supplied type_id pins the parent sum-type, so a
+    /// mismatch is genuine codegen drift, not cross-module
+    /// resolution.
+    pub typed_inconsistencies: usize,
+}
+
+impl MakeVariantReport {
+    /// Total inconsistency count — sum of typed + untyped
+    /// inconsistencies. Useful for backwards-compatible callers
+    /// that previously consumed
+    /// `report_make_variant_inconsistencies() -> usize`.
+    #[inline]
+    pub fn total_inconsistencies(&self) -> usize {
+        self.typed_inconsistencies + self.untyped_inconsistencies
+    }
+
+    /// Total variant emissions (typed + untyped).  Lets ratchet
+    /// tests assert that "typed/(typed+untyped)" stays above a
+    /// threshold post-Phase-3.
+    #[inline]
+    pub fn total_emissions(&self) -> usize {
+        self.typed_emissions + self.untyped_emissions
+    }
+}
+
 ///
 /// Transforms Verum AST into VBC bytecode modules.
 #[derive(Debug)]
@@ -2991,20 +3048,54 @@ impl VbcCodegen {
     /// A hard fail would be a false positive for every cross-module
     /// variant emission.
     ///
-    /// The whole-program version of this check belongs at the level
-    /// where the unified type table is materialized — out of scope
-    /// for the per-module finalize.  Keeping the warning here at
-    /// least surfaces module-internal layout drift early.
+    /// Phase 3e (#146) extension — the same scan also counts
+    /// `MakeVariantTyped` emissions and validates them against the
+    /// type table by `(type_id, tag, field_count)` (a stricter check
+    /// since the operand-supplied type_id pins the parent sum-type
+    /// id directly, no cross-tag heuristics needed).  The returned
+    /// `MakeVariantReport` separates typed-vs-untyped emission
+    /// counts so post-Phase-3 builds can ratchet on the
+    /// untyped-emission count toward zero.
     ///
     /// Returns the number of instructions reported (zero in clean
     /// builds), useful for tests that want a structural assertion.
     pub fn report_make_variant_inconsistencies(&self) -> usize {
+        self.collect_make_variant_report().total_inconsistencies()
+    }
+
+    /// Detailed make-variant emission report (Phase 3e of #146).
+    ///
+    /// Walks every function's bytecode and counts:
+    ///   - `typed_emissions`: `MakeVariantTyped` instructions emitted
+    ///     (preferred, carry the parent sum-type id);
+    ///   - `untyped_emissions`: legacy `MakeVariant` instructions
+    ///     (fallback when codegen can't resolve the parent type);
+    ///   - `untyped_inconsistencies`: untyped emissions whose
+    ///     `(tag, field_count)` doesn't match any module-local
+    ///     declared variant (the legacy Phase-2 signal — false
+    ///     positives expected for cross-module emissions);
+    ///   - `typed_inconsistencies`: typed emissions whose
+    ///     `(type_id, tag, field_count)` doesn't match the
+    ///     declared variant of that type_id (these are stronger
+    ///     signals — the operand-supplied type_id pins the parent,
+    ///     so a mismatch is genuine codegen drift, not cross-module).
+    ///
+    /// Performance: single O(#instructions) walk; type-table is
+    /// indexed once into a HashMap for O(1) lookups during the walk.
+    pub fn collect_make_variant_report(&self) -> MakeVariantReport {
         use crate::instruction::Instruction;
-        use crate::types::VariantKind;
-        // Build the set of valid (tag, field_count) combos.  Stored as
-        // a HashSet<(u32, u32)> for O(1) membership check.
-        let mut valid: std::collections::HashSet<(u32, u32)> =
+        use crate::types::{TypeId, VariantKind};
+
+        // Index 1: legacy Phase-2 set of (tag, field_count) combos
+        // declared anywhere in the module.  Ratifies untyped
+        // emissions module-locally.
+        let mut valid_pairs: std::collections::HashSet<(u32, u32)> =
             std::collections::HashSet::new();
+        // Index 2: (type_id, tag) → field_count map.  Lets typed
+        // emissions cross-check directly against the declared
+        // variant of the same type_id.
+        let mut typed_lookup: std::collections::HashMap<(TypeId, u32), u32> =
+            std::collections::HashMap::new();
         for ty in &self.types {
             for v in &ty.variants {
                 let count = match v.kind {
@@ -3012,45 +3103,95 @@ impl VbcCodegen {
                     VariantKind::Tuple => v.arity as u32,
                     VariantKind::Record => v.fields.len() as u32,
                 };
-                valid.insert((v.tag, count));
+                valid_pairs.insert((v.tag, count));
+                typed_lookup.insert((ty.id, v.tag), count);
             }
         }
-        // Empty type table = nothing to compare against.
-        if valid.is_empty() {
-            return 0;
-        }
-        let mut reported: usize = 0;
+
+        let valid_pairs_known = !valid_pairs.is_empty();
+        let mut report = MakeVariantReport::default();
+
         for f in &self.functions {
             for ins in &f.instructions {
-                if let Instruction::MakeVariant {
-                    dst: _,
-                    tag,
-                    field_count,
-                } = ins
-                    && !valid.contains(&(*tag, *field_count)) {
-                        let fname = self
-                            .ctx
-                            .strings
-                            .get(f.descriptor.name.0 as usize)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                format!("<FunctionId({})>", f.descriptor.id.0)
-                            });
-                        tracing::warn!(
-                            "[layout] MakeVariant {{ tag: {}, field_count: \
-                             {} }} in `{}` has no matching variant in this \
-                             module's type table — may be cross-module \
-                             (legitimate) or stale-FunctionInfo drift \
-                             (latent bug). See #146 Phase 2.",
-                            tag,
-                            field_count,
-                            fname,
-                        );
-                        reported += 1;
+                match ins {
+                    Instruction::MakeVariant {
+                        dst: _,
+                        tag,
+                        field_count,
+                    } => {
+                        report.untyped_emissions += 1;
+                        if valid_pairs_known
+                            && !valid_pairs.contains(&(*tag, *field_count))
+                        {
+                            let fname = self
+                                .ctx
+                                .strings
+                                .get(f.descriptor.name.0 as usize)
+                                .cloned()
+                                .unwrap_or_else(|| {
+                                    format!("<FunctionId({})>", f.descriptor.id.0)
+                                });
+                            tracing::warn!(
+                                "[layout] MakeVariant {{ tag: {}, field_count: \
+                                 {} }} in `{}` has no matching variant in this \
+                                 module's type table — may be cross-module \
+                                 (legitimate) or stale-FunctionInfo drift \
+                                 (latent bug). See #146 Phase 2.",
+                                tag,
+                                field_count,
+                                fname,
+                            );
+                            report.untyped_inconsistencies += 1;
+                        }
                     }
+                    Instruction::MakeVariantTyped {
+                        dst: _,
+                        type_id,
+                        tag,
+                        field_count,
+                    } => {
+                        report.typed_emissions += 1;
+                        // Skip cross-module / builtin type_ids: a
+                        // typed emission against a TypeId that this
+                        // module didn't declare is cross-module
+                        // (legitimate) — analogous to the untyped
+                        // false-positive class.
+                        let type_id_v = TypeId(*type_id);
+                        if let Some(expected) =
+                            typed_lookup.get(&(type_id_v, *tag))
+                        {
+                            if *expected != *field_count {
+                                let fname = self
+                                    .ctx
+                                    .strings
+                                    .get(f.descriptor.name.0 as usize)
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        format!(
+                                            "<FunctionId({})>",
+                                            f.descriptor.id.0
+                                        )
+                                    });
+                                tracing::warn!(
+                                    "[layout] MakeVariantTyped {{ type_id: {}, \
+                                     tag: {}, field_count: {} }} in `{}` \
+                                     disagrees with declared variant arity \
+                                     {} — codegen drift. See #146 Phase 3e.",
+                                    type_id,
+                                    tag,
+                                    field_count,
+                                    fname,
+                                    expected,
+                                );
+                                report.typed_inconsistencies += 1;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
-        reported
+        report
     }
 
     /// Push a `TypeDescriptor` into `self.types`, skipping when an
