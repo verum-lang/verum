@@ -308,29 +308,84 @@ pub struct TypeLevelEvaluator {
 
     /// Current type context for variable resolution
     context: Option<TypeContext>,
+
+    /// Configuration for evaluation behaviour. `enable_cache` is
+    /// the load-bearing field — gates the apply_function cache
+    /// lookup and store. `max_depth` / `reduction_strategy` /
+    /// `smt_timeout_ms` are forward-looking; surfaced via the
+    /// recipe-#8 tracing path at construction.
+    config: TypeLevelConfig,
 }
 
 impl TypeLevelEvaluator {
     /// Create a new type-level evaluator
     pub fn new() -> Self {
+        Self::with_config(TypeLevelConfig::default())
+    }
+
+    /// Create an evaluator with a type context
+    pub fn with_context(context: TypeContext) -> Self {
+        let mut s = Self::with_config(TypeLevelConfig::default());
+        s.context = Some(context);
+        s
+    }
+
+    /// Create an evaluator with a specific [`TypeLevelConfig`].
+    ///
+    /// Honours `config.enable_cache` directly — when `false`, the
+    /// `apply_function` cache lookup and store sites short-circuit
+    /// so an embedder driving experimental type functions can
+    /// deterministically re-evaluate every call (useful for
+    /// debugging non-pure type-level functions and for caching
+    /// benchmarks).
+    ///
+    /// Other fields (`max_depth`, `reduction_strategy`,
+    /// `smt_timeout_ms`) are forward-looking — surfaced via
+    /// recipe-#8 tracing at construction so an operator's
+    /// non-default value doesn't appear to silently take effect.
+    /// Pre-fix the entire `TypeLevelConfig` was inert: the struct
+    /// existed and had builders (`strict()` / `lazy()` /
+    /// `with_max_depth` / `with_smt_timeout`) but the only
+    /// consumer-side type-level evaluator (`TypeLevelEvaluator`)
+    /// took no config and therefore ignored every field.
+    pub fn with_config(config: TypeLevelConfig) -> Self {
+        let defaults = TypeLevelConfig::default();
+        if config.max_depth != defaults.max_depth
+            || config.reduction_strategy != defaults.reduction_strategy
+            || config.smt_timeout_ms != defaults.smt_timeout_ms
+        {
+            tracing::debug!(
+                target: "verum_types::type_level_computation",
+                max_depth = config.max_depth,
+                reduction_strategy = ?config.reduction_strategy,
+                smt_timeout_ms = config.smt_timeout_ms,
+                "TypeLevelEvaluator: non-default config fields requested but not yet \
+                 wired (max_depth recursion gate / reduction_strategy honoured by \
+                 ConstEvaluator only / smt_timeout_ms threaded through downstream \
+                 SmtBackend). enable_cache IS wired and gates the apply_function cache."
+            );
+        }
         Self {
             functions: Map::new(),
             const_eval: ConstEvaluator::new(),
             type_env: Map::new(),
             cache: Map::new(),
             context: None,
+            config,
         }
     }
 
-    /// Create an evaluator with a type context
-    pub fn with_context(context: TypeContext) -> Self {
-        Self {
-            functions: Map::new(),
-            const_eval: ConstEvaluator::new(),
-            type_env: Map::new(),
-            cache: Map::new(),
-            context: Some(context),
-        }
+    /// Read mirror of `TypeLevelConfig.enable_cache`.
+    pub fn caching_enabled(&self) -> bool {
+        self.config.enable_cache
+    }
+
+    /// Read mirror of the configured maximum evaluation depth.
+    /// Forward-looking: not yet enforced inside `apply_function`,
+    /// but surfaced so embedders can confirm the value the
+    /// manifest set.
+    pub fn configured_max_depth(&self) -> usize {
+        self.config.max_depth
     }
 
     /// Register a type-level function
@@ -366,10 +421,14 @@ impl TypeLevelEvaluator {
     /// let result_type = eval.apply_function(&name, &args)?;
     /// ```
     pub fn apply_function(&mut self, name: &Text, args: &List<ConstValue>) -> Result<Type> {
-        // Check cache first
+        // Check cache first — gated on `config.enable_cache`. When
+        // disabled (uncommon outside of debugging / benchmarking),
+        // every call re-evaluates without consulting cached results.
         let cache_key = self.make_cache_key(name, args);
-        if let Some(cached) = self.cache.get(&cache_key) {
-            return Ok(cached.clone());
+        if self.config.enable_cache {
+            if let Some(cached) = self.cache.get(&cache_key) {
+                return Ok(cached.clone());
+            }
         }
 
         // Look up function
@@ -417,8 +476,12 @@ impl TypeLevelEvaluator {
         // Return result after restoring environment
         let result = result?;
 
-        // Cache result
-        self.cache.insert(cache_key, result.clone());
+        // Cache result (gated on the same `enable_cache` switch
+        // consulted at lookup time — keeps lookup and store
+        // symmetric so a disabled cache stays empty).
+        if self.config.enable_cache {
+            self.cache.insert(cache_key, result.clone());
+        }
 
         Ok(result)
     }
@@ -3095,5 +3158,78 @@ mod tests {
 
         // n * 1 = n
         assert!(mult_one_right_proof(&n).is_ok());
+    }
+
+    // ==================== TypeLevelConfig wiring pin tests ====================
+
+    /// Helper: build a no-op type function returning Type::Int so we
+    /// can drive `apply_function` and observe cache behaviour.
+    fn register_const_int_function(eval: &mut TypeLevelEvaluator) {
+        let func = TypeLevelFunction::simple(
+            "const_int".into(),
+            verum_common::List::new(),
+            make_path_expr("i32"),
+        );
+        eval.register_function(func);
+    }
+
+    /// Pin: with `enable_cache = true` (default), apply_function
+    /// stores the result so a subsequent identical call hits the
+    /// cache and returns the same value. `cache_size` reports 1
+    /// entry after one call, still 1 after a second identical call.
+    #[test]
+    fn type_level_cache_default_enabled_stores_results() {
+        let mut eval = TypeLevelEvaluator::with_config(TypeLevelConfig::default());
+        assert!(eval.caching_enabled());
+        assert_eq!(eval.cache_size(), 0);
+        register_const_int_function(&mut eval);
+
+        let args: List<ConstValue> = List::new();
+        let r1 = eval.apply_function(&"const_int".into(), &args).unwrap();
+        assert_eq!(r1, Type::Int);
+        assert_eq!(eval.cache_size(), 1, "first call must seed cache");
+
+        let r2 = eval.apply_function(&"const_int".into(), &args).unwrap();
+        assert_eq!(r2, Type::Int);
+        assert_eq!(eval.cache_size(), 1, "second identical call must hit cache (size unchanged)");
+    }
+
+    /// Pin: with `enable_cache = false`, apply_function neither
+    /// reads nor writes the cache — `cache_size` stays at 0 across
+    /// repeated calls. Pre-fix the entire `TypeLevelConfig` struct
+    /// was inert; this is the soundness pin proving the cache
+    /// gate now does real work.
+    #[test]
+    fn type_level_cache_disabled_skips_storage() {
+        let cfg = TypeLevelConfig {
+            enable_cache: false,
+            ..TypeLevelConfig::default()
+        };
+        let mut eval = TypeLevelEvaluator::with_config(cfg);
+        assert!(!eval.caching_enabled());
+        assert_eq!(eval.cache_size(), 0);
+        register_const_int_function(&mut eval);
+
+        let args: List<ConstValue> = List::new();
+        let r1 = eval.apply_function(&"const_int".into(), &args).unwrap();
+        assert_eq!(r1, Type::Int);
+        assert_eq!(eval.cache_size(), 0, "disabled cache must NOT store first call");
+
+        let r2 = eval.apply_function(&"const_int".into(), &args).unwrap();
+        assert_eq!(r2, Type::Int);
+        assert_eq!(eval.cache_size(), 0, "disabled cache must NOT store any call");
+    }
+
+    /// Pin: `configured_max_depth` mirrors the manifest stance
+    /// verbatim — embedders can read what they configured even
+    /// though the field is forward-looking inside apply_function.
+    #[test]
+    fn type_level_configured_max_depth_mirrors_config() {
+        let cfg = TypeLevelConfig {
+            max_depth: 1234,
+            ..TypeLevelConfig::default()
+        };
+        let eval = TypeLevelEvaluator::with_config(cfg);
+        assert_eq!(eval.configured_max_depth(), 1234);
     }
 }
