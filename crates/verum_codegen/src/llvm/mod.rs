@@ -148,7 +148,7 @@ pub use cbgr::{CbgrLowering, CbgrStats, capabilities};
 pub use context::{FunctionContext, FunctionStats, TierDistribution};
 pub use register_types::{RegisterType, RegisterTypeMap, MethodDispatchTable, MethodDispatchTarget};
 pub use well_known_types::{WellKnownType, WellKnownTypeExt};
-pub use vbc_lowering::{VbcToLlvmLowering, LoweringConfig, LoweringStats};
+pub use vbc_lowering::{VbcToLlvmLowering, LoweringConfig, LoweringStats, PanicStrategy};
 pub use mmio::{MmioLowering, MmioStats, VolatileOrdering, RegisterWidth};
 pub use interrupt::{InterruptLowering, InterruptStats, TargetArch, InterruptHandlerKind};
 pub use simd::{

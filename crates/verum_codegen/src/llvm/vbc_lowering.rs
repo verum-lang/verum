@@ -60,6 +60,68 @@ use super::types::{RefTier, TypeLowering};
 use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt as _};
 use verum_common::well_known_types::type_names as tn;
 
+/// Panic-handling strategy for the AOT runtime.
+///
+/// Mirrors the `[runtime].panic` Verum.toml field.  Threaded from
+/// `CompilerOptions` through `LoweringConfig` to `PlatformIR::
+/// emit_panic_ir`, which selects between two body shapes for the
+/// `verum_panic` runtime function:
+///
+///   - **Unwind** (default): route the panic through
+///     `verum_exception_throw`, which longjmps to the topmost
+///     installed exception handler if one exists, falling through
+///     to `_exit(134)` (SIGABRT-equivalent) when no handler is on
+///     the stack.  Defers between the panic site and the catch
+///     point run via `verum_defer_run_to`.  Matches the documented
+///     "panic = unwind" semantic where caller-side `try { … }
+///     catch { … }` blocks intercept panics.
+///
+///   - **Abort**: skip the exception infrastructure entirely;
+///     emit "PANIC: …" to stderr and call `_exit(1)`.  Defers do
+///     NOT run.  Use when the binary doesn't carry exception
+///     tables (smaller footprint, faster panic emission), or when
+///     the deployment policy mandates immediate process death on
+///     any panic.
+///
+/// Pre-fix `[runtime].panic` was tracing-only at session.rs:390
+/// — manifest setting had zero effect on the emitted runtime
+/// function, which always took the abort path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanicStrategy {
+    /// Route panics through verum_exception_throw (longjmp /
+    /// _exit(134)).  Matches the documented Verum.toml default.
+    Unwind,
+    /// Hard-abort on panic via _exit(1); skip defer execution and
+    /// the exception handler stack walk.  No-throw codegen.
+    Abort,
+}
+
+impl PanicStrategy {
+    /// Parse from the textual form used in `[runtime].panic`.
+    /// Unknown values fall back to `Unwind` with a warning so a
+    /// typo doesn't silently switch panic semantics.
+    pub fn from_manifest_text(s: &str) -> Self {
+        match s {
+            "abort" => PanicStrategy::Abort,
+            "unwind" => PanicStrategy::Unwind,
+            other => {
+                tracing::warn!(
+                    "[runtime].panic: unknown value {:?} (expected \
+                     \"unwind\" or \"abort\"); defaulting to Unwind",
+                    other
+                );
+                PanicStrategy::Unwind
+            }
+        }
+    }
+}
+
+impl Default for PanicStrategy {
+    fn default() -> Self {
+        PanicStrategy::Unwind
+    }
+}
+
 /// Configuration for VBC → LLVM lowering.
 #[derive(Debug, Clone)]
 pub struct LoweringConfig {
@@ -86,6 +148,11 @@ pub struct LoweringConfig {
     /// the interpreter's allow-all default when no script policy is
     /// installed on the Session.
     pub permission_policy: Option<super::permissions::AotPermissionPolicy>,
+    /// Panic-handling strategy.  Selects the body shape for
+    /// `verum_panic` — Unwind routes through `verum_exception_throw`
+    /// (longjmp / _exit(134)); Abort emits stderr + _exit(1).
+    /// Threaded from `[runtime].panic` in Verum.toml.
+    pub panic_strategy: PanicStrategy,
 }
 
 impl Default for LoweringConfig {
@@ -100,6 +167,7 @@ impl Default for LoweringConfig {
             debug_info: false,
             coverage: false,
             permission_policy: None,
+            panic_strategy: PanicStrategy::default(),
         }
     }
 }
@@ -158,6 +226,15 @@ impl LoweringConfig {
         policy: Option<super::permissions::AotPermissionPolicy>,
     ) -> Self {
         self.permission_policy = policy;
+        self
+    }
+
+    /// Set the panic strategy.  Drives the body shape of
+    /// `verum_panic` in the emitted runtime IR — see [`PanicStrategy`].
+    /// Threaded from `[runtime].panic` in Verum.toml at the codegen
+    /// entry point.
+    pub fn with_panic_strategy(mut self, strategy: PanicStrategy) -> Self {
+        self.panic_strategy = strategy;
         self
     }
 
@@ -859,7 +936,16 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // Emit platform-native runtime functions as LLVM IR.
             // These shadow C runtime functions for full LTO optimization.
             if trace { eprintln!("[aot-runtime-stage] emit_platform_functions"); }
-            let platform = super::platform_ir::PlatformIR::new(self.context);
+            // Thread `[runtime].panic` from the manifest through to
+            // the platform-IR emitter — it drives the body shape of
+            // `verum_panic` (Unwind: route through
+            // verum_exception_throw; Abort: stderr + _exit(1)).
+            // Pre-fix this constructor used `PlatformIR::new` which
+            // hard-coded the abort body, ignoring the manifest setting.
+            let platform = super::platform_ir::PlatformIR::with_panic_strategy(
+                self.context,
+                self.config.panic_strategy,
+            );
             platform.emit_platform_functions(&self.module)?;
 
             // Emit tensor runtime functions as LLVM IR.

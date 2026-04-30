@@ -24,11 +24,38 @@ use super::error::{BuildExt, OptionExt};
 /// Emit platform-native runtime functions as LLVM IR.
 pub struct PlatformIR<'ctx> {
     context: &'ctx Context,
+    /// Panic-handling strategy — drives the body shape of
+    /// `verum_panic` (Unwind: route through verum_exception_throw;
+    /// Abort: stderr + _exit(1)).  Threaded from
+    /// `LoweringConfig.panic_strategy`, ultimately sourced from
+    /// `[runtime].panic` in Verum.toml.
+    panic_strategy: super::vbc_lowering::PanicStrategy,
 }
 
 impl<'ctx> PlatformIR<'ctx> {
+    /// Create a new platform-IR emitter with the documented-default
+    /// panic strategy (Unwind).  Most call sites should use
+    /// [`PlatformIR::with_panic_strategy`] to thread the user's
+    /// `[runtime].panic` setting through.
     pub fn new(context: &'ctx Context) -> Self {
-        Self { context }
+        Self {
+            context,
+            panic_strategy: super::vbc_lowering::PanicStrategy::default(),
+        }
+    }
+
+    /// Create a platform-IR emitter with an explicit panic strategy.
+    /// Pre-fix the panic body unconditionally took the abort path;
+    /// callers threading `[runtime].panic` reach this constructor so
+    /// the manifest setting actually drives codegen.
+    pub fn with_panic_strategy(
+        context: &'ctx Context,
+        panic_strategy: super::vbc_lowering::PanicStrategy,
+    ) -> Self {
+        Self {
+            context,
+            panic_strategy,
+        }
     }
 
     /// Emit all platform runtime functions into the module.
@@ -8289,7 +8316,29 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    // 7. verum_panic(msg: ptr, len: i64) — simplified: write "PANIC: " + msg + "\n" to stderr, _exit(134)
+    // 7. verum_panic(msg: ptr, len: i64, …) — body shape selected by
+    //    `self.panic_strategy` (sourced from `[runtime].panic`).
+    //
+    // Both branches first emit "PANIC: " + msg + "\n" to stderr so
+    // the user always sees the failure reason regardless of
+    // strategy.  The branches diverge on what follows:
+    //
+    //  - Unwind: call verum_exception_throw(0).  That function
+    //    longjmps to the topmost installed handler if one exists
+    //    (running defers via verum_defer_run_to on the way), or
+    //    falls through to _exit(134) when no handler is on the
+    //    stack.  Closes #(unfinished) — pre-fix the body always
+    //    took the abort path regardless of `[runtime].panic`.
+    //
+    //  - Abort: skip exception infrastructure entirely, call
+    //    _exit(1) immediately.  Defers do NOT run.
+    //
+    // The choice between the two is honest: `[runtime].panic =
+    // "abort"` callers get smaller binaries (no exception-table
+    // emission triggered by reachable verum_exception_throw) and
+    // immediate process death; `[runtime].panic = "unwind"` callers
+    // (the documented default) get catchable panics via
+    // try { … } catch { … }.
     fn emit_panic_ir(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
@@ -8304,8 +8353,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let write_fn = self.get_or_declare_fn(module, "write",
             i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false));
-        let exit_fn = self.get_or_declare_fn(module, "_exit",
-            void_type.fn_type(&[i64_type.into()], false));
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -8324,9 +8371,38 @@ impl<'ctx> PlatformIR<'ctx> {
         // Write newline
         let nl = builder.build_global_string_ptr("\n", "nl").or_llvm_err()?;
         builder.build_call(write_fn, &[stderr_fd.into(), nl.as_pointer_value().into(), i64_type.const_int(1, false).into()], "").or_llvm_err()?;
-        // _exit(1) — unified exit code for panic, matching Tier 0 interpreter.
-        builder.build_call(exit_fn, &[i64_type.const_int(1, false).into()], "").or_llvm_err()?;
-        builder.build_unreachable().or_llvm_err()?;
+
+        match self.panic_strategy {
+            super::vbc_lowering::PanicStrategy::Unwind => {
+                // Route through verum_exception_throw — longjmps to
+                // the topmost handler if one exists, else falls
+                // through to _exit(134) inside that function.  Pass
+                // value=0; user-visible diagnostics already went to
+                // stderr above.  noreturn attribute on
+                // verum_exception_throw means LLVM treats the call
+                // as a terminator.
+                let throw_fn = self.get_or_declare_fn(
+                    module,
+                    "verum_exception_throw",
+                    void_type.fn_type(&[i64_type.into()], false),
+                );
+                builder.build_call(
+                    throw_fn,
+                    &[i64_type.const_zero().into()],
+                    "",
+                ).or_llvm_err()?;
+                builder.build_unreachable().or_llvm_err()?;
+            }
+            super::vbc_lowering::PanicStrategy::Abort => {
+                // Direct abort path — skip exception infrastructure
+                // entirely. _exit(1) — unified exit code for panic,
+                // matching Tier 0 interpreter.
+                let exit_fn = self.get_or_declare_fn(module, "_exit",
+                    void_type.fn_type(&[i64_type.into()], false));
+                builder.build_call(exit_fn, &[i64_type.const_int(1, false).into()], "").or_llvm_err()?;
+                builder.build_unreachable().or_llvm_err()?;
+            }
+        }
         Ok(())
     }
 
