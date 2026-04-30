@@ -373,6 +373,58 @@ impl SmtConfig {
 
     /// Convert to backend switcher configuration
     pub fn to_switcher_config(&self) -> SwitcherConfig {
+        // Phase-not-realised: `SmtConfig.z3` (Z3-specific settings)
+        // and `SmtConfig.cvc5` (CVC5-specific settings) are TOML
+        // schema fields parsed from `[smt.z3]` / `[smt.cvc5]`
+        // sections but `SwitcherConfig` does not yet have a slot for
+        // either, so this conversion drops them. The actual
+        // backends (Z3Solver in z3_backend.rs, Cvc5Solver in
+        // cvc5_backend.rs) construct their own internal `Z3Config` /
+        // `Cvc5Config` (different types, in their own modules) via
+        // `::default()` rather than reading the TOML-parsed values
+        // surfaced here.
+        //
+        // Surface a debug trace when the embedder configures any
+        // z3 / cvc5 sub-field to a non-default value so the gap
+        // is visible: `[smt.z3] enable_proofs = false` parses but
+        // does NOT currently disable Z3 proof generation. The
+        // 8 z3 fields (enable_proofs, minimize_cores, enable_mbqi,
+        // enable_patterns, random_seed, memory_limit_mb,
+        // num_workers, auto_tactics) and the 8 cvc5 fields
+        // (logic, incremental, produce_models, produce_proofs,
+        // produce_unsat_cores, preprocessing, quantifier_mode,
+        // random_seed, verbosity) all flow through this function.
+        let z3_default = Z3Config::default();
+        let cvc5_default = Cvc5Config::default();
+        let z3_diverged = self.z3.enable_proofs != z3_default.enable_proofs
+            || self.z3.minimize_cores != z3_default.minimize_cores
+            || self.z3.enable_mbqi != z3_default.enable_mbqi
+            || self.z3.enable_patterns != z3_default.enable_patterns
+            || !matches!(self.z3.random_seed, Maybe::None)
+            || self.z3.num_workers != z3_default.num_workers
+            || self.z3.auto_tactics != z3_default.auto_tactics;
+        let cvc5_diverged = self.cvc5.logic != cvc5_default.logic
+            || self.cvc5.incremental != cvc5_default.incremental
+            || self.cvc5.produce_models != cvc5_default.produce_models
+            || self.cvc5.produce_proofs != cvc5_default.produce_proofs
+            || self.cvc5.produce_unsat_cores != cvc5_default.produce_unsat_cores
+            || self.cvc5.preprocessing != cvc5_default.preprocessing
+            || self.cvc5.quantifier_mode != cvc5_default.quantifier_mode
+            || !matches!(self.cvc5.random_seed, Maybe::None)
+            || self.cvc5.verbosity != cvc5_default.verbosity;
+        if z3_diverged || cvc5_diverged {
+            tracing::warn!(
+                "SmtConfig::to_switcher_config: dropping z3/cvc5 sub-config \
+                 (z3_diverged={}, cvc5_diverged={}). The SwitcherConfig type \
+                 has no slot for backend-specific settings; the actual Z3 / \
+                 CVC5 backends construct their own internal config via \
+                 ::default(). Settings like `[smt.z3] enable_proofs=false` or \
+                 `[smt.cvc5] preprocessing=false` parse but are NOT honoured \
+                 at solver-construction time. Forward-looking knobs.",
+                z3_diverged,
+                cvc5_diverged,
+            );
+        }
         SwitcherConfig {
             default_backend: self.backend,
             fallback: self.fallback.clone(),
