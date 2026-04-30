@@ -194,15 +194,152 @@ fn forall_elim_rejects_non_forall_premise() {
     );
 }
 
-// NOTE: tests for the strengthened body-shape gate
-// (forall_elim's expected-vs-body discriminant check / exists_intro's
-// premise-vs-body discriminant check) cannot yet be written against
-// the public `validate` entry point because `expr_eq` doesn't handle
-// Forall/Exists variants — `validate_axiom`'s formula-match check
-// fails before the apply rule runs. The gates themselves are in
-// place and don't regress the existing test suite. Adding
-// Forall/Exists arms to expr_eq_impl is tracked separately as a
-// precondition for direct end-to-end testing.
+// Helper: build `∀x. <body>` with a single Ident binder named `x`.
+// `expr_eq_impl` now handles Forall/Exists with alpha-equivalence
+// (binder names matter for the binding map, but two foralls with
+// the same binder name and equal bodies compare equal).
+fn forall_with_body(body: Expr) -> Expr {
+    use verum_ast::expr::QuantifierBinding;
+    use verum_ast::pattern::{Pattern, PatternKind};
+    use verum_ast::ty::Ident;
+    use verum_common::Maybe;
+    let pat = Pattern::new(
+        PatternKind::Ident {
+            name: Ident::new("x", Span::dummy()),
+            mutable: false,
+            by_ref: false,
+            subpattern: Maybe::None,
+        },
+        Span::dummy(),
+    );
+    let binding = QuantifierBinding {
+        pattern: pat,
+        ty: Maybe::None,
+        domain: Maybe::None,
+        guard: Maybe::None,
+        span: Span::dummy(),
+    };
+    Expr::new(
+        ExprKind::Forall {
+            bindings: List::from_iter([binding]),
+            body: Heap::new(body),
+        },
+        Span::dummy(),
+    )
+}
+
+fn exists_with_body(body: Expr) -> Expr {
+    use verum_ast::expr::QuantifierBinding;
+    use verum_ast::pattern::{Pattern, PatternKind};
+    use verum_ast::ty::Ident;
+    use verum_common::Maybe;
+    let pat = Pattern::new(
+        PatternKind::Ident {
+            name: Ident::new("x", Span::dummy()),
+            mutable: false,
+            by_ref: false,
+            subpattern: Maybe::None,
+        },
+        Span::dummy(),
+    );
+    let binding = QuantifierBinding {
+        pattern: pat,
+        ty: Maybe::None,
+        domain: Maybe::None,
+        guard: Maybe::None,
+        span: Span::dummy(),
+    };
+    Expr::new(
+        ExprKind::Exists {
+            bindings: List::from_iter([binding]),
+            body: Heap::new(body),
+        },
+        Span::dummy(),
+    )
+}
+
+#[test]
+fn forall_elim_rejects_body_shape_mismatch() {
+    // Pin the body-shape gate folded into d6ff4523. With a
+    // premise `∀x. p` (body is a Path) and a claimed conclusion
+    // that's a Bool literal (different ExprKind discriminant),
+    // forall_elim MUST reject. Pre-fix the prior gate (80f43418)
+    // only checked the premise was a Forall — accepted any
+    // expected.
+    let mut validator = ProofValidator::new();
+    let body = Expr::new(
+        ExprKind::Path(verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new("p", Span::dummy()),
+        )),
+        Span::dummy(),
+    );
+    let forall_premise = forall_with_body(body);
+    validator.register_axiom("forall_p", forall_premise.clone());
+
+    let mut premises: List<Heap<ProofTerm>> = List::new();
+    premises.push(Heap::new(ProofTerm::Axiom {
+        name: "forall_p".into(),
+        formula: forall_premise,
+    }));
+
+    let proof = ProofTerm::Apply {
+        rule: "forall_elim".into(),
+        premises,
+    };
+
+    // Wrong shape: bool literal vs body's Path.
+    let claimed = bool_lit(true);
+    let result = validator.validate(&proof, &claimed);
+    assert!(
+        result.is_err(),
+        "forall_elim must reject expected-vs-body shape mismatch: {:?}",
+        result
+    );
+    let msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        msg.contains("forall_elim") && msg.contains("outermost shape"),
+        "error must explain the body-shape gate. got: {}",
+        msg
+    );
+}
+
+#[test]
+fn exists_intro_rejects_witness_shape_mismatch() {
+    // Symmetric pin: exists_intro with expected `∃x. p` (body is
+    // a Path) requires the premise (witness) to share the body's
+    // outermost shape. A bool-literal premise vs Path body MUST
+    // reject.
+    let mut validator = ProofValidator::new();
+    let body = Expr::new(
+        ExprKind::Path(verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new("p", Span::dummy()),
+        )),
+        Span::dummy(),
+    );
+    let exists_expected = exists_with_body(body);
+
+    let mut premises: List<Heap<ProofTerm>> = List::new();
+    premises.push(axiom_premise()); // bool_lit(true) formula
+    validator.register_axiom("p_holds", bool_lit(true));
+
+    let proof = ProofTerm::Apply {
+        rule: "exists_intro".into(),
+        premises,
+    };
+
+    let result = validator.validate(&proof, &exists_expected);
+    assert!(
+        result.is_err(),
+        "exists_intro must reject premise-vs-body shape mismatch: {:?}",
+        result
+    );
+    let msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        msg.contains("exists_intro") && msg.contains("outermost shape"),
+        "error must explain the witness-shape gate. got: {}",
+        msg
+    );
+}
 
 #[test]
 fn exists_intro_rejects_non_exists_expected() {
