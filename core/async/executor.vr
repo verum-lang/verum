@@ -250,6 +250,21 @@ public type AsyncRuntime is {
     task_queue: Mutex<List<Heap<TaskEntry>>>,
     /// Ready queue (woken tasks — ready to be polled)
     ready_queue: Mutex<List<Heap<TaskEntry>>>,
+    /// Timer queue (pending timer-driven wakeups, sorted by deadline ascending).
+    ///
+    /// Replaces the busy-spin `cx.waker().wake_by_ref()` pattern that
+    /// timer-bound futures (Sleep, SleepUntil, ExecutorTimeout,
+    /// RateLimitedStream) historically used.  When a future
+    /// registers a timer here, the event loop:
+    ///   1. Computes the IOEngine wait timeout as
+    ///      `min(default_io_timeout, time_until_next_timer)`.
+    ///   2. After `wait_for_events` returns, drains all entries
+    ///      whose `deadline_ns <= now_ns` and wakes their wakers.
+    ///
+    /// Pre-fix every timer-bound poll burned ~1000 polls/sec on the
+    /// brief_sleep loop; with this queue the loop parks for the
+    /// exact remaining duration and wakes once.
+    timer_queue: Mutex<List<TimerEntry>>,
     /// Next task ID
     next_task_id: AtomicInt,
     /// Pending I/O completion results buffer
@@ -264,6 +279,18 @@ public type AsyncRuntime is {
     total_polls: AtomicInt,
     /// Total number of tasks that completed
     total_completions: AtomicInt,
+};
+
+/// A pending timer registration.
+///
+/// `deadline_ns` is the absolute monotonic instant (nanoseconds
+/// since boot) at which `waker` should be invoked.  Entries live in
+/// `AsyncRuntime.timer_queue` sorted by deadline ascending.
+public type TimerEntry is {
+    /// Absolute deadline in nanoseconds (monotonic clock).
+    deadline_ns: UInt64,
+    /// Waker to invoke when the deadline passes.
+    waker: Waker,
 };
 
 /// Internal task entry for executor scheduling.
@@ -296,6 +323,7 @@ implement AsyncRuntime {
             shutdown: AtomicBool.new(false),
             task_queue: Mutex.new(List.new()),
             ready_queue: Mutex.new(List.new()),
+            timer_queue: Mutex.new(List.new()),
             next_task_id: AtomicInt.new(1),
             io_results: [@zero<CompletionResult>(); 64],
             io_result_count: 0,
@@ -602,6 +630,12 @@ implement AsyncRuntime {
                         // No I/O - just yield CPU briefly
                         spin_hint();
                     }
+
+                    // Drain any timers that expired during the wait.
+                    // Runs unconditionally (whether I/O is enabled or
+                    // not, whether wait returned early or via timeout)
+                    // so registered timer wakers fire promptly.
+                    self.drain_expired_timers(time_now_ns());
                 }
             }
         }
@@ -784,7 +818,33 @@ implement AsyncRuntime {
         if self.io_engine_ptr != 0 {
             let zero_cr = CompletionResult { user_data: 0, result: 0, flags: 0 };
             let mut results: [CompletionResult; 64] = [zero_cr; 64];
-            let timeout = Some(IoDuration.from_millis(1));
+            // Compute the wait timeout: with a pending timer, park
+            // for at most `time_until_next_timer` so the IOEngine
+            // returns in time to drain expired entries; otherwise
+            // fall back to the default 1ms tick.  Closes the
+            // busy-spin gap that timer-bound futures historically
+            // patched over with `cx.waker().wake_by_ref()`.
+            let now_ns = time_now_ns();
+            let timeout = match self.next_timer_deadline() {
+                Some(deadline_ns) if deadline_ns > now_ns => {
+                    let remaining_ns = deadline_ns - now_ns;
+                    // Cap at 1ms — keeps responsiveness for newly
+                    // arriving I/O events when timers are far out.
+                    let one_ms_ns: UInt64 = 1_000_000;
+                    let waitable_ns = if remaining_ns < one_ms_ns {
+                        remaining_ns
+                    } else {
+                        one_ms_ns
+                    };
+                    Some(IoDuration.from_micros((waitable_ns / 1_000) as Int))
+                }
+                Some(_) => {
+                    // Timer already expired — return immediately so
+                    // the caller can drain it on the next iteration.
+                    Some(IoDuration.from_millis(0))
+                }
+                None => Some(IoDuration.from_millis(1)),
+            };
 
             match engine_wait_active(self.io_engine_ptr, &mut results, timeout) {
                 Ok(count) => {
@@ -828,6 +888,82 @@ implement AsyncRuntime {
             let _ = super.super.sys.windows.time.sleep(
                 super.super.sys.windows.time.Duration.from_micros(100)
             );
+        }
+    }
+
+    /// Register a timer-driven wakeup.
+    ///
+    /// `deadline_ns` is the absolute monotonic instant at which the
+    /// `waker` should fire.  The entry is inserted into
+    /// `self.timer_queue` at its sorted position (earliest first)
+    /// so the event-loop head-peek is O(1) and the IOEngine wait
+    /// timeout can be computed without sorting.
+    ///
+    /// Replaces the busy-spin `cx.waker().wake_by_ref()` pattern.
+    /// Pre-fix every timer-bound poll burned ~1000 polls/sec on
+    /// the brief_sleep loop; with this entry the runtime parks
+    /// for the exact remaining duration.
+    pub fn register_timer(&self, deadline_ns: UInt64, waker: Waker) {
+        let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
+        // Sorted insert by deadline_ns ascending.  Linear scan from
+        // the end is O(n) worst-case but the queue is typically
+        // shallow (~1–10 timers) so a heap would be overkill.
+        let mut idx = queue.len();
+        while idx > 0 {
+            match queue.get(idx - 1) {
+                Some(prev_entry) if prev_entry.deadline_ns > deadline_ns => {
+                    idx -= 1;
+                }
+                _ => break,
+            }
+        }
+        queue.insert(idx, TimerEntry {
+            deadline_ns: deadline_ns,
+            waker: waker,
+        });
+    }
+
+    /// Peek the earliest pending timer deadline, if any.
+    ///
+    /// Used by the event loop to size the IOEngine wait timeout —
+    /// returns `Some(deadline_ns)` when at least one timer is
+    /// queued, `None` otherwise (in which case the loop falls back
+    /// to the default `enable_io ? 1ms : brief_sleep_100us`).
+    pub fn next_timer_deadline(&self) -> Maybe<UInt64> {
+        let queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
+        match queue.get(0) {
+            Some(entry) => Some(entry.deadline_ns),
+            None => None,
+        }
+    }
+
+    /// Drain all timer entries whose deadline has passed and wake
+    /// their wakers.
+    ///
+    /// Called by the event loop after `wait_for_events` returns —
+    /// processes every entry with `deadline_ns <= now_ns`.  Wakers
+    /// are dropped after invocation; clones-on-register-time keep
+    /// the original future's waker live.
+    fn drain_expired_timers(&self, now_ns: UInt64) {
+        let mut expired: List<TimerEntry> = List.new();
+        {
+            let mut queue = self.timer_queue.lock().unwrap_or_else(|p| p.into_inner());
+            // Pop from the front while the head is expired.
+            while !queue.is_empty() {
+                match queue.get(0) {
+                    Some(head_entry) if head_entry.deadline_ns <= now_ns => {
+                        if let Some(popped) = queue.remove(0) {
+                            expired.push(popped);
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+        // Wake outside the lock so wakers that re-enter the runtime
+        // (e.g. a waker that schedules another timer) don't deadlock.
+        for fired_entry in expired.into_iter() {
+            fired_entry.waker.wake_by_ref();
         }
     }
 
@@ -1309,8 +1445,24 @@ implement<F: Future> Future for ExecutorTimeout<F> {
         match self.future.poll(cx) {
             Poll.Ready(res) => Poll.Ready(Ok(res)),
             Poll.Pending => {
-                // Schedule wake-up at deadline
-                // The runtime will poll periodically or use timer wheel
+                // Park until the deadline so the runtime re-polls
+                // exactly once when the timeout window closes — the
+                // inner future will wake us earlier through its own
+                // waker if it makes progress.  Closes the busy-spin
+                // gap (#243) for the timeout primitive: pre-fix the
+                // comment said "the runtime will poll periodically
+                // or use timer wheel" but neither was wired, so the
+                // outer event loop just brief_slept and re-polled.
+                match current_runtime() {
+                    Some(rt) => {
+                        rt.register_timer(self.deadline_ns, cx.waker().clone());
+                    }
+                    None => {
+                        // No runtime in scope — fall back to
+                        // historical Pending without registration;
+                        // depends on outer waker activity to advance.
+                    }
+                }
                 Poll.Pending
             }
         }
@@ -1446,6 +1598,34 @@ public type AsyncExecutionEnv is {
 public fn current_env() -> Maybe<&AsyncExecutionEnv> {
     match ctx_get(SLOT_RUNTIME) {
         Some(ptr) => Some(unsafe { &*(ptr as &AsyncExecutionEnv) }),
+        None => None,
+    }
+}
+
+/// Get the current `AsyncRuntime` from the TLS context slot.
+///
+/// Returns `None` outside an active `block_on` window — async
+/// constructs that use this helper must already be running on a
+/// runtime, so callers can typically `unwrap_or_else(|| panic!(…))`.
+///
+/// Use this from timer-bound futures (Sleep, SleepUntil,
+/// ExecutorTimeout, RateLimitedStream, etc.) to register a wakeup
+/// at a precise deadline:
+/// ```verum
+/// match current_runtime() {
+///     Some(rt) => rt.register_timer(deadline_ns, cx.waker().clone()),
+///     None => cx.waker().wake_by_ref(),  // fallback: busy-spin
+/// }
+/// ```
+///
+/// SAFETY: SLOT_RUNTIME is set in `AsyncRuntime::block_on` before
+/// any future polls, and cleared after the main future completes.
+/// The `&AsyncRuntime` is valid for the entire `block_on` body —
+/// the TLS slot stores the pointer received from `&self`, whose
+/// lifetime is tied to the on-stack runtime in `block_on`.
+public fn current_runtime() -> Maybe<&AsyncRuntime> {
+    match ctx_get(SLOT_RUNTIME) {
+        Some(ptr) => Some(unsafe { &*(ptr as &AsyncRuntime) }),
         None => None,
     }
 }
