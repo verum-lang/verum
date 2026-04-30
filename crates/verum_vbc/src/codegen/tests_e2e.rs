@@ -13,7 +13,7 @@
 
 use verum_ast::{FileId, Module};
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 use crate::codegen::{CodegenConfig, VbcCodegen};
 use crate::module::VbcModule;

@@ -890,7 +890,7 @@ mod tests {
     #[ignore = "long-running (~220s) stdlib full typecheck; run with: cargo test stdlib_full_typecheck -- --ignored --nocapture"]
     fn test_stdlib_full_typecheck() {
         use std::path::PathBuf;
-        use verum_parser::Parser;
+        use verum_fast_parser::Parser;
 
         // Find stdlib path
         let stdlib_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

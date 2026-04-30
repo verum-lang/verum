@@ -2931,7 +2931,7 @@ fn lint_file_with(path: &Path, cfg: &LintConfig) -> Result<List<LintIssue>> {
     // silently so text-scan output is still produced.
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
     let fid = FileId::new(0);
     let lexer = Lexer::new(&content, fid);
     let parser = VerumParser::new();
@@ -3063,7 +3063,7 @@ fn lint_paths_parallel_with_cache(
 fn parse_corpus_file(path: &Path) -> Option<super::lint_engine::CorpusFile> {
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
     let source = fs::read_to_string(path).ok()?;
     let fid = FileId::new(0);
     let lexer = Lexer::new(&source, fid);
@@ -3155,7 +3155,7 @@ fn lint_content_with_module(
 
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
     let fid = FileId::new(0);
     let lexer = Lexer::new(content, fid);
     let parser = VerumParser::new();
@@ -3518,7 +3518,7 @@ pub fn lint_source(
 
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
     let fid = FileId::new(0);
     let lexer = Lexer::new(content, fid);
     let parser = VerumParser::new();

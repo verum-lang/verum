@@ -184,7 +184,7 @@ fn build_tier0(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
     use sha2::{Digest, Sha256};
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -248,7 +248,7 @@ fn build_tier1(manifest_dir: &Path, output_path: &Path) -> Result<bool> {
     use sha2::{Digest, Sha256};
     use verum_ast::FileId;
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -704,7 +704,7 @@ fn generate_verification_proofs(
     use crate::registry::types::{ProofInfo, ProofStatus, VerificationLevel, VerificationProofs};
     use verum_ast::{FileId, ItemKind};
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -793,7 +793,7 @@ fn generate_cbgr_profiles(
     use crate::registry::types::{CbgrProfile, CbgrProfiles};
     use verum_ast::{FileId, ItemKind, decl::FunctionParamKind};
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
 
     let src_dir = manifest_dir.join("src");
     if !src_dir.exists() {
@@ -1535,7 +1535,7 @@ pub fn validate_cog(manifest_dir: &Path) -> Result<ValidationReport> {
         if path.is_file() && path.extension().is_some_and(|ext| ext == "vr") {
             use verum_ast::FileId;
             use verum_lexer::Lexer;
-            use verum_parser::VerumParser;
+            use verum_fast_parser::VerumParser;
 
             let source = std::fs::read_to_string(path)?;
             let file_id = FileId::new(0);

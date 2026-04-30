@@ -443,7 +443,7 @@ fn contains_main_fn(src: &str) -> bool {
 fn prepare_interpret(file: &Path, funcs: &[BenchFunc]) -> Result<CompiledFile> {
     use verum_ast::{FileId, Module};
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
     use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
     let src = fs::read_to_string(file)

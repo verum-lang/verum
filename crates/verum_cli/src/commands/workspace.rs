@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use verum_ast::FileId;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 use verum_common::{List, Text};
 use verum_types::{TypeChecker, TypeContext};
 

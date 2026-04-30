@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use verum_ast::{FileId, PrettyConfig, PrettyPrinter};
 use verum_common::{List, Text};
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 use walkdir::WalkDir;
 
 /// Behaviour when the parser cannot turn a source file into an AST.
