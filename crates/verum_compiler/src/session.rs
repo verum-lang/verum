@@ -68,8 +68,30 @@ pub struct Session {
     /// Module registry: stores module exports for cross-file name resolution.
     module_registry: Shared<RwLock<ModuleRegistry>>,
 
-    /// Diagnostics accumulated during compilation
-    diagnostics: Shared<RwLock<List<Diagnostic>>>,
+    /// Diagnostics accumulated during compilation.
+    ///
+    /// Audit-2.3 (event-stream): the original `Shared<RwLock<List<Diagnostic>>>`
+    /// took the write lock on EVERY emit. On a 10K-function module the
+    /// thousands of emissions from parallel type-check / refinement /
+    /// codegen passes serialised through that single lock — a documented
+    /// scalability hotspot. The fix is a hybrid:
+    ///
+    ///   * **`diagnostics_queue`** — lock-free MPMC queue, all emits
+    ///     push here without contention.
+    ///   * **`diagnostics_aggregate`** — owned by readers; the list
+    ///     read-API drains the queue into this on demand and clones
+    ///     the result. Locked, but only on the cold read path.
+    ///
+    /// Hot-path emit cost: one atomic push (~10 ns) vs a parking_lot
+    /// write lock acquire-release (~50 ns uncontended, microseconds
+    /// under contention).
+    diagnostics_queue: Shared<crossbeam::queue::SegQueue<Diagnostic>>,
+
+    /// Aggregate of diagnostics for read-side access. The queue is
+    /// drained into this list on every `diagnostics()` call so the
+    /// API surface is identical to the pre-fix `RwLock<List<...>>`
+    /// shape.
+    diagnostics_aggregate: Shared<RwLock<List<Diagnostic>>>,
 
     /// Next available FileId (atomic for lock-free allocation).
     ///
@@ -206,7 +228,8 @@ impl Session {
             source_files: Shared::new(RwLock::new(Map::new())),
             modules: Shared::new(RwLock::new(Map::new())),
             module_registry: Shared::new(RwLock::new(ModuleRegistry::new())),
-            diagnostics: Shared::new(RwLock::new(List::new())),
+            diagnostics_queue: Shared::new(crossbeam::queue::SegQueue::new()),
+            diagnostics_aggregate: Shared::new(RwLock::new(List::new())),
             next_file_id: Shared::new(AtomicU32::new(0)),
             has_errors: AtomicBool::new(false),
             metrics: Shared::new(RwLock::new(CompilationProfileReport::new())),
@@ -721,7 +744,8 @@ impl Session {
             source_files: Shared::new(RwLock::new(Map::new())),
             modules: Shared::new(RwLock::new(Map::new())),
             module_registry: Shared::new(RwLock::new(registry)),
-            diagnostics: Shared::new(RwLock::new(List::new())),
+            diagnostics_queue: Shared::new(crossbeam::queue::SegQueue::new()),
+            diagnostics_aggregate: Shared::new(RwLock::new(List::new())),
             next_file_id: Shared::new(AtomicU32::new(0)),
             has_errors: AtomicBool::new(false),
             metrics: Shared::new(RwLock::new(CompilationProfileReport::new())),
@@ -870,50 +894,61 @@ impl Session {
         self.modules.read().get(&file_id).cloned()
     }
 
-    /// Emit a diagnostic
+    /// Emit a diagnostic.
+    ///
+    /// Audit-2.3: lock-free push onto `diagnostics_queue`. Concurrent
+    /// emitters from parallel type-check / refinement / codegen passes
+    /// don't block each other. The error flag uses an atomic for the
+    /// same reason.
     pub fn emit_diagnostic(&self, diagnostic: Diagnostic) {
         let is_error = diagnostic.severity() == verum_diagnostics::Severity::Error;
 
-        self.diagnostics.write().push(diagnostic);
+        self.diagnostics_queue.push(diagnostic);
 
         if is_error {
-            // Use atomic store for lock-free error flag update
             self.has_errors.store(true, Ordering::Relaxed);
         }
     }
 
-    /// Emit multiple diagnostics (batched for efficiency)
+    /// Emit multiple diagnostics (batched for efficiency).
+    ///
+    /// SegQueue has no batch-push API, so the loop is just N atomic
+    /// pushes — still lock-free and faster than the prior write-lock
+    /// roundtrip per diagnostic.
     pub fn emit_diagnostics(&self, diagnostics: List<Diagnostic>) {
         if diagnostics.is_empty() {
             return;
         }
-
-        // Check if any diagnostic is an error before taking the lock
         let has_error = diagnostics
             .iter()
             .any(|d| d.severity() == verum_diagnostics::Severity::Error);
-
-        // Single write lock for all diagnostics (batch insert)
-        {
-            let mut diags = self.diagnostics.write();
-            for diag in diagnostics {
-                diags.push(diag);
-            }
+        for diag in diagnostics {
+            self.diagnostics_queue.push(diag);
         }
-
         if has_error {
             self.has_errors.store(true, Ordering::Relaxed);
         }
     }
 
-    /// Get all diagnostics
+    /// Drain the lock-free queue into the aggregate list, then return
+    /// a clone of the aggregate. The drain is performed under the
+    /// aggregate write-lock so concurrent readers see consistent
+    /// snapshots.
     pub fn diagnostics(&self) -> List<Diagnostic> {
-        self.diagnostics.read().clone()
+        // Drain queue → aggregate.
+        let mut aggregate = self.diagnostics_aggregate.write();
+        while let Some(d) = self.diagnostics_queue.pop() {
+            aggregate.push(d);
+        }
+        aggregate.clone()
     }
 
-    /// Clear all diagnostics
+    /// Clear all diagnostics. Drains both the queue and the aggregate
+    /// list so subsequent reads start fresh.
     pub fn clear_diagnostics(&self) {
-        self.diagnostics.write().clear();
+        // Drain queue without retaining.
+        while self.diagnostics_queue.pop().is_some() {}
+        self.diagnostics_aggregate.write().clear();
         self.has_errors.store(false, Ordering::Relaxed);
     }
 
@@ -922,19 +957,18 @@ impl Session {
         self.has_errors.load(Ordering::Relaxed)
     }
 
-    /// Get number of errors
+    /// Get number of errors. Drains the lock-free queue into the
+    /// aggregate first so the count covers the latest emissions.
     pub fn error_count(&self) -> usize {
-        self.diagnostics
-            .read()
+        self.diagnostics()
             .iter()
             .filter(|d| d.severity() == verum_diagnostics::Severity::Error)
             .count()
     }
 
-    /// Get number of warnings
+    /// Get number of warnings. Same drain semantics as `error_count`.
     pub fn warning_count(&self) -> usize {
-        self.diagnostics
-            .read()
+        self.diagnostics()
             .iter()
             .filter(|d| d.severity() == verum_diagnostics::Severity::Warning)
             .count()
