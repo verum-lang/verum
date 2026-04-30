@@ -209,6 +209,23 @@ pub struct MetaContext {
     /// in quote blocks will capture from the expansion site. This enables
     /// intentional capture but also allows accidental capture (M402).
     pub is_transparent: bool,
+
+    // ======== Sandbox Gates ========
+    /// `[meta] reflection = false` — hard-disable the reflection
+    /// surface (`RequiredContext::MetaTypes`, `CompileDiag`)
+    /// regardless of any function-level `using [...]` declaration.
+    ///
+    /// When `true`, `get_builtin` rejects calls to reflection-tagged
+    /// builtins with `MetaError::MissingContext` even if the function
+    /// declared `using [MetaTypes]` — the user-supplied capability
+    /// is overridden by the global gate. This is the security
+    /// stance: a language-level sandbox that wants to forbid
+    /// reflection cannot be circumvented by individual function
+    /// declarations.
+    ///
+    /// Default `false` (reflection allowed). Wired through
+    /// `MacroExpansionPhase::with_reflection_enabled(false)`.
+    pub reflection_disabled: bool,
 }
 
 impl Default for MetaContext {
@@ -277,6 +294,7 @@ impl MetaContext {
             current_module: Text::from(""),
             allowlist: AllowlistRegistry::new(),
             is_transparent: false,
+            reflection_disabled: false,
         }
     }
 
@@ -308,6 +326,59 @@ impl MetaContext {
     pub fn with_using_clause(names: &[Text]) -> Self {
         let mut ctx = Self::new();
         ctx.enabled_contexts = EnabledContexts::from_using_clause(names);
+        ctx
+    }
+
+    /// Mount the resource limits and enabled-contexts surface from a
+    /// `SecurityContext` onto this `MetaContext`.
+    ///
+    /// `SecurityContext` is the user-facing API for capping meta
+    /// execution (recursion depth, iteration count, memory ceiling,
+    /// timeout). Until this method existed, `SecurityContext::set_limits`
+    /// landed on a free-standing `ResourceLimits` value that nothing in
+    /// the evaluator or sandbox ever consulted — a silent no-op exposed
+    /// only by a `tracing::debug!` warning. This method closes that gap
+    /// by copying the four limits + the enabled-contexts mask onto the
+    /// fields the evaluator actually checks:
+    ///
+    ///   * `recursion_limit`  → `MetaContext::execute_user_meta_fn`
+    ///                          gate at `evaluator.rs:2237`
+    ///   * `iteration_limit`  → loop counters in the evaluator
+    ///   * `memory_limit`     → sandbox `ResourceLimiter` (mirrored)
+    ///   * `timeout_ms`       → sandbox deadline
+    ///   * `enabled_contexts` → required-context dispatch in builtins
+    ///
+    /// Embedders that build a meta context from a security policy
+    /// should now write:
+    ///
+    /// ```ignore
+    /// let mut sec = SecurityContext::new();
+    /// sec.set_recursion_limit(256);
+    /// let mut meta = MetaContext::new();
+    /// meta.apply_security_context(&sec);
+    /// ```
+    ///
+    /// Or use the `from_security_context` builder for one-shot construction.
+    pub fn apply_security_context(
+        &mut self,
+        sec: &crate::meta::contexts::SecurityContext,
+    ) {
+        let limits = sec.limits();
+        self.recursion_limit = limits.recursion_limit;
+        self.iteration_limit = limits.iteration_limit;
+        self.memory_limit = limits.memory_limit;
+        self.timeout_ms = limits.timeout_ms;
+        self.enabled_contexts = sec.enabled_contexts().clone();
+    }
+
+    /// Build a fully-configured `MetaContext` directly from a
+    /// `SecurityContext`. Equivalent to `MetaContext::new()` followed
+    /// by `apply_security_context(sec)`.
+    pub fn from_security_context(
+        sec: &crate::meta::contexts::SecurityContext,
+    ) -> Self {
+        let mut ctx = Self::new();
+        ctx.apply_security_context(sec);
         ctx
     }
 
@@ -843,6 +914,58 @@ mod tests {
         let ctx = MetaContext::new();
         assert!(ctx.bindings.is_empty());
         assert!(ctx.type_definitions.is_empty());
+    }
+
+    #[test]
+    fn apply_security_context_propagates_all_four_limits() {
+        // S6 invariant: SecurityContext::set_* must actually flow through
+        // to the MetaContext fields the evaluator + sandbox check.
+        // Before the fix, set_limits was a silent no-op exposed only via
+        // a tracing::debug!.
+        use crate::meta::contexts::SecurityContext;
+        use crate::meta::contexts::ResourceLimits;
+
+        let mut sec = SecurityContext::new();
+        sec.set_limits(ResourceLimits {
+            iteration_limit: 7_777,
+            recursion_limit: 13,
+            memory_limit:    42 * 1024 * 1024,
+            timeout_ms:      9_999,
+        });
+
+        let mut meta = MetaContext::new();
+        // Confirm defaults differ from the values we set, otherwise the
+        // test could silently pass on a reverted plumbing.
+        assert_ne!(meta.recursion_limit, 13);
+        assert_ne!(meta.iteration_limit, 7_777);
+
+        meta.apply_security_context(&sec);
+
+        assert_eq!(meta.iteration_limit, 7_777);
+        assert_eq!(meta.recursion_limit, 13);
+        assert_eq!(meta.memory_limit, 42 * 1024 * 1024);
+        assert_eq!(meta.timeout_ms, 9_999);
+    }
+
+    #[test]
+    fn from_security_context_one_shot_construction() {
+        use crate::meta::contexts::SecurityContext;
+        use crate::meta::contexts::ResourceLimits;
+
+        let mut sec = SecurityContext::new();
+        sec.set_limits(ResourceLimits {
+            iteration_limit: 100,
+            recursion_limit: 5,
+            memory_limit:    1_024,
+            timeout_ms:      250,
+        });
+
+        let meta = MetaContext::from_security_context(&sec);
+
+        assert_eq!(meta.recursion_limit, 5);
+        assert_eq!(meta.iteration_limit, 100);
+        assert_eq!(meta.memory_limit, 1_024);
+        assert_eq!(meta.timeout_ms, 250);
     }
 
     #[test]
