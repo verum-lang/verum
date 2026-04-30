@@ -204,6 +204,13 @@ pub struct CommonPipelineConfig {
     /// `[safety] ffi`). When false, the safety-gate rejects every
     /// FFI function with a diagnostic pointing at the config key.
     pub ffi_allowed: bool,
+    /// Maximum recursion depth for compile-time meta-function
+    /// evaluation. Sourced from `[meta] macro_recursion_limit`
+    /// in `verum.toml`. Reaches the runtime gate at
+    /// `MetaContext::execute_user_meta_fn` (evaluator.rs:2237) via
+    /// `MacroExpansionPhase::with_macro_recursion_limit`. Default
+    /// 128 — matches the manifest's `default_macro_depth()`.
+    pub macro_recursion_limit: u32,
     /// Optional shared routing-stats collector. When present, the
     /// contract-verification phase installs it on the underlying
     /// `SmtContext` so every Z3 check records telemetry — making
@@ -229,6 +236,7 @@ impl Default for CommonPipelineConfig {
             compile_time_enabled: true,
             unsafe_allowed: true,
             ffi_allowed: true,
+            macro_recursion_limit: 128,
             routing_stats: None,
         }
     }
@@ -252,6 +260,7 @@ impl CommonPipelineConfig {
             compile_time_enabled: true,
             unsafe_allowed: true,
             ffi_allowed: true,
+            macro_recursion_limit: 128,
             routing_stats: None,
         }
     }
@@ -273,6 +282,7 @@ impl CommonPipelineConfig {
             compile_time_enabled: true,
             unsafe_allowed: true,
             ffi_allowed: true,
+            macro_recursion_limit: 128,
             routing_stats: None,
         }
     }
@@ -692,7 +702,8 @@ pub fn run_common_pipeline(
     if config.expand_macros {
         let expansion_phase = macro_expansion::MacroExpansionPhase::new()
             .with_derive_enabled(config.derive_enabled)
-            .with_compile_time_enabled(config.compile_time_enabled);
+            .with_compile_time_enabled(config.compile_time_enabled)
+            .with_macro_recursion_limit(config.macro_recursion_limit);
         let expansion_input = PhaseInput {
             data: current_data.clone(),
             context: context.clone(),
