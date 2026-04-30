@@ -235,6 +235,16 @@ pub struct CommonPipelineConfig {
     /// (sourced from `[types] coherence_check_depth`). Default 16.
     /// Forwarded via `with_coherence_check_depth`.
     pub coherence_check_depth: u32,
+    /// `[protocols].resolution_strategy` — selects how
+    /// `ProtocolChecker::find_impl` resolves multi-candidate
+    /// matches: `"most_specific"` (default), `"first_declared"`,
+    /// or `"error"`.  Forwarded via
+    /// `with_protocol_resolution_strategy`.
+    pub protocol_resolution_strategy: verum_common::Text,
+    /// `[protocols].blanket_impls` — when false, blanket impls
+    /// (`impl<T> Protocol for T`) are excluded from the
+    /// candidate set.  Forwarded via `with_protocol_blanket_impls`.
+    pub protocol_blanket_impls: bool,
     /// Optional shared routing-stats collector. When present, the
     /// contract-verification phase installs it on the underlying
     /// `SmtContext` so every Z3 check records telemetry — making
@@ -267,6 +277,8 @@ impl Default for CommonPipelineConfig {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            protocol_resolution_strategy: verum_common::Text::from("most_specific"),
+            protocol_blanket_impls: true,
             routing_stats: None,
         }
     }
@@ -297,6 +309,8 @@ impl CommonPipelineConfig {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            protocol_resolution_strategy: verum_common::Text::from("most_specific"),
+            protocol_blanket_impls: true,
             routing_stats: None,
         }
     }
@@ -325,6 +339,8 @@ impl CommonPipelineConfig {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            protocol_resolution_strategy: verum_common::Text::from("most_specific"),
+            protocol_blanket_impls: true,
             routing_stats: None,
         }
     }
@@ -863,6 +879,8 @@ pub fn run_common_pipeline(
             .with_quotient_enabled(config.quotient_enabled)
             .with_instance_search_enabled(config.instance_search_enabled)
             .with_coherence_check_depth(config.coherence_check_depth)
+            .with_protocol_resolution_strategy(config.protocol_resolution_strategy.clone())
+            .with_protocol_blanket_impls(config.protocol_blanket_impls)
     } else {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_cubical_enabled(config.cubical_enabled)
@@ -873,6 +891,8 @@ pub fn run_common_pipeline(
             .with_quotient_enabled(config.quotient_enabled)
             .with_instance_search_enabled(config.instance_search_enabled)
             .with_coherence_check_depth(config.coherence_check_depth)
+            .with_protocol_resolution_strategy(config.protocol_resolution_strategy.clone())
+            .with_protocol_blanket_impls(config.protocol_blanket_impls)
     };
     let semantic_input = PhaseInput {
         data: current_data,
