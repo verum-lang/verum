@@ -26,24 +26,27 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
-use verum_ast::{decl::ItemKind, Module};
-use verum_common::{List, Map, Maybe, Text};
+use verum_ast::{decl::ItemKind, FileId, Module, SourceFile};
+use verum_common::{List, Map, Maybe, Shared, Text};
 use verum_diagnostics::{DiagnosticBuilder, Severity};
+use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 use verum_modules::{ModuleId, ModuleInfo, ModulePath, ModuleRegistry};
 use verum_types::TypeChecker;
 
 use crate::phases::type_error_to_diagnostic;
 
-use super::CompilationPipeline;
+use super::{macros::MacroExpander, should_parse_as_script, CompilationPipeline};
 
 impl<'s> CompilationPipeline<'s> {
 
     /// Expand macros in a module (Pass 2)
-    fn expand_module(&mut self, path: &Text, module: &mut Module) -> Result<()> {
+    pub(super) fn expand_module(&mut self, path: &Text, module: &mut Module) -> Result<()> {
 
         debug!("Expanding macros in module: {}", path.as_str());
 
@@ -117,7 +120,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// File-to-module path mapping: strip src_root prefix, replace `/` with `.`,
     /// strip `.vr` extension, and treat `mod.vr` as the directory module name.
-    fn file_path_to_module_path(
+    pub(super) fn file_path_to_module_path(
         &self,
         file_path: &std::path::Path,
         src_root: &std::path::Path,
@@ -174,7 +177,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// This function uses an iterative approach with an explicit work queue
     /// to avoid stack overflow when loading deeply nested module hierarchies.
-    fn load_imported_modules(
+    pub(super) fn load_imported_modules(
         &mut self,
         module: &Module,
         current_module_path: &str,
@@ -445,7 +448,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Extract the base module path from an import tree.
-    fn extract_import_module_path(&self, tree: &verum_ast::MountTreeKind) -> String {
+    pub(super) fn extract_import_module_path(&self, tree: &verum_ast::MountTreeKind) -> String {
         use verum_ast::MountTreeKind;
         use verum_ast::ty::PathSegment;
 
@@ -498,7 +501,7 @@ impl<'s> CompilationPipeline<'s> {
     /// For super imports (supports chained super):
     /// - From `handlers.search`: `super.contexts` -> `contexts` (sibling of parent)
     /// - From `services.package_service`: `super.super.domain` -> `domain` (sibling of services)
-    fn resolve_import_path(
+    pub(super) fn resolve_import_path(
         &self,
         import_path: &str,
         current_module_path: &str,
@@ -521,7 +524,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// For user paths, this maps directly:
     /// - domain.errors -> domain/errors (when src_root is src/)
-    fn module_path_to_file_path(
+    pub(super) fn module_path_to_file_path(
         &self,
         module_path: &verum_modules::ModulePath,
         src_root: &std::path::Path,
@@ -555,7 +558,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Phase 1.5: builds export tables (public types, functions) and extracts
     /// contexts/protocols from each module for cross-file name and context resolution.
-    fn register_modules_for_cross_file_resolution(&mut self) -> Result<()> {
+    pub(super) fn register_modules_for_cross_file_resolution(&mut self) -> Result<()> {
         use verum_modules::{
             ModuleInfo, extract_contexts_from_module, extract_exports_from_module,
         };
@@ -717,7 +720,7 @@ impl<'s> CompilationPipeline<'s> {
     /// `lazy_resolver` is `Arc<Mutex<dyn LazyModuleResolver>>` so
     /// concurrent late-loads serialise on a single mutex — acceptable
     /// because reachability-narrowing makes late loads rare.
-    fn analyze_module(&self, path: &Text, module: &Module) -> Result<()> {
+    pub(super) fn analyze_module(&self, path: &Text, module: &Module) -> Result<()> {
         use verum_ast::ItemKind;
 
         // Type check all items in the module
@@ -1190,24 +1193,4 @@ impl<'s> CompilationPipeline<'s> {
         self.build_function_cfg(func)
     }
 
-    /// Unified pre-codegen validation.
-    ///
-    /// Runs every language-mechanism validation that must agree
-    /// between the interpreter, CPU AOT, and GPU paths:
-    ///   1. `[safety]` gates (unconditional, regardless of verify_mode)
-    ///   2. Type check
-    ///   3. Target-profile / dependency analysis
-    ///   4. SMT refinement verification (if `verify_mode.use_smt()`)
-    ///   5. Context / DI validation
-    ///   6. Send/Sync boundary enforcement
-    ///   7. CBGR tier analysis
-    ///   8. FFI boundary validation
-    ///
-    /// Every pipeline entry point (`run_interpreter`,
-    /// `run_native_compilation`, `run_mlir_aot`, `run_for_test`, …)
-    /// should call this method to guarantee identical semantics on
-    /// every .vr file across every execution path. The `skip_type`
-    /// flag is offered for pathological fast-paths (e.g.,
-    /// verify_mode = Runtime + no user-requested gates), but even
-    /// then the safety gate still fires.
 }
