@@ -1,28 +1,36 @@
 // @test: typecheck-pass
 // @level: L2
-// @tags: shell, scripts, log, pipeline
+// @tags: shell, scripts, log, pipeline, cancellation
 // @description: Real-world shell script — tail a log and grep for ERROR lines.
 //
 // Exercises:
 //   * Multi-stage pipeline composition via .pipe_to()
 //   * .merge_stderr() to fold stderr into stdout for grepping
-//   * .run_with_cancel() with an explicit CancellationToken
+//   * .run_with_cancel(&token, grace) — explicit SIGTERM-grace-SIGKILL flow
 
 mount core.shell.command.{ShellCommand};
-mount core.shell.result.{ShellResult};
+mount core.shell.result.{ShellResult, ShellError};
 mount core.async.cancellation.{CancellationToken};
+mount core.time.duration.{Duration};
 
-/// `tail -f /var/log/syslog 2>&1 | grep ERROR` with cancellation.
-async fn tail_errors(token: CancellationToken) -> ShellResult {
+/// `tail -F /var/log/syslog 2>&1 | grep ERROR` with explicit
+/// cancellation. The SIGTERM-to-SIGKILL grace window is 2s — enough
+/// for grep to flush its line-buffer but short enough for tests not
+/// to hang.
+async fn tail_errors(token: &CancellationToken)
+    -> Result<ShellResult, ShellError>
+{
     sh#"tail -F /var/log/syslog"
         .merge_stderr()
         .pipe_to(sh#"grep --line-buffered ERROR")
-        .run_with_cancel(token)
+        .run_with_cancel(token, Duration.from_millis(2000))
         .await
 }
 
 async fn main() -> Int {
     let token = CancellationToken.new();
-    let _ = tail_errors(token).await;
-    0
+    match tail_errors(&token).await {
+        Ok(_)  => 0,
+        Err(_) => 1,
+    }
 }

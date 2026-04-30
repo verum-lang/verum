@@ -36,6 +36,7 @@ mount core.shell.result.{ShellResult, ShellError};
 mount core.shell.context.{ShellContext};
 mount core.shell.stream.{StreamConfig, LineStream};
 mount core.async.cancellation.{CancellationToken};
+mount core.time.duration.{Duration};
 
 // =============================================================================
 // ShellCommand — captured-but-unexecuted shell command
@@ -103,11 +104,50 @@ implement ShellCommand {
         core.shell.exec.sh_check(&self.text).await
     }
 
-    /// Run with a `CancellationToken` — when the token fires, the child
-    /// process receives SIGTERM (graceful) and after a short grace
-    /// period SIGKILL (forced).
-    public async fn run_with_cancel(&self, token: CancellationToken) -> ShellResult {
-        core.shell.exec.sh_with_cancel(&self.text, token).await
+    /// Run with a `CancellationToken` — when the token fires, the
+    /// child process receives SIGTERM (graceful) and after the
+    /// `grace` period (default 5s) SIGKILL (forced).
+    ///
+    /// Returns `Ok(ShellResult)` on normal completion, `Err(Cancelled
+    /// { reason })` if the token fired before the child exited, or
+    /// `Err(SpawnFailed)` if the child couldn't even start. The
+    /// returned signature matches `sh_with_cancel` 1:1 so the `?`
+    /// operator threads cleanly:
+    ///
+    /// ```verum
+    /// let token = CancellationToken.new();
+    /// let result = sh#"sleep 60"
+    ///     .run_with_cancel(&token, Duration.from_secs(2))
+    ///     .await?;
+    /// ```
+    ///
+    /// Pass `Duration.from_millis(0)` for the default 5-second
+    /// grace period; pass any positive duration to override.
+    public async fn run_with_cancel(
+        &self,
+        token: &CancellationToken,
+        grace: Duration,
+    ) -> Result<ShellResult, ShellError> {
+        core.shell.exec.sh_with_cancel(&self.text, token, grace).await
+    }
+
+    /// Convenience wrapper: cancel after a wall-clock timeout.
+    /// Constructs a fresh `CancellationToken.with_timeout(after)`
+    /// and forwards through `run_with_cancel`. Default grace
+    /// (5s) is used for the SIGTERM-to-SIGKILL window.
+    ///
+    /// ```verum
+    /// // Hard kill after 30s if not done.
+    /// let r = sh#"./long-running-script.sh"
+    ///     .run_with_timeout(Duration.from_secs(30))
+    ///     .await;
+    /// ```
+    public async fn run_with_timeout(
+        &self,
+        after: Duration,
+    ) -> Result<ShellResult, ShellError> {
+        let token = CancellationToken.with_timeout(after);
+        self.run_with_cancel(&token, Duration.from_millis(0)).await
     }
 
     /// Stream stdout LINE-BY-LINE as an async generator.  Each yield is
