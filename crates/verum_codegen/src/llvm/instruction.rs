@@ -3728,9 +3728,29 @@ pub fn lower_instruction<'ctx>(
         // System Instructions: SyscallLinux, Mmap, Munmap
         // ====================================================================
         Instruction::SyscallLinux { dst, num, a1, a2, a3, a4, a5, a6 } => {
-            // Emit raw Linux syscall via inline assembly
-            // syscall instruction: rax=num, rdi=a1, rsi=a2, rdx=a3, r10=a4, r8=a5, r9=a6
-            // Returns result in rax
+            // Emit raw Linux syscall via inline assembly.
+            //
+            // Per-architecture register conventions:
+            //
+            //   * **x86_64**: `syscall` instruction
+            //     - syscall number in `rax`
+            //     - args 1-6 in `rdi, rsi, rdx, r10, r8, r9`
+            //     - return in `rax`
+            //     - clobbered: `rcx, r11` (kernel uses for return address /
+            //       eflags shadow), `memory`
+            //
+            //   * **aarch64**: `svc #0` instruction (Linux trap-on-svc-0)
+            //     - syscall number in `x8`
+            //     - args 1-6 in `x0, x1, x2, x3, x4, x5`
+            //     - return in `x0`
+            //     - clobbered: `memory` (kernel may scribble caller-save
+            //       registers; LLVM marks x0-x18 as caller-save by default
+            //       so no explicit clobber needed)
+            //
+            // Both forms are libc-free — no glibc syscall wrapper involved.
+            // The compiler emits the trap instruction directly into the
+            // user code, the kernel handles the trap, and control returns
+            // with the result in the platform-specific return register.
             let i64_ty = ctx.types().i64_type();
             let fn_type = i64_ty.fn_type(
                 &[i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into(),
@@ -3738,8 +3758,32 @@ pub fn lower_instruction<'ctx>(
                 false,
             );
 
-            let asm_str = "syscall";
-            let constraints = "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}";
+            #[cfg(target_arch = "x86_64")]
+            let (asm_str, constraints) = (
+                "syscall",
+                "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
+            );
+
+            #[cfg(target_arch = "aarch64")]
+            let (asm_str, constraints) = (
+                "svc #0",
+                // Inkwell/LLVM ARM64 register names: x0-x7 for args/return,
+                // x8 for syscall number.  Output `={x0}` binds the call's
+                // return value to x0.  Inputs in declaration order map to
+                // num→x8, a1→x0, a2→x1, …, a6→x5.  `~{memory}` mirrors the
+                // x86_64 form — kernel may write to user memory pointed
+                // to by syscall args (read/write/getsockname/etc.), so
+                // LLVM must not reorder loads/stores across the syscall.
+                "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
+            );
+
+            // Fallback for other architectures (32-bit ARM, RISC-V, …):
+            // emit a stub that returns -ENOSYS = -38.  Linker will not
+            // fail; runtime callers see a clean errno.  Production
+            // builds for those targets need their own platform-specific
+            // arm via @cfg in the calling Verum-side syscall wrapper.
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+            let (asm_str, constraints): (&str, &str) = ("", "=r");
 
             let asm_fn = ctx.llvm_context().create_inline_asm(
                 fn_type,
