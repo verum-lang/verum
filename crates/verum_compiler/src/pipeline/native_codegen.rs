@@ -216,13 +216,26 @@ impl<'s> CompilationPipeline<'s> {
             .codegen
             .tail_call_optimization;
 
+        // Resolve `[codegen].vectorize` from Verum.toml.  When
+        // false, every emitted function gets `no-loop-vectorize`
+        // + `no-slp-vectorize` so LLVM's autovectorizer skips
+        // those functions regardless of opt level.  Sibling wire
+        // to tail_call_optimization above; same pattern.
+        let vectorize = self
+            .session
+            .options()
+            .language_features
+            .codegen
+            .vectorize;
+
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage)
             .with_permission_policy(self.session.aot_permission_policy())
             .with_panic_strategy(panic_strategy)
-            .with_tail_call_optimization(tail_call_optimization);
+            .with_tail_call_optimization(tail_call_optimization)
+            .with_vectorize(vectorize);
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,
