@@ -1281,6 +1281,19 @@ enum Commands {
         #[clap(long = "docker")]
         docker: bool,
 
+        /// Verify provenance signatures on emitted cross-format files
+        /// (#174).  Walks the corpus, recomputes each theorem's
+        /// expected `verum_signature` header, and compares it to the
+        /// signature actually present in
+        /// `target/audit-reports/cross-format-roundtrip/{coq,lean}/*`.
+        /// Exits non-zero on any mismatch.  Reproducibility primitive:
+        /// a third-party reviewer pulls the published .v / .lean files
+        /// out of supplementary material and runs this gate to confirm
+        /// the files were emitted by the named kernel version against
+        /// the named corpus state.
+        #[clap(long = "signatures")]
+        signatures: bool,
+
         /// Run the kernel-soundness IOU dashboard (#152 / Phase-1 of
         /// trust-base reduction).  Enumerates every kernel rule whose
         /// soundness lemma is admitted with an IOU reason in
@@ -3619,6 +3632,7 @@ fn run_command(cli: Cli) -> Result<()> {
             cross_format_roundtrip,
             docker,
             bundle,
+            signatures,
             soundness_iou,
             apply_graph,
             epsilon,
@@ -3678,6 +3692,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 )
             } else if bundle {
                 commands::audit::audit_bundle_with_format(output_format)
+            } else if signatures {
+                commands::audit::audit_signatures_with_format(output_format)
             } else if soundness_iou {
                 commands::audit::audit_soundness_iou_with_format(output_format)
             } else if apply_graph {

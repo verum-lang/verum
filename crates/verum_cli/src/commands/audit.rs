@@ -2750,6 +2750,225 @@ fn audit_cross_format_roundtrip_inner(
 }
 
 // =============================================================================
+// audit --signatures — task #174 / certificate-bearing artifacts
+// =============================================================================
+
+/// Verify provenance signatures on emitted cross-format files.
+///
+/// Walks the corpus, recomputes each theorem's expected
+/// `verum_signature` header via
+/// [`verum_kernel::soundness::corpus_export::compute_provenance_signature`],
+/// and compares against the signature line actually present at the
+/// top of the on-disk
+/// `target/audit-reports/cross-format-roundtrip/{coq,lean}/*` files.
+///
+/// **Reproducibility primitive.**  A third-party reviewer pulls the
+/// published `.v` / `.lean` files out of MSFS supplementary material,
+/// runs this gate, and gets a binary verdict: the files came from
+/// EXACTLY the named kernel version against the named corpus state,
+/// or they didn't.  No need to re-run the entire pipeline to verify
+/// provenance — just recompute the hash and compare.
+///
+/// **Exit semantics.**  Non-zero on any signature mismatch (file
+/// drift) or missing signature header (file emitted by older kernel).
+/// Always emits per-file verdict to JSON.
+pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::soundness::corpus_export::{compute_provenance_signature, TheoremSpec};
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Verifying provenance signatures on emitted cross-format files");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let mut vr_files = discover_vr_files(&manifest_dir);
+    vr_files.extend(discover_stdlib_vr_files());
+    let mut theorem_specs: Vec<TheoremSpec> = Vec::new();
+
+    for abs_path in &vr_files {
+        // Only walk corpus-rooted files; stdlib's theorems aren't
+        // emitted by the cross-format gate.
+        if !abs_path.starts_with(&manifest_dir) {
+            continue;
+        }
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let module_path_text = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, ".")
+            .trim_end_matches(".vr")
+            .to_string();
+        for item in &module.items {
+            let (name, decl_attrs, has_proof, proposition_expr) =
+                match &item.kind {
+                    verum_ast::decl::ItemKind::Theorem(d)
+                    | verum_ast::decl::ItemKind::Lemma(d)
+                    | verum_ast::decl::ItemKind::Corollary(d) => (
+                        d.name.name.as_str().to_string(),
+                        &d.attributes,
+                        matches!(&d.proof, verum_common::Maybe::Some(_)),
+                        d.proposition.as_ref(),
+                    ),
+                    _ => continue,
+                };
+            let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
+                .map(|t| t.as_str().to_string());
+            let proposition_text =
+                verum_ast::pretty::format_expr(proposition_expr).to_string();
+            theorem_specs.push(TheoremSpec {
+                name: sanitise_theorem_name(&name),
+                module_path: module_path_text.clone(),
+                proposition_text,
+                per_backend_proposition: std::collections::BTreeMap::new(),
+                params: Vec::new(),
+                generics: Vec::new(),
+                has_proof_body: has_proof,
+                declared_strategy,
+            });
+        }
+    }
+
+    let report_dir = manifest_dir
+        .join("target")
+        .join("audit-reports")
+        .join("cross-format-roundtrip");
+    let mut verifications: Vec<serde_json::Value> = Vec::new();
+    let mut mismatched = 0usize;
+    let mut missing = 0usize;
+    let mut verified = 0usize;
+
+    for spec in &theorem_specs {
+        for backend_id in ["coq", "lean"] {
+            let expected_sig = compute_provenance_signature(spec, backend_id);
+            let extension = if backend_id == "coq" { "v" } else { "lean" };
+            let file_path = report_dir
+                .join(backend_id)
+                .join(format!("{}.{}", spec.name, extension));
+            let outcome = if !file_path.exists() {
+                "file_absent"
+            } else {
+                match std::fs::read_to_string(&file_path) {
+                    Ok(text) => match extract_signature_header(&text) {
+                        Some(actual_sig) => {
+                            if actual_sig == expected_sig {
+                                verified += 1;
+                                "verified"
+                            } else {
+                                mismatched += 1;
+                                "mismatched"
+                            }
+                        }
+                        None => {
+                            missing += 1;
+                            "header_missing"
+                        }
+                    },
+                    Err(_) => "read_error",
+                }
+            };
+            verifications.push(serde_json::json!({
+                "theorem": spec.name,
+                "backend": backend_id,
+                "file": file_path.strip_prefix(&manifest_dir).unwrap_or(&file_path).display().to_string(),
+                "expected_signature": expected_sig,
+                "outcome": outcome,
+            }));
+        }
+    }
+
+    let report_path = manifest_dir
+        .join("target")
+        .join("audit-reports")
+        .join("signatures.json");
+    let _ = std::fs::create_dir_all(report_path.parent().unwrap());
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-signatures",
+        "kernel_version": verum_kernel::soundness::corpus_export::KERNEL_VERSION,
+        "theorems_walked": theorem_specs.len(),
+        "verified": verified,
+        "mismatched": mismatched,
+        "header_missing": missing,
+        "verifications": verifications,
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Provenance-signature verification");
+            println!("────────────────────────────────────────");
+            println!(
+                "  Walked {} theorem(s); kernel version {}.",
+                theorem_specs.len(),
+                verum_kernel::soundness::corpus_export::KERNEL_VERSION,
+            );
+            println!(
+                "  ✓ {} verified · ✗ {} mismatched · ⚠ {} header-missing",
+                verified, mismatched, missing,
+            );
+            if mismatched > 0 || missing > 0 {
+                println!();
+                for v in verifications.iter().filter(|v| {
+                    matches!(
+                        v.get("outcome").and_then(|s| s.as_str()),
+                        Some("mismatched") | Some("header_missing")
+                    )
+                }) {
+                    println!(
+                        "    {} :: {} → {}",
+                        v.get("backend").and_then(|s| s.as_str()).unwrap_or("?"),
+                        v.get("theorem").and_then(|s| s.as_str()).unwrap_or("?"),
+                        v.get("outcome").and_then(|s| s.as_str()).unwrap_or("?"),
+                    );
+                }
+            }
+            println!();
+            println!("  Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+    }
+
+    if mismatched > 0 || missing > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "signature audit: {} mismatched + {} header-missing — emitted files do \
+             not match the corpus state Verum claims to have produced them from",
+            mismatched, missing,
+        )));
+    }
+    Ok(())
+}
+
+/// Extract the `verum_signature: …` value from the first 8 lines of a
+/// rendered file.  Both Coq comments `(* verum_signature: X *)` and
+/// Lean comments `/-! verum_signature: X -/` carry the signature in
+/// the same syntactic shape — we tokenise on the prefix.
+fn extract_signature_header(text: &str) -> Option<String> {
+    for line in text.lines().take(8) {
+        let trimmed = line.trim();
+        let body = trimmed
+            .strip_prefix("(*")
+            .and_then(|s| s.strip_suffix("*)"))
+            .or_else(|| trimmed.strip_prefix("/-!").and_then(|s| s.strip_suffix("-/")));
+        if let Some(body) = body {
+            let body = body.trim();
+            if let Some(sig) = body.strip_prefix("verum_signature:") {
+                return Some(sig.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+// =============================================================================
 // audit --soundness-iou — task #152 / Phase-1 trust-base reduction
 // =============================================================================
 
