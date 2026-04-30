@@ -1,5 +1,32 @@
 # Verum Language Platform
 
+## CRITICAL: No libc in interpreter or AOT
+
+**Architectural invariant**: Verum's VBC interpreter (Tier 0) and
+AOT-compiled binaries (Tier 1) MUST NOT call into libc.  All
+runtime functionality goes through:
+
+* **Linux**: direct syscalls via `syscall` / `svc #0` instructions.
+* **macOS**: libSystem.B.dylib only (Apple-required boundary, NOT
+  libc in the glibc/musl sense).
+* **Windows**: kernel32.dll + ntdll.dll only (no MSVC CRT, no UCRT).
+* **FreeBSD**: direct syscalls.
+* **Embedded**: bare-metal, no OS dependencies.
+
+See `docs/architecture/no-libc-architecture.md` for the full
+ruleset, verification procedure (`ldd` / `otool` / `dumpbin`), and
+the remaining migration punch-list.
+
+When emitting LLVM IR, every per-platform decision (syscall
+numbers, sockaddr layout, errno-fn name, socket-option constants,
+…) reads `module.get_triple()` — the **target** triple — never
+host `#[cfg(target_os = "...")]` directives.  HOST gates miscompile
+cross builds.  Helpers in
+`crates/verum_codegen/src/llvm/target_triple.rs`
+(`target_is_linux` / `target_is_darwin` / `target_is_windows` /
+`target_is_aarch64` / `target_is_x86_64`) are the canonical
+inspection API.
+
 ## CRITICAL: Verum Grammar Specification
 
 **AUTHORITATIVE SOURCE**: `grammar/verum.ebnf` - The ONLY source of truth for Verum syntax.

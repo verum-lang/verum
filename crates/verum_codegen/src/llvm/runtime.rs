@@ -6299,20 +6299,97 @@ impl<'ctx> RuntimeLowering<'ctx> {
         f
     }
 
-    /// Get or declare memset function.
+    /// Get or declare a 3-arg memset wrapper that internally calls
+    /// the LLVM intrinsic `llvm.memset.p0.i64` with `isvolatile=false`.
+    ///
+    /// **Libc-free**: the wrapper is an LLVM-internal function that
+    /// lowers to inline code via the LLVM backend (no `libc::memset`
+    /// symbol resolution at link time, no glibc dependency).  The
+    /// 3-arg shape `(ptr, value_i32, size_i64)` is preserved so the
+    /// many existing callers (~30 sites) don't need updating; the
+    /// extra `isvolatile=false` argument is supplied internally.
+    ///
+    /// Distinct from `FfiLowering::lower_secure_zero` which uses the
+    /// 4-arg intrinsic directly with `isvolatile=true` for the
+    /// security-critical zeroise path.
+    ///
+    /// See `internal/specs/no-libc-architecture.md` for the
+    /// architectural rule this method enforces.
     fn get_or_declare_memset(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
-        let name = "memset";
-        if let Some(func) = module.get_function(name) {
+        // The wrapper gets a Verum-internal name to avoid colliding
+        // with the libc `memset` symbol (which any C interop layer
+        // would still want to expose).  Internal-linkage so it
+        // doesn't escape into the produced object file's exported
+        // symbol table.
+        let wrapper_name = "verum_internal_memset";
+        if let Some(func) = module.get_function(wrapper_name) {
             return Ok(func);
         }
 
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
+        let i8_type = self.context.i8_type();
+        let bool_type = self.context.bool_type();
 
-        let fn_type = ptr_type.fn_type(&[ptr_type.into(), i32_type.into(), i64_type.into()], false);
+        // Declare the underlying LLVM intrinsic.
+        let intrinsic_name = "llvm.memset.p0.i64";
+        let intrinsic_fn_type = self.context.void_type().fn_type(
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                i64_type.into(),
+                bool_type.into(),
+            ],
+            false,
+        );
+        let intrinsic_fn = module.get_function(intrinsic_name).unwrap_or_else(|| {
+            module.add_function(intrinsic_name, intrinsic_fn_type, None)
+        });
 
-        Ok(module.add_function(name, fn_type, None))
+        // Wrapper signature: matches the historical libc `memset`
+        // shape so call sites don't need updating.
+        let wrapper_fn_type =
+            ptr_type.fn_type(&[ptr_type.into(), i32_type.into(), i64_type.into()], false);
+        let wrapper = module.add_function(wrapper_name, wrapper_fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        // Body: %dst = arg0; %val = trunc i32 arg1 to i8;
+        //       %size = arg2;
+        //       call void @llvm.memset.p0.i64(%dst, %val, %size, i1 false);
+        //       ret ptr %dst
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let dst = wrapper
+            .get_nth_param(0)
+            .or_internal("memset wrapper missing param 0")?
+            .into_pointer_value();
+        let val_i32 = wrapper
+            .get_nth_param(1)
+            .or_internal("memset wrapper missing param 1")?
+            .into_int_value();
+        let size = wrapper
+            .get_nth_param(2)
+            .or_internal("memset wrapper missing param 2")?
+            .into_int_value();
+
+        let val_i8 = builder
+            .build_int_truncate(val_i32, i8_type, "val_i8")
+            .or_llvm_err()?;
+        let is_volatile = bool_type.const_int(0, false);
+
+        builder
+            .build_call(
+                intrinsic_fn,
+                &[dst.into(), val_i8.into(), size.into(), is_volatile.into()],
+                "",
+            )
+            .or_llvm_err()?;
+        builder.build_return(Some(&dst)).or_llvm_err()?;
+
+        Ok(wrapper)
     }
 
     // =========================================================================
