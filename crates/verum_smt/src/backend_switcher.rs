@@ -108,6 +108,25 @@ pub struct SwitcherConfig {
 
     /// Enable detailed logging
     pub verbose: bool,
+
+    /// Optional Z3-specific backend configuration. When `Maybe::None`,
+    /// `build_backends` constructs `Z3Config::default()` (with the
+    /// umbrella `timeout_ms` propagated). When `Maybe::Some`, every
+    /// field of the supplied config is honored at backend
+    /// construction — this is the wiring path for
+    /// `[smt.z3]` settings parsed from `verum.toml` and translated
+    /// via `SmtConfig::to_switcher_config()`.
+    ///
+    /// The umbrella `timeout_ms` still wins when the supplied
+    /// `Z3Config.global_timeout_ms` is `Maybe::None`, so a manifest
+    /// that sets `[smt] timeout_ms = N` without overriding
+    /// `[smt.z3]` keeps the umbrella's intent.
+    pub z3_backend: Maybe<crate::z3_backend::Z3Config>,
+
+    /// Optional CVC5-specific backend configuration. Same semantics
+    /// as `z3_backend` but for CVC5 — populated from `[smt.cvc5]`
+    /// when present, otherwise `Maybe::None` and defaults apply.
+    pub cvc5_backend: Maybe<crate::cvc5_backend::Cvc5Config>,
 }
 
 impl Default for SwitcherConfig {
@@ -119,6 +138,8 @@ impl Default for SwitcherConfig {
             validation: ValidationConfig::default(),
             timeout_ms: 30000, // 30s
             verbose: false,
+            z3_backend: Maybe::None,
+            cvc5_backend: Maybe::None,
         }
     }
 }
@@ -273,12 +294,30 @@ impl SmtBackendSwitcher {
     /// configs at construction time so a single manifest setting
     /// covers every solver instance the switcher spawns.
     fn build_backends(config: &SwitcherConfig) -> (Z3Backend, Maybe<Cvc5Backend>) {
-        let mut z3_config = crate::z3_backend::Z3Config::default();
-        z3_config.global_timeout_ms = Maybe::Some(config.timeout_ms);
+        // Honor `SwitcherConfig.z3_backend` when present (TOML
+        // `[smt.z3]` flowed through `SmtConfig::to_switcher_config`)
+        // — every field of the supplied Z3Config takes effect at
+        // construction. Fall back to default when absent.
+        // The umbrella `timeout_ms` only wins when the supplied
+        // config's `global_timeout_ms` is `Maybe::None`, so a manifest
+        // that overrides Z3's per-backend timeout keeps that intent.
+        let mut z3_config = match &config.z3_backend {
+            Maybe::Some(c) => c.clone(),
+            Maybe::None => crate::z3_backend::Z3Config::default(),
+        };
+        if matches!(z3_config.global_timeout_ms, Maybe::None) {
+            z3_config.global_timeout_ms = Maybe::Some(config.timeout_ms);
+        }
         let z3 = Z3Backend::new(z3_config);
 
-        let mut cvc5_config = Cvc5Config::default();
-        cvc5_config.timeout_ms = Maybe::Some(config.timeout_ms);
+        // Same dispatch for CVC5.
+        let mut cvc5_config = match &config.cvc5_backend {
+            Maybe::Some(c) => c.clone(),
+            Maybe::None => Cvc5Config::default(),
+        };
+        if matches!(cvc5_config.timeout_ms, Maybe::None) {
+            cvc5_config.timeout_ms = Maybe::Some(config.timeout_ms);
+        }
         let cvc5 = Cvc5Backend::new(cvc5_config)
             .ok()
             .map(Maybe::Some)

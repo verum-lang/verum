@@ -294,6 +294,42 @@ impl SmtLogic {
             Self::ALL => "ALL",
         }
     }
+
+    /// Parse an SMT-LIB 2 logic name into the corresponding variant.
+    /// Case-insensitive. Returns `None` for unknown names so the
+    /// caller can fall back to `ALL` and surface a warning rather
+    /// than silently downgrade the solver.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_ascii_uppercase().as_str() {
+            "QF_LIA" => Some(Self::QF_LIA),
+            "QF_LRA" => Some(Self::QF_LRA),
+            "QF_BV" => Some(Self::QF_BV),
+            "QF_NIA" => Some(Self::QF_NIA),
+            "QF_NRA" => Some(Self::QF_NRA),
+            "QF_AX" => Some(Self::QF_AX),
+            "QF_UFLIA" => Some(Self::QF_UFLIA),
+            "QF_AUFLIA" => Some(Self::QF_AUFLIA),
+            "ALL" => Some(Self::ALL),
+            _ => None,
+        }
+    }
+}
+
+impl QuantifierMode {
+    /// Parse a quantifier-mode name (case-insensitive). The same
+    /// names CVC5's `--quant-instantiate-mode` flag accepts:
+    /// `auto`, `none`, `ematching`, `cegqi`, `mbqi`. Returns `None`
+    /// for unknown names so the caller can fall back to `Auto`.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "none" => Some(Self::None),
+            "ematching" | "e-matching" | "e_matching" => Some(Self::EMatching),
+            "cegqi" => Some(Self::CEGQI),
+            "mbqi" => Some(Self::MBQI),
+            _ => None,
+        }
+    }
 }
 
 /// Quantifier instantiation modes
