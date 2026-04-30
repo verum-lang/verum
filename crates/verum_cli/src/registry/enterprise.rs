@@ -183,6 +183,51 @@ impl EnterpriseClient {
             None
         };
 
+        // Phase-not-realised tracing for inert AuditConfig fields.
+        // `audit.enabled` IS consumed at cog_manager.rs:190/263/332
+        // (gates `security::log_action` calls), but three companion
+        // fields land on the manifest without reaching production
+        // code paths:
+        //
+        // - `audit.log_file` (PathBuf) — `security::save_audit_log`
+        //   takes a path argument from the caller; no caller threads
+        //   the manifest's value through. Audit entries currently
+        //   live in-memory only (Vec<AuditEntry>) and never flush
+        //   to the configured file.
+        //
+        // - `audit.retention_days` (u32) — no rotation/eviction
+        //   pass exists; old entries persist indefinitely.
+        //
+        // - `audit.log_level` (AuditLevel: All/Changes/Security) —
+        //   `log_action` records every call regardless of the
+        //   configured level; no filtering happens at the recorder.
+        //
+        // Surface a debug trace when the user has set any of these
+        // to a non-default-equivalent value so embedders writing
+        // `[audit] log_file = "/var/log/verum.log"` see the value
+        // was observed but not threaded through.
+        if config.audit.enabled {
+            let default_log_file = std::path::PathBuf::from("verum-audit.log");
+            let log_file_overridden = config.audit.log_file != default_log_file;
+            let retention_overridden = config.audit.retention_days != 90;
+            let log_level_overridden =
+                !matches!(config.audit.log_level, AuditLevel::All);
+            if log_file_overridden || retention_overridden || log_level_overridden {
+                tracing::debug!(
+                    "EnterpriseConfig.audit surface: log_file={:?}, retention_days={}, \
+                     log_level={:?} (these fields land on the AuditConfig and are \
+                     parsed from the manifest, but `security::log_action` records \
+                     in-memory only — no caller flushes to log_file, no rotation \
+                     pass honours retention_days, and no level-filtering applies \
+                     log_level. Forward-looking; only `audit.enabled` reaches the \
+                     recorder gate today.)",
+                    config.audit.log_file,
+                    config.audit.retention_days,
+                    config.audit.log_level,
+                );
+            }
+        }
+
         Ok(Self { config, client })
     }
 
