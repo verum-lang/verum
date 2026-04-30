@@ -1,0 +1,281 @@
+// =============================================================================
+// kernel_soundness.judgment — Γ ⊢ t : T as a Verum data type
+// =============================================================================
+//
+// The kernel rules at proof_tree.rs:694-787 are typing-judgment derivations.
+// Stating the soundness theorems requires a propositional carrier for
+// "Γ ⊢ t : T" — that's what this module provides.
+//
+// **Why a data type and not a relation?**
+//
+// The audit gate `verum audit --kernel-soundness` is a *first-order*
+// well-formedness check.  A relation in HoTT requires elimination via
+// induction-on-derivation; a data type lets the per-rule lemmas in
+// `theorems.vr` pattern-match on the *evidence*, which is what makes
+// the per-rule theorems syntactically discharge-able and makes the
+// cross-export pipeline straightforward.
+//
+// **Encoding choice.**
+//
+// `Judgment` is a record carrying the context, term, and type.
+// `Derivation` carries the rule applied + sub-derivations of the
+// premises + the resulting judgment.  This is a *witness* that the
+// term is well-typed under the rule named in the witness.  Soundness
+// theorems then take the form:
+//
+//   forall d: Derivation. evidence_well_formed(d) -> conclusion(d).judgment_holds()
+//
+// where `evidence_well_formed` is decidable structurally.
+// =============================================================================
+
+module core.verify.kernel_soundness.judgment;
+
+mount core.verify.kernel_soundness.model.{CoreTerm, CoreType, UniverseLevel};
+
+// =============================================================================
+// Context — Γ as a list of (name, type) bindings
+// =============================================================================
+
+/// A typing context Γ: an ordered list of `(variable, type)` bindings.
+/// Newer bindings shadow older ones (de Bruijn-style; the kernel works
+/// in named form for diagnostics, then converts to de Bruijn for
+/// alpha-equivalence checking).
+///
+/// **Closure invariant**: the type of every binding may reference
+/// only variables bound earlier in the context.  Encoded structurally
+/// (the soundness lemmas in `theorems.vr` rely on this) — every
+/// well-formed context is a `Cons` of a well-formed prefix and a
+/// type whose free variables fall inside the prefix.
+public type Context is
+    | Empty
+    | Cons {
+        prefix: Heap<Context>,
+        binder: Text,
+        binder_ty: CoreTerm,
+      };
+
+/// Project: lookup a variable's declared type.  `Some(ty)` if `name`
+/// occurs in the context (innermost binding wins); `None` otherwise.
+/// Used by K-Var soundness.
+public pure fn context_lookup(ctx: Context, name: Text) -> Maybe<CoreTerm> {
+    match ctx {
+        Context.Empty => None,
+        Context.Cons { prefix, binder, binder_ty } => {
+            if binder == name {
+                Some(binder_ty)
+            } else {
+                context_lookup(*prefix, name)
+            }
+        }
+    }
+}
+
+/// Project: context length, used by depth-bounded soundness lemmas
+/// (e.g., the strict-positivity check K-Pos walks the context to
+/// verify no inductive-type self-reference appears under a strictly-
+/// positive position).
+public pure fn context_length(ctx: Context) -> Int {
+    match ctx {
+        Context.Empty => 0,
+        Context.Cons { prefix, binder: _, binder_ty: _ } => {
+            1 + context_length(*prefix)
+        }
+    }
+}
+
+// =============================================================================
+// Judgment — Γ ⊢ t : T
+// =============================================================================
+
+/// A typing judgment: "in context Γ, term `t` has type `T`."
+///
+/// The kernel manufactures these as it walks a derivation; the
+/// soundness theorems quantify over them.  `Judgment` itself is
+/// just data — whether it's *valid* is decided by the per-rule
+/// lemmas in `theorems.vr`.
+public type Judgment is {
+    context: Context,
+    term: CoreTerm,
+    ty: CoreTerm,
+};
+
+// =============================================================================
+// SideCondition — non-judgmental obligations attached to a rule
+// =============================================================================
+
+/// A side-condition is a constraint a rule imposes that isn't itself
+/// a typing judgment.  Examples:
+///
+///   * **K-FwAx** requires the framework axiom's body to inhabit
+///     the propositional universe `Prop` — `BodyInProp { axiom_body: Term }`.
+///   * **K-Pos** requires the inductive type's constructor signatures
+///     to have *strict positivity* — `StrictlyPositive { ind_path: Text,
+///     constructors: List<CoreTerm> }`.
+///   * **K-Refine-omega** requires the refinement predicate's modal
+///     depth to be a transfinite ordinal below `ω` —
+///     `ModalDepthBoundedBy { predicate: Term, bound: UniverseLevel }`.
+///   * **K-Univ-Stratification** requires the level of the smaller
+///     universe to be strictly less than the larger — `LevelLt { lo, hi }`.
+///   * **K-Smt** requires the SMT certificate to replay successfully
+///     against the kernel's term-decoder — `SmtCertReplays`.
+///
+/// Side conditions decouple "what rule was applied" from "what extra
+/// thing must hold for that rule to apply legitimately."  The
+/// soundness lemmas discharge them per-rule.
+public type SideCondition is
+    | BodyInProp { axiom_body: CoreTerm }
+    | StrictlyPositive { ind_path: Text, constructors: List<CoreTerm> }
+    | ModalDepthBoundedBy { predicate: CoreTerm, bound: UniverseLevel }
+    | LevelLt { lo: UniverseLevel, hi: UniverseLevel }
+    | SmtCertReplays { cert_solver_tag: Text }
+    | NoFreeVars { term: CoreTerm }
+    | EquivIsRelation { equiv: CoreTerm, base: CoreTerm }
+    | RespectsEquivalence { case_fn: CoreTerm, equiv: CoreTerm };
+
+// =============================================================================
+// Derivation — a witness that a `Judgment` follows from a `Rule`
+// =============================================================================
+
+/// A typing derivation.  Carries the rule applied, the sub-derivations
+/// for each premise, the side-conditions the rule discharges, and the
+/// conclusion judgment.  `Derivation` is the central data type the
+/// per-rule soundness lemmas pattern-match on.
+///
+/// The inductive structure (a `Derivation` carries `List<Derivation>`
+/// for its premises) means the corpus's soundness proofs are
+/// structurally-recursive over derivation trees — exactly the shape
+/// Coq / Lean import naturally.
+public type Derivation is {
+    rule: KernelRule,
+    premises: List<Derivation>,
+    side_conditions: List<SideCondition>,
+    conclusion: Judgment,
+};
+
+// =============================================================================
+// KernelRule — names for the 35 inference rules
+// =============================================================================
+
+/// The 35 kernel inference rules, named to match the Rust-side
+/// `verum_kernel::proof_tree::KernelRule` enum (proof_tree.rs:694-787).
+/// Categorisation matches the `CoreTerm` variant categorisation in
+/// `model.vr`.
+///
+/// **Drift-detection invariant**: the order and names here MUST agree
+/// with the Rust enum.  The cross-export pipeline emits
+/// `Inductive KernelRule := …` blocks based on this list; the audit
+/// gate fails on any mismatch.
+public type KernelRule is
+    // ---- Structural (9 rules) -----------------------------------------------
+    | KVar
+    | KUniv
+    | KPiForm
+    | KLamIntro
+    | KAppElim
+    | KSigmaForm
+    | KPairIntro
+    | KFstElim
+    | KSndElim
+    // ---- Cubical (6 rules) --------------------------------------------------
+    | KPathTyForm
+    | KPathOverForm
+    | KReflIntro
+    | KHComp
+    | KTransp
+    | KGlue
+    // ---- Refinement (4 rules) -----------------------------------------------
+    | KRefine
+    | KRefineOmega
+    | KRefineIntro
+    | KRefineErase
+    // ---- Quotient (3 rules) -------------------------------------------------
+    | KQuotForm
+    | KQuotIntro
+    | KQuotElim
+    // ---- Inductive (3 rules) ------------------------------------------------
+    | KInductive
+    | KPos
+    | KElim
+    // ---- SMT / Axiom (2 rules) ----------------------------------------------
+    | KSmt
+    | KFwAx
+    // ---- Diakrisis ε / α duality + κ-tower + cohesive (11 rules) -----------
+    | KEpsMu
+    | KUniverseAscent
+    | KRoundTrip
+    | KEpsilonOf
+    | KAlphaOf
+    | KModalBox
+    | KModalDiamond
+    | KModalBigAnd
+    | KShape
+    | KFlat
+    | KSharp;
+
+/// Stable text name for a `KernelRule`.  The cross-export emitters
+/// use this for the per-rule Coq `Lemma K_<Name>_sound : …` and Lean
+/// `theorem K_<Name>_sound : …` declarations.  The audit gate uses it
+/// as the report key.
+///
+/// Naming follows `K-<Category>-<Constructor>` from
+/// `docs/architecture/verum-verification-architecture.md`, with `-`
+/// replaced by `_` for foreign-tool identifier-shape compatibility.
+public pure fn kernel_rule_name(r: KernelRule) -> Text {
+    match r {
+        // Structural
+        KernelRule.KVar => Text.from("K_Var"),
+        KernelRule.KUniv => Text.from("K_Univ"),
+        KernelRule.KPiForm => Text.from("K_Pi_Form"),
+        KernelRule.KLamIntro => Text.from("K_Lam_Intro"),
+        KernelRule.KAppElim => Text.from("K_App_Elim"),
+        KernelRule.KSigmaForm => Text.from("K_Sigma_Form"),
+        KernelRule.KPairIntro => Text.from("K_Pair_Intro"),
+        KernelRule.KFstElim => Text.from("K_Fst_Elim"),
+        KernelRule.KSndElim => Text.from("K_Snd_Elim"),
+        // Cubical
+        KernelRule.KPathTyForm => Text.from("K_Path_Ty_Form"),
+        KernelRule.KPathOverForm => Text.from("K_Path_Over_Form"),
+        KernelRule.KReflIntro => Text.from("K_Refl_Intro"),
+        KernelRule.KHComp => Text.from("K_HComp"),
+        KernelRule.KTransp => Text.from("K_Transp"),
+        KernelRule.KGlue => Text.from("K_Glue"),
+        // Refinement
+        KernelRule.KRefine => Text.from("K_Refine"),
+        KernelRule.KRefineOmega => Text.from("K_Refine_Omega"),
+        KernelRule.KRefineIntro => Text.from("K_Refine_Intro"),
+        KernelRule.KRefineErase => Text.from("K_Refine_Erase"),
+        // Quotient
+        KernelRule.KQuotForm => Text.from("K_Quot_Form"),
+        KernelRule.KQuotIntro => Text.from("K_Quot_Intro"),
+        KernelRule.KQuotElim => Text.from("K_Quot_Elim"),
+        // Inductive
+        KernelRule.KInductive => Text.from("K_Inductive"),
+        KernelRule.KPos => Text.from("K_Pos"),
+        KernelRule.KElim => Text.from("K_Elim"),
+        // SMT / Axiom
+        KernelRule.KSmt => Text.from("K_Smt"),
+        KernelRule.KFwAx => Text.from("K_FwAx"),
+        // Diakrisis
+        KernelRule.KEpsMu => Text.from("K_Eps_Mu"),
+        KernelRule.KUniverseAscent => Text.from("K_Universe_Ascent"),
+        KernelRule.KRoundTrip => Text.from("K_Round_Trip"),
+        KernelRule.KEpsilonOf => Text.from("K_Epsilon_Of"),
+        KernelRule.KAlphaOf => Text.from("K_Alpha_Of"),
+        KernelRule.KModalBox => Text.from("K_Modal_Box"),
+        KernelRule.KModalDiamond => Text.from("K_Modal_Diamond"),
+        KernelRule.KModalBigAnd => Text.from("K_Modal_Big_And"),
+        KernelRule.KShape => Text.from("K_Shape"),
+        KernelRule.KFlat => Text.from("K_Flat"),
+        KernelRule.KSharp => Text.from("K_Sharp"),
+    }
+}
+
+/// Total number of kernel rules.  Same drift-detection role as
+/// `CORE_TERM_VARIANT_COUNT` in `model.vr` — a per-rule lemma must
+/// exist in `theorems.vr` for every value here, and the cross-export
+/// snapshot test fails when this number changes without the rest of
+/// the corpus following.
+///
+/// **Distribution**: Structural 9 + Cubical 6 + Refinement 4 +
+/// Quotient 3 + Inductive 3 + SmtAxiom 2 + Diakrisis 11 = **38**.
+public const KERNEL_RULE_COUNT: Int = 38;

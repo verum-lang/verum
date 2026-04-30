@@ -1,0 +1,433 @@
+// =============================================================================
+// kernel_soundness.rules — premise/conclusion encoding of the 35 kernel rules
+// =============================================================================
+//
+// For each `KernelRule` the kernel imposes:
+//   * a list of *premise* judgments (Γ ⊢ tᵢ : Tᵢ),
+//   * a list of *side-conditions* (e.g., "axiom body inhabits Prop"),
+//   * a single *conclusion* judgment.
+//
+// This module produces those triples mechanically from a `Derivation`
+// node — given an instantiated `Derivation`, `rule_premises_required(d)`,
+// `rule_side_conditions_required(d)`, and `rule_conclusion_shape(d)`
+// describe what would have to hold for the rule to apply legitimately.
+//
+// **Architectural role**: rules.vr is the *specification*; theorems.vr
+// is the *correctness proof* that the spec is sound.  Cross-export
+// emitters consume rules.vr to generate the foreign-tool premise lists.
+// They never invent premises — every emitted Coq/Lean lemma's hypothesis
+// chain matches `rule_premises_required` for the same rule, so a
+// foreign re-checker is verifying the same statement Verum is.
+// =============================================================================
+
+module core.verify.kernel_soundness.rules;
+
+mount core.verify.kernel_soundness.model.{CoreTerm, CoreType, UniverseLevel};
+mount core.verify.kernel_soundness.judgment.{
+    Context, Judgment, SideCondition, Derivation, KernelRule,
+};
+
+// =============================================================================
+// PremiseShape — what the rule demands of its sub-derivations
+// =============================================================================
+
+/// Symbolic premise: "this sub-derivation must conclude in a
+/// judgment whose shape matches `expected`."  `expected` describes
+/// the syntactic form of the conclusion the premise must produce.
+///
+/// The four shape constructors cover everything any of the 35 rules
+/// asks for:
+///
+///   * **TermHasType{ty_shape}** — the premise must conclude
+///     `Γ ⊢ t : T` where `T` reduces to a head matching `ty_shape`.
+///   * **TermHasUniverse{level_bound}** — the premise must show that
+///     `t` inhabits some `Universe(u)` with `u ≤ level_bound`.
+///   * **TermIsKnown{name}** — the premise must show `t` reduces to
+///     a specific named term (e.g., for KGlue's equivalence-condition).
+///   * **AnyTerm** — the rule cares only that the premise concludes
+///     *some* well-typed judgment; used by elimination rules whose
+///     soundness is independent of the scrutinee's type-head.
+public type PremiseShape is
+    | TermHasType { ty_shape: CoreType }
+    | TermHasUniverse { level_bound: UniverseLevel }
+    | TermIsKnown { name: Text }
+    | AnyTerm;
+
+/// `rule_premises_required(d)` returns the *expected shapes* of the
+/// derivation's premises.  The list length matches the number of
+/// premises the rule needs; each entry's shape constrains what the
+/// corresponding sub-derivation must conclude.
+///
+/// **Why a function and not a static table?**  Several rules' premise
+/// shapes depend on the *concrete* term being typed.  E.g., K-App-Elim
+/// requires `head : Pi(x:A).B` where `A` is read off the argument's
+/// expected type; that's per-derivation, not per-rule.
+public pure fn rule_premises_required(d: Derivation) -> List<PremiseShape> {
+    match d.rule {
+        // ---- Structural ---------------------------------------------------
+        KernelRule.KVar => List.empty(),
+        KernelRule.KUniv => List.empty(),
+        KernelRule.KPiForm => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("v") }
+            },
+        ]),
+        KernelRule.KLamIntro => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KAppElim => List.from([
+            PremiseShape.TermHasType { ty_shape: CoreType.PiTy },
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KSigmaForm => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("v") }
+            },
+        ]),
+        KernelRule.KPairIntro => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KFstElim => List.from([
+            PremiseShape.TermHasType { ty_shape: CoreType.SigmaTy },
+        ]),
+        KernelRule.KSndElim => List.from([
+            PremiseShape.TermHasType { ty_shape: CoreType.SigmaTy },
+        ]),
+        // ---- Cubical ------------------------------------------------------
+        KernelRule.KPathTyForm => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KPathOverForm => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.TermHasType { ty_shape: CoreType.PathTyHead },
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KReflIntro => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KHComp => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KTransp => List.from([
+            PremiseShape.TermHasType { ty_shape: CoreType.PathTyHead },
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KGlue => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        // ---- Refinement ---------------------------------------------------
+        KernelRule.KRefine => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KRefineOmega => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KRefineIntro => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KRefineErase => List.from([
+            PremiseShape.TermHasType { ty_shape: CoreType.RefineTy },
+        ]),
+        // ---- Quotient -----------------------------------------------------
+        KernelRule.KQuotForm => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KQuotIntro => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KQuotElim => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        // ---- Inductive ----------------------------------------------------
+        KernelRule.KInductive => List.empty(),
+        KernelRule.KPos => List.empty(),
+        KernelRule.KElim => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        // ---- SMT / Axiom --------------------------------------------------
+        KernelRule.KSmt => List.empty(),
+        KernelRule.KFwAx => List.empty(),
+        // ---- Diakrisis ----------------------------------------------------
+        KernelRule.KEpsMu => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KUniverseAscent => List.from([
+            PremiseShape.TermHasUniverse {
+                level_bound: UniverseLevel.Variable { name: Text.from("u") }
+            },
+        ]),
+        KernelRule.KRoundTrip => List.from([
+            PremiseShape.AnyTerm,
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KEpsilonOf => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KAlphaOf => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KModalBox => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KModalDiamond => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KModalBigAnd => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KShape => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KFlat => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+        KernelRule.KSharp => List.from([
+            PremiseShape.AnyTerm,
+        ]),
+    }
+}
+
+/// `rule_side_conditions_required(d)` projects the side-conditions a
+/// rule imposes beyond its premises.  Most rules return an empty
+/// list; the interesting ones — KFwAx, KPos, KSmt, KRefineOmega,
+/// KUniverseAscent, KQuotForm, KQuotElim — carry their respective
+/// non-judgmental obligations.
+///
+/// The returned `SideCondition` values are *templates* — a function
+/// of `d`, not constants.  E.g., `KFwAx` produces a
+/// `BodyInProp { axiom_body: <body of d.conclusion.term> }` so the
+/// soundness lemma in `theorems.vr` can pattern-match on the actual
+/// axiom body.
+public pure fn rule_side_conditions_required(d: Derivation) -> List<SideCondition> {
+    match d.rule {
+        KernelRule.KFwAx => match d.conclusion.term {
+            CoreTerm.Axiom { name: _, ty, framework: _ } => List.from([
+                SideCondition.BodyInProp { axiom_body: *ty },
+            ]),
+            _ => List.empty(),
+        },
+        KernelRule.KPos => match d.conclusion.term {
+            CoreTerm.Inductive { path, args } => List.from([
+                SideCondition.StrictlyPositive {
+                    ind_path: path,
+                    constructors: args,
+                },
+            ]),
+            _ => List.empty(),
+        },
+        KernelRule.KSmt => match d.conclusion.term {
+            CoreTerm.SmtProof { cert } => List.from([
+                SideCondition.SmtCertReplays {
+                    cert_solver_tag: cert.solver_tag,
+                },
+            ]),
+            _ => List.empty(),
+        },
+        KernelRule.KRefineOmega => match d.conclusion.term {
+            CoreTerm.Refine { base: _, binder: _, predicate } => List.from([
+                SideCondition.ModalDepthBoundedBy {
+                    predicate: *predicate,
+                    bound: UniverseLevel.Variable { name: Text.from("omega") },
+                },
+            ]),
+            _ => List.empty(),
+        },
+        KernelRule.KUniverseAscent => List.from([
+            SideCondition.LevelLt {
+                lo: UniverseLevel.Variable { name: Text.from("u") },
+                hi: UniverseLevel.Variable { name: Text.from("u_succ") },
+            },
+        ]),
+        KernelRule.KQuotForm => match d.conclusion.term {
+            CoreTerm.Quotient { base, equiv } => List.from([
+                SideCondition.EquivIsRelation {
+                    equiv: *equiv,
+                    base: *base,
+                },
+            ]),
+            _ => List.empty(),
+        },
+        KernelRule.KQuotElim => match d.conclusion.term {
+            CoreTerm.QuotElim { scrutinee, motive: _, case_fn } => {
+                let equiv_for_scrutinee = match *scrutinee {
+                    CoreTerm.QuotIntro { value: _, base: _, equiv } => *equiv,
+                    _ => CoreTerm.Var { name: Text.from("?equiv") },
+                };
+                List.from([
+                    SideCondition.RespectsEquivalence {
+                        case_fn: *case_fn,
+                        equiv: equiv_for_scrutinee,
+                    },
+                ])
+            }
+            _ => List.empty(),
+        },
+        // No side conditions for the remaining rules (the kernel still
+        // checks them — every rule has at least the implicit context-
+        // well-formedness obligation — but those are folded into
+        // premise-shape checking via the `Context` invariant in
+        // judgment.vr, not surfaced as a separate `SideCondition`).
+        _ => List.empty(),
+    }
+}
+
+// =============================================================================
+// Conclusion-shape projection
+// =============================================================================
+
+/// `rule_conclusion_shape(d)` describes the syntactic form of the
+/// term the rule introduces/eliminates.  Used by:
+///   1. The audit gate, to ensure the derivation's `conclusion.term`
+///      structurally matches the rule (a KAppElim derivation must
+///      conclude in a `CoreTerm.App(...)`, not a `Lam`).
+///   2. The cross-export emitters, to choose which Coq/Lean tactic
+///      to invoke (intro vs. apply vs. constructor).
+public pure fn rule_conclusion_shape(d: Derivation) -> CoreType {
+    match d.rule {
+        // Universe formers — Pi/Sigma/PathTy/Refine/Glue/Quotient
+        KernelRule.KUniv => CoreType.UniverseTy {
+            level: UniverseLevel.Concrete { level: 0 },
+        },
+        KernelRule.KPiForm => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KSigmaForm => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KPathTyForm => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KPathOverForm => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KGlue => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KRefine => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KRefineOmega => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KQuotForm => CoreType.UniverseTy {
+            level: UniverseLevel.Variable { name: Text.from("u") },
+        },
+        KernelRule.KInductive => CoreType.InductiveTy { path: Text.from("?") },
+        // Eliminators conclude in the motive's image — coarse-grained
+        KernelRule.KAppElim => CoreType.OtherTy,
+        KernelRule.KFstElim => CoreType.OtherTy,
+        KernelRule.KSndElim => CoreType.OtherTy,
+        KernelRule.KQuotElim => CoreType.OtherTy,
+        KernelRule.KElim => CoreType.OtherTy,
+        KernelRule.KRefineErase => CoreType.OtherTy,
+        // Introductions conclude in the corresponding type head
+        KernelRule.KLamIntro => CoreType.PiTy,
+        KernelRule.KPairIntro => CoreType.SigmaTy,
+        KernelRule.KReflIntro => CoreType.PathTyHead,
+        KernelRule.KRefineIntro => CoreType.RefineTy,
+        KernelRule.KQuotIntro => CoreType.OtherTy,
+        // Var/Smt/FwAx are coarse — depend on the looked-up / certified term
+        KernelRule.KVar => CoreType.OtherTy,
+        KernelRule.KSmt => CoreType.OtherTy,
+        KernelRule.KFwAx => CoreType.OtherTy,
+        // Cubical operations conclude in the carrier type
+        KernelRule.KHComp => CoreType.OtherTy,
+        KernelRule.KTransp => CoreType.OtherTy,
+        // Diakrisis conclusions — universe-typed witnesses
+        KernelRule.KEpsMu => CoreType.OtherTy,
+        KernelRule.KUniverseAscent => CoreType.UniverseTy {
+            level: UniverseLevel.Succ {
+                inner: Heap.new(UniverseLevel.Variable { name: Text.from("u") }),
+            },
+        },
+        KernelRule.KRoundTrip => CoreType.OtherTy,
+        KernelRule.KEpsilonOf => CoreType.OtherTy,
+        KernelRule.KAlphaOf => CoreType.OtherTy,
+        KernelRule.KModalBox => CoreType.OtherTy,
+        KernelRule.KModalDiamond => CoreType.OtherTy,
+        KernelRule.KModalBigAnd => CoreType.OtherTy,
+        KernelRule.KShape => CoreType.OtherTy,
+        KernelRule.KFlat => CoreType.OtherTy,
+        KernelRule.KSharp => CoreType.OtherTy,
+    }
+}
+
+// =============================================================================
+// Categorisation — group rules for diagnostics + per-category audits
+// =============================================================================
+
+/// Coarse category for a rule, used by audit reports.
+public type RuleCategory is
+    | CatStructural
+    | CatCubical
+    | CatRefinement
+    | CatQuotient
+    | CatInductive
+    | CatSmtAxiom
+    | CatDiakrisis;
+
+/// Project a rule to its category.
+public pure fn rule_category(r: KernelRule) -> RuleCategory {
+    match r {
+        KernelRule.KVar | KernelRule.KUniv | KernelRule.KPiForm |
+        KernelRule.KLamIntro | KernelRule.KAppElim | KernelRule.KSigmaForm |
+        KernelRule.KPairIntro | KernelRule.KFstElim | KernelRule.KSndElim
+            => RuleCategory.CatStructural,
+        KernelRule.KPathTyForm | KernelRule.KPathOverForm |
+        KernelRule.KReflIntro | KernelRule.KHComp | KernelRule.KTransp |
+        KernelRule.KGlue
+            => RuleCategory.CatCubical,
+        KernelRule.KRefine | KernelRule.KRefineOmega |
+        KernelRule.KRefineIntro | KernelRule.KRefineErase
+            => RuleCategory.CatRefinement,
+        KernelRule.KQuotForm | KernelRule.KQuotIntro | KernelRule.KQuotElim
+            => RuleCategory.CatQuotient,
+        KernelRule.KInductive | KernelRule.KPos | KernelRule.KElim
+            => RuleCategory.CatInductive,
+        KernelRule.KSmt | KernelRule.KFwAx
+            => RuleCategory.CatSmtAxiom,
+        KernelRule.KEpsMu | KernelRule.KUniverseAscent | KernelRule.KRoundTrip |
+        KernelRule.KEpsilonOf | KernelRule.KAlphaOf | KernelRule.KModalBox |
+        KernelRule.KModalDiamond | KernelRule.KModalBigAnd | KernelRule.KShape |
+        KernelRule.KFlat | KernelRule.KSharp
+            => RuleCategory.CatDiakrisis,
+    }
+}

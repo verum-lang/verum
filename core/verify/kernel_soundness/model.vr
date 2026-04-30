@@ -1,0 +1,290 @@
+// =============================================================================
+// kernel_soundness.model — Verum-side inductive mirror of the kernel calculus
+// =============================================================================
+//
+// This module is the syntactic substrate that the kernel-soundness theorems
+// quantify over.  It MUST stay structurally faithful to the Rust-side
+// `verum_kernel::CoreTerm` / `CoreType` / `UniverseLevel` enums in
+// `crates/verum_kernel/src/term.rs:31-419` — every variant on the Rust side
+// has exactly one mirror constructor here, and the field names match.
+//
+// **Why mirror in Verum at all?**
+//
+// The Rust enum is the *implementation* of the kernel.  The Verum mirror is
+// the *meta-theoretic object* that the soundness theorem talks about.
+// Stating "every term the kernel checks is well-typed" is meaningful only
+// when the term-level inductive type is itself in the corpus.  This module
+// therefore holds the propositional view of the calculus that the
+// per-rule soundness lemmas in `theorems.vr` consume.
+//
+// **Faithfulness invariant.**
+//
+// The cross-export pipeline (`crates/verum_kernel_soundness_export/`)
+// walks this module and produces parallel `Inductive CoreTerm := …` blocks
+// in Coq + Lean.  If a variant drifts between Rust and Verum the export
+// still type-checks (the foreign checker doesn't care that Rust exists),
+// but the soundness claim becomes meaningless because the meta-theory is
+// no longer about the actual kernel.  The audit gate
+// `verum audit --kernel-soundness` checks the variant-name set agrees
+// between Rust and Verum and refuses to pass on drift.
+//
+// Source: `crates/verum_kernel/src/term.rs` schema-version v7 (#198).
+// =============================================================================
+
+module core.verify.kernel_soundness.model;
+
+// =============================================================================
+// UniverseLevel — `Type(i)` stratification
+// =============================================================================
+
+/// Universe-level expression — concrete, variable, successor, or a max
+/// of two sub-levels, plus the propositional universe `Prop`.
+///
+/// Mirror of `verum_kernel::UniverseLevel` (term.rs:407-418).
+public type UniverseLevel is
+    | Concrete { level: Int }
+    | Variable { name: Text }
+    | Succ { inner: Heap<UniverseLevel> }
+    | Max { left: Heap<UniverseLevel>, right: Heap<UniverseLevel> }
+    | Prop;
+
+/// Project: is this the propositional universe?  K-FwAx's side condition
+/// asks for axiom bodies to inhabit `Prop`; this is the canonical test.
+public pure fn universe_is_prop(u: UniverseLevel) -> Bool {
+    match u {
+        UniverseLevel.Prop => true,
+        _ => false,
+    }
+}
+
+/// Project: extract a concrete level if this is `Concrete(n)`, else None.
+/// Used by the kernel's universe-stratification check (K-Univ).
+public pure fn universe_concrete_level(u: UniverseLevel) -> Maybe<Int> {
+    match u {
+        UniverseLevel.Concrete { level } => Some(level),
+        _ => None,
+    }
+}
+
+// =============================================================================
+// FrameworkId — provenance for axioms (mirror of verum_kernel::FrameworkId)
+// =============================================================================
+
+/// Framework attribution for a `CoreTerm.Axiom`.  Every axiom records
+/// where it came from so `verum audit --framework-axioms` can enumerate
+/// the trusted base.
+public type FrameworkId is {
+    framework: Text,
+    citation: Text,
+};
+
+// =============================================================================
+// SmtCertificateRef — opaque handle to an SMT replay certificate
+// =============================================================================
+
+/// The kernel's `SmtProof(SmtCertificate)` carries the full certificate
+/// payload.  At the meta-theoretic layer we only need to know that *some*
+/// certificate exists and where it came from — the replay logic itself
+/// is at the Rust layer in `verum_kernel::replay_smt_cert`.
+///
+/// `solver_tag` records which backend produced the cert ("z3", "cvc5",
+/// …); `formula_hash` is a content hash of the proven formula so two
+/// distinct proofs of the same fact can be deduplicated by upstream
+/// audit.
+public type SmtCertificateRef is {
+    solver_tag: Text,
+    formula_hash: Text,
+};
+
+// =============================================================================
+// CoreTerm — the kernel's term language
+// =============================================================================
+
+/// A term in Verum-Core, the explicit typed calculus the kernel checks.
+///
+/// Variants are listed in the same order as `verum_kernel::CoreTerm`
+/// (term.rs:31-377) so a side-by-side review is mechanical.  Categories
+/// (mirroring the `KernelRule` enum at proof_tree.rs:694-787):
+///
+///   * **Structural-9**:        Var · Universe · Pi · Lam · App · Sigma ·
+///                              Pair · Fst · Snd
+///   * **Cubical-6**:           PathTy · PathOver · Refl · HComp · Transp ·
+///                              Glue
+///   * **Refinement-1**:        Refine
+///   * **Quotient-3**:          Quotient · QuotIntro · QuotElim
+///   * **Inductive-2**:         Inductive · Elim
+///   * **SMT/Axiom-2**:         SmtProof · Axiom
+///   * **Diakrisis-11**:        EpsilonOf · AlphaOf · ModalBox · ModalDiamond ·
+///                              ModalBigAnd · Shape · Flat · Sharp
+public type CoreTerm is
+    // ---- Structural ---------------------------------------------------------
+    | Var { name: Text }
+    | Universe { level: UniverseLevel }
+    | Pi {
+        binder: Text,
+        domain: Heap<CoreTerm>,
+        codomain: Heap<CoreTerm>,
+      }
+    | Lam {
+        binder: Text,
+        domain: Heap<CoreTerm>,
+        body: Heap<CoreTerm>,
+      }
+    | App {
+        head: Heap<CoreTerm>,
+        arg: Heap<CoreTerm>,
+      }
+    | Sigma {
+        binder: Text,
+        fst_ty: Heap<CoreTerm>,
+        snd_ty: Heap<CoreTerm>,
+      }
+    | Pair {
+        fst: Heap<CoreTerm>,
+        snd: Heap<CoreTerm>,
+      }
+    | Fst { inner: Heap<CoreTerm> }
+    | Snd { inner: Heap<CoreTerm> }
+    // ---- Cubical ------------------------------------------------------------
+    | PathTy {
+        carrier: Heap<CoreTerm>,
+        lhs: Heap<CoreTerm>,
+        rhs: Heap<CoreTerm>,
+      }
+    | PathOver {
+        motive: Heap<CoreTerm>,
+        path: Heap<CoreTerm>,
+        lhs: Heap<CoreTerm>,
+        rhs: Heap<CoreTerm>,
+      }
+    | Refl { value: Heap<CoreTerm> }
+    | HComp {
+        phi: Heap<CoreTerm>,
+        walls: Heap<CoreTerm>,
+        base: Heap<CoreTerm>,
+      }
+    | Transp {
+        path: Heap<CoreTerm>,
+        regular: Heap<CoreTerm>,
+        value: Heap<CoreTerm>,
+      }
+    | Glue {
+        carrier: Heap<CoreTerm>,
+        phi: Heap<CoreTerm>,
+        fiber: Heap<CoreTerm>,
+        equiv: Heap<CoreTerm>,
+      }
+    // ---- Refinement ---------------------------------------------------------
+    | Refine {
+        base: Heap<CoreTerm>,
+        binder: Text,
+        predicate: Heap<CoreTerm>,
+      }
+    // ---- Quotient -----------------------------------------------------------
+    | Quotient {
+        base: Heap<CoreTerm>,
+        equiv: Heap<CoreTerm>,
+      }
+    | QuotIntro {
+        value: Heap<CoreTerm>,
+        base: Heap<CoreTerm>,
+        equiv: Heap<CoreTerm>,
+      }
+    | QuotElim {
+        scrutinee: Heap<CoreTerm>,
+        motive: Heap<CoreTerm>,
+        case_fn: Heap<CoreTerm>,
+      }
+    // ---- Inductive ----------------------------------------------------------
+    | Inductive {
+        path: Text,
+        args: List<CoreTerm>,
+      }
+    | Elim {
+        scrutinee: Heap<CoreTerm>,
+        motive: Heap<CoreTerm>,
+        cases: List<CoreTerm>,
+      }
+    // ---- SMT / Axiom --------------------------------------------------------
+    | SmtProof { cert: SmtCertificateRef }
+    | Axiom {
+        name: Text,
+        ty: Heap<CoreTerm>,
+        framework: FrameworkId,
+      }
+    // ---- Diakrisis ε / α duality -------------------------------------------
+    | EpsilonOf { articulation: Heap<CoreTerm> }
+    | AlphaOf { enactment: Heap<CoreTerm> }
+    // ---- Modal-depth carriers ----------------------------------------------
+    | ModalBox { inner: Heap<CoreTerm> }
+    | ModalDiamond { inner: Heap<CoreTerm> }
+    | ModalBigAnd { components: List<Heap<CoreTerm>> }
+    // ---- Schreiber DCCT cohesive triple-adjunction ∫ ⊣ ♭ ⊣ ♯ ----------------
+    | Shape { inner: Heap<CoreTerm> }
+    | Flat { inner: Heap<CoreTerm> }
+    | Sharp { inner: Heap<CoreTerm> };
+
+// =============================================================================
+// CoreType — structural type heads (mirror of verum_kernel::CoreType)
+// =============================================================================
+
+/// A structural view of a type used by kernel diagnostics.  This is a
+/// coarse projection from `CoreTerm` (when in `Universe` position) onto
+/// the constructor head, suitable for "expected Pi, got Int"-style
+/// reports without copying the underlying term.
+///
+/// Mirror of `verum_kernel::CoreType` (term.rs:386-403).
+public type CoreType is
+    | UniverseTy { level: UniverseLevel }
+    | PiTy
+    | SigmaTy
+    | PathTyHead
+    | RefineTy
+    | GlueTy
+    | InductiveTy { path: Text }
+    | OtherTy;
+
+// =============================================================================
+// Project: term → type-head reduction
+// =============================================================================
+
+/// Map a fully-elaborated `CoreTerm` to its `CoreType` head.  This is a
+/// pure structural projection — it doesn't compute, normalise, or
+/// inspect sub-terms.  Used by error reporting and by the K-Univ
+/// stratification check in `theorems.vr`.
+public pure fn core_term_head(t: CoreTerm) -> CoreType {
+    match t {
+        CoreTerm.Universe { level } => CoreType.UniverseTy { level: level },
+        CoreTerm.Pi { binder: _, domain: _, codomain: _ } => CoreType.PiTy,
+        CoreTerm.Sigma { binder: _, fst_ty: _, snd_ty: _ } => CoreType.SigmaTy,
+        CoreTerm.PathTy { carrier: _, lhs: _, rhs: _ } => CoreType.PathTyHead,
+        CoreTerm.PathOver { motive: _, path: _, lhs: _, rhs: _ } => CoreType.PathTyHead,
+        CoreTerm.Refine { base: _, binder: _, predicate: _ } => CoreType.RefineTy,
+        CoreTerm.Glue { carrier: _, phi: _, fiber: _, equiv: _ } => CoreType.GlueTy,
+        CoreTerm.Inductive { path, args: _ } => CoreType.InductiveTy { path: path },
+        _ => CoreType.OtherTy,
+    }
+}
+
+// =============================================================================
+// Module-export tag: variant census
+// =============================================================================
+
+/// Total number of `CoreTerm` constructors.  Cross-export emitters use
+/// this constant in a snapshot test that fails loudly when the Verum
+/// mirror gains or loses a constructor without the Rust side following
+/// (or vice versa).  Every increment requires touching `term.rs` AND
+/// every per-rule lemma in `theorems.vr` — making the drift impossible
+/// to land silently.
+///
+/// Categories: Structural 9 + Cubical 6 + Refinement 1 + Quotient 3 +
+///             Inductive 2 + SMT/Axiom 2 + Diakrisis-ε/α 2 +
+///             Modal-depth 3 + Schreiber 3 = 31.
+public const CORE_TERM_VARIANT_COUNT: Int = 31;
+
+/// Total number of `CoreType` constructors.  Same drift-detection role
+/// as `CORE_TERM_VARIANT_COUNT`.
+///
+/// Variants: UniverseTy + PiTy + SigmaTy + PathTyHead + RefineTy +
+///           GlueTy + InductiveTy + OtherTy = 8.
+public const CORE_TYPE_VARIANT_COUNT: Int = 8;
