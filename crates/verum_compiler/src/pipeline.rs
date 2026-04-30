@@ -2884,17 +2884,41 @@ impl<'s> CompilationPipeline<'s> {
                 );
             }
 
-            for path in &module_paths {
-                // Only verify modules that need it (changed or have changed dependencies)
-                if !modules_to_verify.contains(path) {
-                    continue;
-                }
+            // Parallel per-module verification (#100). `phase_verify`
+            // is `&self` post-#100 audit and constructs its SMT
+            // contexts (Z3 + CVC5) per call, so each rayon worker
+            // owns its solver state. Inner per-function loop is also
+            // parallel; the two layers compose into work-stealing
+            // across both axes when project has multiple modules.
+            let verify_workset: Vec<(Text, Arc<Module>)> = module_paths
+                .iter()
+                .filter(|path| modules_to_verify.contains(*path))
+                .filter_map(|path| {
+                    self.modules
+                        .get(path)
+                        .map(|module_rc| (path.clone(), Arc::clone(module_rc)))
+                })
+                .collect();
 
-                debug!("  Verifying: {}", path.as_str());
-                // Clone Arc (cheap) to release borrow before calling mutable method
-                let module_rc = self.modules.get(path).map(Arc::clone);
-                if let Some(module) = module_rc {
-                    self.phase_verify(&module)?;
+            let parallel_verify_outer =
+                std::env::var("VERUM_NO_PARALLEL_VERIFY").is_err();
+
+            if parallel_verify_outer && verify_workset.len() > 1 {
+                use rayon::prelude::*;
+                debug!(
+                    "  Verifying {} modules in parallel (rayon outer)",
+                    verify_workset.len()
+                );
+                verify_workset
+                    .par_iter()
+                    .try_for_each(|(path, module)| -> Result<()> {
+                        debug!("  Verifying: {}", path.as_str());
+                        self.phase_verify(module)
+                    })?;
+            } else {
+                for (path, module) in &verify_workset {
+                    debug!("  Verifying: {}", path.as_str());
+                    self.phase_verify(module)?;
                 }
             }
         }
@@ -7356,12 +7380,11 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Phase 4: Refinement verification
-    fn phase_verify(&mut self, module: &Module) -> Result<()> {
+    fn phase_verify(&self, module: &Module) -> Result<()> {
         let _bc = verum_error::breadcrumb::enter("compiler.phase.verify", "");
         debug!("Running refinement verification");
 
         let start = Instant::now();
-        let mut cost_tracker = CostTracker::new();
         let _smt_ctx = SmtContext::new();
 
         // Framework-hygiene preamble (#190): R1+R2+R3 discipline
@@ -7440,26 +7463,52 @@ impl<'s> CompilationPipeline<'s> {
             num_to_verify
         );
 
-        let mut num_verified = 0;
-        let mut num_failed = 0;
-        let mut num_timeout = 0;
+        // ───────────────────────────────────────────────────────────
+        // Parallel per-function verification (#100, Z3 + CVC5).
+        //
+        // Both backends are constructed per call inside
+        // `verify_function_refinements` (`SmtContext::with_config(…)`
+        // + `SmtRefinementVerifier::with_mode(…)`), so each rayon
+        // worker gets its own thread-confined Z3 / CVC5 context. The
+        // shared session-level `routing_stats` is `Arc<RoutingStats>`
+        // with internally-atomic counters, safe to fan out.
+        //
+        // Counters and `CostTracker` are accumulated under a single
+        // Mutex held only across the per-record append (microsecond-
+        // scale) — ~zero contention versus the millisecond/second
+        // SMT calls each worker spends.
+        //
+        // Opt-out: `VERUM_NO_PARALLEL_VERIFY=1` falls back to the
+        // sequential loop. Useful for debugging non-deterministic
+        // diagnostic ordering or pinning down a parallel-only
+        // regression. Closure-cache and routing-stats are unaffected
+        // — both are designed for concurrent access.
+        // ───────────────────────────────────────────────────────────
+        let timeout_ms = self.session.options().smt_timeout_secs * 1000;
+        let timeout_secs = self.session.options().smt_timeout_secs;
+        let parallel_verify = std::env::var("VERUM_NO_PARALLEL_VERIFY").is_err();
 
-        for func in functions_to_verify {
+        let work: Vec<&verum_ast::decl::FunctionDecl> =
+            functions_to_verify.iter().copied().collect();
+
+        let aggregate = std::sync::Mutex::new((
+            0usize, // num_verified
+            0usize, // num_failed
+            0usize, // num_timeout
+            CostTracker::new(),
+        ));
+
+        let verify_one = |func: &verum_ast::decl::FunctionDecl| {
             debug!("Verifying function: {}", func.name.name);
 
             let verify_start = Instant::now();
-            let timeout_ms = self.session.options().smt_timeout_secs * 1000;
 
             // K-rule preamble (#187): walk the function's refinement
             // types and run the kernel rules (currently
             // K-Refine-omega) BEFORE invoking SMT. K-rule failures
-            // are hard formation errors per the trusted-base
-            // contract; short-circuiting saves the SMT round and
-            // surfaces a sharper diagnostic. This is the
-            // user-facing wiring of KernelRecheck — every `verum
-            // build` / `verum verify` invocation now re-checks
-            // refinement-type formation against the trusted kernel
-            // before any SMT proof is attempted.
+            // are hard formation errors per the trusted-base contract;
+            // short-circuiting saves the SMT round and surfaces a
+            // sharper diagnostic.
             let kernel_outcomes =
                 verum_verification::KernelRecheck::recheck_function(func);
             let mut kernel_failure: Option<(verum_common::Text, String)> = None;
@@ -7470,7 +7519,6 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
             if let Some((label, msg)) = kernel_failure {
-                num_failed += 1;
                 let diag = verum_diagnostics::DiagnosticBuilder::error()
                     .message(format!(
                         "kernel-recheck failed for '{}': {} — {}",
@@ -7480,65 +7528,65 @@ impl<'s> CompilationPipeline<'s> {
                     ))
                     .build();
                 self.session.emit_diagnostic(diag);
-                continue;
+                let mut g = aggregate.lock().unwrap();
+                g.1 += 1;
+                return;
             }
 
-            // Perform actual SMT-based refinement verification
+            // Perform actual SMT-based refinement verification.
             let verification_result = self.verify_function_refinements(func, timeout_ms);
-
             let verify_elapsed = verify_start.elapsed();
+            let func_name_text: verum_common::Text =
+                func.name.as_str().to_string().into();
 
             match verification_result {
                 Ok(true) => {
-                    num_verified += 1;
                     debug!(
                         "Verified function '{}' in {:.2}ms",
                         func.name.name,
                         verify_elapsed.as_millis()
                     );
-
-                    // Track successful verification cost
-                    cost_tracker.record(verum_smt::VerificationCost::new(
-                        func.name.as_str().to_string().into(),
+                    let mut g = aggregate.lock().unwrap();
+                    g.0 += 1;
+                    g.3.record(verum_smt::VerificationCost::new(
+                        func_name_text,
                         verify_elapsed,
                         true,
                     ));
                 }
                 Ok(false) => {
-                    num_failed += 1;
-                    // Diagnostic already emitted by verify_function_refinements
-
-                    // Track failed verification cost
-                    cost_tracker.record(verum_smt::VerificationCost::new(
-                        func.name.as_str().to_string().into(),
+                    let mut g = aggregate.lock().unwrap();
+                    g.1 += 1;
+                    g.3.record(verum_smt::VerificationCost::new(
+                        func_name_text,
                         verify_elapsed,
                         false,
                     ));
                 }
                 Err(e) => {
-                    // Check if it's a timeout
-                    if verify_elapsed.as_secs() > self.session.options().smt_timeout_secs {
-                        num_timeout += 1;
+                    if verify_elapsed.as_secs() > timeout_secs {
                         warn!("Verification timeout for function: {}", func.name.name);
-
-                        // Emit warning diagnostic
                         let diag = DiagnosticBuilder::new(Severity::Warning)
                             .message(format!(
                                 "Verification timeout for function '{}' ({}s > {}s). Falling back to runtime checks.",
                                 func.name.name,
                                 verify_elapsed.as_secs(),
-                                self.session.options().smt_timeout_secs
+                                timeout_secs
                             ))
                             .build();
                         self.session.emit_diagnostic(diag);
+                        let mut g = aggregate.lock().unwrap();
+                        g.2 += 1;
+                        g.3.record(verum_smt::VerificationCost::new(
+                            func_name_text,
+                            verify_elapsed,
+                            false,
+                        ));
                     } else {
-                        num_failed += 1;
                         warn!(
                             "Verification error for function '{}': {}",
                             func.name.name, e
                         );
-
-                        // Emit error diagnostic
                         let diag = DiagnosticBuilder::new(Severity::Error)
                             .message(format!(
                                 "Verification error for function '{}': {}",
@@ -7546,17 +7594,33 @@ impl<'s> CompilationPipeline<'s> {
                             ))
                             .build();
                         self.session.emit_diagnostic(diag);
+                        let mut g = aggregate.lock().unwrap();
+                        g.1 += 1;
+                        g.3.record(verum_smt::VerificationCost::new(
+                            func_name_text,
+                            verify_elapsed,
+                            false,
+                        ));
                     }
-
-                    // Track error cost
-                    cost_tracker.record(verum_smt::VerificationCost::new(
-                        func.name.as_str().to_string().into(),
-                        verify_elapsed,
-                        false,
-                    ));
                 }
             }
+        };
+
+        if parallel_verify && work.len() > 1 {
+            use rayon::prelude::*;
+            debug!(
+                "  Verifying {} functions in parallel (rayon, Z3+CVC5)",
+                work.len()
+            );
+            work.par_iter().copied().for_each(verify_one);
+        } else {
+            for func in &work {
+                verify_one(func);
+            }
         }
+
+        let (num_verified, num_failed, num_timeout, cost_tracker) =
+            aggregate.into_inner().unwrap();
 
         // Phase 4b: Verify theorem/lemma/axiom proofs via SMT
         self.verify_theorem_proofs(module)?;
@@ -7612,7 +7676,7 @@ impl<'s> CompilationPipeline<'s> {
     /// elevate them to errors.
     ///
     /// Reference specification: `docs/architecture/model-theoretic-semantics.md`.
-    fn verify_impl_axioms_for_module(&mut self, module: &Module) -> Result<()> {
+    fn verify_impl_axioms_for_module(&self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::verify_impl_axioms;
         use verum_ast::decl::{ImplKind, TypeDeclBody};
 
@@ -7717,7 +7781,7 @@ impl<'s> CompilationPipeline<'s> {
     /// - Term proofs → Z3 formula translation + satisfiability check
     /// - Structured proofs → Weakest precondition calculus
     /// - Method proofs → Induction/cases via WP engine
-    fn verify_theorem_proofs(&mut self, module: &Module) -> Result<()> {
+    fn verify_theorem_proofs(&self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::{
             build_refinement_alias_map, register_module_lemmas,
             verify_proof_body_with_aliases, ProofVerificationResult,
@@ -8022,7 +8086,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// AST-level bounds statistics; actual elimination happens at MIR level via
     /// escape analysis and CBGR check elimination in verification_phase.rs.
-    fn run_bounds_elimination_analysis(&mut self, module: &Module) -> Result<()> {
+    fn run_bounds_elimination_analysis(&self, module: &Module) -> Result<()> {
         debug!("Running AST-level bounds statistics collection");
         let start = Instant::now();
 
@@ -8167,7 +8231,7 @@ impl<'s> CompilationPipeline<'s> {
     /// types, generates assertions, and verifies constraints. Fast-path for syntactic
     /// subsumption; falls back to Z3 for complex cases. Timeout-bounded (10-500ms).
     fn verify_function_refinements(
-        &mut self,
+        &self,
         func: &verum_ast::decl::FunctionDecl,
         timeout_ms: u64,
     ) -> Result<bool> {
