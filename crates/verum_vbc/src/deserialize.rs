@@ -90,10 +90,39 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
 /// Closes round-1 §3.1 + round-2 §3.1 of the red-team review and
 /// activates the previously-INERT `ContentHashMismatch` defense.
 pub fn deserialize_module_validated(data: &[u8]) -> VbcResult<VbcModule> {
+    deserialize_module_validated_with_options(data, &crate::validate::ValidationOptions::strict())
+}
+
+/// Variant of [`deserialize_module_validated`] that honors
+/// [`ValidationOptions::skip_hash_check`] and
+/// [`ValidationOptions::skip_bytecode_validation`].
+///
+/// Pre-fix the only validated entry point invoked
+/// `verify_content_hash` unconditionally — `ValidationOptions::fast()`
+/// (which sets both skip flags) had no way to actually skip hash
+/// verification because no caller threaded the options through. This
+/// variant closes the gap: callers wanting the inexpensive fast-path
+/// pass `ValidationOptions::fast()` and the loader honors both flags
+/// in lockstep.
+///
+/// Caveat: skipping hash verification is a security trade-off, not a
+/// validity trade-off — the hash is the only on-disk artefact that
+/// flags tampering. Reserve `fast()` for in-process loads from a
+/// freshly-serialized module where the bytes can't have been modified
+/// since serialization. Cross-process / on-disk loads should keep the
+/// strict default.
+pub fn deserialize_module_validated_with_options(
+    data: &[u8],
+    options: &crate::validate::ValidationOptions,
+) -> VbcResult<VbcModule> {
     let module = deserialize_module(data)?;
-    verify_content_hash(data, module.header.content_hash)?;
-    verify_dependency_hash(&module)?;
-    crate::validate::validate_module(&module)?;
+    if !options.skip_hash_check {
+        verify_content_hash(data, module.header.content_hash)?;
+        verify_dependency_hash(&module)?;
+    }
+    if !options.skip_bytecode_validation {
+        crate::validate::validate_module_with_options(&module, options)?;
+    }
     Ok(module)
 }
 
@@ -1438,5 +1467,136 @@ mod tests {
                 other.err()
             ),
         }
+    }
+
+    /// Build a module large enough that the post-header payload
+    /// has bytes safely past the section table for tamper tests.
+    fn build_big_module() -> VbcModule {
+        let mut module = VbcModule::new("big_module_for_hash_tamper".to_string());
+        // Pad with constants and strings so the compressed payload
+        // grows beyond the section / table area. The exact tamper
+        // offset isn't important — we just need a byte we know is
+        // in the hashed payload region.
+        for i in 0..32 {
+            module.add_constant(Constant::Int(i as i64));
+            module.intern_string(&format!("padding_string_{}", i));
+        }
+        module
+    }
+
+    /// `deserialize_module_validated` (strict-default) catches
+    /// content-hash tampering. Pin: tampering the LAST byte of the
+    /// file lands in the compressed-payload region and surfaces as
+    /// `ContentHashMismatch`. Tampering the last byte is robust
+    /// against header-layout evolution — it can never fall inside
+    /// a fixed-size header field.
+    #[test]
+    fn validated_strict_rejects_payload_tampering() {
+        let mut bytes = serialize_module(&build_big_module()).unwrap();
+        // Corrupt the recorded content_hash field at offset 72 in the
+        // header (per format::HEADER_SIZE layout: magic+version+flags+
+        // 6 sections + content_hash@72 + dep_hash@80 + reserved@88).
+        // The structural decode reads the header verbatim, so flipping
+        // a hash byte succeeds at decode but trips verify_content_hash
+        // — exactly the gate we're pinning.
+        bytes[72] ^= 0xFF;
+
+        let result = deserialize_module_validated(&bytes);
+        assert!(
+            matches!(result, Err(VbcError::ContentHashMismatch { .. })),
+            "tampered payload must be rejected by strict default, got {:?}",
+            result
+        );
+    }
+
+    /// `deserialize_module_validated_with_options(_, fast())`
+    /// honors `skip_hash_check = true` — the same tampered bytes
+    /// that the strict path rejects now pass through (or fail at a
+    /// later step that ISN'T ContentHashMismatch). Headline
+    /// regression: pre-fix the fast preset had no path that could
+    /// actually skip hash verification because no caller threaded
+    /// the options through.
+    #[test]
+    fn validated_with_options_honors_skip_hash_check() {
+        use crate::validate::ValidationOptions;
+        let mut bytes = serialize_module(&build_big_module()).unwrap();
+        // Corrupt the recorded content_hash field at offset 72 in the
+        // header (per format::HEADER_SIZE layout: magic+version+flags+
+        // 6 sections + content_hash@72 + dep_hash@80 + reserved@88).
+        // The structural decode reads the header verbatim, so flipping
+        // a hash byte succeeds at decode but trips verify_content_hash
+        // — exactly the gate we're pinning.
+        bytes[72] ^= 0xFF;
+
+        // Strict default rejects (companion to the previous test).
+        assert!(matches!(
+            deserialize_module_validated(&bytes),
+            Err(VbcError::ContentHashMismatch { .. })
+        ));
+
+        // Fast preset honors the skip — must NOT be ContentHashMismatch
+        // (the gate we just confirmed is bypassed). Decompression
+        // may still fail on the corrupt last byte, but that's a
+        // distinct error class.
+        let result = deserialize_module_validated_with_options(
+            &bytes,
+            &ValidationOptions::fast(),
+        );
+        assert!(
+            !matches!(result, Err(VbcError::ContentHashMismatch { .. })),
+            "fast() must skip hash verification — got ContentHashMismatch \
+             which means the skip flag was ignored"
+        );
+    }
+
+    /// `validated_with_options(_, strict())` matches the legacy
+    /// `validated` entry-point's behaviour: rejects tampering with
+    /// the same error class. Locks the equivalence so changes to
+    /// one path don't silently diverge from the other.
+    #[test]
+    fn validated_with_options_strict_matches_legacy() {
+        use crate::validate::ValidationOptions;
+        let mut bytes = serialize_module(&build_big_module()).unwrap();
+        // Corrupt the recorded content_hash field at offset 72 in the
+        // header (per format::HEADER_SIZE layout: magic+version+flags+
+        // 6 sections + content_hash@72 + dep_hash@80 + reserved@88).
+        // The structural decode reads the header verbatim, so flipping
+        // a hash byte succeeds at decode but trips verify_content_hash
+        // — exactly the gate we're pinning.
+        bytes[72] ^= 0xFF;
+
+        let legacy = deserialize_module_validated(&bytes);
+        let strict = deserialize_module_validated_with_options(
+            &bytes,
+            &ValidationOptions::strict(),
+        );
+
+        // Both must produce ContentHashMismatch — same reject reason.
+        assert!(matches!(legacy, Err(VbcError::ContentHashMismatch { .. })));
+        assert!(matches!(strict, Err(VbcError::ContentHashMismatch { .. })));
+    }
+
+    /// Untampered bytes must round-trip through the with-options
+    /// entry point under both strict() and fast() — the skip flag
+    /// should never produce a SPURIOUS rejection on valid input.
+    #[test]
+    fn validated_with_options_round_trips_clean_bytes() {
+        use crate::validate::ValidationOptions;
+        let module = build_big_module();
+        let bytes = serialize_module(&module).unwrap();
+
+        let strict_loaded = deserialize_module_validated_with_options(
+            &bytes,
+            &ValidationOptions::strict(),
+        )
+        .expect("clean bytes must load under strict");
+        assert_eq!(strict_loaded.name, module.name);
+
+        let fast_loaded = deserialize_module_validated_with_options(
+            &bytes,
+            &ValidationOptions::fast(),
+        )
+        .expect("clean bytes must load under fast");
+        assert_eq!(fast_loaded.name, module.name);
     }
 }
