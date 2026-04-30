@@ -105,6 +105,7 @@ mod coherence;
 mod compile_orchestration;
 mod dispatch;
 mod impl_axioms;
+mod gpu_detect;
 mod interpreter;
 mod macros;
 pub use macros::reset_test_isolation;
@@ -4389,80 +4390,6 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// `extern {}` blocks: warn-only (stdlib compatibility).
     /// `ffi {}` blocks: strict errors (user-written contracts must be correct).
-    /// Scan a parsed module for `@device(gpu)` or `@device(GPU)` attributes on
-    /// functions. Returns true if any GPU kernel annotation is found, enabling
-    /// automatic GPU compilation without an explicit `--gpu` flag.
-    ///
-    /// This runs after Phase 2 (parsing) and before type checking so that the
-    /// backend selection (CPU-only vs CPU+GPU) can be informed early.
-    fn detect_gpu_kernels(module: &Module) -> bool {
-        for item in module.items.iter() {
-            // Check item-level attributes (outer attributes on the item)
-            if Self::has_device_gpu_attr(&item.attributes) {
-                return true;
-            }
-            // Check function-level attributes (on the FunctionDecl itself)
-            if let ItemKind::Function(ref func) = item.kind {
-                if Self::has_device_gpu_attr(&func.attributes) {
-                    return true;
-                }
-            }
-            // Check functions inside impl blocks
-            if let ItemKind::Impl(ref impl_decl) = item.kind {
-                for impl_item in impl_decl.items.iter() {
-                    if Self::has_device_gpu_attr(&impl_item.attributes) {
-                        return true;
-                    }
-                    if let verum_ast::decl::ImplItemKind::Function(ref func) = impl_item.kind {
-                        if Self::has_device_gpu_attr(&func.attributes) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    /// Check if a list of attributes contains `@device(gpu)` or `@device(GPU)`.
-    fn has_device_gpu_attr(attrs: &List<verum_ast::Attribute>) -> bool {
-        use verum_ast::expr::ExprKind;
-        use verum_ast::ty::PathSegment;
-
-        for attr in attrs.iter() {
-            if attr.name.as_str() != "device" {
-                continue;
-            }
-            // Check the first argument for "gpu" or "GPU" identifier
-            if let Maybe::Some(ref args) = attr.args {
-                if let Some(first_arg) = args.first() {
-                    match &first_arg.kind {
-                        // @device(gpu) — parsed as a path with single segment
-                        ExprKind::Path(path) => {
-                            if let Some(seg) = path.segments.first() {
-                                if let PathSegment::Name(ident) = seg {
-                                    let name = ident.name.as_str();
-                                    if name.eq_ignore_ascii_case("gpu") {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                        // @device("gpu") — parsed as a string literal
-                        ExprKind::Literal(lit) => {
-                            if let verum_ast::literal::LiteralKind::Text(s) = &lit.kind {
-                                if s.as_str().eq_ignore_ascii_case("gpu") {
-                                    return true;
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        false
-    }
 
     fn phase_ffi_validation(&self, module: &Module) -> Result<()> {
         use crate::phases::ffi_boundary::validate_module_ffi;
