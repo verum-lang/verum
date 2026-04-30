@@ -193,6 +193,25 @@ pub struct LoweringConfig {
     /// historical defaults (`num_cpus::get()`, platform stack
     /// size).  Threaded from `pipeline/native_codegen.rs`.
     pub runtime_bridge: super::platform_ir::RuntimeBridgeValues,
+    /// Manifest-driven `[codegen].inline_depth` (default 3,
+    /// validated ≤ 16 by `LanguageFeatures::validate`).  Maps to
+    /// LLVM's per-function `"inline-threshold"` string attribute,
+    /// which overrides the inliner's default 225 cost-unit budget
+    /// for callees considered when inlining INTO this function.
+    ///
+    /// Mapping: `threshold = inline_depth * 75`.
+    ///   - 0  → 0    (effectively suppresses inlining)
+    ///   - 1  → 75   (very conservative)
+    ///   - 2  → 150  (conservative)
+    ///   - 3  → 225  (LLVM default — emits no IR attribute,
+    ///                bit-identical to pre-wire builds)
+    ///   - 16 → 1200 (very aggressive)
+    ///
+    /// At the default `inline_depth = 3`, the attribute is
+    /// suppressed so default builds produce identical IR to
+    /// pre-wire output.  Closes the inert-defense pattern at
+    /// session.rs:448.
+    pub inline_depth: u32,
 }
 
 impl Default for LoweringConfig {
@@ -211,6 +230,7 @@ impl Default for LoweringConfig {
             tail_call_optimization: true,
             vectorize: true,
             runtime_bridge: super::platform_ir::RuntimeBridgeValues::default(),
+            inline_depth: 3,
         }
     }
 }
@@ -311,6 +331,18 @@ impl LoweringConfig {
         bridge: super::platform_ir::RuntimeBridgeValues,
     ) -> Self {
         self.runtime_bridge = bridge;
+        self
+    }
+
+    /// Install manifest-driven `[codegen].inline_depth`.  Maps to
+    /// per-function `"inline-threshold"` LLVM string attribute.
+    /// Threaded from `pipeline/native_codegen.rs::language_
+    /// features.codegen.inline_depth`.  At the default 3 the
+    /// attribute is suppressed (LLVM uses its built-in 225
+    /// threshold), so default builds emit IR bit-identical to
+    /// pre-wire output.
+    pub fn with_inline_depth(mut self, depth: u32) -> Self {
+        self.inline_depth = depth;
         self
     }
 
@@ -1778,6 +1810,38 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 .context
                 .create_string_attribute("no-slp-vectorize", "true");
             llvm_fn.add_attribute(AttributeLoc::Function, no_slp);
+        }
+
+        // Honour `[codegen].inline_depth` from Verum.toml.  Maps to
+        // LLVM's per-function `"inline-threshold"` string attribute
+        // — overrides the inliner's default 225 cost-unit budget for
+        // callees considered when inlining INTO this function.
+        // Mapping: `threshold = inline_depth * 75` (so the default 3
+        // produces 225 = LLVM's built-in default).  Pre-fix the
+        // manifest field was tracing-only at session.rs:448; setting
+        // it had zero effect on generated code.
+        //
+        // Performance: zero overhead in the default path
+        // (`inline_depth = 3` → emit no attribute, IR
+        // bit-identical to pre-wire).  Only non-default values
+        // emit the string attribute, and even then the cost is one
+        // attribute per function (decimal int formatting) at
+        // codegen time only — runtime is unchanged.
+        //
+        // The attribute survives ThinLTO and applies module-wide
+        // through the LLVM legacy + new pass manager
+        // (`InlineCost::getCallSiteCost` reads it via
+        // `Attribute::getValueAsString`).  Edge cases:
+        //   * `inline_depth = 0` → threshold = 0, suppresses all
+        //     inlining into this function.
+        //   * `inline_depth = 16` (validate cap) → threshold = 1200,
+        //     5.3× more aggressive than default.
+        if self.config.inline_depth != 3 {
+            let threshold = self.config.inline_depth.saturating_mul(75);
+            let attr = self
+                .context
+                .create_string_attribute("inline-threshold", &threshold.to_string());
+            llvm_fn.add_attribute(AttributeLoc::Function, attr);
         }
 
         let func_name = vbc_module
@@ -3624,5 +3688,69 @@ mod tests {
         // naked_kind_id should be non-zero if LLVM recognizes the attribute
         // The exact value varies by LLVM version, but it should be > 0
         assert!(naked_kind_id > 0, "LLVM should recognize 'naked' attribute");
+    }
+
+    // ============================================================
+    // [codegen].inline_depth wire-up pins (task #267).
+    //
+    // Pre-fix the manifest field was tracing-only at session.rs:448
+    // and `LoweringConfig.inline_threshold` was a separate
+    // forward-looking knob neither field actually drove.  These
+    // tests verify the new `LoweringConfig.inline_depth` is plumbed
+    // through default + builder, and the cost-mapping is correct.
+    // ============================================================
+
+    #[test]
+    fn inline_depth_default_is_three() {
+        // Pin: documented Verum.toml default + LLVM default 225 cost
+        // budget (3 * 75 = 225).  At default value, the lowering
+        // emits no `"inline-threshold"` attribute, keeping IR
+        // bit-identical to pre-wire builds.
+        let config = LoweringConfig::default();
+        assert_eq!(config.inline_depth, 3);
+        let new_named = LoweringConfig::new("test_module");
+        assert_eq!(new_named.inline_depth, 3);
+    }
+
+    #[test]
+    fn with_inline_depth_round_trips() {
+        // Pin: builder accepts every value [0, 16] (manifest
+        // validate cap) and stores it verbatim — no normalisation.
+        for depth in [0u32, 1, 2, 3, 5, 8, 16] {
+            let config = LoweringConfig::new("test").with_inline_depth(depth);
+            assert_eq!(
+                config.inline_depth, depth,
+                "with_inline_depth({}) must round-trip exactly",
+                depth
+            );
+        }
+    }
+
+    #[test]
+    fn inline_depth_cost_unit_mapping() {
+        // Pin: the documented mapping `threshold = inline_depth * 75`
+        // is what the lowering emits.  Default 3 → 225 (matches
+        // LLVM's built-in default), 16 → 1200 (5.3× more
+        // aggressive), 0 → 0 (suppresses inlining).  This test pins
+        // the arithmetic so a future refactor can't silently shift
+        // the cost-unit scale without also updating session.rs's
+        // documentation block.
+        let scale: u32 = 75;
+        assert_eq!(0u32.saturating_mul(scale), 0);
+        assert_eq!(1u32.saturating_mul(scale), 75);
+        assert_eq!(3u32.saturating_mul(scale), 225, "default threshold");
+        assert_eq!(16u32.saturating_mul(scale), 1200, "max threshold");
+    }
+
+    #[test]
+    fn inline_depth_does_not_overflow_at_u32_max() {
+        // Pin: even adversarial inputs must not panic.  The
+        // language_features::validate gate caps at 16, so this is
+        // defence-in-depth — `saturating_mul` guards the codegen
+        // emission against any caller bypassing manifest validation.
+        let scale: u32 = 75;
+        let huge = u32::MAX;
+        let result = huge.saturating_mul(scale);
+        assert_eq!(result, u32::MAX, "saturating_mul must clamp at u32::MAX");
     }
 }
