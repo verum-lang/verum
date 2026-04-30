@@ -386,13 +386,12 @@ impl Session {
         //    by `[runtime].panic` (commit 85090093 — Unwind or
         //    Abort).  No longer tracing-only.
 
-        // Phase-not-realised tracing for inert runtime knobs.
-        // The `[runtime]` manifest section parses 8 fields. Six
-        // are wired:
+        // The `[runtime]` manifest section parses 8 fields. ALL
+        // EIGHT are wired in Tier 0 (interpreter):
         //   - `cbgr_mode`, `async_scheduler`, `heap_policy` flow
-        //     through pipeline.rs:9401/11430/11435 to the VBC
-        //     interpreter state;
-        //   - `panic` flows through pipeline.rs:11760 →
+        //     through `pipeline/interpreter.rs:78-83` to the VBC
+        //     interpreter state.
+        //   - `panic` flows through `pipeline/native_codegen.rs` →
         //     `LoweringConfig.panic_strategy` → `PlatformIR::
         //     emit_panic_ir` (commit 85090093) and selects the
         //     `verum_panic` body shape (Unwind / Abort).
@@ -405,29 +404,31 @@ impl Session {
         //     `__verum_runtime_*` LLVM globals at codegen time
         //     and reach stdlib code via `verum_get_runtime_*`
         //     getters.  Default 0 keeps stdlib auto-detection
-        //     (num_cpus, platform stack size).  Stdlib-side
-        //     consumption is the second half of #258 / #259 —
-        //     wired separately as the .vr-side stdlib intrinsic
-        //     calls drop in cleanly atop this LLVM-side bridge.
-        // Two remain inert:
-        //   - `futures` / `nurseries`: the async runtime is
-        //     compiled in unconditionally; toggling these in
-        //     Verum.toml has no effect on whether `async fn` /
-        //     `nursery {}` parse and elaborate.
+        //     (num_cpus, platform stack size).
+        //   - `futures` flows through `pipeline/interpreter.rs:80`
+        //     → `InterpreterConfig.futures_enabled` →
+        //     `handle_spawn` (Spawn opcode 0xA0), which rejects
+        //     spawn operations with a manifest-citing panic when
+        //     the user opted out (`async_nursery.rs:54`).
+        //     Closes #262.
+        //   - `nurseries` flows the same path →
+        //     `InterpreterConfig.nurseries_enabled` →
+        //     `handle_nursery_init` (NurseryInit opcode 0xA8),
+        //     which rejects nursery construction with a manifest-
+        //     citing panic; downstream nursery ops become
+        //     unreachable without a handle (`async_nursery.rs:360`).
         //
-        // Surface a warning when either of these two is set to a
-        // non-default value so they don't silently fall through.
+        // Tier 1 (AOT) gating for futures/nurseries is a follow-up
+        // (#262-AOT): the LLVM lowering currently emits
+        // Spawn/NurseryInit IR unconditionally.  Tier 0 (interpret)
+        // is the load-bearing path today and is fully gated; AOT
+        // gating requires a codegen-time rejection or runtime
+        // panic-on-execute branch in `verum_codegen/src/llvm/`.
+        // Until #262-AOT lands, AOT compilations of programs that
+        // use spawn/nursery succeed regardless of the manifest
+        // setting.  No runtime warn! needed for the Tier 0 path —
+        // observable behaviour matches the manifest there.
         let rt = &opts.language_features.runtime;
-        if !rt.futures || !rt.nurseries {
-            tracing::warn!(
-                "manifest [runtime] surface: futures={}, nurseries={} (these fields \
-                 land on LanguageFeatures.runtime but no production gate consults them \
-                 — the async runtime is compiled in unconditionally regardless of \
-                 these flags)",
-                rt.futures,
-                rt.nurseries,
-            );
-        }
 
         // Honest production diagnostic for #271 (multi-threaded async
         // scheduler).  The manifest→runtime bridge already flows
