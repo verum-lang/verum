@@ -21,7 +21,10 @@
 //   core.math.epistemic      — Theory, EpistemicStatus, EpistemicTopology
 //   core.math.infinity_topos — InfinityTopos, SheafInfinityTopos, descent
 //   core.math.kan_extension  — compute_pointwise_lan/ran, compute_obstruction
-//   core.math.hott           — Path, Equiv, transport
+//   (core.math.hott was previously mounted for Path/Equiv/transport
+//    but none are referenced in this module; the mount was dropped
+//    to silence the `Path` import error after the hott rename to
+//    `HottPath`)
 //   core.math.giry           — LlmOracle (for stochastic translation)
 // =============================================================================
 
@@ -47,7 +50,6 @@ mount core.math.kan_extension.{
     KanDirection, KanExtensionResult, ObstructionData,
     compute_pointwise_lan, compute_pointwise_ran, compute_obstruction,
 };
-mount core.math.hott.{Path, Equiv, refl, transport};
 mount core.math.giry.{Giry, LlmOracle, sample_above, ContextEmbedding, FunctorProposal};
 
 // =============================================================================
