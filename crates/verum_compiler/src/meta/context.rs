@@ -108,6 +108,16 @@ pub struct MetaContext {
     pub memory_limit: u64,
     /// Timeout for meta function execution (milliseconds)
     pub timeout_ms: u64,
+    /// Deadline for the current top-level evaluation, derived
+    /// from `timeout_ms` at the entry of `eval_meta_expr` when
+    /// the field is non-zero. `None` outside of an active
+    /// evaluation; `Some(deadline)` while the evaluator is on
+    /// the call stack. The check at the top of `eval_meta_expr`
+    /// trips with `MetaError::TimeoutExceeded` when
+    /// `Instant::now() > deadline`. `timeout_ms = 0` is a
+    /// sentinel meaning "never time out" (preserves the legacy
+    /// no-deadline behaviour for embedders that don't opt in).
+    pub current_deadline: Option<std::time::Instant>,
     /// Chain of generation records (for tracking code provenance)
     pub generation_chain: List<StageRecord>,
     /// Trace markers for debugging staged execution
@@ -261,6 +271,7 @@ impl MetaContext {
             current_recursion_depth: 0,
             memory_limit: 100 * 1024 * 1024, // 100 MB
             timeout_ms: 30_000,              // 30 seconds
+            current_deadline: None,
             generation_chain: List::new(),
             trace_markers: List::new(),
             trace_enabled: false,
