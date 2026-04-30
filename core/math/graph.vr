@@ -375,54 +375,85 @@ public fn topological_sort<V, L, G>(g: &G) -> List<V>
 /// Returns a map from each reachable vertex to its minimum
 /// path-weight from `start` (using the graph's edge labels as
 /// weights). Unreachable vertices are absent from the result.
+/// `dist[start] = W.zero()` (set by this function — callers no
+/// longer need to pre-populate the source weight).
 ///
 /// Requires the graph's edge label type `W` to form a total order
-/// with associative, commutative addition — the classical
-/// min-plus semiring structure for shortest paths.
+/// with associative, commutative addition (`Add<W, Output=W>`) and
+/// an additive identity (`Zero`) — the classical min-plus semiring
+/// structure for shortest paths.
 ///
-/// Complexity: O((|V| + |E|) log |V|) with a binary-heap priority
-/// queue; O(|E| + |V|²) if the underlying heap is an array.
+/// Complexity: O(|V|² + |E|) with the current repeated-min-scan
+/// frontier. Swap-in of BinaryHeap with Reverse<(W, V)> is the
+/// O((|V| + |E|) log |V|) optimisation follow-up.
 ///
-/// Note: current implementation uses repeated O(|V|) frontier scan
-/// rather than a real priority queue — matches complexity on sparse
-/// graphs but falls behind on dense ones. Swap-in of BinaryHeap with
-/// Reverse<(W, V)> is the optimisation follow-up.
+/// **Algorithm**:
+///   1. Initialise `dist[start] = W.zero()`. All other vertices have
+///      no entry (represents +∞ — unvisited).
+///   2. Loop: pick the unvisited vertex `u` with minimum `dist[u]`.
+///      Mark `u` visited. Relax each out-edge `(u, v, w)`: if
+///      `dist[u] + w < dist[v]`, set `dist[v] = dist[u] + w`.
+///   3. Terminate when no unvisited vertex has a finite dist —
+///      remaining vertices are unreachable.
+///
+/// Pre-fix this function required the caller to pre-populate `dist`
+/// with the source's starting weight, and the relaxation step
+/// compared raw edge weight `w` rather than path weight `dist[u]+w`,
+/// producing semantically incorrect single-edge-weight results
+/// instead of true shortest paths.
 public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
     where type G: Graph<V, W>,
           type V: Eq,
-          type W: Ord
+          type W: Ord + Add<W, Output = W> + Zero
 {
     let mut dist: Map<V, W> = Map.new();
     let mut visited: List<V> = List.new();
-    // Source has weight W.zero() conceptually; store the label from
-    // a self-edge if present, else the first reachable edge's label.
-    // For minimalist phase-2: store a sentinel by requiring the user
-    // to provide the initial weight via the first out-edge.
-    //
-    // Simplified fold: requires user to pre-populate `dist` with
-    // the source's starting weight. A full Monoid<W>-based fold with
-    // W.zero() and a priority-queue frontier is a dense-workload
-    // follow-up.
-    visited.push(start.clone());
 
-    // Seed the frontier with `start`'s out-edges.
-    let mut frontier_updated = true;
-    while frontier_updated {
-        frontier_updated = false;
-        for v in visited.clone().iter() {
-            for edge in g.out_edges(v).iter() {
-                let tgt = edge.tgt.clone();
-                let w = edge.label.clone();
-                let current_best = dist.get(&tgt);
-                let should_update = match current_best {
-                    Maybe.None => true,
-                    Maybe.Some(existing) => w < *existing,
-                };
-                if should_update {
-                    dist.insert(tgt.clone(), w);
-                    if !visited.contains(&tgt) {
-                        visited.push(tgt);
-                        frontier_updated = true;
+    // Step 1: initialise source distance.
+    dist.insert(start.clone(), W.zero());
+
+    // Step 2: classical Dijkstra main loop. We pick the unvisited
+    // vertex with the minimum recorded `dist` (linear scan over
+    // dist's keys) and relax its out-edges. The loop terminates
+    // when no unvisited vertex has a finite dist — at that point
+    // every remaining vertex is unreachable from `start`.
+    loop {
+        // Find unvisited vertex with minimum dist. The Map's iter
+        // yields (K, V) pairs (verum_common::Map<K,V>::iter signature),
+        // so destructure rather than field-access.
+        let mut next_vertex: Maybe<V> = Maybe.None;
+        let mut next_dist: Maybe<W> = Maybe.None;
+        for (v, d) in dist.iter() {
+            if visited.contains(&v) { continue; }
+            let take = match &next_dist {
+                Maybe.None => true,
+                Maybe.Some(best) => d < *best,
+            };
+            if take {
+                next_vertex = Maybe.Some(v.clone());
+                next_dist = Maybe.Some(d.clone());
+            }
+        }
+
+        match next_vertex {
+            Maybe.None => break, // No more reachable unvisited vertices.
+            Maybe.Some(u) => {
+                visited.push(u.clone());
+
+                // Relax: dist[u] is the shortest path so far to u
+                // (Dijkstra invariant: once visited, dist[u] is final
+                // for non-negative edge weights).
+                let dist_u = dist.get(&u).expect("u in dist by selection").clone();
+                for edge in g.out_edges(&u).iter() {
+                    let tgt = edge.tgt.clone();
+                    let w = edge.label.clone();
+                    let candidate = dist_u.clone().add(w);
+                    let should_update = match dist.get(&tgt) {
+                        Maybe.None => true,
+                        Maybe.Some(existing) => candidate < *existing,
+                    };
+                    if should_update {
+                        dist.insert(tgt, candidate);
                     }
                 }
             }
