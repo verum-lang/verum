@@ -238,6 +238,38 @@ pub struct VbcToMlirGpuLowering<'ctx> {
 
 impl<'ctx> VbcToMlirGpuLowering<'ctx> {
     pub fn new(context: &'ctx Context, config: GpuLoweringConfig) -> Self {
+        // Surface 4 inert GpuLoweringConfig fields via tracing —
+        // same misleading-knob pattern as the AotConfig wiring in
+        // 07213987. Pre-fix `opt_level`, `max_shared_memory`,
+        // `default_block_size`, and `enable_async_copy` were set in
+        // Default + cuda()/rocm()/vulkan() presets but no production
+        // path consumed them: a manifest declaring `[gpu] opt_level = 0`
+        // (or any non-default value of these four) silently fell
+        // through to the hardcoded MLIR pass behaviour.
+        //
+        // Emit at construction time, gated on any non-default value
+        // so the default path stays log-quiet. Operators see the gap
+        // ("manifest knob set, codegen ignored it") in logs rather
+        // than silently believing their setting was honoured.
+        let defaults = GpuLoweringConfig::default();
+        if config.opt_level != defaults.opt_level
+            || config.max_shared_memory != defaults.max_shared_memory
+            || config.default_block_size != defaults.default_block_size
+            || config.enable_async_copy != defaults.enable_async_copy
+        {
+            tracing::debug!(
+                target: "verum_codegen::mlir::gpu_lowering",
+                opt_level = config.opt_level,
+                max_shared_memory = config.max_shared_memory,
+                default_block_size = ?config.default_block_size,
+                enable_async_copy = config.enable_async_copy,
+                "GpuLoweringConfig: non-default knobs set but not consumed by the \
+                 current MLIR lowering — these flags reach codegen as data only. \
+                 Pass-pipeline + kernel-launch behaviour comes from the GPU pass \
+                 manager (mlir/passes/gpu_pipeline.rs); thread these knobs through \
+                 there to make them load-bearing."
+            );
+        }
         Self { context, config, stats: GpuLoweringStats::default(), value_map: HashMap::new() }
     }
 
