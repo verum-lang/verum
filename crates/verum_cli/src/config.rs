@@ -1151,14 +1151,25 @@ pub struct BuildConfig {
     pub panic: PanicStrategy,
     /// Windows subsystem selection — controls whether the produced
     /// PE binary allocates a console window when launched.
-    /// `Console` (default): standard CLI / console app, allocates a
-    /// console.  `Gui`: silent app suitable for Win32 GUI programs,
-    /// no console flashes on launch.  Maps to the linker's
-    /// `/SUBSYSTEM:CONSOLE` vs `/SUBSYSTEM:WINDOWS` flag and to
-    /// `LinkConfig::windows()` vs `LinkConfig::windows_gui()` in
-    /// `verum_codegen::link`.  Ignored on non-Windows targets.
+    ///
+    /// `None` (default) means "unset" — the source-level
+    /// `@gui` / `@console` attribute on `fn main` will fill in the
+    /// value at codegen time.  `Some(Console)` / `Some(Gui)` is an
+    /// explicit manifest-level choice that overrides the source
+    /// attribute (manifest is more authoritative than per-binary
+    /// source code, since manifests are the project-level
+    /// configuration).
+    ///
+    /// Maps to `/SUBSYSTEM:CONSOLE` vs `/SUBSYSTEM:WINDOWS` at link
+    /// time.  Ignored on non-Windows targets.
+    ///
+    /// Resolution order, highest precedence first:
+    ///   1. CLI `--windows-subsystem` flag.
+    ///   2. Manifest `[build].windows_subsystem` (this field).
+    ///   3. Source-level `@gui` / `@console` attribute on `fn main`.
+    ///   4. Default Console.
     #[serde(default)]
-    pub windows_subsystem: WindowsSubsystem,
+    pub windows_subsystem: Option<WindowsSubsystem>,
 }
 
 /// Windows PE subsystem selection.  Determines whether the loader
