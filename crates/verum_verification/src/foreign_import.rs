@@ -49,6 +49,22 @@ use verum_common::Text;
 // =============================================================================
 
 /// Foreign proof system this importer handles.
+///
+/// **Canonical 7-system enum** — single source of truth for foreign
+/// proof systems across the codebase.  Used by:
+///
+///   - `verum_verification::foreign_import` — skeleton import (this module).
+///   - `verum_smt::cross_format_runner` — re-check via `Checker`.
+///   - `verum_kernel::soundness::corpus_export` — `CorpusBackend`.
+///   - `verum_smt::proof_replay` — proof-term lowering (`ProofReplayBackend`).
+///   - `verum_kernel::soundness::apply_graph` — foreign-prefix
+///     classification (mirrors `is_foreign_framework_target`).
+///
+/// **Pre-#166**: each layer had its own foreign-system enumeration
+/// (string-based dispatch in `proof_replay`, `ExportFormat` in
+/// `cross_format_runner`, this 4-variant enum in `foreign_import`).
+/// Post-#166 step 1: this enum covers all 7 systems used anywhere in
+/// Verum and is the migration target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ForeignSystem {
     /// Coq / Rocq — `.v` files.  Parses `Theorem` / `Lemma` /
@@ -63,16 +79,32 @@ pub enum ForeignSystem {
     /// Isabelle/HOL — `.thy` files.  Parses `theorem` / `lemma` /
     /// `axiomatization`.
     Isabelle,
+    /// Agda — `.agda` files.  Used by `verum_smt::proof_replay::agda`
+    /// for SMT proof-term replay.  Parses `theorem` / `lemma` /
+    /// `postulate` (axiom-equivalent).
+    Agda,
+    /// Dedukti / Lambdapi — `.dk` / `.lp` files.  Used by
+    /// `verum_smt::proof_replay::dedukti` for λΠ-modulo proof terms.
+    /// Universal logical framework — every other system encodes into it.
+    Dedukti,
+    /// Metamath — `.mm` files.  Used by `verum_smt::proof_replay::metamath`.
+    /// Tiny verifier (~500 LOC) — the formal-methods minimalist's choice.
+    Metamath,
 }
 
 impl ForeignSystem {
-    /// Stable diagnostic name (matches the `--from <name>` flag).
+    /// Stable diagnostic name (matches the `--from <name>` flag,
+    /// `target_name()` in `ProofReplayBackend`, and the language tag
+    /// emitted by `TargetTactic`).
     pub fn name(self) -> &'static str {
         match self {
             Self::Coq => "coq",
             Self::Lean4 => "lean4",
             Self::Mizar => "mizar",
             Self::Isabelle => "isabelle",
+            Self::Agda => "agda",
+            Self::Dedukti => "dedukti",
+            Self::Metamath => "metamath",
         }
     }
 
@@ -84,6 +116,9 @@ impl ForeignSystem {
             "lean4" | "lean" | "mathlib4" | "mathlib" => Some(Self::Lean4),
             "mizar" | "mml" => Some(Self::Mizar),
             "isabelle" | "isabelle/hol" | "hol" => Some(Self::Isabelle),
+            "agda" => Some(Self::Agda),
+            "dedukti" | "lambdapi" | "dk" => Some(Self::Dedukti),
+            "metamath" | "mm" => Some(Self::Metamath),
             _ => None,
         }
     }
@@ -95,22 +130,85 @@ impl ForeignSystem {
             Self::Lean4 => "lean",
             Self::Mizar => "miz",
             Self::Isabelle => "thy",
+            Self::Agda => "agda",
+            Self::Dedukti => "dk",
+            Self::Metamath => "mm",
         }
     }
 
     /// Framework tag for `@framework(<tag>, "...")` attribution.
+    /// Matches the attribute keys used in `core/verify/kernel_v0/lemmas/`
+    /// and the `apply_graph::is_foreign_framework_target` prefix list.
     pub fn framework_tag(self) -> &'static str {
         match self {
             Self::Coq => "coq",
             Self::Lean4 => "lean_mathlib4",
             Self::Mizar => "mizar_mml",
             Self::Isabelle => "isabelle_hol",
+            Self::Agda => "agda_stdlib",
+            Self::Dedukti => "dedukti",
+            Self::Metamath => "metamath",
+        }
+    }
+
+    /// Install hint for the system's verifier toolchain.  Used by
+    /// `Checker::install_hint()` and CLI diagnostics when a foreign
+    /// tool is missing.  One sentence, ASCII-clean.
+    pub fn install_hint(self) -> &'static str {
+        match self {
+            Self::Coq => "install Coq via opam: `opam install coq`",
+            Self::Lean4 => "install Lean 4 via elan: `curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh`",
+            Self::Mizar => "install Mizar from https://mizar.uwb.edu.pl/ (no canonical package manager)",
+            Self::Isabelle => "install Isabelle from https://isabelle.in.tum.de/installation.html",
+            Self::Agda => "install Agda via cabal: `cabal install Agda`",
+            Self::Dedukti => "install Dedukti via opam: `opam install dedukti`",
+            Self::Metamath => "install Metamath verifier: clone https://github.com/metamath/metamath-exe and build with make",
+        }
+    }
+
+    /// Human-readable display name for diagnostic output.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Coq => "Coq",
+            Self::Lean4 => "Lean 4",
+            Self::Mizar => "Mizar",
+            Self::Isabelle => "Isabelle/HOL",
+            Self::Agda => "Agda",
+            Self::Dedukti => "Dedukti",
+            Self::Metamath => "Metamath",
         }
     }
 
     /// All supported systems.
-    pub fn all() -> [ForeignSystem; 4] {
+    pub fn all() -> [ForeignSystem; 7] {
+        [
+            Self::Coq,
+            Self::Lean4,
+            Self::Mizar,
+            Self::Isabelle,
+            Self::Agda,
+            Self::Dedukti,
+            Self::Metamath,
+        ]
+    }
+
+    /// Systems that currently have an `Importer` implementation
+    /// (statement-level skeleton extraction).  Excludes Agda / Dedukti
+    /// / Metamath which are output-only (proof-replay targets).
+    pub fn with_importer() -> [ForeignSystem; 4] {
         [Self::Coq, Self::Lean4, Self::Mizar, Self::Isabelle]
+    }
+
+    /// Systems that have a proof-replay backend (SMT cert → target).
+    pub fn with_proof_replay() -> [ForeignSystem; 5] {
+        [Self::Coq, Self::Lean4, Self::Agda, Self::Dedukti, Self::Metamath]
+    }
+
+    /// Whether this system has a corresponding `Checker`
+    /// (cross-format re-check via foreign toolchain).  Only Coq +
+    /// Lean4 currently — the others lack hermetic checker integrations.
+    pub fn has_checker(self) -> bool {
+        matches!(self, Self::Coq | Self::Lean4)
     }
 }
 
@@ -257,13 +355,36 @@ pub trait ForeignSystemImporter: std::fmt::Debug + Send + Sync {
 }
 
 /// Look up the canonical importer for a system tag.
-pub fn importer_for(system: ForeignSystem) -> Box<dyn ForeignSystemImporter> {
+///
+/// **Returns `None`** for systems without an importer
+/// (`Agda`/`Dedukti`/`Metamath` — they're proof-replay targets, not
+/// import sources).  Use [`ForeignSystem::with_importer`] to enumerate
+/// systems with importers up-front.
+pub fn try_importer_for(system: ForeignSystem) -> Option<Box<dyn ForeignSystemImporter>> {
     match system {
-        ForeignSystem::Coq => Box::new(CoqImporter),
-        ForeignSystem::Lean4 => Box::new(Lean4Importer),
-        ForeignSystem::Mizar => Box::new(MizarImporter),
-        ForeignSystem::Isabelle => Box::new(IsabelleImporter),
+        ForeignSystem::Coq => Some(Box::new(CoqImporter)),
+        ForeignSystem::Lean4 => Some(Box::new(Lean4Importer)),
+        ForeignSystem::Mizar => Some(Box::new(MizarImporter)),
+        ForeignSystem::Isabelle => Some(Box::new(IsabelleImporter)),
+        ForeignSystem::Agda
+        | ForeignSystem::Dedukti
+        | ForeignSystem::Metamath => None,
     }
+}
+
+/// Look up the canonical importer for a system tag.
+///
+/// **Panics** for systems without an importer.  Prefer
+/// [`try_importer_for`] when handling unknown system tags from user
+/// input; this variant is for callers that have already validated the
+/// system has an importer (e.g., via [`ForeignSystem::with_importer`]).
+pub fn importer_for(system: ForeignSystem) -> Box<dyn ForeignSystemImporter> {
+    try_importer_for(system).unwrap_or_else(|| {
+        panic!(
+            "ForeignSystem::{:?} has no importer; use try_importer_for() or check ForeignSystem::with_importer()",
+            system,
+        )
+    })
 }
 
 // =============================================================================
@@ -586,6 +707,14 @@ fn match_scope_open<'a>(line: &'a str, system: ForeignSystem) -> Option<&'a str>
             None
         }
         ForeignSystem::Mizar => None,
+        // Scope tracking is not yet implemented for these systems —
+        // parser support for them lives in `verum_smt::proof_replay::*`
+        // and only consumes individual declarations, not nested scopes.
+        // A future expansion may add Agda's `module X where` and
+        // Dedukti's `module X.` to this dispatcher.
+        ForeignSystem::Agda
+        | ForeignSystem::Dedukti
+        | ForeignSystem::Metamath => None,
     }
 }
 
@@ -626,6 +755,11 @@ fn match_scope_close<'a>(line: &'a str, system: ForeignSystem) -> Option<ScopeCl
             None
         }
         ForeignSystem::Mizar => None,
+        // Scope-close not yet implemented — see scope-open dispatcher
+        // above for the rationale.
+        ForeignSystem::Agda
+        | ForeignSystem::Dedukti
+        | ForeignSystem::Metamath => None,
     }
 }
 
@@ -680,6 +814,18 @@ fn aggregate_decl(remaining: &[&str], system: ForeignSystem) -> (String, usize) 
             }
             ForeignSystem::Lean4 => {
                 if snapshot.contains(":=") || raw.trim().is_empty() {
+                    return (joined, consumed);
+                }
+            }
+            // For systems where multi-line aggregation isn't yet
+            // implemented, terminate at any line boundary so the
+            // caller advances cleanly.  Parsing for these systems
+            // lives in `verum_smt::proof_replay::*` and consumes
+            // single-line declarations only.
+            ForeignSystem::Agda
+            | ForeignSystem::Dedukti
+            | ForeignSystem::Metamath => {
+                if snapshot.ends_with('.') || raw.trim().is_empty() {
                     return (joined, consumed);
                 }
             }
@@ -782,6 +928,14 @@ fn strip_comments(content: &str, system: ForeignSystem) -> String {
         ForeignSystem::Coq | ForeignSystem::Isabelle => strip_block_comments(content, "(*", "*)"),
         ForeignSystem::Lean4 => strip_line_comments(content, "--"),
         ForeignSystem::Mizar => strip_line_comments(content, "::"),
+        // Agda uses Lean-style `--` line comments + `{-  -}` block
+        // comments; current minimal-viable handling strips only line
+        // comments (matches how the proof_replay parser consumes Agda
+        // input).  Dedukti/Lambdapi use Coq-style block comments.
+        ForeignSystem::Agda => strip_line_comments(content, "--"),
+        ForeignSystem::Dedukti => strip_block_comments(content, "(;", ";)"),
+        // Metamath uses `$( ... $)` block comments.
+        ForeignSystem::Metamath => strip_block_comments(content, "$(", "$)"),
     }
 }
 
@@ -861,7 +1015,7 @@ mod tests {
     fn extensions_distinct() {
         let exts: std::collections::BTreeSet<&str> =
             ForeignSystem::all().iter().map(|s| s.extension()).collect();
-        assert_eq!(exts.len(), 4);
+        assert_eq!(exts.len(), 7, "every foreign system must have a distinct extension");
     }
 
     #[test]
@@ -870,7 +1024,96 @@ mod tests {
             .iter()
             .map(|s| s.framework_tag())
             .collect();
-        assert_eq!(tags.len(), 4);
+        assert_eq!(tags.len(), 7, "every foreign system must have a distinct framework tag");
+    }
+
+    #[test]
+    fn all_systems_count_is_seven_post_166() {
+        // #166 step 1: extended from 4 → 7 systems (Coq, Lean4, Mizar,
+        // Isabelle, Agda, Dedukti, Metamath).  Pin the count so future
+        // additions are intentional.
+        assert_eq!(ForeignSystem::all().len(), 7);
+    }
+
+    #[test]
+    fn extended_systems_round_trip() {
+        // Pin the new systems and their aliases.
+        assert_eq!(ForeignSystem::from_name("agda"), Some(ForeignSystem::Agda));
+        assert_eq!(
+            ForeignSystem::from_name("dedukti"),
+            Some(ForeignSystem::Dedukti)
+        );
+        assert_eq!(
+            ForeignSystem::from_name("lambdapi"),
+            Some(ForeignSystem::Dedukti)
+        );
+        assert_eq!(ForeignSystem::from_name("dk"), Some(ForeignSystem::Dedukti));
+        assert_eq!(
+            ForeignSystem::from_name("metamath"),
+            Some(ForeignSystem::Metamath)
+        );
+        assert_eq!(ForeignSystem::from_name("mm"), Some(ForeignSystem::Metamath));
+    }
+
+    #[test]
+    fn install_hints_non_empty() {
+        for s in ForeignSystem::all() {
+            assert!(
+                !s.install_hint().trim().is_empty(),
+                "install_hint must be non-empty for {:?}",
+                s,
+            );
+        }
+    }
+
+    #[test]
+    fn display_names_capitalised() {
+        // Display names start uppercase (human-readable).
+        for s in ForeignSystem::all() {
+            let dn = s.display_name();
+            assert!(
+                dn.chars().next().map(|c| c.is_uppercase()).unwrap_or(false),
+                "display_name for {:?} should start uppercase, got {:?}",
+                s,
+                dn,
+            );
+        }
+    }
+
+    #[test]
+    fn with_importer_subset_matches_dispatch() {
+        // The 4 systems with importers must all return Some from
+        // try_importer_for; the other 3 must return None.
+        for s in ForeignSystem::with_importer() {
+            assert!(
+                try_importer_for(s).is_some(),
+                "{:?} declared in with_importer must have try_importer_for support",
+                s,
+            );
+        }
+        for s in [
+            ForeignSystem::Agda,
+            ForeignSystem::Dedukti,
+            ForeignSystem::Metamath,
+        ] {
+            assert!(
+                try_importer_for(s).is_none(),
+                "{:?} is a proof-replay-only target — try_importer_for must return None",
+                s,
+            );
+        }
+    }
+
+    #[test]
+    fn has_checker_matches_known_set() {
+        // Currently only Coq + Lean4 have hermetic Checker integrations.
+        assert!(ForeignSystem::Coq.has_checker());
+        assert!(ForeignSystem::Lean4.has_checker());
+        assert!(!ForeignSystem::Mizar.has_checker());
+        assert!(!ForeignSystem::Isabelle.has_checker());
+        assert!(!ForeignSystem::Agda.has_checker());
+        assert!(!ForeignSystem::Dedukti.has_checker());
+        assert!(!ForeignSystem::Metamath.has_checker());
     }
 
     // ----- CoqImporter -----
@@ -1021,7 +1264,9 @@ mod tests {
 
     #[test]
     fn importer_for_returns_correct_system() {
-        for s in ForeignSystem::all() {
+        // Only iterate systems with importers — Agda/Dedukti/Metamath
+        // are proof-replay-only targets and panic on importer_for.
+        for s in ForeignSystem::with_importer() {
             assert_eq!(importer_for(s).system(), s);
         }
     }
