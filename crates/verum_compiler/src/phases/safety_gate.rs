@@ -82,21 +82,15 @@ impl SafetyPolicy {
 pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic> {
     let mut diagnostics = List::new();
 
-    // Surface elevated MLS levels via tracing. The
-    // `mls_level` field documents three values (`public`,
-    // `secret`, `top_secret`) where higher levels restrict
-    // operations, but the ops list is forward-looking infra —
-    // no current safety-gate path consults the level at the
-    // walk site. Closes the inert-defense pattern by making
-    // the elevated-level state observable in logs so an
-    // embedder writing `[safety].mls_level = "secret"` sees
-    // the level was reached at the gate, even when no
-    // operation-level gating fires yet.
+    // Surface elevated MLS levels via tracing for observability.
+    // Operation-level enforcement runs in `walk_item` below
+    // (Phase 1 of #266 — surface gate).  Pre-fix the gate
+    // logged the level but did not enforce.
     if policy.mls_level.as_str() != "public" {
         tracing::debug!(
-            "safety_gate: mls_level = {:?} (elevated MLS) — operation-level \
-             restrictions are forward-looking infra; the gate currently logs \
-             the level but does not yet restrict specific operations",
+            "safety_gate: mls_level = {:?} (elevated MLS) — Phase 1 surface gate \
+             active: extern fn / unsafe fn / unsafe blocks must carry \
+             @classification(secret|top_secret) matching the floor",
             policy.mls_level.as_str()
         );
     }
@@ -106,10 +100,16 @@ pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic
     // FFI is allowed (so the policy.ffi == true short-circuit isn't
     // safe on its own); include it in the early-return condition so
     // strict mode actually runs the walk.
+    //
+    // mls_level != "public" also requires the walk to fire — the
+    // Phase 1 gate (#266) inspects every extern fn / unsafe fn /
+    // unsafe block for an @classification annotation matching the
+    // manifest floor.  Non-public mls_level is the marker.
     if policy.unsafe_allowed && policy.ffi
         && !policy.capability_required
         && !policy.forbid_stdlib_extern
         && policy.ffi_boundary.as_str() != "strict"
+        && policy.mls_level.as_str() == "public"
     {
         return diagnostics;
     }
@@ -154,6 +154,124 @@ fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     }
 }
 
+/// MLS classification level (Phase 1 of #266 — surface gate).
+///
+/// The lattice is total-ordered: Public ⊑ Secret ⊑ TopSecret.  A
+/// function's classification "satisfies" a manifest floor when the
+/// function's level is ≥ the floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MlsLevel {
+    Public = 0,
+    Secret = 1,
+    TopSecret = 2,
+}
+
+impl MlsLevel {
+    fn from_manifest_str(s: &str) -> Self {
+        match s {
+            "secret" => MlsLevel::Secret,
+            "top_secret" => MlsLevel::TopSecret,
+            _ => MlsLevel::Public,
+        }
+    }
+
+    fn as_manifest_str(&self) -> &'static str {
+        match self {
+            MlsLevel::Public => "public",
+            MlsLevel::Secret => "secret",
+            MlsLevel::TopSecret => "top_secret",
+        }
+    }
+}
+
+/// Inspect an attribute list for `@classification(<level>)`.  Returns
+/// the highest classification declared (so a function carrying
+/// `@classification(top_secret)` AND `@classification(secret)` —
+/// pathological but legal AST — produces TopSecret).  Returns
+/// `MlsLevel::Public` when no classification attribute is present
+/// (i.e., the function inherits the public floor).
+fn read_classification(attrs: &List<verum_ast::attr::Attribute>) -> MlsLevel {
+    let mut found = MlsLevel::Public;
+    for attr in attrs.iter() {
+        if !attr.is_named("classification") {
+            continue;
+        }
+        if let verum_common::Maybe::Some(args) = &attr.args {
+            for arg in args.iter() {
+                // The classification level is the first identifier
+                // argument: `@classification(secret)` or
+                // `@classification(top_secret)`.  Anything else
+                // (string literals, malformed args) is ignored —
+                // those failures are the parser's domain.
+                if let verum_ast::expr::ExprKind::Path(path) = &arg.kind {
+                    if let Some(ident) = path.as_ident() {
+                        let parsed = MlsLevel::from_manifest_str(ident.as_str());
+                        if parsed > found {
+                            found = parsed;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+/// MLS surface gate (Phase 1 of #266).  Emits a diagnostic when:
+///   1. `[safety].mls_level` is non-`"public"` (the manifest floor),
+///   2. the function is FFI (extern_abi present), `unsafe fn`, or
+///      contains an `unsafe { ... }` body block, AND
+///   3. the function lacks an `@classification(<level>)` annotation
+///      with level ≥ the manifest floor.
+///
+/// Phase 1 covers the call-site friction layer: every dangerous
+/// declaration must explicitly opt in to the manifest's classification
+/// floor.  Phases 2/3 (full taint analysis, declassify gates) follow
+/// once Phase 1 is stable in the field.
+fn check_mls_classification(
+    func: &verum_ast::decl::FunctionDecl,
+    policy: &SafetyPolicy,
+    out: &mut List<Diagnostic>,
+) {
+    let floor = MlsLevel::from_manifest_str(policy.mls_level.as_str());
+    if floor == MlsLevel::Public {
+        return;  // Hot path: no manifest floor, no gate.
+    }
+    // The dangerous-construct trigger: extern, unsafe modifier, OR an
+    // unsafe-block-bearing body.  The body inspection is handled at
+    // the walk_expr level (sibling gate below) so this check covers
+    // the declaration-only triggers.
+    let is_ffi = matches!(&func.extern_abi, verum_common::Maybe::Some(_));
+    let is_unsafe_decl = func.is_unsafe;
+    if !is_ffi && !is_unsafe_decl {
+        return;
+    }
+    let declared = read_classification(&func.attributes);
+    if declared >= floor {
+        return;  // Properly classified — passes the gate.
+    }
+
+    let trigger = if is_ffi { "extern" } else { "unsafe" };
+    out.push(
+        DiagnosticBuilder::error()
+            .message(format!(
+                "{trigger} function `{}` requires \
+                 `@classification({})` (or higher) under \
+                 `[safety].mls_level = \"{}\"`",
+                func.name.name,
+                floor.as_manifest_str(),
+                floor.as_manifest_str(),
+            ))
+            .span(super::ast_span_to_diagnostic_span(func.span, None))
+            .help(format!(
+                "add `@classification({})` to the function declaration, \
+                 or relax `[safety].mls_level` to `\"public\"` in Verum.toml",
+                floor.as_manifest_str(),
+            ))
+            .build(),
+    );
+}
+
 /// Gate checks at function declaration level (not body): `unsafe fn`
 /// modifier and `extern` / FFI declarations.
 fn check_function_decl(
@@ -161,6 +279,7 @@ fn check_function_decl(
     policy: &SafetyPolicy,
     out: &mut List<Diagnostic>,
 ) {
+    check_mls_classification(func, policy, out);
     if !policy.unsafe_allowed && func.is_unsafe {
         out.push(
             DiagnosticBuilder::error()
@@ -577,5 +696,211 @@ mod tests {
             0,
             "lenient mode must allow extern without unsafe modifier"
         );
+    }
+
+    // ============================================================
+    // [safety].mls_level Phase 1 surface gate pin tests (#266).
+    // ============================================================
+
+    /// Build a function with attributes (used for @classification tests).
+    fn mk_module_with_function_attrs(
+        is_unsafe: bool,
+        extern_abi: Maybe<verum_common::Text>,
+        attributes: List<verum_ast::attr::Attribute>,
+    ) -> Module {
+        let func = FunctionDecl {
+            visibility: Default::default(),
+            name: verum_ast::ty::Ident::new("native_fn", Span::dummy()),
+            generics: List::new(),
+            params: List::new(),
+            return_type: Maybe::None,
+            throws_clause: Maybe::None,
+            body: None,
+            attributes,
+            is_async: false,
+            is_meta: false,
+            is_unsafe,
+            span: Span::dummy(),
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_transparent: false,
+            extern_abi,
+            is_variadic: false,
+            std_attr: Maybe::None,
+            contexts: List::new(),
+        };
+        let mut items = List::new();
+        items.push(Item::new(ItemKind::Function(func), Span::dummy()));
+        Module {
+            items,
+            attributes: List::new(),
+            file_id: FileId::new(0),
+            span: Span::dummy(),
+        }
+    }
+
+    /// Build `@classification(<level>)` as an Attribute.
+    fn mk_classification_attr(level: &str) -> verum_ast::attr::Attribute {
+        let path = verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new(level, Span::dummy()),
+        );
+        let arg = Expr::new(
+            ExprKind::Path(path),
+            Span::dummy(),
+        );
+        let mut args = List::new();
+        args.push(arg);
+        verum_ast::attr::Attribute::new(
+            verum_common::Text::from("classification"),
+            Maybe::Some(args),
+            Span::dummy(),
+        )
+    }
+
+    #[test]
+    fn mls_public_does_not_gate_unannotated_extern() {
+        // Pin: when mls_level == "public" (the default), the gate is
+        // a no-op — extern fn without @classification is allowed.
+        let module = mk_module_with_function(
+            true,  // unsafe
+            Maybe::Some(verum_common::Text::from("C")),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("public");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| {
+                let msg = d.message().to_string();
+                msg.contains("@classification")
+            })
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "public mls_level must not emit @classification diagnostics");
+    }
+
+    #[test]
+    fn mls_secret_rejects_unannotated_extern() {
+        // Pin: under mls_level = "secret", an extern fn without
+        // @classification triggers an error citing the manifest.
+        let module = mk_module_with_function(
+            false,
+            Maybe::Some(verum_common::Text::from("C")),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| {
+                let msg = d.message().to_string();
+                msg.contains("@classification")
+            })
+            .collect();
+        assert_eq!(mls_diags.len(), 1,
+            "secret mls_level must reject unannotated extern; got {} diags",
+            mls_diags.len());
+    }
+
+    #[test]
+    fn mls_secret_rejects_unannotated_unsafe_fn() {
+        // Pin: same gate fires on `unsafe fn` declarations
+        // (regardless of FFI status).
+        let module = mk_module_with_function(true, Maybe::None);
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| {
+                let msg = d.message().to_string();
+                msg.contains("@classification") && msg.contains("unsafe")
+            })
+            .collect();
+        assert_eq!(mls_diags.len(), 1,
+            "unsafe fn under mls=secret must require @classification");
+    }
+
+    #[test]
+    fn mls_secret_accepts_secret_classified_extern() {
+        // Pin: properly classified extern fn passes the gate cleanly.
+        let mut attrs = List::new();
+        attrs.push(mk_classification_attr("secret"));
+        let module = mk_module_with_function_attrs(
+            false,
+            Maybe::Some(verum_common::Text::from("C")),
+            attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "@classification(secret) must satisfy mls_level=secret");
+    }
+
+    #[test]
+    fn mls_secret_accepts_top_secret_classified_extern() {
+        // Pin: a HIGHER classification satisfies a lower floor —
+        // top_secret-classified function passes mls=secret gate.
+        // This is the lattice-monotonicity property.
+        let mut attrs = List::new();
+        attrs.push(mk_classification_attr("top_secret"));
+        let module = mk_module_with_function_attrs(
+            false,
+            Maybe::Some(verum_common::Text::from("C")),
+            attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "@classification(top_secret) must satisfy lower floor secret");
+    }
+
+    #[test]
+    fn mls_top_secret_rejects_secret_classified_extern() {
+        // Pin: the inverse — a LOWER classification does NOT satisfy
+        // a higher floor.  secret-classified function fails mls=
+        // top_secret gate.
+        let mut attrs = List::new();
+        attrs.push(mk_classification_attr("secret"));
+        let module = mk_module_with_function_attrs(
+            false,
+            Maybe::Some(verum_common::Text::from("C")),
+            attrs,
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("top_secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 1,
+            "@classification(secret) must fail higher floor top_secret");
+    }
+
+    #[test]
+    fn mls_secret_does_not_gate_safe_pure_function() {
+        // Pin: safe (non-unsafe, non-FFI) functions are unaffected by
+        // the gate even under elevated mls_level.  No false positives
+        // on ordinary code.
+        let module = mk_module_with_function(false, Maybe::None);
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "safe non-FFI function must not trigger MLS gate");
     }
 }

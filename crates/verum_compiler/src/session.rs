@@ -527,8 +527,7 @@ impl Session {
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
-        // Phase-not-realised tracing for inert safety knobs.
-        // The `[safety]` manifest section parses 6 fields. Five
+        // The `[safety]` manifest section parses 6 fields. ALL SIX
         // are wired:
         //   - unsafe_allowed / ffi / capability_required /
         //     forbid_stdlib_extern at pipeline.rs:6391-6393 gate
@@ -537,23 +536,16 @@ impl Session {
         //     the "extern fn should be marked `unsafe` under
         //     `[safety].ffi_boundary = strict`" warning, threaded
         //     from manifest via SafetyPolicy::from_features.
-        // One remains inert: `mls_level` (default "public";
-        // validate() restricts to public|secret|top_secret but
-        // no information-flow analysis pass currently consults
-        // it). Surface non-default values so a `[safety]
-        // mls_level = "secret"` setting doesn't silently fall
-        // through.
-        let sf = &opts.language_features.safety;
-        if sf.mls_level.as_str() != "public" {
-            tracing::warn!(
-                "manifest [safety] surface: mls_level={:?} \
-                 (this field lands on LanguageFeatures.safety and validate() \
-                 restricts it to public|secret|top_secret, but no \
-                 information-flow analysis pass currently consults it — \
-                 MLS classification has no production analysis path yet)",
-                sf.mls_level,
-            );
-        }
+        //   - mls_level (Phase 1, #266 surface gate): when set to
+        //     `"secret"` or `"top_secret"`, every extern fn /
+        //     unsafe fn declaration must carry an
+        //     `@classification(<level>)` attribute matching the
+        //     manifest floor. Phases 2/3 (full taint analysis,
+        //     declassify gates) are tracked as #266-Phase2 and
+        //     #266-Phase3.
+        //
+        // No runtime warn! needed — every value the user can set
+        // produces observable typecheck behaviour.
 
         // Phase-not-realised tracing for inert test-harness knobs.
         // The `[test]` manifest section parses 8 fields and
