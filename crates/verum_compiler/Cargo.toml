@@ -38,6 +38,7 @@ tracing-subscriber = { workspace = true }
 colored = { workspace = true }
 parking_lot = { workspace = true }
 crossbeam = { workspace = true }
+dashmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
