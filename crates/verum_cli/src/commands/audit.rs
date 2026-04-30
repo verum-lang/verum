@@ -2394,26 +2394,42 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
             .to_string();
 
         for item in &module.items {
-            let (name, decl_attrs, has_proof) = match &item.kind {
+            let (name, decl_attrs, has_proof, proposition_expr) = match &item.kind {
                 verum_ast::decl::ItemKind::Theorem(d)
                 | verum_ast::decl::ItemKind::Lemma(d)
                 | verum_ast::decl::ItemKind::Corollary(d) => (
                     d.name.name.as_str().to_string(),
                     &d.attributes,
                     matches!(&d.proof, verum_common::Maybe::Some(_)),
+                    d.proposition.as_ref(),
                 ),
                 _ => continue,
             };
             let declared_strategy =
                 strictest_verify_strategy(&item.attributes, decl_attrs)
                     .map(|t| t.as_str().to_string());
-            theorem_specs.push(TheoremSpec {
-                name: sanitise_theorem_name(&name),
-                module_path: module_path_text.clone(),
-                proposition_text: format!("(theorem {} — V0 statement-level export)", name),
-                has_proof_body: has_proof,
-                declared_strategy,
-            });
+            // Render the proposition's source text via the AST
+            // pretty-printer so the foreign-tool comment carries
+            // exactly what the user wrote — not a synthetic
+            // placeholder.
+            let proposition_text =
+                verum_ast::pretty::format_expr(proposition_expr).to_string();
+            // Run the per-backend Expr → Prop translators (#140 /
+            // MSFS-L4.7).  Successful translations land in
+            // `per_backend_proposition`; fallbacks are absent and
+            // the per-format renderer falls back to `Prop` with the
+            // original text in a comment.
+            theorem_specs.push(
+                TheoremSpec {
+                    name: sanitise_theorem_name(&name),
+                    module_path: module_path_text.clone(),
+                    proposition_text,
+                    per_backend_proposition: std::collections::BTreeMap::new(),
+                    has_proof_body: has_proof,
+                    declared_strategy,
+                }
+                .with_translated_proposition(proposition_expr),
+            );
         }
     }
 

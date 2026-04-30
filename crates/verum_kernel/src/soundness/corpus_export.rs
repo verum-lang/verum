@@ -46,6 +46,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::expr_translate::{CoqExprRenderer, ExprRenderer, LeanExprRenderer, TranslatedExpr};
+
 /// One theorem's cross-format export specification — what the
 /// per-format renderer needs.  Constructed from the AST by the
 /// audit walker; consumed by [`CorpusBackend::render_theorem`].
@@ -64,6 +66,17 @@ pub struct TheoremSpec {
     /// translate, this falls back to `Prop` and the foreign-tool
     /// re-check verifies only that the *name* binding is well-formed.
     pub proposition_text: String,
+    /// **Per-format translated proposition (#140 / MSFS-L4.7)**.
+    /// When `Some`, the corresponding [`CorpusBackend`] uses this
+    /// rendered proposition as the theorem's TYPE in the foreign
+    /// tool — e.g., `Theorem foo : (n = 7).` instead of
+    /// `Theorem foo : Prop.`  Keys are backend ids
+    /// (`"coq"`, `"lean"`); values are the renderer's output.
+    /// When the translation falls back, the entry stays absent and
+    /// the renderer reverts to `Prop` with the original text in a
+    /// comment.
+    #[serde(default)]
+    pub per_backend_proposition: std::collections::BTreeMap<String, String>,
     /// Whether the theorem has a proof body.  Statements without a
     /// proof body are treated as axioms (postulates) in the foreign
     /// tool; ones with a proof body get `sorry` / `Admitted.` as a
@@ -72,6 +85,34 @@ pub struct TheoremSpec {
     /// `@verify(<strategy>)` annotation if present (records the
     /// declared verification level for the audit report).
     pub declared_strategy: Option<String>,
+}
+
+impl TheoremSpec {
+    /// Populate `per_backend_proposition` for the standard backend
+    /// set (Coq + Lean) by running the corresponding [`ExprRenderer`]
+    /// over the supplied AST proposition.  Successful translations
+    /// land in the map; fallbacks are recorded as absent entries
+    /// (the per-format renderer then emits `Prop` with the original
+    /// text in a comment).
+    pub fn with_translated_proposition(mut self, proposition: &verum_ast::Expr) -> Self {
+        for renderer in [
+            Box::new(CoqExprRenderer::new()) as Box<dyn ExprRenderer>,
+            Box::new(LeanExprRenderer::new()) as Box<dyn ExprRenderer>,
+        ] {
+            match renderer.render(proposition) {
+                TranslatedExpr::Translated { text } => {
+                    self.per_backend_proposition
+                        .insert(renderer.id().to_string(), text);
+                }
+                TranslatedExpr::Fallback { .. } => {
+                    // Absence is the signal for the per-format
+                    // renderer to emit `Prop` with the original text
+                    // in a comment.
+                }
+            }
+        }
+        self
+    }
 }
 
 /// One backend's per-theorem render of [`TheoremSpec`].  Returned
@@ -142,24 +183,35 @@ impl CorpusBackend for CoqCorpusBackend {
             content.push_str(&format!("(* @verify({}) *)\n", strat));
         }
         content.push('\n');
-        // Statement-level export: emit a `Parameter`-form binding that
-        // declares the theorem's name with an opaque `Prop` type.
-        // Even at this opaque layer, `coqc` verifies the binding is
-        // well-formed (no name collision, valid identifier shape).
-        // The proposition text is preserved verbatim in a comment so
-        // a reviewer can see what the statement is supposed to say.
-        content.push_str(&format!("(* Proposition (Verum source): {} *)\n",
-            sanitise_for_comment(&spec.proposition_text)));
+        // Statement-level export — type structure varies by whether
+        // the AST translator (#140 / MSFS-L4.7) successfully rendered
+        // the proposition into Coq syntax:
+        //
+        //   * `per_backend_proposition["coq"]` is `Some(t)` → use `t`
+        //     as the theorem's TYPE.  `coqc` validates the
+        //     proposition's type structure as well as its name binding.
+        //   * Translation fell back → use `Prop` and embed the
+        //     original Verum-side text in a comment.  `coqc` validates
+        //     only the name binding.
+        let coq_type: &str = spec
+            .per_backend_proposition
+            .get("coq")
+            .map(|s| s.as_str())
+            .unwrap_or("Prop");
+        content.push_str(&format!(
+            "(* Proposition (Verum source): {} *)\n",
+            sanitise_for_comment(&spec.proposition_text)
+        ));
         if spec.has_proof_body {
             content.push_str(&format!(
-                "Theorem {} : Prop.\n\
+                "Theorem {} : {}.\n\
                  Proof.\n  \
                    admit.\n\
                  Admitted.\n",
-                spec.name,
+                spec.name, coq_type,
             ));
         } else {
-            content.push_str(&format!("Axiom {} : Prop.\n", spec.name));
+            content.push_str(&format!("Axiom {} : {}.\n", spec.name, coq_type));
         }
         RenderedTheorem { filename, content }
     }
@@ -215,13 +267,20 @@ impl CorpusBackend for LeanCorpusBackend {
             "/-! Proposition (Verum source): {} -/\n",
             sanitise_for_comment(&spec.proposition_text),
         ));
+        // Same translator-driven type-structure choice as the Coq
+        // backend (#140 / MSFS-L4.7).
+        let lean_type: &str = spec
+            .per_backend_proposition
+            .get("lean")
+            .map(|s| s.as_str())
+            .unwrap_or("Prop");
         if spec.has_proof_body {
             content.push_str(&format!(
-                "theorem {} : Prop := by sorry\n",
-                spec.name,
+                "theorem {} : {} := by sorry\n",
+                spec.name, lean_type,
             ));
         } else {
-            content.push_str(&format!("axiom {} : Prop\n", spec.name));
+            content.push_str(&format!("axiom {} : {}\n", spec.name, lean_type));
         }
         RenderedTheorem { filename, content }
     }
@@ -258,6 +317,7 @@ mod tests {
             name: name.to_string(),
             module_path: "test_module".to_string(),
             proposition_text: prop.to_string(),
+            per_backend_proposition: std::collections::BTreeMap::new(),
             has_proof_body: true,
             declared_strategy: None,
         }
@@ -268,6 +328,7 @@ mod tests {
             name: name.to_string(),
             module_path: "test_module".to_string(),
             proposition_text: prop.to_string(),
+            per_backend_proposition: std::collections::BTreeMap::new(),
             has_proof_body: false,
             declared_strategy: None,
         }
@@ -357,5 +418,95 @@ mod tests {
         assert!(r.content.contains("theorems.msfs.05_afnt_alpha.theorem_5_1"));
         let r = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(r.content.contains("theorems.msfs.05_afnt_alpha.theorem_5_1"));
+    }
+
+    #[test]
+    fn translator_lifts_coq_theorem_type_when_proposition_translates() {
+        // When per_backend_proposition["coq"] is populated, the
+        // emitted Coq file's `Theorem foo : <type>.` carries the
+        // translated proposition instead of `Prop`.  Pre-fix the
+        // type was always `Prop` and `coqc` only validated name
+        // binding; post-fix it validates the proposition's TYPE
+        // structure too.
+        let mut spec = spec_proven("eq_thm", "n == 7");
+        spec.per_backend_proposition.insert("coq".into(), "(n = 7)".into());
+        spec.per_backend_proposition.insert("lean".into(), "(n = 7)".into());
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("Theorem eq_thm : (n = 7)."),
+            "Coq output must use translated type; got:\n{}",
+            coq.content,
+        );
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            lean.content.contains("theorem eq_thm : (n = 7) := by sorry"),
+            "Lean output must use translated type; got:\n{}",
+            lean.content,
+        );
+    }
+
+    #[test]
+    fn translator_falls_back_to_prop_when_translation_absent() {
+        // Untranslated proposition (no entry in per_backend_proposition)
+        // → renderer falls back to `Prop` while preserving the
+        // original Verum text in a comment.
+        let spec = spec_proven("untranslated_thm", "complex match shape");
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(coq.content.contains("Theorem untranslated_thm : Prop."));
+        assert!(coq.content.contains("complex match shape"));
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(lean.content.contains("theorem untranslated_thm : Prop := by sorry"));
+        assert!(lean.content.contains("complex match shape"));
+    }
+
+    #[test]
+    fn translator_lifts_axiom_form_too() {
+        // The translation lift applies to proofless decls (axiom
+        // form) the same way it applies to proof-bearing decls.
+        let mut spec = spec_axiom("nat_zero_pos", "0 == 0");
+        spec.per_backend_proposition.insert("coq".into(), "(0 = 0)".into());
+        spec.per_backend_proposition.insert("lean".into(), "(0 = 0)".into());
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(coq.content.contains("Axiom nat_zero_pos : (0 = 0)."));
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(lean.content.contains("axiom nat_zero_pos : (0 = 0)"));
+    }
+
+    #[test]
+    fn with_translated_proposition_runs_both_backends() {
+        // Round-trip: TheoremSpec::with_translated_proposition takes
+        // an Expr and populates per_backend_proposition for every
+        // standard backend (Coq + Lean).
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::{Ident, Path};
+        use verum_ast::Span;
+        use verum_common::Heap;
+
+        let lit_zero = verum_ast::Expr::new(
+            ExprKind::Literal(verum_ast::Literal::int(0, Span::dummy())),
+            Span::dummy(),
+        );
+        let path_n = verum_ast::Expr::new(
+            ExprKind::Path(Path::single(Ident::new("n", Span::dummy()))),
+            Span::dummy(),
+        );
+        let prop = verum_ast::Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Eq,
+                left: Heap::new(path_n),
+                right: Heap::new(lit_zero),
+            },
+            Span::dummy(),
+        );
+        let spec = spec_proven("zero_thm", "n == 0")
+            .with_translated_proposition(&prop);
+        assert_eq!(
+            spec.per_backend_proposition.get("coq").map(|s| s.as_str()),
+            Some("(n = 0)"),
+        );
+        assert_eq!(
+            spec.per_backend_proposition.get("lean").map(|s| s.as_str()),
+            Some("(n = 0)"),
+        );
     }
 }
