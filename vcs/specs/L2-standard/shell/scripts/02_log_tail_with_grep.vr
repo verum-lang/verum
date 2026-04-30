@@ -1,0 +1,28 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, log, pipeline
+// @description: Real-world shell script — tail a log and grep for ERROR lines.
+//
+// Exercises:
+//   * Multi-stage pipeline composition via .pipe_to()
+//   * .merge_stderr() to fold stderr into stdout for grepping
+//   * .run_with_cancel() with an explicit CancellationToken
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult};
+mount core.async.cancellation.{CancellationToken};
+
+/// `tail -f /var/log/syslog 2>&1 | grep ERROR` with cancellation.
+async fn tail_errors(token: CancellationToken) -> ShellResult {
+    sh#"tail -F /var/log/syslog"
+        .merge_stderr()
+        .pipe_to(sh#"grep --line-buffered ERROR")
+        .run_with_cancel(token)
+        .await
+}
+
+async fn main() -> Int {
+    let token = CancellationToken.new();
+    let _ = tail_errors(token).await;
+    0
+}
