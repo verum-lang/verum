@@ -34,6 +34,7 @@ mount core.{Text, Result};
 mount core.base.protocols.{Display, Debug, Clone};
 mount core.shell.result.{ShellResult, ShellError};
 mount core.shell.context.{ShellContext};
+mount core.shell.stream.{StreamConfig, LineStream};
 mount core.async.cancellation.{CancellationToken};
 
 // =============================================================================
@@ -107,6 +108,59 @@ implement ShellCommand {
     /// period SIGKILL (forced).
     public async fn run_with_cancel(&self, token: CancellationToken) -> ShellResult {
         core.shell.exec.sh_with_cancel(&self.text, token).await
+    }
+
+    /// Stream stdout LINE-BY-LINE as an async generator.  Each yield is
+    /// `Result<Text, ShellError>` carrying one line (newline stripped).
+    /// Use with `for await` for ergonomic consumption:
+    ///
+    /// ```verum
+    /// for await line in sh#"git log --oneline".stream_lines() {
+    ///     match line {
+    ///         Ok(text) => print(&text),
+    ///         Err(e)   => eprintln(f"stream error: {e}"),
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Backpressure: relies on the kernel pipe buffer.  For
+    /// fast-producer / slow-consumer scenarios prefer
+    /// `stream_lines_bounded(config)` which adds an explicit channel
+    /// + cancellation surface.  Forwards to `core.shell.stream.
+    /// stream_lines` — same auto-escape invariant: `self.text` is
+    /// shell-safe by construction.
+    public async fn* stream_lines(&self) -> Result<Text, ShellError> {
+        for await line in core.shell.stream.stream_lines(&self.text) {
+            yield line;
+        }
+    }
+
+    /// Stream stdout line-by-line through a BOUNDED channel with
+    /// explicit cancellation handle.  The returned `LineStream`
+    /// carries:
+    ///
+    ///   * `receiver: Receiver<Result<Text, ShellError>>` — the
+    ///     consumer endpoint with bounded backpressure
+    ///   * `job: Job` — the spawned producer task; `job.kill()`
+    ///     terminates the child process AND closes the channel
+    ///
+    /// Use this variant when:
+    ///   * the producer is much faster than the consumer (e.g.
+    ///     `cat huge.log` piped to a slow downstream parser);
+    ///   * you need to `select!` over multiple streams;
+    ///   * you need to cancel the producer on a timeout / signal.
+    ///
+    /// ```verum
+    /// let stream = sh#"tail -F /var/log/syslog"
+    ///     .stream_lines_bounded(StreamConfig.default()).await?;
+    /// // ... consume from stream.receiver ...
+    /// stream.job.kill();
+    /// ```
+    public async fn stream_lines_bounded(
+        &self,
+        config: StreamConfig,
+    ) -> Result<LineStream, ShellError> {
+        core.shell.stream.stream_lines_bounded(&self.text, config).await
     }
 
     /// Compose two commands as a shell pipeline: `self | other`. The
