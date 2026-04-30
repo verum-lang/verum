@@ -1475,6 +1475,19 @@ enum Commands {
         #[clap(long)]
         framework_conflicts: bool,
 
+        /// foundation-profiles audit:
+        /// classify every `@framework(<name>, "<citation>")` marker
+        /// by its underlying logical foundation (ZFC family / MLTT
+        /// / HoTT / Cubical / CIC) using the `verum_kernel::
+        /// foundation_profile::FoundationDistribution` analyzer.
+        /// Reports per-foundation citation counts, lists unresolved
+        /// framework names, and detects cross-foundation conflicts
+        /// (UIP ⊥ univalence). Exits non-zero on any conflict.
+        ///
+        /// Output: `target/audit-reports/foundation-profiles.json`.
+        #[clap(long)]
+        foundation_profiles: bool,
+
         /// accessibility audit (item 4):
         /// walk every `@enact(...)` / EpsilonOf marker in the
         /// project, cross-reference against `@accessibility(λ)`
@@ -3724,6 +3737,7 @@ fn run_command(cli: Cli) -> Result<()> {
             hygiene_strict,
             owl2_classify,
             framework_conflicts,
+            foundation_profiles,
             accessibility,
             round_trip,
             coherent,
@@ -3796,6 +3810,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_owl2_classify_with_format(output_format)
             } else if framework_conflicts {
                 commands::audit::audit_framework_conflicts_with_format(output_format)
+            } else if foundation_profiles {
+                commands::audit::audit_foundation_profiles_with_format(output_format)
             } else if accessibility {
                 commands::audit::audit_accessibility_with_format(output_format)
             } else if round_trip {

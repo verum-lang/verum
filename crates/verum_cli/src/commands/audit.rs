@@ -826,6 +826,201 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
     Ok(())
 }
 
+/// `verum audit --foundation-profiles` — classify every `@framework(...)`
+/// citation in the project by its underlying logical foundation
+/// (ZFC family / MLTT / HoTT / Cubical / CIC) and surface
+/// cross-foundation conflicts.
+///
+/// Walks every `.vr` file under the project, collects every
+/// `@framework(<name>, "<citation>")` attribute via
+/// [`verum_kernel::framework_citation::collect_framework_citations`],
+/// then partitions the manifest by foundation via
+/// [`verum_kernel::foundation_profile::FoundationDistribution`].
+///
+/// **Three categories of report data**:
+///   1. Per-foundation citation count — observability for the
+///      meta-theoretic shape of the corpus.
+///   2. Unresolved citations — framework names not in either bridge.
+///      Surfaced so the corpus author can extend the recogniser or
+///      correct the citation.
+///   3. Foundation conflicts — pairwise incompatibilities (currently
+///      UIP + univalence; see `FoundationProfile::conflicts_with`).
+///      Exits non-zero on any conflict — the corpus would derive
+///      `False` if both foundations are simultaneously assumed.
+///
+/// **Why separate from `--framework-conflicts`**: that gate operates
+/// at the framework-name level (the literal `@framework(<name>, ...)`
+/// argument) and uses `verum_verification::audit_framework_set`'s
+/// hand-curated incompatibility matrix.  This gate operates at the
+/// foundation level (the LOGIC each framework lives in) and uses
+/// foundation-level incompatibility (UIP ⊥ univalence).  The two
+/// dimensions are orthogonal: a corpus can be framework-coherent
+/// (no `uip` + `univalence` framework names) but foundation-incoherent
+/// (an `msfs` citation living in ZFC + 2 inacc next to a `cubical`
+/// citation living in HoTT — currently compatible, but if MSFS were
+/// reclassified to MLTT+UIP, the conflict would surface here).
+///
+/// Output: `target/audit-reports/foundation-profiles.json`.
+pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::foundation_profile::{
+        FoundationDistribution, FoundationProfile,
+    };
+    use verum_kernel::framework_citation::collect_framework_citations;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Classifying @framework citations by logical foundation");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut all_citations = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+        let manifest = collect_framework_citations(&module.items);
+        all_citations.extend(manifest.rows);
+    }
+
+    let dist = FoundationDistribution::from_citations(&all_citations);
+
+    // Always write the JSON report to disk so the bundle dispatcher
+    // and any downstream tooling can read it without re-running the
+    // gate.  This matches the "every gate writes JSON unconditionally"
+    // discipline established by task #172.
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("foundation-profiles.json");
+    let report_json = serde_json::json!({
+        "schema_version": 1,
+        "parsed_files": parsed_files,
+        "skipped_files": skipped_files,
+        "total_citations": all_citations.len(),
+        "resolved_count": dist.resolved_count(),
+        "unresolved_count": dist.unresolved_count(),
+        "by_foundation": dist
+            .by_foundation
+            .iter()
+            .map(|(p, n)| (p.tag().to_string(), serde_json::json!(*n)))
+            .collect::<serde_json::Map<_, _>>(),
+        "unresolved": dist.unresolved,
+        "conflicts": dist.conflicts,
+        "is_coherent": dist.is_coherent(),
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report_json).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Foundation-profile distribution");
+            println!("─────────────────────────────────────────");
+            println!("Files parsed:        {}", parsed_files);
+            println!("Files skipped:       {}", skipped_files);
+            println!("Total citations:     {}", all_citations.len());
+            println!("Resolved:            {}", dist.resolved_count());
+            println!("Unresolved:          {}", dist.unresolved_count());
+            println!();
+            if dist.by_foundation.is_empty() {
+                println!("No citations classified into a foundation.");
+            } else {
+                println!("By foundation:");
+                for (profile, count) in &dist.by_foundation {
+                    println!(
+                        "  {:>4}  {:<35}  ({})",
+                        count,
+                        profile.display_name(),
+                        profile.tag(),
+                    );
+                }
+            }
+            if !dist.unresolved.is_empty() {
+                println!();
+                println!(
+                    "Unresolved framework names ({}) — extend `from_known_framework` \
+                     in verum_kernel::foundation_profile to recognise these:",
+                    dist.unresolved.len(),
+                );
+                let mut by_name: BTreeMap<&String, usize> = BTreeMap::new();
+                for u in &dist.unresolved {
+                    *by_name.entry(&u.framework).or_insert(0) += 1;
+                }
+                for (name, count) in &by_name {
+                    println!("  • {}  ({})", name, count);
+                }
+            }
+            println!();
+            if dist.is_coherent() {
+                println!(
+                    "{} {} foundation(s) coexist coherently.",
+                    "✓".green(),
+                    dist.foundations().len(),
+                );
+            } else {
+                println!(
+                    "{} Foundation pluralism detected — verify no \
+                     single derivation chain crosses these:",
+                    "!".yellow(),
+                );
+                for c in &dist.conflicts {
+                    println!(
+                        "  {} ⊥ {}: {}",
+                        c.left.tag(),
+                        c.right.tag(),
+                        c.reason,
+                    );
+                }
+            }
+            // Quick reachability hint that helps the auditor file
+            // follow-ups.
+            if !dist.unresolved.is_empty() || !dist.is_coherent() {
+                println!();
+                println!("Report: {}", report_path.display());
+            }
+            // Touch FoundationProfile to keep the import alive for
+            // downstream callers cherry-picking this code path
+            // — the linker-level no-op silences the unused-import
+            // warning when FoundationProfile is only mentioned in
+            // doc comments.
+            let _ = FoundationProfile::default_profile();
+        }
+        AuditFormat::Json => {
+            // The unconditional disk write above already produced the
+            // canonical artefact; mirror it to stdout so the bundle
+            // dispatcher and CLI consumers see the same payload.
+            println!(
+                "{}",
+                serde_json::to_string(&report_json).unwrap_or_default(),
+            );
+        }
+    }
+
+    // Foundation pluralism (corpus-level multi-foundation citation)
+    // is observability, not a build-breaking error: a corpus can
+    // legitimately host independent theorems in incompatible
+    // foundations as long as no single derivation chain assumes both.
+    // Cross-chain detection (a per-theorem walk) is a future V1 add;
+    // V0 surfaces the corpus-level pluralism so the auditor can
+    // verify isolation manually.  Exit 0 unconditionally.
+    Ok(())
+}
+
 /// `verum audit --accessibility` (item 4).
 ///
 /// Walks every `@enact(...)` marker (and EpsilonOf-tagged

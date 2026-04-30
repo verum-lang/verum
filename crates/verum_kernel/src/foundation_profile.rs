@@ -30,8 +30,11 @@
 //!   theorems); the audit gate flags theorems that depend on a
 //!   foundation incompatible with their consumers.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
+use crate::framework_citation::{FrameworkCitation, FrameworkCitationManifest};
 use crate::zfc_self_recognition::InaccessibleLevel;
 
 // =============================================================================
@@ -46,7 +49,7 @@ use crate::zfc_self_recognition::InaccessibleLevel;
 /// classical) first, then HoTT (type-theoretic with univalence),
 /// then Cubical (constructive HoTT with computational univalence),
 /// then constructive variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FoundationProfile {
     /// **ZFC + 0 inaccessibles** — pure Zermelo-Fraenkel set theory
@@ -309,6 +312,10 @@ impl FoundationProfile {
     pub fn from_known_framework(framework: &str) -> Option<Self> {
         match framework {
             // ZFC + 2 inaccessibles (Verum's default meta-theory).
+            // `verum` is the self-citation tag — corpus theorems that
+            // cite a Verum-side stdlib result use `@framework(verum,
+            // "...")` to mark the trust dependency on Verum's own
+            // proven body.
             "msfs"
             | "diakrisis"
             | "connes_reconstruction"
@@ -317,9 +324,18 @@ impl FoundationProfile {
             | "petz_classification"
             | "adamek_rosicky"
             | "lair_makkai_pare"
-            | "lambek_scott" => Some(FoundationProfile::ZfcTwoInaccessibles),
+            | "lambek_scott"
+            | "verum" => Some(FoundationProfile::ZfcTwoInaccessibles),
             // ZFC + 1 inaccessible (HTT lives here).
             "lurie_htt" => Some(FoundationProfile::ZfcOneInaccessible),
+            // CIC (Coq + Lean 4 + their stdlibs all share the
+            // CIC/CoIC family — Lean 4's logic is a CIC-derived
+            // dependent type theory; mathlib4 lives in Lean 4).
+            // Foundation-classification operates at the family
+            // granularity, so they all map to Cic.
+            "coq_stdlib" | "lean4_stdlib" | "mathlib4" => {
+                Some(FoundationProfile::Cic)
+            }
             // Pure ZFC (elementary mathematics, no Grothendieck universes).
             "arnold_catastrophe"
             | "bounded_arithmetic_i_delta_0"
@@ -372,6 +388,185 @@ impl std::fmt::Display for FoundationProfile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display_name())
     }
+}
+
+// =============================================================================
+// FoundationDistribution — bridge to FrameworkCitationManifest
+// =============================================================================
+
+/// One citation that couldn't be classified into a foundation by
+/// either [`FoundationProfile::from_framework_tag`] or
+/// [`FoundationProfile::from_known_framework`].
+///
+/// Surfaced by the audit gate so the corpus author can either add
+/// the framework to the recognised set or correct the citation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnresolvedCitation {
+    /// Framework name as written in the `@framework(...)` attribute.
+    pub framework: String,
+    /// Citation string (path / paragraph reference).
+    pub citation: String,
+    /// Declaration carrying the citation.
+    pub decl_name: String,
+    /// `"theorem"` / `"lemma"` / `"corollary"` / `"axiom"`.
+    pub decl_kind: String,
+}
+
+/// One detected cross-foundation incompatibility — typically the
+/// UIP-vs-univalence pair, but the data shape is general so future
+/// rules (e.g., classical-vs-anti-classical) plug in without API
+/// change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundationConflict {
+    /// First foundation in the conflicting pair.
+    pub left: FoundationProfile,
+    /// Second foundation in the conflicting pair.
+    pub right: FoundationProfile,
+    /// Human-readable explanation.
+    pub reason: String,
+}
+
+/// Distribution of `@framework(...)` citations across foundation
+/// profiles, with conflict detection.
+///
+/// The data layer underneath
+/// `verum audit --foundation-profiles`: takes the citation manifest
+/// produced by [`crate::framework_citation::collect_framework_citations`]
+/// and partitions it by foundation, surfacing unresolved citations
+/// and cross-foundation conflicts.
+///
+/// **Why a separate analyzer (vs. a method on `FrameworkCitationManifest`)**:
+/// the citation manifest knows nothing about foundations — it's
+/// purely structural.  The classification is a separate concern that
+/// lives where foundations are defined.  This keeps
+/// `framework_citation` reusable for audit gates that don't care
+/// about foundations (e.g., `--framework-axioms` enumeration).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FoundationDistribution {
+    /// Per-foundation citation count.  Keys are foundation profiles
+    /// that appeared at least once; missing keys mean zero citations.
+    pub by_foundation: BTreeMap<FoundationProfile, usize>,
+    /// Citations whose framework name matched neither bridge.
+    pub unresolved: Vec<UnresolvedCitation>,
+    /// Cross-foundation incompatibilities detected (UIP + univalence
+    /// is the canonical case).
+    pub conflicts: Vec<FoundationConflict>,
+}
+
+impl FoundationDistribution {
+    /// Classify every citation in the manifest into a foundation,
+    /// accumulating the per-foundation count and recording
+    /// unresolved citations.  Detects pairwise conflicts among the
+    /// distinct foundations present.
+    pub fn from_manifest(manifest: &FrameworkCitationManifest) -> Self {
+        Self::from_citations(&manifest.rows)
+    }
+
+    /// Like [`Self::from_manifest`] but takes the citation list
+    /// directly — useful when the caller already iterated rows.
+    pub fn from_citations(rows: &[FrameworkCitation]) -> Self {
+        let mut by_foundation: BTreeMap<FoundationProfile, usize> = BTreeMap::new();
+        let mut unresolved: Vec<UnresolvedCitation> = Vec::new();
+
+        for row in rows {
+            match FoundationProfile::resolve_citation(&row.framework) {
+                Some(profile) => {
+                    *by_foundation.entry(profile).or_insert(0) += 1;
+                }
+                None => unresolved.push(UnresolvedCitation {
+                    framework: row.framework.clone(),
+                    citation: row.citation.clone(),
+                    decl_name: row.decl_name.clone(),
+                    decl_kind: row.decl_kind.clone(),
+                }),
+            }
+        }
+
+        let conflicts = detect_pairwise_conflicts(&by_foundation);
+
+        Self {
+            by_foundation,
+            unresolved,
+            conflicts,
+        }
+    }
+
+    /// Distinct foundations present (excluding unresolved citations),
+    /// in canonical (BTreeMap) order.
+    pub fn foundations(&self) -> Vec<FoundationProfile> {
+        self.by_foundation.keys().copied().collect()
+    }
+
+    /// Total citations that classified into a foundation.
+    pub fn resolved_count(&self) -> usize {
+        self.by_foundation.values().sum()
+    }
+
+    /// Total unresolved citations.
+    pub fn unresolved_count(&self) -> usize {
+        self.unresolved.len()
+    }
+
+    /// Whether the corpus is foundation-coherent: no detected
+    /// conflicts.  Unresolved citations don't count as conflicts —
+    /// they're observability data, not logical contradictions.
+    pub fn is_coherent(&self) -> bool {
+        self.conflicts.is_empty()
+    }
+
+    /// Whether the corpus has zero citations across the board (an
+    /// empty manifest).
+    pub fn is_empty(&self) -> bool {
+        self.by_foundation.is_empty() && self.unresolved.is_empty()
+    }
+}
+
+/// Detect every pairwise incompatibility among the distinct
+/// foundations present.  Returns at most `n*(n-1)/2` conflicts
+/// where `n = by_foundation.len()`.  Order is canonical
+/// (lexicographic by tag) so reports are reproducible.
+fn detect_pairwise_conflicts(
+    by_foundation: &BTreeMap<FoundationProfile, usize>,
+) -> Vec<FoundationConflict> {
+    let foundations: Vec<FoundationProfile> = by_foundation.keys().copied().collect();
+    let mut conflicts = Vec::new();
+    for i in 0..foundations.len() {
+        for j in (i + 1)..foundations.len() {
+            let left = foundations[i];
+            let right = foundations[j];
+            if left.conflicts_with(right) {
+                conflicts.push(FoundationConflict {
+                    left,
+                    right,
+                    reason: conflict_reason(left, right),
+                });
+            }
+        }
+    }
+    conflicts
+}
+
+/// Human-readable explanation for a detected conflict.  Currently
+/// only UIP + univalence is detectable; the match is exhaustive on
+/// the conflict cases enumerated by [`FoundationProfile::conflicts_with`].
+fn conflict_reason(a: FoundationProfile, b: FoundationProfile) -> String {
+    let (uip, uni) = if a.assumes_uip() && b.assumes_univalence() {
+        (a, b)
+    } else if b.assumes_uip() && a.assumes_univalence() {
+        (b, a)
+    } else {
+        return format!(
+            "incompatible foundations: {} and {}",
+            a.tag(),
+            b.tag(),
+        );
+    };
+    format!(
+        "{} assumes UIP; {} assumes univalence — UIP and univalence are \
+         logically incompatible (Hofmann-Streicher 1996, Voevodsky 2010)",
+        uip.tag(),
+        uni.tag(),
+    )
 }
 
 #[cfg(test)]
@@ -609,6 +804,30 @@ mod tests {
     }
 
     #[test]
+    fn from_known_framework_cic_external_proof_assistants() {
+        // Coq + Lean 4 + Lean's mathlib4 all share the CIC family.
+        for framework in ["coq_stdlib", "lean4_stdlib", "mathlib4"] {
+            assert_eq!(
+                FoundationProfile::from_known_framework(framework),
+                Some(FoundationProfile::Cic),
+                "framework {:?} should resolve to CIC",
+                framework,
+            );
+        }
+    }
+
+    #[test]
+    fn from_known_framework_verum_self_citation() {
+        // The `@framework(verum, "...")` self-citation marks the
+        // trust dependency on Verum's own stdlib results — Verum's
+        // default foundation is ZFC + 2 inaccessibles.
+        assert_eq!(
+            FoundationProfile::from_known_framework("verum"),
+            Some(FoundationProfile::ZfcTwoInaccessibles),
+        );
+    }
+
+    #[test]
     fn from_known_framework_pure_zfc_corpora() {
         for framework in [
             "arnold_catastrophe",
@@ -668,6 +887,127 @@ mod tests {
         // Unknown tags return None.
         assert!(FoundationProfile::resolve_citation("garbage").is_none());
         assert!(FoundationProfile::resolve_citation("owl2_fs").is_none());
+    }
+
+    fn cite(framework: &str, citation: &str, decl: &str, kind: &str) -> FrameworkCitation {
+        FrameworkCitation {
+            decl_name: decl.to_string(),
+            decl_kind: kind.to_string(),
+            framework: framework.to_string(),
+            citation: citation.to_string(),
+        }
+    }
+
+    #[test]
+    fn distribution_partitions_resolved_and_unresolved() {
+        let citations = vec![
+            cite("hott", "1.2.3", "uni_lemma", "lemma"),
+            cite("msfs", "5.1", "afnt_alpha", "theorem"),
+            cite("lurie_htt", "5.5", "topos_lemma", "lemma"),
+            cite("garbage_unknown", "—", "weird_thm", "theorem"),
+        ];
+        let dist = FoundationDistribution::from_citations(&citations);
+        assert_eq!(dist.resolved_count(), 3);
+        assert_eq!(dist.unresolved_count(), 1);
+        assert_eq!(
+            dist.by_foundation[&FoundationProfile::Hott],
+            1,
+        );
+        assert_eq!(
+            dist.by_foundation[&FoundationProfile::ZfcTwoInaccessibles],
+            1,
+        );
+        assert_eq!(
+            dist.by_foundation[&FoundationProfile::ZfcOneInaccessible],
+            1,
+        );
+        assert_eq!(dist.unresolved[0].framework, "garbage_unknown");
+    }
+
+    #[test]
+    fn distribution_aggregates_repeated_frameworks() {
+        let citations = vec![
+            cite("msfs", "1", "a", "theorem"),
+            cite("msfs", "2", "b", "theorem"),
+            cite("diakrisis", "3", "c", "theorem"),
+        ];
+        let dist = FoundationDistribution::from_citations(&citations);
+        // msfs (2) + diakrisis (1) — both ZfcTwoInaccessibles → 3.
+        assert_eq!(
+            dist.by_foundation[&FoundationProfile::ZfcTwoInaccessibles],
+            3,
+        );
+        assert_eq!(dist.foundations().len(), 1);
+    }
+
+    #[test]
+    fn distribution_detects_uip_univalence_conflict() {
+        let citations = vec![
+            cite("hott", "univalence", "uni_thm", "theorem"),
+            cite("uip", "uniqueness", "uip_thm", "theorem"),
+        ];
+        let dist = FoundationDistribution::from_citations(&citations);
+        assert!(!dist.is_coherent());
+        assert_eq!(dist.conflicts.len(), 1);
+        let c = &dist.conflicts[0];
+        assert!(c.reason.contains("UIP"));
+        assert!(c.reason.contains("univalence"));
+        // One of left/right is MlttUip, the other is Hott.
+        assert!(
+            (c.left == FoundationProfile::MlttUip && c.right == FoundationProfile::Hott)
+                || (c.left == FoundationProfile::Hott
+                    && c.right == FoundationProfile::MlttUip),
+        );
+    }
+
+    #[test]
+    fn distribution_no_conflict_when_foundations_compatible() {
+        let citations = vec![
+            cite("hott", "x", "a", "theorem"),
+            cite("cubical", "y", "b", "theorem"),
+            cite("msfs", "z", "c", "theorem"),
+        ];
+        let dist = FoundationDistribution::from_citations(&citations);
+        assert!(dist.is_coherent());
+    }
+
+    #[test]
+    fn distribution_empty_manifest_has_no_state() {
+        let dist = FoundationDistribution::from_citations(&[]);
+        assert_eq!(dist.resolved_count(), 0);
+        assert_eq!(dist.unresolved_count(), 0);
+        assert!(dist.is_coherent());
+        assert!(dist.is_empty());
+    }
+
+    #[test]
+    fn distribution_serde_round_trip() {
+        let citations = vec![
+            cite("hott", "1", "a", "theorem"),
+            cite("msfs", "2", "b", "theorem"),
+            cite("garbage", "3", "c", "theorem"),
+        ];
+        let dist = FoundationDistribution::from_citations(&citations);
+        let json = serde_json::to_string(&dist).unwrap();
+        let restored: FoundationDistribution = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, dist);
+    }
+
+    #[test]
+    fn distribution_from_manifest_matches_from_citations() {
+        let citations = vec![cite("hott", "1", "a", "theorem")];
+        let mut manifest = FrameworkCitationManifest::empty();
+        for c in &citations {
+            *manifest
+                .by_framework
+                .entry(c.framework.clone())
+                .or_insert(0) += 1;
+            manifest.rows.push(c.clone());
+        }
+        assert_eq!(
+            FoundationDistribution::from_manifest(&manifest),
+            FoundationDistribution::from_citations(&citations),
+        );
     }
 
     #[test]

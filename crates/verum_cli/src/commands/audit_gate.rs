@@ -169,6 +169,7 @@ impl Default for AuditRegistry {
         r.register(Box::new(CrossFormatRoundtripGate));
         r.register(Box::new(EpsilonGate));
         r.register(Box::new(FrameworkAxiomsGate));
+        r.register(Box::new(FoundationProfilesGate));
         r.register(Box::new(FrameworkConflictsGate));
         r.register(Box::new(FrameworkSoundnessGate));
         r.register(Box::new(HygieneGate));
@@ -336,6 +337,18 @@ impl AuditGate for FrameworkConflictsGate {
     }
 }
 
+/// `verum audit --foundation-profiles` — citation-by-foundation classifier.
+pub struct FoundationProfilesGate;
+impl AuditGate for FoundationProfilesGate {
+    fn name(&self) -> &'static str { "foundation-profiles" }
+    fn description(&self) -> &'static str {
+        "Classify every @framework citation by logical foundation (ZFC family / MLTT / HoTT / Cubical / CIC); detect cross-foundation conflicts (UIP ⊥ univalence)."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_foundation_profiles_with_format(format)
+    }
+}
+
 /// `verum audit --framework-soundness` — framework citation soundness.
 pub struct FrameworkSoundnessGate;
 impl AuditGate for FrameworkSoundnessGate {
@@ -498,6 +511,7 @@ mod tests {
             "coord-consistency",
             "cross-format-roundtrip",
             "epsilon",
+            "foundation-profiles",
             "framework-axioms",
             "framework-conflicts",
             "framework-soundness",
@@ -519,7 +533,7 @@ mod tests {
                 name,
             );
         }
-        assert_eq!(r.len(), 24, "expected 24 gates in the default registry");
+        assert_eq!(r.len(), 25, "expected 25 gates in the default registry");
     }
 
     #[test]
@@ -537,7 +551,7 @@ mod tests {
     fn registry_list_returns_name_description_pairs() {
         let r = AuditRegistry::default();
         let entries = r.list();
-        assert_eq!(entries.len(), 24);
+        assert_eq!(entries.len(), 25);
         for (name, desc) in &entries {
             assert!(!name.is_empty());
             assert!(!desc.is_empty());
