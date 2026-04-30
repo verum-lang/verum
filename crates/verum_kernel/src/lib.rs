@@ -85,6 +85,15 @@
 /// fixes. Bump on every kernel-rule addition.
 pub const VVA_VERSION: &str = "2.6.0";
 
+pub mod proof_checker;
+// Note: `proof_checker::{check, infer, Context, Term}` deliberately
+// stay un-reexported at crate root — the names collide with
+// kernel-side `verum_kernel::infer` (the larger Verum-AST type
+// inferencer) and the higher-level `Term`/`Context` carriers in
+// `verum_kernel::term`.  The proof-term checker is the minimal
+// trusted base; downstream callers reach it via the explicit
+// `proof_checker::*` path so the namespace boundary stays loud.
+
 pub mod proof_tree;
 pub use proof_tree::{KernelProofNode, KernelRule, record_inference};
 
