@@ -1489,6 +1489,28 @@ pub struct ProtocolChecker {
     /// are impossible within the lifetime of a process and across
     /// processes the cache is fresh anyway (thread-local).
     checker_id: u64,
+
+    /// `[protocols].resolution_strategy` — chooses how `find_impl`
+    /// resolves multi-candidate cases.  Threaded from manifest via
+    /// `set_resolution_strategy`.
+    ///
+    ///   * `"most_specific"` (default) — pick the most specific impl
+    ///     (current behaviour via `select_most_specific_impl`).
+    ///   * `"first_declared"` — pick the first registered candidate
+    ///     (useful in open-world plugin systems).
+    ///   * `"error"` — any overlap is an error; `find_impl` returns
+    ///     None to surface the existing ambiguity diagnostic.
+    ///
+    /// Pre-fix the production resolver hardcoded "most_specific" and
+    /// `[protocols].resolution_strategy` was tracing-only at
+    /// session.rs:582.
+    resolution_strategy: Text,
+    /// `[protocols].blanket_impls` — when false, candidates whose
+    /// `for_type` is a bare type variable (the blanket
+    /// `impl<T> Protocol for T` pattern) are excluded from
+    /// `find_impl`'s candidate set.  Threaded from manifest via
+    /// `set_blanket_impls`.  Default true (Rust-like ergonomics).
+    blanket_impls: bool,
 }
 
 impl ProtocolChecker {
@@ -1508,6 +1530,8 @@ impl ProtocolChecker {
             variant_type_names: Map::new(),
             method_resolution_cache: Map::new(),
             checker_id: allocate_checker_id(),
+            resolution_strategy: Text::from("most_specific"),
+            blanket_impls: true,
         };
 
         // Register standard protocols
@@ -1538,7 +1562,49 @@ impl ProtocolChecker {
             variant_type_names: Map::new(),
             method_resolution_cache: Map::new(),
             checker_id: allocate_checker_id(),
+            resolution_strategy: Text::from("most_specific"),
+            blanket_impls: true,
         }
+    }
+
+    /// Apply the manifest-side `[protocols].resolution_strategy`.
+    /// Unknown values fall back to `"most_specific"` with a warning
+    /// so a typo doesn't silently switch resolution semantics.
+    pub fn set_resolution_strategy(&mut self, strategy: impl Into<Text>) {
+        let s: Text = strategy.into();
+        match s.as_str() {
+            "most_specific" | "first_declared" | "error" => {
+                self.resolution_strategy = s;
+            }
+            other => {
+                tracing::warn!(
+                    "[protocols].resolution_strategy: unknown value {:?} \
+                     (expected \"most_specific\" | \"first_declared\" | \
+                     \"error\"); defaulting to most_specific",
+                    other
+                );
+                self.resolution_strategy = Text::from("most_specific");
+            }
+        }
+    }
+
+    /// Apply the manifest-side `[protocols].blanket_impls`. When
+    /// false, `find_impl` excludes candidates whose `for_type` is a
+    /// bare type variable from the candidate set.
+    pub fn set_blanket_impls(&mut self, allowed: bool) {
+        self.blanket_impls = allowed;
+    }
+
+    /// Read-only accessor — exposed for diagnostics + tests.
+    #[inline]
+    pub fn resolution_strategy(&self) -> &Text {
+        &self.resolution_strategy
+    }
+
+    /// Read-only accessor — exposed for diagnostics + tests.
+    #[inline]
+    pub fn blanket_impls_allowed(&self) -> bool {
+        self.blanket_impls
     }
 
     /// Public accessor for the per-instance checker id. Used by the
@@ -4289,6 +4355,15 @@ impl ProtocolChecker {
                 continue;
             }
 
+            // Honour `[protocols].blanket_impls = false`: skip
+            // candidates whose `for_type` is a bare type variable
+            // (the blanket `impl<T> Protocol for T` pattern). Pre-fix
+            // the manifest field was tracing-only at session.rs:582;
+            // setting `blanket_impls = false` had zero effect.
+            if !self.blanket_impls && matches!(&impl_.for_type, Type::Var(_)) {
+                continue;
+            }
+
             // Try to match the impl's for_type against the concrete type
             if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
                 // Verify where clauses are satisfied with this substitution
@@ -4307,10 +4382,28 @@ impl ProtocolChecker {
             return Maybe::Some(candidates[0].1);
         }
 
-        // Multiple candidates: use specialization resolution
-        // Specialization: more specific protocol implementations override general ones, with lattice-based specificity ordering — .2 - Specialization Precedence
-        let best_idx = self.select_most_specific_impl(&candidates, ty);
-        Maybe::Some(candidates[best_idx].1)
+        // Multiple candidates: dispatch on `[protocols].
+        // resolution_strategy`. Pre-fix the resolver hardcoded
+        // most-specific selection, ignoring the manifest. Now:
+        //   * "most_specific" (default) — current behaviour via
+        //     `select_most_specific_impl` (lattice-based specificity).
+        //   * "first_declared" — pick the first registered candidate.
+        //     Useful for open-world plugin systems where ordering
+        //     reflects priority.
+        //   * "error" — return None on overlap. The compiler's
+        //     existing diagnostic path picks up the missing impl
+        //     and surfaces an ambiguity error to the user.
+        match self.resolution_strategy.as_str() {
+            "first_declared" => Maybe::Some(candidates[0].1),
+            "error" => Maybe::None,
+            // Default "most_specific" + any unrecognised string
+            // (set_resolution_strategy normalises to known values,
+            // so this branch is the documented default).
+            _ => {
+                let best_idx = self.select_most_specific_impl(&candidates, ty);
+                Maybe::Some(candidates[best_idx].1)
+            }
+        }
     }
 
     /// Find implementation with type substitution information
@@ -4359,6 +4452,13 @@ impl ProtocolChecker {
                 continue;
             }
 
+            // Honour `[protocols].blanket_impls = false` — sibling
+            // gate to the one in `find_impl`. Skip type-variable
+            // for_types when blanket impls are disabled.
+            if !self.blanket_impls && matches!(&impl_.for_type, Type::Var(_)) {
+                continue;
+            }
+
             if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
                 if self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
                     candidates.push((idx, impl_, substitution));
@@ -4377,10 +4477,21 @@ impl ProtocolChecker {
             return Maybe::None;
         }
 
-        // Select best candidate
-        let best_idx = self.select_most_specific_impl(&candidates, ty);
-        let (_, impl_, subst) = candidates.into_iter().nth(best_idx)?;
-        Maybe::Some((impl_, subst))
+        // Multiple candidates: dispatch on `[protocols].
+        // resolution_strategy` (sibling to `find_impl`).
+        match self.resolution_strategy.as_str() {
+            "first_declared" => {
+                let (_, impl_, subst) = candidates.into_iter().next()?;
+                Maybe::Some((impl_, subst))
+            }
+            "error" => Maybe::None,
+            _ => {
+                // Default "most_specific".
+                let best_idx = self.select_most_specific_impl(&candidates, ty);
+                let (_, impl_, subst) = candidates.into_iter().nth(best_idx)?;
+                Maybe::Some((impl_, subst))
+            }
+        }
     }
 
     /// Infer associated type from type structure and protocol context
@@ -13741,5 +13852,85 @@ mod tests {
         let registry = checker.export_instance_registry();
         assert_eq!(registry.len(), 1);
         assert!(registry.check_coherence().is_coherent());
+    }
+
+    // ============================================================
+    // [protocols].resolution_strategy + blanket_impls — pin tests
+    // for the newly-wired manifest fields. See ProtocolChecker
+    // resolution_strategy / blanket_impls fields.
+    //
+    // The multi-candidate find_impl behaviour depends on having
+    // overlapping impls registered, which `register_impl` rejects
+    // via `check_overlap`.  These pin tests therefore focus on the
+    // setter/getter contract + manifest-text normalisation; the
+    // dispatch behaviour is exercised end-to-end through the
+    // semantic_analysis phase + actual @specialize-marked impls in
+    // the integration suite.
+    // ============================================================
+
+    #[test]
+    fn resolution_strategy_default_is_most_specific() {
+        // Pin: a freshly-constructed ProtocolChecker reports
+        // "most_specific" — matches the documented Verum.toml
+        // default and the pre-wire hardcoded behaviour.
+        let checker = ProtocolChecker::new();
+        assert_eq!(
+            checker.resolution_strategy().as_str(),
+            "most_specific",
+            "default resolution_strategy must be most_specific"
+        );
+        let empty = ProtocolChecker::new_empty();
+        assert_eq!(
+            empty.resolution_strategy().as_str(),
+            "most_specific",
+            "new_empty must also default to most_specific"
+        );
+    }
+
+    #[test]
+    fn resolution_strategy_accepts_three_documented_values() {
+        // Pin: the three documented values normalise to
+        // themselves; setter accepts them without warning.
+        let mut checker = ProtocolChecker::new();
+        for s in ["most_specific", "first_declared", "error"] {
+            checker.set_resolution_strategy(s);
+            assert_eq!(checker.resolution_strategy().as_str(), s);
+        }
+    }
+
+    #[test]
+    fn resolution_strategy_unknown_falls_back_to_most_specific() {
+        // Pin: `set_resolution_strategy(unknown)` normalises to
+        // "most_specific" with a warning rather than storing an
+        // unrecognised value.  Sibling to
+        // `PanicStrategy::from_manifest_text`.
+        let mut checker = ProtocolChecker::new();
+        checker.set_resolution_strategy("nonsense_strategy");
+        assert_eq!(
+            checker.resolution_strategy().as_str(),
+            "most_specific",
+            "unknown strategy must normalise to most_specific"
+        );
+    }
+
+    #[test]
+    fn blanket_impls_default_is_true() {
+        // Pin: documented Verum.toml default + Rust-like ergonomics.
+        assert!(ProtocolChecker::new().blanket_impls_allowed());
+        assert!(ProtocolChecker::new_empty().blanket_impls_allowed());
+    }
+
+    #[test]
+    fn blanket_impls_setter_round_trips() {
+        // Pin: `set_blanket_impls(false)` flips the gate; setter is
+        // idempotent.  Used at semantic_analysis to wire
+        // `[protocols].blanket_impls` from manifest.
+        let mut checker = ProtocolChecker::new();
+        checker.set_blanket_impls(false);
+        assert!(!checker.blanket_impls_allowed());
+        checker.set_blanket_impls(false);
+        assert!(!checker.blanket_impls_allowed());
+        checker.set_blanket_impls(true);
+        assert!(checker.blanket_impls_allowed());
     }
 }

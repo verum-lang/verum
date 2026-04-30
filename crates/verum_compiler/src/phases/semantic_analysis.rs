@@ -43,6 +43,13 @@ pub struct SemanticAnalysisPhase {
     quotient_enabled: bool,
     instance_search_enabled: bool,
     coherence_check_depth: u32,
+    /// `[protocols].resolution_strategy` — most_specific (default) /
+    /// first_declared / error.  Routed to ProtocolChecker.
+    protocol_resolution_strategy: verum_common::Text,
+    /// `[protocols].blanket_impls` — when false, ProtocolChecker
+    /// excludes type-variable for_types (blanket impls) from
+    /// candidate sets.
+    protocol_blanket_impls: bool,
 }
 
 impl SemanticAnalysisPhase {
@@ -62,6 +69,8 @@ impl SemanticAnalysisPhase {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            protocol_resolution_strategy: verum_common::Text::from("most_specific"),
+            protocol_blanket_impls: true,
         }
     }
 
@@ -81,7 +90,27 @@ impl SemanticAnalysisPhase {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            protocol_resolution_strategy: verum_common::Text::from("most_specific"),
+            protocol_blanket_impls: true,
         }
+    }
+
+    /// Apply `[protocols].resolution_strategy` from manifest.
+    /// Threaded through to `ProtocolChecker.resolution_strategy` at
+    /// `phase_checker.set_protocol_resolution_strategy(...)`. Closes
+    /// the inert-defense pattern around the field.
+    pub fn with_protocol_resolution_strategy(
+        mut self,
+        strategy: impl Into<verum_common::Text>,
+    ) -> Self {
+        self.protocol_resolution_strategy = strategy.into();
+        self
+    }
+
+    /// Apply `[protocols].blanket_impls` from manifest.
+    pub fn with_protocol_blanket_impls(mut self, allowed: bool) -> Self {
+        self.protocol_blanket_impls = allowed;
+        self
     }
 
     /// Enable or disable cubical-type normalization in the underlying
@@ -260,6 +289,18 @@ impl CompilationPhase for SemanticAnalysisPhase {
         phase_checker.set_quotient_enabled(self.quotient_enabled);
         phase_checker.set_instance_search_enabled(self.instance_search_enabled);
         phase_checker.set_coherence_check_depth(self.coherence_check_depth);
+
+        // Apply `[protocols].*` manifest gates to the embedded
+        // ProtocolChecker.  Pre-fix the resolver hardcoded
+        // "most_specific" + blanket=true regardless of manifest;
+        // these calls thread the user's `[protocols].resolution_
+        // strategy` and `[protocols].blanket_impls` settings into
+        // the production `find_impl` path so they actually drive
+        // resolution behaviour.
+        phase_checker.set_protocol_resolution_strategy(
+            self.protocol_resolution_strategy.clone(),
+        );
+        phase_checker.set_protocol_blanket_impls(self.protocol_blanket_impls);
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions

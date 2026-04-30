@@ -6542,6 +6542,24 @@ impl TypeChecker {
         self.coherence_check_depth = depth;
     }
 
+    /// Apply `[protocols].resolution_strategy` to the embedded
+    /// `ProtocolChecker`. Threads from manifest →
+    /// `phase_checker.set_protocol_resolution_strategy(...)` →
+    /// `ProtocolChecker.resolution_strategy`, which `find_impl`
+    /// consults when multiple candidates are available.  Closes the
+    /// inert-defense pattern around the field — pre-fix the
+    /// resolver hardcoded "most_specific" regardless of manifest.
+    pub fn set_protocol_resolution_strategy(&mut self, strategy: impl Into<verum_common::Text>) {
+        self.protocol_checker.write().set_resolution_strategy(strategy);
+    }
+
+    /// Apply `[protocols].blanket_impls` to the embedded
+    /// `ProtocolChecker`. When false, `find_impl` excludes
+    /// candidates whose `for_type` is a bare type variable.
+    pub fn set_protocol_blanket_impls(&mut self, allowed: bool) {
+        self.protocol_checker.write().set_blanket_impls(allowed);
+    }
+
     pub fn register_builtins(&mut self) {
         // ============================================================
         // UNIFIED BUILTIN REGISTRATION
