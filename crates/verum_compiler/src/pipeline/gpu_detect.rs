@@ -12,8 +12,8 @@
 //!   * `has_device_gpu_attr` — single-attribute predicate
 //!     (matches `@device(gpu)` and `@device(GPU)` shapes).
 
-use verum_ast::Module;
-use verum_common::List;
+use verum_ast::{decl::ItemKind, Module};
+use verum_common::{List, Maybe};
 
 use super::CompilationPipeline;
 
@@ -24,7 +24,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// This runs after Phase 2 (parsing) and before type checking so that the
     /// backend selection (CPU-only vs CPU+GPU) can be informed early.
-    fn detect_gpu_kernels(module: &Module) -> bool {
+    pub(super) fn detect_gpu_kernels(module: &Module) -> bool {
         for item in module.items.iter() {
             // Check item-level attributes (outer attributes on the item)
             if Self::has_device_gpu_attr(&item.attributes) {
@@ -54,7 +54,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Check if a list of attributes contains `@device(gpu)` or `@device(GPU)`.
-    fn has_device_gpu_attr(attrs: &List<verum_ast::Attribute>) -> bool {
+    pub(super) fn has_device_gpu_attr(attrs: &List<verum_ast::Attribute>) -> bool {
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::PathSegment;
 
