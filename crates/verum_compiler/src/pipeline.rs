@@ -641,6 +641,43 @@ impl TestExecutionResult {
 /// Module system: files map to modules (lib.vr = crate root, foo.vr = module foo,
 /// foo/bar.vr = module foo.bar). Visibility defaults to private. Name resolution
 /// is deterministic and unambiguous via hierarchical module paths.
+///
+/// Result of the unified `CompilationPipeline::run()` dispatch.
+///
+/// Each variant corresponds to a distinct compilation tier: `Checked`
+/// is the type-only path (codegen and linking skipped), `Built`
+/// carries the path to a freshly-produced native executable. Future
+/// tiers (Tier-0 interpret, MLIR JIT, MLIR AOT) extend this enum
+/// — by-value matching at the caller side ensures each new variant
+/// is exhaustively handled at every call site.
+#[derive(Debug, Clone)]
+pub enum RunResult {
+    /// `check_only = true` — type-checking succeeded, no output
+    /// produced. Embedders displaying build-completion UI should
+    /// emit a "Check OK" message instead of pointing at a binary.
+    Checked,
+    /// AOT compilation succeeded — the path is the produced
+    /// native executable on disk.
+    Built(PathBuf),
+}
+
+impl RunResult {
+    /// Path to the produced binary, or `None` for the check-only
+    /// variant. Convenience for callers that only want the
+    /// happy-path build artifact.
+    pub fn output_path(&self) -> Option<&Path> {
+        match self {
+            Self::Checked => None,
+            Self::Built(p) => Some(p),
+        }
+    }
+
+    /// Whether the pipeline ran in check-only mode (no codegen).
+    pub fn is_check_only(&self) -> bool {
+        matches!(self, Self::Checked)
+    }
+}
+
 pub struct CompilationPipeline<'s> {
     session: &'s mut Session,
 
@@ -838,7 +875,7 @@ fn should_parse_as_script(
     if bytes.len() >= 2 && &bytes[..2] == b"#!" {
         return true;
     }
-    if bytes.len() >= 5 && &bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
+    if bytes.len() >= 5 && bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
         return true;
     }
 
@@ -1488,6 +1525,13 @@ impl<'s> CompilationPipeline<'s> {
 
         // Parse
         let module = self.phase_parse(file_id)?;
+
+        // On-demand narrowing: drop stdlib modules not reachable from the
+        // user's `mount` set. Cuts the type-check surface from ~2266 to
+        // typically <100 modules; opt-out via `VERUM_NO_LAZY_STDLIB=1`.
+        if std::env::var("VERUM_NO_LAZY_STDLIB").is_err() {
+            self.narrow_stdlib_to_user_reachable(&module);
+        }
 
         // Type check
         self.phase_type_check(&module)?;
@@ -3556,6 +3600,78 @@ impl<'s> CompilationPipeline<'s> {
     // ========================================================================
     // STDLIB MODULE LOADING
     // ========================================================================
+
+    /// Narrow the loaded stdlib to the modules transitively reachable from
+    /// `user_ast`'s `mount` declarations.
+    ///
+    /// This is the **on-demand stdlib loader** keystone. It runs AFTER
+    /// `load_stdlib_modules()` populates the session registry (via the
+    /// fast registry cache or the slow disk/parse path) and **before**
+    /// type-checking begins. Every module not transitively referenced
+    /// is dropped from both `self.modules` and the session registry,
+    /// shrinking the surface that downstream type inference, glob
+    /// re-export resolution, and protocol search must walk.
+    ///
+    /// # When this runs
+    ///
+    /// `compile_string` and other top-level entry points wire this in
+    /// after parsing the user source. Stdlib bootstrap mode skips it —
+    /// bootstrapping inherently needs every module.
+    ///
+    /// # Safety
+    ///
+    /// Conservative: any module the reachability pass cannot prove
+    /// unused is kept. If the embedded dep graph is unavailable
+    /// (e.g. minimal builds without `core/`), this is a no-op and the
+    /// full registry is preserved. The lazy resolver in
+    /// `verum_types::infer` continues to back-fill missing modules at
+    /// type-check time as a final safety net.
+    ///
+    /// # Returns
+    ///
+    /// `(kept, dropped)` count. Diagnostics-only — callers don't
+    /// branch on the result.
+    pub fn narrow_stdlib_to_user_reachable(&mut self, user_ast: &Module) -> (usize, usize) {
+        use crate::stdlib_reachability;
+
+        // Compute the reachable set. None means the embedded dep graph
+        // isn't available — leave the registry untouched.
+        let Some(reachable) =
+            stdlib_reachability::compute_reachable_stdlib_modules(user_ast)
+        else {
+            debug!("on-demand loader: dep graph unavailable, full registry retained");
+            return (self.modules.len(), 0);
+        };
+
+        if reachable.is_empty() {
+            // User code has no `mount` statements at all — nothing to
+            // narrow against. Leave the registry as-is; the pipeline's
+            // existing prelude resolution still works.
+            debug!("on-demand loader: user has zero mounts, skipping narrow");
+            return (self.modules.len(), 0);
+        }
+
+        let pre_local = self.modules.len();
+        // Narrow the local self.modules map.
+        self.modules.retain(|path, _| reachable.contains(path.as_str()));
+        let local_dropped = pre_local.saturating_sub(self.modules.len());
+
+        // Narrow the session's module registry. The same `reachable`
+        // set is the canonical filter — both sides must agree or the
+        // type-checker will see local imports that the registry no
+        // longer knows about.
+        let (reg_kept, reg_dropped) = {
+            let registry_shared = self.session.module_registry();
+            let mut registry = registry_shared.write();
+            registry.retain_paths(&reachable)
+        };
+
+        info!(
+            "on-demand stdlib: kept {} modules, dropped {} (local: {} dropped)",
+            reg_kept, reg_dropped, local_dropped
+        );
+        (reg_kept, reg_dropped)
+    }
 
     /// Load and parse all stdlib modules into self.modules.
     ///
@@ -5914,6 +6030,41 @@ impl<'s> CompilationPipeline<'s> {
         self.session.abort_if_errors()?;
 
         Ok(())
+    }
+
+    /// Unified compilation entry: select the execution tier from
+    /// `Session::options()` and dispatch.
+    ///
+    /// This is the architectural single-point-of-truth for tier
+    /// selection. Pre-fix every CLI command memorised which
+    /// `run_*` method matched its intent; the `CompilerOptions`
+    /// dispatch flags (`check_only`, future `target_tier`) had no
+    /// production reader because callers always invoked a specific
+    /// tier directly. This method makes those flags load-bearing:
+    /// embedders set `options.check_only = true` and call `run()`,
+    /// and the dispatch routes through the check-only path with
+    /// no further per-caller code.
+    ///
+    /// Tier selection logic (in priority order):
+    ///
+    ///   1. `check_only = true` → `RunResult::Checked` via
+    ///      `run_check_only()`. Skips codegen + linking entirely.
+    ///   2. otherwise → `RunResult::Built(path)` via
+    ///      `run_native_compilation()` (AOT, the production tier).
+    ///
+    /// Future tier additions (interpret, MLIR JIT, MLIR AOT) extend
+    /// this match block — they're intentionally NOT wired yet so
+    /// every caller migration step is a separate observable change.
+    /// Existing `run_*` methods remain `pub` for power users that
+    /// need to bypass the dispatch (e.g. tests pinning a specific
+    /// tier's behaviour).
+    pub fn run(&mut self) -> Result<RunResult> {
+        if self.session.options().check_only {
+            self.run_check_only()?;
+            return Ok(RunResult::Checked);
+        }
+        let path = self.run_native_compilation()?;
+        Ok(RunResult::Built(path))
     }
 
     /// Run complete compilation (all phases)
@@ -15806,6 +15957,45 @@ pub fn reset_test_isolation() {
 // ---------------------------------------------------------------------------
 // Inline tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod run_result_tests {
+    //! Pin the public API of `RunResult` — the dispatch contract
+    //! relied on by `commands/build.rs` and any future caller of
+    //! `pipeline.run()`. Any change to variant set or accessor
+    //! signature must update these pins so the breaking change is
+    //! visible at review time.
+    use super::RunResult;
+    use std::path::PathBuf;
+
+    #[test]
+    fn checked_variant_has_no_output_path() {
+        let r = RunResult::Checked;
+        assert!(r.is_check_only(), "Checked must report is_check_only=true");
+        assert!(r.output_path().is_none(), "Checked has no binary path");
+    }
+
+    #[test]
+    fn built_variant_carries_path() {
+        let p = PathBuf::from("/tmp/example.bin");
+        let r = RunResult::Built(p.clone());
+        assert!(!r.is_check_only(), "Built must report is_check_only=false");
+        assert_eq!(r.output_path(), Some(p.as_path()));
+    }
+
+    #[test]
+    fn built_clone_preserves_path() {
+        let p = PathBuf::from("/tmp/example.bin");
+        let r = RunResult::Built(p.clone());
+        let r2 = r.clone();
+        assert_eq!(r.output_path(), r2.output_path());
+        // Pin: variants are byte-equal under match (Debug derived).
+        match (&r, &r2) {
+            (RunResult::Built(a), RunResult::Built(b)) => assert_eq!(a, b),
+            _ => panic!("clone changed variant"),
+        }
+    }
+}
 
 #[cfg(test)]
 mod resolve_super_path_tests {
