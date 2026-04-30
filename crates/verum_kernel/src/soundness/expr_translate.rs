@@ -187,6 +187,38 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
             }
             Some(format!("({})", out))
         }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            // `obj.method(a, b)` → `(method obj a b)`. Type args are
+            // dropped; both Coq and Lean infer them from the receiver
+            // and arg types in the surrounding context.
+            let receiver_text = render_expr_coq(receiver)?;
+            let mut out = method.as_str().to_string();
+            out.push(' ');
+            out.push_str(&parens_if_complex(&receiver_text));
+            for a in args.iter() {
+                let arg_text = render_expr_coq(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(format!("({})", out))
+        }
+        ExprKind::Field { expr: inner, field } => {
+            // `obj.field` → `(field obj)`. Coq accepts `obj.(field)`
+            // record syntax too, but applicative form is uniform with
+            // method projections and avoids needing record-context
+            // resolution.
+            let recv_text = render_expr_coq(inner)?;
+            Some(format!(
+                "({} {})",
+                field.as_str(),
+                parens_if_complex(&recv_text)
+            ))
+        }
         ExprKind::Forall { bindings, body } => {
             let names: Vec<String> = bindings
                 .iter()
@@ -319,6 +351,31 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
                 out.push_str(&parens_if_complex(&arg_text));
             }
             Some(format!("({})", out))
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let receiver_text = render_expr_lean(receiver)?;
+            let mut out = method.as_str().to_string();
+            out.push(' ');
+            out.push_str(&parens_if_complex(&receiver_text));
+            for a in args.iter() {
+                let arg_text = render_expr_lean(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(format!("({})", out))
+        }
+        ExprKind::Field { expr: inner, field } => {
+            let recv_text = render_expr_lean(inner)?;
+            Some(format!(
+                "({} {})",
+                field.as_str(),
+                parens_if_complex(&recv_text)
+            ))
         }
         ExprKind::Forall { bindings, body } => {
             let names: Vec<String> = bindings
@@ -704,7 +761,6 @@ fn classify_unrenderable(expr: &Expr) -> &'static str {
         ExprKind::If { .. } => "if-then-else",
         ExprKind::Block(_) => "block expression",
         ExprKind::Closure { .. } => "closure expression",
-        ExprKind::MethodCall { .. } => "method call",
         ExprKind::Tuple(_) => "tuple expression",
         ExprKind::Array(_) => "array literal",
         ExprKind::Range { .. } => "range expression",
@@ -1027,6 +1083,164 @@ mod tests {
         );
         let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
         assert_eq!(text, "(f a b)");
+    }
+
+    // =========================================================================
+    // MethodCall + Field translator tests (#142 / MSFS-L4.9)
+    // =========================================================================
+
+    fn method_call(receiver: Expr, method: &str, args: Vec<Expr>) -> Expr {
+        let mut arg_list = verum_common::List::new();
+        for a in args {
+            arg_list.push(a);
+        }
+        Expr::new(
+            ExprKind::MethodCall {
+                receiver: Heap::new(receiver),
+                method: Ident::new(method, Span::dummy()),
+                type_args: verum_common::List::new(),
+                args: arg_list,
+            },
+            Span::dummy(),
+        )
+    }
+
+    fn field(receiver: Expr, name: &str) -> Expr {
+        Expr::new(
+            ExprKind::Field {
+                expr: Heap::new(receiver),
+                field: Ident::new(name, Span::dummy()),
+            },
+            Span::dummy(),
+        )
+    }
+
+    #[test]
+    fn coq_translates_zero_arg_method_call() {
+        // obj.foo() → (foo obj)
+        let e = method_call(ident_expr("obj"), "foo", vec![]);
+        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(foo obj)");
+    }
+
+    #[test]
+    fn lean_translates_zero_arg_method_call() {
+        let e = method_call(ident_expr("obj"), "foo", vec![]);
+        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(foo obj)");
+    }
+
+    #[test]
+    fn coq_translates_method_call_with_args() {
+        // obj.foo(a, b) → (foo obj a b)
+        let e = method_call(
+            ident_expr("obj"),
+            "foo",
+            vec![ident_expr("a"), ident_expr("b")],
+        );
+        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(foo obj a b)");
+    }
+
+    #[test]
+    fn coq_translates_chained_method_calls() {
+        // cand.articulation_view().cond_F_S().has_phi_X()
+        //   → (has_phi_X (cond_F_S (articulation_view cand)))
+        // This is the dominant MSFS proposition shape.
+        let chain = method_call(
+            method_call(
+                method_call(ident_expr("cand"), "articulation_view", vec![]),
+                "cond_F_S",
+                vec![],
+            ),
+            "has_phi_X",
+            vec![],
+        );
+        let text = CoqExprRenderer::new()
+            .render(&chain)
+            .text()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            text,
+            "(has_phi_X (cond_F_S (articulation_view cand)))"
+        );
+    }
+
+    #[test]
+    fn lean_translates_chained_method_calls() {
+        let chain = method_call(
+            method_call(
+                method_call(ident_expr("cand"), "articulation_view", vec![]),
+                "cond_F_S",
+                vec![],
+            ),
+            "has_phi_X",
+            vec![],
+        );
+        let text = LeanExprRenderer::new()
+            .render(&chain)
+            .text()
+            .unwrap()
+            .to_string();
+        // Both backends produce the same applicative form.
+        assert_eq!(
+            text,
+            "(has_phi_X (cond_F_S (articulation_view cand)))"
+        );
+    }
+
+    #[test]
+    fn coq_translates_method_chain_in_logical_and() {
+        // w.exhibitor_in_outer_stratum() && w.exhibitor_not_in_inner_stratum()
+        // — pin for proposition_2_2_iii_cls_strict_above_clsmax.
+        let e = binop(
+            BinOp::And,
+            method_call(ident_expr("w"), "exhibitor_in_outer_stratum", vec![]),
+            method_call(ident_expr("w"), "exhibitor_not_in_inner_stratum", vec![]),
+        );
+        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert!(text.contains("(exhibitor_in_outer_stratum w)"));
+        assert!(text.contains("(exhibitor_not_in_inner_stratum w)"));
+        assert!(text.contains("/\\"));
+    }
+
+    #[test]
+    fn coq_translates_field_access() {
+        // obj.field → (field obj)
+        let e = field(ident_expr("obj"), "depth");
+        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(depth obj)");
+    }
+
+    #[test]
+    fn lean_translates_field_access() {
+        let e = field(ident_expr("obj"), "depth");
+        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(depth obj)");
+    }
+
+    #[test]
+    fn method_call_falls_back_when_arg_unrenderable() {
+        // obj.foo(<tuple>) → tuple is unrenderable, so the whole
+        // method-call expression must surface as a fallback.  Pre-#142
+        // every MethodCall surfaced as fallback regardless of args;
+        // post-#142 only sub-expression failures bubble up.
+        let unrenderable_arg = Expr::new(
+            ExprKind::Tuple({
+                let mut elems = verum_common::List::new();
+                elems.push(ident_expr("x"));
+                elems.push(ident_expr("y"));
+                elems
+            }),
+            Span::dummy(),
+        );
+        let e = method_call(ident_expr("obj"), "foo", vec![unrenderable_arg]);
+        let r = CoqExprRenderer::new().render(&e);
+        match r {
+            TranslatedExpr::Fallback { .. } => { /* expected */ }
+            other => panic!("expected Fallback, got {:?}", other),
+        }
     }
 
     #[test]
