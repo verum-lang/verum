@@ -2073,14 +2073,28 @@ impl ProofValidator {
         Ok(())
     }
 
-    /// Validate hypothesis proof term
+    /// Validate hypothesis proof term.
+    ///
+    /// A `Hypothesis { id, formula }` claims that `h{id}` proves
+    /// `formula`. Soundness requires checking THREE things:
+    /// 1. `formula` matches the user-supplied `expected` (sanity check).
+    /// 2. `h{id}` is actually in scope (no dangling reference).
+    /// 3. The hypothesis at `h{id}` has `formula` as its proposition —
+    ///    otherwise the user could claim anything that happens to
+    ///    syntactically match `expected`, even if `h{id}` proves
+    ///    something completely different.
+    ///
+    /// Pre-fix only (1) and (2) were checked. (3) was missing, so a
+    /// hypothesis `h0 : P` could be re-labeled by the user as proving
+    /// `Q` (with formula = expected = Q) and the validator silently
+    /// accepted. This commit closes that gap.
     fn validate_hypothesis(
         &self,
         id: usize,
         formula: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
-        // Check formula matches expected
+        // (1) sanity: user's formula must match the claimed conclusion.
         if !self.expr_eq(formula, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
@@ -2088,11 +2102,24 @@ impl ProofValidator {
             });
         }
 
-        // Hypotheses are valid if in context
+        // (2) reference: h{id} must be in scope.
         let hyp_name = Text::from(format!("h{}", id));
-        if !self.hypotheses.contains(&hyp_name) {
-            return Err(ValidationError::HypothesisNotFound {
-                hypothesis: hyp_name,
+        let actual = match self.hypotheses.lookup(&hyp_name) {
+            Maybe::Some(prop) => prop,
+            Maybe::None => {
+                return Err(ValidationError::HypothesisNotFound {
+                    hypothesis: hyp_name,
+                });
+            }
+        };
+
+        // (3) content: the hypothesis at h{id} must actually carry the
+        // claimed `formula`. Without this gate the user could claim
+        // anything as long as it matches `expected`.
+        if !self.expr_eq(&actual, formula) {
+            return Err(ValidationError::PropositionMismatch {
+                expected: self.expr_to_text(formula),
+                actual: self.expr_to_text(&actual),
             });
         }
 
