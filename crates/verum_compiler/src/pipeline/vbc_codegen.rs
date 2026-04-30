@@ -27,14 +27,15 @@ use anyhow::Result;
 use tracing::{debug, info, warn};
 
 use verum_ast::Module;
+use verum_common::{Map, Text};
 use verum_vbc::codegen::{CodegenConfig, TierContext, VbcCodegen};
 use verum_vbc::module::VbcModule;
 
 use super::CompilationPipeline;
 
 impl<'s> CompilationPipeline<'s> {
-    /// Compile AST module to VBC module
-    fn compile_ast_to_vbc(&self, module: &Module) -> Result<std::sync::Arc<verum_vbc::module::VbcModule>> {
+    /// Compile AST module to VBC module.
+    pub(super) fn compile_ast_to_vbc(&self, module: &Module) -> Result<Arc<VbcModule>> {
         // Phase 4.4: Dependent-type verification at module boundary.
         // The `DependentVerifier` orchestrator dispatches accumulated
         // goals (cubical equality, universe constraints, sheaf descent,
@@ -367,7 +368,7 @@ impl<'s> CompilationPipeline<'s> {
     /// Module path mapping: stdlib modules are stored with `std.` prefix
     /// (e.g., `std.sys.darwin.time`), but imports use various prefixes like
     /// `core.sys.darwin.time` or `sys.darwin.time`. This method tries all variants.
-    fn collect_imported_stdlib_modules(&self, module: &Module) -> Vec<Module> {
+    pub(super) fn collect_imported_stdlib_modules(&self, module: &Module) -> Vec<Module> {
         use verum_ast::ItemKind;
 
         let mut imported = Vec::new();
@@ -864,7 +865,7 @@ impl<'s> CompilationPipeline<'s> {
     /// has components, the original path is returned (the progressive-
     /// prefix walk will then fail to match anything, which is the
     /// correct behaviour for a malformed input).
-    fn resolve_super_path(src_path: &str, mount_path: &str) -> String {
+    pub(super) fn resolve_super_path(src_path: &str, mount_path: &str) -> String {
         let mut mount_segs: Vec<&str> = mount_path.split('.').collect();
         let mut super_count = 0;
         while mount_segs.first().is_some_and(|&s| s == "super") {
@@ -914,7 +915,7 @@ impl<'s> CompilationPipeline<'s> {
     /// methods would never reach `compile_module_items_lenient`, and the
     /// LLVM backend would emit unresolved `Call`s that const-fold to bogus
     /// pointers — the bug tracked by `vcs/specs/L0-critical/vbc/aot_stdlib_return/`.
-    fn clear_non_compilable_stdlib_modules(&mut self, user_module: Option<&Module>) {
+    pub(super) fn clear_non_compilable_stdlib_modules(&mut self, user_module: Option<&Module>) {
         // Only retain stdlib modules whose functions are actually compiled to
         // native code via VBC → LLVM. Most stdlib modules only provide type
         // definitions used during type checking and should be dropped to avoid
@@ -1108,23 +1109,4 @@ impl<'s> CompilationPipeline<'s> {
         );
     }
 
-    /// Find the program entry function in the VBC module and return
-    /// its function ID.
-    ///
-    /// Strict mode separation (matches the AST-level
-    /// `EntryDetectionPhase::detect_entry_point`):
-    ///
-    ///   • **Application** entry = `main` (in a non-script module).
-    ///     Prefer it when present.
-    ///   • **Script** entry = `__verum_script_main` (the synthesised
-    ///     wrapper from script-tagged modules).
-    ///
-    /// The two are not interchangeable. A `fn main` declared *inside*
-    /// a script module is a regular callable function, not the
-    /// program entry — the AST-level pass already filtered such
-    /// `main`s out, so by the time we reach the VBC the only `main`
-    /// in the function table came from an application module. We
-    /// preserve the precedence (`main` first, then wrapper) only as
-    /// a defence-in-depth: if both names somehow appear in the VBC,
-    /// the application entry still wins.
 }
