@@ -216,25 +216,13 @@ impl MacroExpansionPhase {
     }
 
     pub fn with_quote_syntax_enabled(mut self, enabled: bool) -> Self {
-        // Phase-not-realised tracing: `quote_syntax_enabled`
-        // (sourced from `[meta] quote_syntax`) is intended to gate
-        // `quote { ... }` expansion at the security/sandbox layer
-        // — when `false`, the expander should reject quote-form
-        // expressions before they reach the macro evaluator. The
-        // current expansion path does NOT consult this flag at any
-        // decision point — it only stores the value. Apply the
-        // gate when set to non-default (false) so embedders see
-        // the gap rather than silently believing their `[meta]
-        // quote_syntax = false` setting was honoured.
-        if !enabled {
-            tracing::debug!(
-                "MacroExpansionPhase::with_quote_syntax_enabled(false) — \
-                 quote_syntax_enabled is stored on the phase but the expansion \
-                 path does not yet gate `quote {{ ... }}` rejection on it; the \
-                 manifest setting `[meta] quote_syntax = false` is observed but \
-                 not enforced (forward-looking sandbox gate)"
-            );
-        }
+        // `quote_syntax_enabled` (sourced from `[meta] quote_syntax`)
+        // is the security/sandbox gate for `quote { ... }` expansion.
+        // When `false`, `expand_module` runs `validate_quote_syntax_gate`
+        // before any expansion and rejects on the first Quote AST
+        // node found — `[meta] quote_syntax = false` is enforced as
+        // a hard error, with the diagnostic pointing at the offending
+        // span and the manifest knob.
         self.quote_syntax_enabled = enabled;
         self
     }
@@ -297,6 +285,30 @@ impl MacroExpansionPhase {
 
         // Set current file ID for literal parsing context
         self.current_file_id = module.file_id;
+
+        // Quote-syntax gate. `[meta] quote_syntax = false` rejects
+        // `quote { ... }` expressions before any expansion runs;
+        // this catches both meta and non-meta function bodies that
+        // would otherwise reach the macro evaluator. The walker
+        // returns the FIRST offending span so the diagnostic points
+        // at a concrete location even in modules with many quotes.
+        if !self.quote_syntax_enabled {
+            if let Some(span) = self::find_first_quote_in_module(module) {
+                let diag = DiagnosticBuilder::new(Severity::Error)
+                    .message(Text::from(
+                        "`quote { ... }` syntax is disabled — \
+                         `[meta] quote_syntax = false` rejects quote-form \
+                         expressions at the security/sandbox layer",
+                    ))
+                    .span(super::ast_span_to_diagnostic_span(span, None))
+                    .help(Text::from(
+                        "set `quote_syntax = true` under `[meta]` in verum.toml, \
+                         or remove `-Z meta.quote_syntax=false`",
+                    ))
+                    .build();
+                return Err(List::from(vec![diag]));
+            }
+        }
 
         let mut expanded_items = List::new();
         let mut diagnostics = List::new();
@@ -1719,6 +1731,48 @@ impl CompilationPhase for MacroExpansionPhase {
     }
 }
 
+/// Scan `module` for the first `ExprKind::Quote` AST node and
+/// return its span. Used by the `quote_syntax_enabled` security
+/// gate at `expand_module` entry — when the gate is closed,
+/// finding ANY quote means hard-rejecting the module with a
+/// pointed diagnostic.
+///
+/// The walker is fail-fast: it stops at the first hit so large
+/// modules with many quotes don't pay an O(N) walk cost when one
+/// span is enough to flag the violation. The walker handles every
+/// expression-bearing item kind (functions / impl blocks / type
+/// `where` clauses) so a quote in any reachable position is
+/// caught.
+fn find_first_quote_in_module(module: &Module) -> Option<Span> {
+    use verum_ast::visitor::{walk_expr, walk_item, Visitor};
+
+    struct Finder {
+        first: Option<Span>,
+    }
+
+    impl Visitor for Finder {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if self.first.is_some() {
+                return;
+            }
+            if let ExprKind::Quote { .. } = &expr.kind {
+                self.first = Some(expr.span);
+                return;
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    let mut finder = Finder { first: None };
+    for item in &module.items {
+        if finder.first.is_some() {
+            break;
+        }
+        walk_item(&mut finder, item);
+    }
+    finder.first
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1831,5 +1885,103 @@ mod tests {
             .with_compile_time_enabled(false);
         assert!(!phase.derive_enabled);
         assert!(!phase.compile_time_enabled);
+    }
+
+    /// Pin: `quote_syntax_enabled = false` rejects modules that
+    /// contain ANY `quote { ... }` expression. The diagnostic
+    /// must mention the manifest knob so the operator knows where
+    /// to flip the toggle.
+    #[test]
+    fn quote_gate_rejects_module_with_quote() {
+        use verum_ast::decl::{FunctionBody, FunctionDecl, ItemKind};
+        use verum_ast::expr::{Block, Expr, ExprKind};
+        use verum_ast::{FileId, Ident, Item, Module, Span};
+        use verum_common::{List, Maybe};
+
+        let span = Span::dummy();
+
+        // Body block with a single trailing Quote expression. We
+        // construct the AST directly so this test doesn't depend on
+        // the parser. Empty token list is fine — the gate fires on
+        // any Quote AST node, regardless of token count.
+        let quote_expr = Expr {
+            kind: ExprKind::Quote {
+                target_stage: Maybe::None,
+                tokens: List::new(),
+            },
+            span,
+            ref_kind: None,
+            check_eliminated: false,
+        };
+        let body_block = Block {
+            stmts: List::new(),
+            expr: Maybe::Some(Box::new(quote_expr)),
+            span,
+        };
+        let func = FunctionDecl {
+            visibility: Default::default(),
+            name: Ident::new("f", span),
+            generics: List::new(),
+            params: List::new(),
+            return_type: Maybe::None,
+            throws_clause: Maybe::None,
+            body: Some(FunctionBody::Block(body_block)),
+            attributes: List::new(),
+            is_async: false,
+            is_meta: false,
+            is_unsafe: false,
+            span,
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_transparent: false,
+            extern_abi: Maybe::None,
+            is_variadic: false,
+            std_attr: Maybe::None,
+            contexts: List::new(),
+        };
+        let mut items = List::new();
+        items.push(Item::new(ItemKind::Function(func), span));
+        let module = Module {
+            items,
+            attributes: List::new(),
+            file_id: FileId::new(0),
+            span,
+        };
+
+        // Gate closed → expand_module rejects with a quote-syntax
+        // diagnostic that names the manifest knob.
+        let mut phase_off = MacroExpansionPhase::new()
+            .with_quote_syntax_enabled(false);
+        let result = phase_off.expand_module(&module);
+        let diags = result.expect_err("quote_syntax=false must reject module with quote");
+        assert_eq!(diags.len(), 1, "exactly one diagnostic for the first quote");
+        let msg = format!("{:?}", diags.iter().next().unwrap());
+        assert!(
+            msg.contains("quote_syntax") || msg.contains("[meta]"),
+            "diagnostic should mention quote_syntax or [meta] (got: {})",
+            msg,
+        );
+    }
+
+    /// Pin: `find_first_quote_in_module` returns `None` for an
+    /// empty module — the gate walker must not see a quote where
+    /// none exists.
+    #[test]
+    fn find_first_quote_in_empty_module_is_none() {
+        use verum_ast::{FileId, Module, Span};
+        use verum_common::List;
+        let module = Module {
+            items: List::new(),
+            attributes: List::new(),
+            file_id: FileId::new(0),
+            span: Span::dummy(),
+        };
+        assert!(super::find_first_quote_in_module(&module).is_none());
     }
 }
