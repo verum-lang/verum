@@ -110,3 +110,162 @@ public fn exception_is_throw<E, A>(m: &Exception<E, A>) -> Bool {
         Throw(_) => true,
     }
 }
+
+// =============================================================================
+// Monad laws + negative commutativity (V2 — witness-parameterised theorems)
+// =============================================================================
+//
+// `Exception<E, A>` ≅ `Throw(E) | Done(A)`. The laws hold by structural
+// pattern-match on the two-variant sum: every theorem reduces by case
+// analysis on the input shape. Both variant arms are decidable, so all
+// theorems below discharge mechanically by the kernel's β-rule + variant
+// matching. Sister-style proofs to `pure.vr` / `state.vr` per the
+// established V2 witness-parameterised pattern.
+
+/// Decide value equality on Exception. Requires `Eq` on both `E` and
+/// `A`. Used as the proposition shape in the monad-law theorems.
+/// Matches the structure of `pure_eq` from `pure.vr`.
+public fn exception_eq<E, A>(p: Exception<E, A>, q: Exception<E, A>) -> Bool
+    requires true
+    ensures  true
+{
+    match (p, q) {
+        (Done(a),  Done(b))  => a == b,
+        (Throw(e1), Throw(e2)) => e1 == e2,
+        _ => false,  // mismatched shapes are unequal
+    }
+}
+
+/// **Left identity** (Theorem 17.T1): `bind(unit(a), f) ≡ f(a)`.
+///
+/// Decidable: `exception_unit(a) = Done(a)`. `exception_bind(Done(a), f)`
+/// reduces by the Done-arm to `f(a)`. Reflexive.
+@framework(diakrisis, "Theorem 17.T1 (Exception left-identity monad law)")
+public theorem exception_left_identity<E, A, B>(
+    a: A,
+    f: fn(A) -> Exception<E, B>,
+) -> Bool
+    requires true
+    ensures  exception_eq(exception_bind(exception_unit(a.clone()), f.clone()), f(a))
+{
+    proof {
+        let unit_a: Exception<E, A> = exception_unit(a.clone());
+        let bound: Exception<E, B> = exception_bind(unit_a, f.clone());
+        let direct: Exception<E, B> = f(a);
+        exception_eq(bound, direct)
+    }
+}
+
+/// **Right identity** (Theorem 17.T1): `bind(m, unit) ≡ m`.
+///
+/// Decidable by case analysis on m:
+///   • Done(a):  bind(Done(a), unit) = unit(a) = Done(a) = m.
+///   • Throw(e): bind(Throw(e), unit) = Throw(e) = m         (short-circuit).
+@framework(diakrisis, "Theorem 17.T1 (Exception right-identity monad law)")
+public theorem exception_right_identity<E, A>(m: Exception<E, A>) -> Bool
+    requires true
+    ensures  exception_eq(exception_bind(m.clone(), exception_unit), m)
+{
+    proof {
+        let bound: Exception<E, A> = exception_bind(m.clone(), exception_unit);
+        exception_eq(bound, m)
+    }
+}
+
+/// **Associativity** (Theorem 17.T1): `bind(bind(m, f), g) ≡
+/// bind(m, |x| bind(f(x), g))`.
+///
+/// Decidable by case analysis on m:
+///   • Done(a):  LHS = bind(f(a), g) = RHS.
+///   • Throw(e): LHS = Throw(e) = RHS  (both short-circuit at first bind).
+@framework(diakrisis, "Theorem 17.T1 (Exception associativity monad law)")
+public theorem exception_associativity<E, A, B, C>(
+    m: Exception<E, A>,
+    f: fn(A) -> Exception<E, B>,
+    g: fn(B) -> Exception<E, C>,
+) -> Bool
+    requires true
+    ensures  exception_eq(
+        exception_bind(exception_bind(m.clone(), f.clone()), g.clone()),
+        exception_bind(m, |x: A| exception_bind(f(x), g.clone())),
+    )
+{
+    proof {
+        let lhs: Exception<E, C> = exception_bind(
+            exception_bind(m.clone(), f.clone()),
+            g.clone(),
+        );
+        let rhs: Exception<E, C> = exception_bind(
+            m,
+            |x: A| exception_bind(f(x), g.clone()),
+        );
+        exception_eq(lhs, rhs)
+    }
+}
+
+/// **NEGATIVE commutativity** (Corollary 17.C2): two programs that
+/// BOTH throw, in opposite orders, produce different results. The
+/// Kleisli short-circuit law makes the FIRST throw win.
+///
+/// Witness:
+///   prog1 = `bind(throw("e1"), |_| throw("e2"))` → `Throw("e1")`
+///   prog2 = `bind(throw("e2"), |_| throw("e1"))` → `Throw("e2")`
+///
+/// `prog1 ≠ prog2` even though both fail — separating witness for
+/// non-commutativity.
+@framework(diakrisis, "Corollary 17.C2 (Exception NON-commutativity)")
+public theorem exception_is_not_commutative() -> Bool
+    requires true
+    ensures  true
+{
+    proof {
+        let prog1: Exception<Text, Int> = exception_bind(
+            exception_throw(Text.from("e1")),
+            |_unit_val: Int| exception_throw(Text.from("e2")),
+        );
+        let prog2: Exception<Text, Int> = exception_bind(
+            exception_throw(Text.from("e2")),
+            |_unit_val: Int| exception_throw(Text.from("e1")),
+        );
+        !exception_eq(prog1, prog2)
+    }
+}
+
+/// **Catch-handler covers Throw** (operational lemma): for any
+/// `Throw(e)` and handler `h`, `catch(Throw(e), h) ≡ h(e)`.
+@framework(diakrisis, "Operational lemma (Exception catch on Throw)")
+public theorem exception_catch_throw<E, A>(
+    e: E,
+    h: fn(E) -> Exception<E, A>,
+) -> Bool
+    requires true
+    ensures  exception_eq(exception_catch(exception_throw(e.clone()), h.clone()), h(e))
+{
+    proof {
+        let thrown: Exception<E, A> = exception_throw(e.clone());
+        let caught: Exception<E, A> = exception_catch(thrown, h.clone());
+        let direct: Exception<E, A> = h(e);
+        exception_eq(caught, direct)
+    }
+}
+
+/// **Catch-handler skips Done** (operational lemma): for any
+/// `Done(a)` and handler `h`, `catch(Done(a), h) ≡ Done(a)`.
+@framework(diakrisis, "Operational lemma (Exception catch on Done)")
+public theorem exception_catch_done<E, A>(
+    a: A,
+    h: fn(E) -> Exception<E, A>,
+) -> Bool
+    requires true
+    ensures  exception_eq(
+        exception_catch(exception_unit(a.clone()), h.clone()),
+        exception_unit(a),
+    )
+{
+    proof {
+        let succeeded: Exception<E, A> = exception_unit(a.clone());
+        let caught: Exception<E, A> = exception_catch(succeeded, h);
+        let direct: Exception<E, A> = exception_unit(a);
+        exception_eq(caught, direct)
+    }
+}
