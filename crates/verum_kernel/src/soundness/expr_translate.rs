@@ -43,6 +43,7 @@
 use serde::{Deserialize, Serialize};
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::{LiteralKind, StringLit};
+use verum_ast::ty::{Type, TypeKind};
 use verum_ast::{BinOp, UnOp};
 
 /// Output of translating one expression.  Carries either a successful
@@ -390,6 +391,306 @@ fn parens_if_complex(text: &str) -> String {
         format!("({})", text)
     } else {
         text.to_string()
+    }
+}
+
+// =============================================================================
+// TypeRenderer — verum_ast::Type → Coq/Lean type syntax (#141 / MSFS-L4.8)
+// =============================================================================
+//
+// Sibling to [`ExprRenderer`] — translates types into the foreign
+// tool's surface syntax so theorem parameters can be declared in the
+// emitted file.  Without this, every theorem's free variables are
+// undeclared and `coqc`/`lean` reject before they get to type-
+// checking the proposition.
+
+/// Output of translating a type.  Same discriminated-union shape as
+/// [`TranslatedExpr`] — successful render or a fallback diagnostic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TranslatedType {
+    /// Type translated cleanly — `text` is ready to be embedded as
+    /// the parameter type in `(name : <text>)`.
+    Translated {
+        /// Foreign-tool type-syntax text (e.g., `Z`, `nat`, `bool`,
+        /// `list nat`).
+        text: String,
+    },
+    /// The type's shape couldn't be translated faithfully (refinement
+    /// types with predicates, complex generics, function types with
+    /// effects, etc.).  Caller decides how to embed (typical: declare
+    /// the parameter as a fresh `Set` / `Type` variable).
+    Fallback {
+        /// Why the fallback fired.
+        reason: String,
+        /// Verum-side rendering preserved verbatim for the comment.
+        original: String,
+    },
+}
+
+impl TranslatedType {
+    /// `true` iff translation succeeded.
+    pub fn is_translated(&self) -> bool {
+        matches!(self, TranslatedType::Translated { .. })
+    }
+
+    /// Get the translated text or `None`.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            TranslatedType::Translated { text } => Some(text.as_str()),
+            TranslatedType::Fallback { .. } => None,
+        }
+    }
+}
+
+/// Per-format type translator.  Adding a new foreign format is a
+/// single new instance.
+pub trait TypeRenderer {
+    /// Stable id matching the corresponding [`ExprRenderer`].
+    fn id(&self) -> &'static str;
+    /// Translate a Verum type into the foreign tool's type syntax.
+    fn render(&self, ty: &Type) -> TranslatedType;
+}
+
+// -----------------------------------------------------------------------------
+// CoqTypeRenderer
+// -----------------------------------------------------------------------------
+
+/// Coq type backend.
+pub struct CoqTypeRenderer;
+
+impl CoqTypeRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for CoqTypeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeRenderer for CoqTypeRenderer {
+    fn id(&self) -> &'static str {
+        "coq"
+    }
+
+    fn render(&self, ty: &Type) -> TranslatedType {
+        match render_type_coq(ty) {
+            Some(text) => TranslatedType::Translated { text },
+            None => TranslatedType::Fallback {
+                reason: classify_unrenderable_type(ty).to_string(),
+                original: format!("{:?}", ty.kind),
+            },
+        }
+    }
+}
+
+fn render_type_coq(ty: &Type) -> Option<String> {
+    match &ty.kind {
+        TypeKind::Unit => Some("unit".to_string()),
+        TypeKind::Bool => Some("bool".to_string()),
+        TypeKind::Int => Some("Z".to_string()),
+        TypeKind::Float => Some("R".to_string()),
+        TypeKind::Char => Some("ascii".to_string()),
+        TypeKind::Text => Some("string".to_string()),
+        TypeKind::Path(path) => path.as_ident().map(|i| {
+            // Common Verum stdlib types map to Coq's stdlib counterparts.
+            match i.as_str() {
+                "Int" => "Z".to_string(),
+                "Bool" => "bool".to_string(),
+                "Float" => "R".to_string(),
+                "Text" => "string".to_string(),
+                "Char" => "ascii".to_string(),
+                "Unit" => "unit".to_string(),
+                "Nat" => "nat".to_string(),
+                other => other.to_string(),
+            }
+        }),
+        TypeKind::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .iter()
+                .map(render_type_coq)
+                .collect::<Option<Vec<_>>>()?;
+            if parts.is_empty() {
+                Some("unit".to_string())
+            } else if parts.len() == 1 {
+                Some(parts.into_iter().next().unwrap())
+            } else {
+                // Coq tuple syntax: `T1 * T2 * ...`.
+                Some(format!("({})", parts.join(" * ")))
+            }
+        }
+        TypeKind::Slice(inner) | TypeKind::Array { element: inner, .. } => {
+            // Coq stdlib lists: `list T`.
+            let t = render_type_coq(inner)?;
+            Some(format!("(list {})", t))
+        }
+        TypeKind::Generic { base, args, .. } => {
+            // Verum `Foo<A, B>` → Coq `Foo A B` (curried application).
+            // Common stdlib mappings: List<T> → list T, Maybe<T> → option T.
+            let base_text = render_type_coq(base)?;
+            let mapped_base = match base_text.as_str() {
+                "List" => "list",
+                "Maybe" | "Option" => "option",
+                "Result" => "sum",
+                other => other,
+            }
+            .to_string();
+            let arg_parts: Vec<String> = args
+                .iter()
+                .filter_map(generic_arg_to_coq_text)
+                .collect();
+            if arg_parts.is_empty() {
+                Some(mapped_base)
+            } else {
+                Some(format!("({} {})", mapped_base, arg_parts.join(" ")))
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => {
+            // References don't translate into a meaningful Coq type;
+            // embed as the underlying carrier — sufficient for
+            // statement-level type-checking.
+            render_type_coq(inner)
+        }
+        _ => None,
+    }
+}
+
+fn generic_arg_to_coq_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
+    use verum_ast::ty::GenericArg;
+    match arg {
+        GenericArg::Type(t) => render_type_coq(t),
+        // Const args / lifetime args don't translate cleanly — fall
+        // back to a placeholder and let the caller decide.
+        _ => Some("_".to_string()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LeanTypeRenderer
+// -----------------------------------------------------------------------------
+
+/// Lean 4 type backend.
+pub struct LeanTypeRenderer;
+
+impl LeanTypeRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for LeanTypeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeRenderer for LeanTypeRenderer {
+    fn id(&self) -> &'static str {
+        "lean"
+    }
+
+    fn render(&self, ty: &Type) -> TranslatedType {
+        match render_type_lean(ty) {
+            Some(text) => TranslatedType::Translated { text },
+            None => TranslatedType::Fallback {
+                reason: classify_unrenderable_type(ty).to_string(),
+                original: format!("{:?}", ty.kind),
+            },
+        }
+    }
+}
+
+fn render_type_lean(ty: &Type) -> Option<String> {
+    match &ty.kind {
+        TypeKind::Unit => Some("Unit".to_string()),
+        TypeKind::Bool => Some("Bool".to_string()),
+        TypeKind::Int => Some("Int".to_string()),
+        TypeKind::Float => Some("Float".to_string()),
+        TypeKind::Char => Some("Char".to_string()),
+        TypeKind::Text => Some("String".to_string()),
+        TypeKind::Path(path) => path.as_ident().map(|i| {
+            match i.as_str() {
+                "Int" => "Int".to_string(),
+                "Bool" => "Bool".to_string(),
+                "Float" => "Float".to_string(),
+                "Text" => "String".to_string(),
+                "Char" => "Char".to_string(),
+                "Unit" => "Unit".to_string(),
+                "Nat" => "Nat".to_string(),
+                other => other.to_string(),
+            }
+        }),
+        TypeKind::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .iter()
+                .map(render_type_lean)
+                .collect::<Option<Vec<_>>>()?;
+            if parts.is_empty() {
+                Some("Unit".to_string())
+            } else if parts.len() == 1 {
+                Some(parts.into_iter().next().unwrap())
+            } else {
+                // Lean tuple syntax: `T1 × T2 × ...`.
+                Some(format!("({})", parts.join(" × ")))
+            }
+        }
+        TypeKind::Slice(inner) | TypeKind::Array { element: inner, .. } => {
+            let t = render_type_lean(inner)?;
+            Some(format!("(List {})", t))
+        }
+        TypeKind::Generic { base, args, .. } => {
+            let base_text = render_type_lean(base)?;
+            let mapped_base = match base_text.as_str() {
+                "List" => "List",
+                "Maybe" | "Option" => "Option",
+                "Result" => "Sum",
+                other => other,
+            }
+            .to_string();
+            let arg_parts: Vec<String> = args
+                .iter()
+                .filter_map(generic_arg_to_lean_text)
+                .collect();
+            if arg_parts.is_empty() {
+                Some(mapped_base)
+            } else {
+                Some(format!("({} {})", mapped_base, arg_parts.join(" ")))
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => render_type_lean(inner),
+        _ => None,
+    }
+}
+
+fn generic_arg_to_lean_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
+    use verum_ast::ty::GenericArg;
+    match arg {
+        GenericArg::Type(t) => render_type_lean(t),
+        _ => Some("_".to_string()),
+    }
+}
+
+/// Diagnostic classifier for unrenderable type shapes.
+fn classify_unrenderable_type(ty: &Type) -> &'static str {
+    match &ty.kind {
+        TypeKind::Refined { .. } => "refinement type",
+        TypeKind::Function { .. } => "function type",
+        TypeKind::Rank2Function { .. } => "rank-2 function type",
+        TypeKind::PathType { .. } => "path-equality type",
+        TypeKind::DependentApp { .. } => "dependent-application type",
+        TypeKind::Pointer { .. } => "raw pointer",
+        TypeKind::VolatilePointer { .. } => "volatile pointer",
+        TypeKind::Never => "never type",
+        TypeKind::Unknown => "unknown type",
+        _ => "unsupported type shape",
     }
 }
 
@@ -743,5 +1044,178 @@ mod tests {
     fn renderer_id_is_stable() {
         assert_eq!(CoqExprRenderer::new().id(), "coq");
         assert_eq!(LeanExprRenderer::new().id(), "lean");
+    }
+
+    // =========================================================================
+    // Type translator tests (#141 / MSFS-L4.8)
+    // =========================================================================
+
+    fn ty(kind: TypeKind) -> Type {
+        Type::new(kind, Span::dummy())
+    }
+
+    fn path_ty(name: &str) -> Type {
+        ty(TypeKind::Path(Path::single(Ident::new(name, Span::dummy()))))
+    }
+
+    #[test]
+    fn coq_translates_primitive_types() {
+        let r = CoqTypeRenderer::new();
+        assert_eq!(r.render(&ty(TypeKind::Int)).text(), Some("Z"));
+        assert_eq!(r.render(&ty(TypeKind::Bool)).text(), Some("bool"));
+        assert_eq!(r.render(&ty(TypeKind::Text)).text(), Some("string"));
+        assert_eq!(r.render(&ty(TypeKind::Float)).text(), Some("R"));
+        assert_eq!(r.render(&ty(TypeKind::Unit)).text(), Some("unit"));
+        assert_eq!(r.render(&ty(TypeKind::Char)).text(), Some("ascii"));
+    }
+
+    #[test]
+    fn lean_translates_primitive_types() {
+        let r = LeanTypeRenderer::new();
+        assert_eq!(r.render(&ty(TypeKind::Int)).text(), Some("Int"));
+        assert_eq!(r.render(&ty(TypeKind::Bool)).text(), Some("Bool"));
+        assert_eq!(r.render(&ty(TypeKind::Text)).text(), Some("String"));
+        assert_eq!(r.render(&ty(TypeKind::Float)).text(), Some("Float"));
+        assert_eq!(r.render(&ty(TypeKind::Unit)).text(), Some("Unit"));
+        assert_eq!(r.render(&ty(TypeKind::Char)).text(), Some("Char"));
+    }
+
+    #[test]
+    fn coq_remaps_path_named_primitives() {
+        // `Int` written as a Path identifier (not a Primitive
+        // TypeKind::Int) — should still map to `Z`.
+        let r = CoqTypeRenderer::new();
+        assert_eq!(r.render(&path_ty("Int")).text(), Some("Z"));
+        assert_eq!(r.render(&path_ty("Bool")).text(), Some("bool"));
+        assert_eq!(r.render(&path_ty("Nat")).text(), Some("nat"));
+    }
+
+    #[test]
+    fn lean_remaps_path_named_primitives() {
+        let r = LeanTypeRenderer::new();
+        assert_eq!(r.render(&path_ty("Int")).text(), Some("Int"));
+        assert_eq!(r.render(&path_ty("Bool")).text(), Some("Bool"));
+        assert_eq!(r.render(&path_ty("Nat")).text(), Some("Nat"));
+    }
+
+    #[test]
+    fn coq_translates_user_named_path_verbatim() {
+        // User-defined types pass through unchanged.
+        let r = CoqTypeRenderer::new();
+        assert_eq!(r.render(&path_ty("MyType")).text(), Some("MyType"));
+    }
+
+    #[test]
+    fn coq_translates_tuple_to_product() {
+        let r = CoqTypeRenderer::new();
+        let t = ty(TypeKind::Tuple({
+            let mut v = verum_common::List::new();
+            v.push(ty(TypeKind::Int));
+            v.push(ty(TypeKind::Bool));
+            v
+        }));
+        assert_eq!(r.render(&t).text(), Some("(Z * bool)"));
+    }
+
+    #[test]
+    fn lean_translates_tuple_to_product() {
+        let r = LeanTypeRenderer::new();
+        let t = ty(TypeKind::Tuple({
+            let mut v = verum_common::List::new();
+            v.push(ty(TypeKind::Int));
+            v.push(ty(TypeKind::Bool));
+            v
+        }));
+        assert_eq!(r.render(&t).text(), Some("(Int × Bool)"));
+    }
+
+    #[test]
+    fn coq_translates_slice_to_list() {
+        let r = CoqTypeRenderer::new();
+        let t = ty(TypeKind::Slice(verum_common::Heap::new(ty(TypeKind::Int))));
+        assert_eq!(r.render(&t).text(), Some("(list Z)"));
+    }
+
+    #[test]
+    fn lean_translates_slice_to_list() {
+        let r = LeanTypeRenderer::new();
+        let t = ty(TypeKind::Slice(verum_common::Heap::new(ty(TypeKind::Int))));
+        assert_eq!(r.render(&t).text(), Some("(List Int)"));
+    }
+
+    #[test]
+    fn coq_translates_generic_list_maybe() {
+        // Generic { base: List, args: [Int] } → `(list Z)`.
+        let r = CoqTypeRenderer::new();
+        let mut args: verum_common::List<verum_ast::ty::GenericArg> =
+            verum_common::List::new();
+        args.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Int)));
+        let t = ty(TypeKind::Generic {
+            base: verum_common::Heap::new(path_ty("List")),
+            args,
+        });
+        assert_eq!(r.render(&t).text(), Some("(list Z)"));
+
+        // Maybe<Bool> → option bool.
+        let mut args2: verum_common::List<verum_ast::ty::GenericArg> =
+            verum_common::List::new();
+        args2.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Bool)));
+        let t2 = ty(TypeKind::Generic {
+            base: verum_common::Heap::new(path_ty("Maybe")),
+            args: args2,
+        });
+        assert_eq!(r.render(&t2).text(), Some("(option bool)"));
+    }
+
+    #[test]
+    fn lean_translates_generic_list_option() {
+        let r = LeanTypeRenderer::new();
+        let mut args: verum_common::List<verum_ast::ty::GenericArg> =
+            verum_common::List::new();
+        args.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Int)));
+        let t = ty(TypeKind::Generic {
+            base: verum_common::Heap::new(path_ty("List")),
+            args,
+        });
+        assert_eq!(r.render(&t).text(), Some("(List Int)"));
+
+        let mut args2: verum_common::List<verum_ast::ty::GenericArg> =
+            verum_common::List::new();
+        args2.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Bool)));
+        let t2 = ty(TypeKind::Generic {
+            base: verum_common::Heap::new(path_ty("Maybe")),
+            args: args2,
+        });
+        assert_eq!(r.render(&t2).text(), Some("(Option Bool)"));
+    }
+
+    #[test]
+    fn type_renderer_falls_back_for_unsupported_shape() {
+        // Function type isn't translatable by the V0 renderer.
+        let r = CoqTypeRenderer::new();
+        let t = ty(TypeKind::Never);
+        match r.render(&t) {
+            TranslatedType::Fallback { reason, .. } => {
+                assert_eq!(reason, "never type");
+            }
+            other => panic!("expected Fallback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn type_renderer_id_is_stable() {
+        assert_eq!(CoqTypeRenderer::new().id(), "coq");
+        assert_eq!(LeanTypeRenderer::new().id(), "lean");
+    }
+
+    #[test]
+    fn translated_type_text_accessor_works() {
+        let translated = TranslatedType::Translated { text: "Z".into() };
+        assert_eq!(translated.text(), Some("Z"));
+        let fallback = TranslatedType::Fallback {
+            reason: "never type".into(),
+            original: "Never".into(),
+        };
+        assert_eq!(fallback.text(), None);
     }
 }
