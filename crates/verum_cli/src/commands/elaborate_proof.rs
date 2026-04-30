@@ -36,7 +36,9 @@ use verum_kernel::tactic_elaborator::{
     elaborate_theorem, register_kernel_bridge_dispatchers, register_kernel_v0_lemmas,
     register_propositional_connectives, ElabContext, ElabError,
 };
-use verum_kernel::verification_goal::{from_theorem_decl, TheoremKind};
+use verum_kernel::verification_goal::{
+    from_theorem_decl, module_verification_surface, TheoremKind,
+};
 
 /// One row in the elaboration report — what happened for one
 /// theorem.
@@ -115,6 +117,14 @@ pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
 
     let rows = walk_and_elaborate(&source_path, &out_dir)?;
 
+    let surface_path = out_dir.join("verification-surface.json");
+    if surface_path.exists() {
+        ui::success(&format!(
+            "verification surface → {}",
+            surface_path.display(),
+        ));
+    }
+
     // Render report.
     let mut total_verified = 0usize;
     let mut total_skipped = 0usize;
@@ -192,6 +202,33 @@ fn walk_and_elaborate(
     // Ensure output directory exists.
     std::fs::create_dir_all(out_dir).map_err(|e| {
         CliError::custom(format!("mkdir {}: {}", out_dir.display(), e))
+    })?;
+
+    // Emit the module-level verification surface — one JSON file
+    // listing every theorem / lemma / corollary / fn-with-contract's
+    // unified VerificationGoal.  This is the dashboard view that an
+    // audit gate consumes when answering "what is this module
+    // proving?".  Per-theorem .vproof + .vgoal artifacts continue to
+    // emit individually below.
+    let surface_ctx = {
+        let mut c = ElabContext::new();
+        register_propositional_connectives(&mut c);
+        register_kernel_v0_lemmas(&mut c);
+        register_kernel_bridge_dispatchers(&mut c);
+        c
+    };
+    let module_items: Vec<verum_ast::decl::Item> = module.items.iter().cloned().collect();
+    let surface = module_verification_surface(&module_items, &surface_ctx);
+    let surface_path = out_dir.join("verification-surface.json");
+    let surface_json = serde_json::to_string_pretty(&surface).map_err(|e| {
+        CliError::custom(format!("serialise verification surface: {}", e))
+    })?;
+    std::fs::write(&surface_path, surface_json).map_err(|e| {
+        CliError::custom(format!(
+            "write {}: {}",
+            surface_path.display(),
+            e,
+        ))
     })?;
 
     let mut rows = Vec::new();
