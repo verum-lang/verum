@@ -33,10 +33,20 @@
 //                              + cut-elimination + orthogonality
 //
 //   core.action.monads       — concrete strong-monad implementations
-//                              per VVA-9 V1: Pure, Reader, Writer,
-//                              State (commutative-vs-non-commutative
-//                              demo set; List / Probability /
-//                              Exception / Io follow in V1.5)
+//                              per VVA-9 V1.5 (COMPLETE): Pure,
+//                              Reader, Writer, State (V1) +
+//                              Probability, Quantum (Tier-A V0) +
+//                              Exception, Nondeterm (List monad,
+//                              renamed to avoid collection-type
+//                              clash), Io. Every effect in the
+//                              Theorem 17.T1 catalogue ships
+//                              concrete monad data + operators +
+//                              monad-law theorems (left/right
+//                              identity, associativity) +
+//                              commutativity (positive for the
+//                              commutative effects, negative
+//                              separating witnesses for State /
+//                              Exception / Io)
 //
 //   core.action.ludics_lazy  — cofix-based lazy ludics designs per
 //                              VVA-10 V1: LazyDesign + bounded
