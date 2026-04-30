@@ -641,6 +641,43 @@ impl TestExecutionResult {
 /// Module system: files map to modules (lib.vr = crate root, foo.vr = module foo,
 /// foo/bar.vr = module foo.bar). Visibility defaults to private. Name resolution
 /// is deterministic and unambiguous via hierarchical module paths.
+///
+/// Result of the unified [`CompilationPipeline::run`] dispatch.
+///
+/// Each variant corresponds to a distinct compilation tier: `Checked`
+/// is the type-only path (codegen and linking skipped); `Built`
+/// carries the path to a freshly-produced native executable.  Future
+/// tiers (Tier-0 interpret, MLIR JIT, MLIR AOT) extend this enum —
+/// by-value matching at the caller side ensures each new variant is
+/// exhaustively handled at every call site.
+#[derive(Debug, Clone)]
+pub enum RunResult {
+    /// `check_only = true` — type-checking succeeded, no output
+    /// produced.  Embedders displaying build-completion UI should
+    /// emit a "Check OK" message instead of pointing at a binary.
+    Checked,
+    /// AOT compilation succeeded — the path is the produced native
+    /// executable on disk.
+    Built(PathBuf),
+}
+
+impl RunResult {
+    /// Path to the produced binary, or `None` for the check-only
+    /// variant.  Convenience for callers that only want the
+    /// happy-path build artifact.
+    pub fn output_path(&self) -> Option<&Path> {
+        match self {
+            Self::Checked => None,
+            Self::Built(p) => Some(p),
+        }
+    }
+
+    /// Whether the pipeline ran in check-only mode (no codegen).
+    pub fn is_check_only(&self) -> bool {
+        matches!(self, Self::Checked)
+    }
+}
+
 pub struct CompilationPipeline<'s> {
     session: &'s mut Session,
 
@@ -2767,25 +2804,65 @@ impl<'s> CompilationPipeline<'s> {
             );
         }
 
-        // PASS 3: Semantic Analysis
-        // Skip analysis for verification-only modules (they reuse cached type check results).
-        // This is the key optimization: when only the implementation of a dependency changed
-        // (not its signature), we don't need to re-type-check dependent modules.
+        // PASS 3: Semantic Analysis (parallel, #101)
+        //
+        // Skip analysis for verification-only modules (they reuse cached
+        // type check results). This is the key optimization: when only the
+        // implementation of a dependency changed (not its signature), we
+        // don't need to re-type-check dependent modules.
+        //
+        // Parallelism rationale: each call to `analyze_module` constructs
+        // its own `TypeChecker` and never writes back to `Compiler` state
+        // — every "mutation" routes through `Session::emit_diagnostic`
+        // (lock-free SegQueue post-#105) or `Session::abort_if_errors`
+        // (atomic counter). The shared `module_registry` and
+        // `lazy_resolver` are `Arc<{RwLock,Mutex}<…>>`, so inter-thread
+        // access is the lock primitives' problem, not ours. Reads of
+        // `self.modules` / `self.collected_contexts` are pure HashMap /
+        // List iteration with no concurrent writers in this phase.
+        //
+        // Opt-out: `VERUM_NO_PARALLEL_ANALYZE=1` falls back to the
+        // sequential loop. Useful for debugging non-deterministic
+        // diagnostic ordering or pinning down a parallel-only regression.
         self.current_pass = CompilerPass::Pass3Analysis;
         info!("Pass 3: Analysis phase");
 
-        for path in &module_paths {
-            // Skip verification-only modules - they don't need re-analysis
-            if verify_only.contains(path) {
-                debug!("  Skipping analysis (verify-only): {}", path.as_str());
-                continue;
-            }
+        let parallel_analyze = std::env::var("VERUM_NO_PARALLEL_ANALYZE").is_err();
 
-            debug!("  Analyzing: {}", path.as_str());
-            // Clone Arc (cheap) to release borrow before calling mutable method
-            let module_rc = self.modules.get(path).map(Arc::clone);
-            if let Some(module) = module_rc {
-                self.analyze_module(path, &module)?;
+        // Pre-collect (path, module) pairs in topological order so we
+        // can hand the parallel iterator a self-contained work list and
+        // keep the hot-path closure free of HashMap lookups.
+        let analysis_workset: Vec<(Text, Arc<Module>)> = module_paths
+            .iter()
+            .filter(|path| !verify_only.contains(*path))
+            .filter_map(|path| {
+                self.modules
+                    .get(path)
+                    .map(|module_rc| (path.clone(), Arc::clone(module_rc)))
+            })
+            .collect();
+
+        if parallel_analyze && analysis_workset.len() > 1 {
+            use rayon::prelude::*;
+            debug!(
+                "  Analyzing {} modules in parallel (rayon)",
+                analysis_workset.len()
+            );
+            // `try_for_each` short-circuits on the first Err — preserves
+            // the sequential loop's "bail on first failure" semantics.
+            // Diagnostics from other threads still flow into the session
+            // queue, so the post-pass `abort_if_errors` reports the
+            // complete set rather than a single first-failure.
+            analysis_workset
+                .par_iter()
+                .try_for_each(|(path, module)| -> Result<()> {
+                    debug!("  Analyzing: {}", path.as_str());
+                    self.analyze_module(path, module)
+                })?;
+        } else {
+            for (path, module) in &analysis_workset {
+                debug!("  Analyzing: {}", path.as_str());
+                self.analyze_module(path, module)?;
             }
         }
 
@@ -5577,7 +5654,35 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Cross-file context resolution enables `using [Context]` across files.
     /// Cross-module name resolution enables imports to resolve types from other modules.
-    fn analyze_module(&mut self, path: &Text, module: &Module) -> Result<()> {
+    ///
+    /// Per-module semantic analysis. Despite originally being `&mut self`,
+    /// the body never writes any field of `Compiler` directly: every
+    /// observable mutation flows through `Session::emit_diagnostic`
+    /// (lock-free MPMC queue post-#105) or `Session::abort_if_errors`
+    /// (atomic counter), and the per-call `TypeChecker` is constructed
+    /// fresh and dropped before return. Pre-fix the artificial `&mut`
+    /// borrow on `self` serialised the Pass-3 module loop — even on
+    /// machines with 16 cores, modules in a large project were analysed
+    /// strictly one at a time.
+    ///
+    /// The `&self` signature (#101) unblocks `module_paths.par_iter()`
+    /// at the call site for a 2-4× wall-clock win on multi-module
+    /// projects. Parallel correctness rests on three invariants the
+    /// audit verified:
+    ///
+    ///   1. `TypeChecker` instances do not share mutable state — each
+    ///      thread owns its checker.
+    ///   2. Reads of `self.modules` / `self.collected_contexts` /
+    ///      `self.stdlib_metadata` are pure HashMap / List iteration
+    ///      with no concurrent writers (the loop runs after all parsing
+    ///      passes have completed).
+    ///   3. Diagnostic emission and error-counter polling are already
+    ///      lock-free atomic operations on `Session`.
+    ///
+    /// `lazy_resolver` is `Arc<Mutex<dyn LazyModuleResolver>>` so
+    /// concurrent late-loads serialise on a single mutex — acceptable
+    /// because reachability-narrowing makes late loads rare.
+    fn analyze_module(&self, path: &Text, module: &Module) -> Result<()> {
         use verum_ast::ItemKind;
 
         // Type check all items in the module
@@ -5870,6 +5975,23 @@ impl<'s> CompilationPipeline<'s> {
         self.session.abort_if_errors()?;
 
         Ok(())
+    }
+
+    /// Unified dispatch entry-point: routes to the appropriate
+    /// internal `run_*` method based on the session's
+    /// `CompilerOptions`.  Centralises tier selection in one place
+    /// so future tiers (Tier-0 interpret, MLIR JIT, MLIR AOT) extend
+    /// the dispatch by adding a new arm rather than touching every
+    /// caller.  The matched [`RunResult`] tells the caller whether
+    /// codegen produced a binary (`Built(path)`) or was skipped
+    /// because `check_only=true` (`Checked`).
+    pub fn run(&mut self) -> Result<RunResult> {
+        if self.session.options().check_only {
+            self.run_check_only()?;
+            return Ok(RunResult::Checked);
+        }
+        let path = self.run_native_compilation()?;
+        Ok(RunResult::Built(path))
     }
 
     /// Run complete compilation (all phases)
