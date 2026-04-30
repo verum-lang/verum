@@ -952,6 +952,35 @@ pub fn format_document_with_config(
     text: &str,
     config: VerumFormatConfig,
 ) -> List<TextEdit> {
+    // Phase-not-realised tracing: three VerumFormatConfig fields
+    // (`max_line_width`, `align_assignments`, `preserve_blank_lines`)
+    // are forward-looking — they land on the config from editor
+    // settings + verum.toml `[fmt]` parsing, but the current
+    // formatter doesn't yet implement soft-line-break decisions
+    // (max_line_width), consecutive-assignment alignment
+    // (align_assignments), or user-blank-line preservation
+    // (preserve_blank_lines — trivia-preserving handles comments,
+    // not blank lines). Surface a warning when the user has set
+    // any of these to a non-default value, so a `[fmt] max_line_width
+    // = 80` setting in verum.toml doesn't silently produce
+    // 100-column output.
+    if config.max_line_width != 100
+        || config.align_assignments
+        || !config.preserve_blank_lines
+    {
+        tracing::warn!(
+            "VerumFormatConfig surface: max_line_width={}, \
+             align_assignments={}, preserve_blank_lines={} (these \
+             fields land on the config but the current formatter \
+             does not yet implement soft-line-break decisions, \
+             consecutive-assignment alignment, or user-blank-line \
+             preservation — they're forward-looking knobs)",
+            config.max_line_width,
+            config.align_assignments,
+            config.preserve_blank_lines,
+        );
+    }
+
     let formatter = TriviaPreservingFormatter::new(config.clone());
 
     // Use trivia-preserving formatter for syntax tree-based formatting
