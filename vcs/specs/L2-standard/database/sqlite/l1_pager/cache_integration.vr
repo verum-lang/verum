@@ -1,0 +1,161 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, native, l1_pager, page_cache, dirty-tracking
+// @timeout: 30000
+// @expected-exit: 0
+//
+// Pager + PageCache integration smoke. Pre-#119 the v0.1 skeleton used a
+// raw `Map<Int, PageFrame>` with no dirty tracking, no LRU, no commit
+// path; pager_write was synchronous write-through.  Post-#119 the
+// pager owns a `PageCache`, write-back-buffers dirty pages, and
+// drains them on commit.
+//
+// This pin asserts:
+//   1. After `pager_write`, `dirty_count` reflects exactly one page.
+//   2. `pager_read` of the same page returns the just-written bytes
+//      (cache-hit path, not backend round-trip).
+//   3. After `pager_commit`, `dirty_count` is zero.
+//   4. Sequential reads of new pages bump `cache.miss` count.
+//   5. Re-reading a cached page bumps `cache.hit` count.
+//   6. Read-only mode rejects `pager_write` with `ReadOnly`.
+//
+// Spec: sqlite-native.md §8 (L1 Pager).
+
+mount core.database.sqlite.native.l1_pager.{
+    Pager, PageFrame, PagerErrorKind, SyncMode,
+    pager_open_memory, pager_open_memory_with_config, pager_config_default,
+    pager_read, pager_write, pager_commit, pager_flush,
+};
+mount collections.List;
+mount base.{Result, Ok, Err};
+
+fn make_page(page_no: Int, fill: Byte, page_size: Int) -> PageFrame {
+    let mut data: List<Byte> = List.new();
+    let mut i = 0;
+    while i < page_size {
+        data.push(fill);
+        i = i + 1;
+    }
+    PageFrame { page_no: page_no, data: data, dirty: true }
+}
+
+fn test_dirty_tracking() {
+    print("test_dirty_tracking: open pager");
+    let mut p: Pager = match pager_open_memory() {
+        Ok(p)  => p,
+        Err(_) => { panic("open_memory failed"); return; }
+    };
+    assert_eq(p.dirty_count_view(), 0);
+
+    let frame = make_page(1, 0xAB as Byte, 4096);
+    match pager_write(&mut p, &frame) {
+        Ok(_)  => {},
+        Err(_) => { panic("write failed"); return; }
+    };
+    assert_eq(p.dirty_count_view(), 1);
+
+    let frame2 = make_page(2, 0xCD as Byte, 4096);
+    match pager_write(&mut p, &frame2) {
+        Ok(_)  => {},
+        Err(_) => { panic("write 2 failed"); return; }
+    };
+    assert_eq(p.dirty_count_view(), 2);
+
+    // Overwriting an already-dirty page should NOT bump the count.
+    let frame1b = make_page(1, 0x12 as Byte, 4096);
+    match pager_write(&mut p, &frame1b) {
+        Ok(_)  => {},
+        Err(_) => { panic("write 1b failed"); return; }
+    };
+    assert_eq(p.dirty_count_view(), 2);
+
+    // Commit drains.
+    match pager_commit(&mut p) {
+        Ok(_)  => {},
+        Err(_) => { panic("commit failed"); return; }
+    };
+    assert_eq(p.dirty_count_view(), 0);
+}
+
+fn test_cache_hit_after_write() {
+    print("test_cache_hit_after_write");
+    let mut p: Pager = match pager_open_memory() {
+        Ok(p)  => p,
+        Err(_) => { panic("open_memory failed"); return; }
+    };
+    let frame = make_page(7, 0xEF as Byte, 4096);
+    let _ = pager_write(&mut p, &frame);
+
+    // Reading the just-written page should hit the cache (not the backend).
+    let read = match pager_read(&mut p, 7) {
+        Ok(f)  => f,
+        Err(_) => { panic("read failed"); return; }
+    };
+    assert_eq(read.page_no, 7);
+    assert_eq(read.data.len(), 4096);
+    assert_eq(read.data[0], 0xEF as Byte);
+    assert_eq(read.data[2048], 0xEF as Byte);
+    assert_eq(read.data[4095], 0xEF as Byte);
+}
+
+fn test_cache_stats_progression() {
+    print("test_cache_stats_progression");
+    let mut p: Pager = match pager_open_memory() {
+        Ok(p)  => p,
+        Err(_) => { panic("open_memory failed"); return; }
+    };
+
+    // Baseline: 0 hits, 0 misses.
+    let (h0, m0, _e0, _peak0) = p.cache_stats();
+    assert_eq(h0, 0);
+    assert_eq(m0, 0);
+
+    // First read of a fresh page → miss.
+    let _ = pager_read(&mut p, 1);
+    let (h1, m1, _e1, _peak1) = p.cache_stats();
+    assert_eq(h1, 0);
+    assert_eq(m1, 1);
+
+    // Re-read the same page → hit.
+    let _ = pager_read(&mut p, 1);
+    let (h2, m2, _e2, _peak2) = p.cache_stats();
+    assert_eq(h2, 1);
+    assert_eq(m2, 1);
+
+    // Read a different page → another miss.
+    let _ = pager_read(&mut p, 2);
+    let (h3, m3, _e3, _peak3) = p.cache_stats();
+    assert_eq(h3, 1);
+    assert_eq(m3, 2);
+}
+
+fn test_read_only_rejects_writes() {
+    print("test_read_only_rejects_writes");
+    let mut cfg = pager_config_default();
+    cfg.read_only = true;
+    let mut p: Pager = match pager_open_memory_with_config(4096, cfg) {
+        Ok(p)  => p,
+        Err(_) => { panic("open_memory_with_config failed"); return; }
+    };
+    assert(p.is_read_only());
+
+    let frame = make_page(1, 0xAB as Byte, 4096);
+    match pager_write(&mut p, &frame) {
+        Ok(_)  => { panic("write should have failed on read-only pager"); return; }
+        Err(e) => {
+            match e.kind {
+                ReadOnly => { /* expected */ }
+                _ => { panic("expected ReadOnly error"); return; }
+            }
+        }
+    };
+}
+
+fn main() {
+    test_dirty_tracking();
+    test_cache_hit_after_write();
+    test_cache_stats_progression();
+    test_read_only_rejects_writes();
+    print("L1 pager + cache integration ok");
+}

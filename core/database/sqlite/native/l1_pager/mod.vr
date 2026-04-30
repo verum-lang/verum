@@ -60,8 +60,15 @@ public module checkpointer;
 
 public mount .pager.{
     PageNo, PageFrame, Pager, PagerError, PagerErrorKind,
+    PagerConfig, SyncMode,
     PAGE_SIZE_MIN, PAGE_SIZE_MAX, PAGE_SIZE_DEFAULT,
-    pager_open_memory, pager_read, pager_write, pager_close,
+    DEFAULT_CACHE_PAGES, MIN_CACHE_PAGES,
+    pager_open_memory, pager_open_memory_with_size,
+    pager_open_memory_with_config, pager_open_file_with_config,
+    pager_open_file, pager_open_file_rwc, pager_open_file_ro,
+    pager_read, pager_write, pager_write_sync,
+    pager_flush, pager_commit, pager_close,
+    pager_config_default,
 };
 
 public mount .page_cache.{
