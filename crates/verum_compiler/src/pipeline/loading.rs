@@ -33,8 +33,12 @@ use tracing::{debug, info, warn};
 
 use verum_ast::Module;
 use verum_common::{List, Map, Text};
+use verum_modules::ModulePath;
 
-use super::CompilationPipeline;
+use super::{
+    BuildMode, CachedStdlibModules, CompilationPipeline, compute_stdlib_content_hash,
+    global_stdlib_cache, global_stdlib_registry_cache, try_load_registry_from_disk,
+};
 
 impl<'s> CompilationPipeline<'s> {
     // ========================================================================
