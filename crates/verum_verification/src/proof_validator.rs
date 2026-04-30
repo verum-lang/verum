@@ -6397,20 +6397,40 @@ impl ProofValidator {
         Ok(())
     }
 
-    /// Validate SkHack: Skolemization hack
+    /// Validate SkHack: Skolemization transforms `∃x. P(x)` into
+    /// `P(f(free_vars))` where `f` is a fresh Skolem function.
     ///
-    /// Validates a Skolemization transformation (existential to function).
+    /// Soundness gate: the input `formula` MUST be syntactically
+    /// existential. Pre-fix the parameter was bound to `_` and
+    /// completely ignored — the validator only checked
+    /// `skolemized == expected`, so a user could SkHack any
+    /// non-existential formula and as long as `skolemized`
+    /// matched `expected` syntactically, the rule passed.
     ///
-    /// Skolemization hack: transforms exists x. P(x) to P(f(free_vars)) where f is
-    /// a fresh Skolem function. Trusted if result matches expected.
+    /// Full Skolemization soundness (checking that
+    /// `skolemized = body[x := f(free_vars)]` for some fresh `f`)
+    /// requires higher-order substitution matching and is tracked
+    /// separately; this commit closes the most common misuse —
+    /// applying SkHack to a formula that isn't existential at all.
+    /// Same pattern as the forall_elim/exists_intro/iff_oeq shape
+    /// gates.
     fn validate_sk_hack(
         &self,
-        _formula: &Expr,
+        formula: &Expr,
         skolemized: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
-        // Skolemization transforms ∃x.P(x) to P(f(free_vars))
-        // We trust the Skolemization if the result matches expected
+        if !matches!(formula.kind, ExprKind::Exists { .. }) {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "sk_hack: input formula {} is not an existential — \
+                     Skolemization only applies to ∃x. P(x) shapes",
+                    self.expr_to_text(formula)
+                )
+                .into(),
+            });
+        }
+
         if !self.expr_eq(skolemized, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
@@ -9365,22 +9385,73 @@ mod tests {
     fn test_validate_sk_hack() {
         let mut validator = ProofValidator::new();
 
+        // Build an actual ∃x. P(x): Exists { bindings: [x: Int], body: P }.
+        let p = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
+            Span::dummy(),
+        );
+        let pat = verum_ast::Pattern {
+            kind: verum_ast::pattern::PatternKind::Ident {
+                by_ref: false,
+                mutable: false,
+                name: verum_ast::Ident::new("x", Span::dummy()),
+                subpattern: Maybe::None,
+            },
+            span: Span::dummy(),
+        };
+        let mut bindings: List<verum_ast::expr::QuantifierBinding> = List::new();
+        bindings.push(verum_ast::expr::QuantifierBinding {
+            pattern: pat,
+            ty: Maybe::None,
+            domain: Maybe::None,
+            guard: Maybe::None,
+            span: Span::dummy(),
+        });
         let formula = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            ExprKind::Exists {
+                bindings,
+                body: Heap::new(p.clone()),
+            },
             Span::dummy(),
         );
-        let skolemized = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
-            Span::dummy(),
-        );
+        // The Skolemized form: just `P` with the bound variable
+        // replaced by a fresh constant (we don't model that here;
+        // the test pins the SHAPE gate, not the substitution check).
+        let skolemized = p.clone();
 
         let proof = ProofTerm::SkHack {
-            formula: formula.clone(),
+            formula,
             skolemized: skolemized.clone(),
         };
 
         let result = validator.validate(&proof, &skolemized);
-        assert!(result.is_ok(), "SkHack should validate correctly");
+        assert!(
+            result.is_ok(),
+            "SkHack with existential premise should validate: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_validate_sk_hack_rejects_non_existential_formula() {
+        // Soundness regression for #39: a literal `true` is NOT
+        // existential. Pre-fix the validator accepted it because
+        // `formula` was `_`-bound and only `skolemized == expected`
+        // was checked.
+        let mut validator = ProofValidator::new();
+        let bool_true = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let proof = ProofTerm::SkHack {
+            formula: bool_true.clone(),
+            skolemized: bool_true.clone(),
+        };
+        let result = validator.validate(&proof, &bool_true);
+        assert!(
+            result.is_err(),
+            "literal `true` is not an existential — must reject SkHack"
+        );
     }
 
     #[test]
