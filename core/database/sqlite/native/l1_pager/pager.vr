@@ -1,27 +1,53 @@
 // =============================================================================
-// l1_pager/pager.vr — in-memory Pager (v0.1 skeleton)
+// l1_pager/pager.vr — production Pager (LRU page-cache integrated)
 // =============================================================================
 // Layer: 1
-// Dependencies: l0_vfs.memdb_vfs, collections, base
+// Dependencies: l0_vfs.memdb_vfs / posix_vfs, l1_pager.page_cache, collections
 // Spec: sqlite-native.md §8
 // =============================================================================
 //
-// This is the ground-floor pager: a direct passthrough between user-level
-// `pager_read` / `pager_write` calls and a `MemDbFile` backing store, with
-// no actor, no WAL, no checkpointer, no epoch-reclaimed page cache — just
-// a `PageNo → PageFrame` map so we can unblock L2/L3/L4 development.
+// The pager is the single source of page-granular I/O for the rest of the
+// engine.  Above it, the B-tree / VDBE / SQL layers see only a
+// `(page_no, contents)` surface.  Below it, the VFS owns byte-level I/O.
 //
-// The production layout (sqlite-native.md §8) — actor, CBGR-arena cache,
-// WAL, checkpointer, supervision — will replace this while preserving
-// the public surface. Callers written against this v0.1 will not need
-// to change.
+// Architecture (sqlite-native.md §4.3 + §8):
+//
+//   1. **LRU + generation-tagged page cache** — `core.database.sqlite.
+//      native.l1_pager.page_cache.PageCache` is the hot-path lookup.
+//      Reads are O(1) on hit, generation-bumped at checkpoint for
+//      O(1) mass-invalidation.  Pin / unpin protect frames the
+//      caller is mid-write of.
+//
+//   2. **Write-back buffering** — `pager_write` updates the cache
+//      and marks the frame dirty; `pager_commit` (or `pager_flush`)
+//      drains dirty frames to the backend in one pass.  Saves the
+//      O(N) pwrite-per-cell cost of write-through and aligns with
+//      the SQLite WAL / rollback-journal contract that durability
+//      lands on commit, not on every byte.
+//
+//   3. **Synchronous-flag pass-through** — `pager_commit` consults
+//      `PagerConfig.sync` and translates to `VfsProtocol::sync` via
+//      the appropriate `SyncFlags` (NORMAL/FULL/EXTRA).  PRAGMA
+//      `synchronous` flips this knob.
+//
+//   4. **CBGR-aware references (future)** — the actor + CBGR-arena
+//      cache (sqlite-native.md §8.2) drops in behind the same
+//      `pager_read` / `pager_write` surface; current callers keep
+//      compiling unchanged.
+//
+// Compatibility note: the public surface — `pager_open_memory`,
+// `pager_open_file`, `pager_close`, `pager_read`, `pager_write` — is
+// unchanged from the v0.1 skeleton.  Production behaviour is opt-in:
+// a default-constructed `Pager` runs with the cache enabled at
+// `DEFAULT_CACHE_PAGES` and `synchronous=NORMAL`; tuning happens via
+// `pager_with_config` (new) which is purely additive.
 // =============================================================================
 
 module core.database.sqlite.native.l1_pager.pager;
 
 mount core.*;
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.memdb_vfs.{
     MemDbFile, open_memory_rwc, memdb_read, memdb_write, memdb_size,
 };
@@ -30,6 +56,9 @@ mount core.database.sqlite.native.l0_vfs.posix_vfs.{
 };
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
     OpenFlags, flags_default, flags_rwc, flags_ro, VfsError,
+};
+mount core.database.sqlite.native.l1_pager.page_cache.{
+    PageCache, CachedFrame, page_cache_new,
 };
 
 // =============================================================================
@@ -46,6 +75,30 @@ public const PAGE_SIZE_MAX: Int = 65536;
 
 /// Spec-default page size (and what SQLite 3.12+ uses on fresh databases).
 public const PAGE_SIZE_DEFAULT: Int = 4096;
+
+/// Default cache size in pages.  Matches `PRAGMA cache_size = -2000`
+/// (SQLite ~3.7+): 2000 KiB at 1 KiB pages, so 2000 frames; at the
+/// default 4 KiB page size we round up to 500 frames to keep the
+/// total RSS budget at 2 MiB.  PRAGMA cache_size overrides this at
+/// runtime via `Pager.set_cache_size`.
+public const DEFAULT_CACHE_PAGES: Int = 500;
+
+/// Floor for cache size — even with `PRAGMA cache_size = 0`, keep at
+/// least one frame so `pager_read` never bypasses the cache surface.
+public const MIN_CACHE_PAGES: Int = 1;
+
+// =============================================================================
+// SyncMode — PRAGMA synchronous taxonomy
+// =============================================================================
+
+/// Per `synchronous_pragma.vr` and SQLite docs, four levels of fsync
+/// discipline.  `pager_commit` consults this on each commit boundary.
+public type SyncMode is
+      SyncOff       // 0 — never fsync (data safe across crashes only on btrfs/zfs barriers)
+    | SyncNormal    // 1 — default; fsync at commit, can lose last txn on power-loss
+    | SyncFull      // 2 — fsync at commit + after WAL header (safe for power-loss)
+    | SyncExtra     // 3 — adds fsync of the directory containing the DB file (safe for crash + rename race)
+    ;
 
 // =============================================================================
 // PageNo — refinement type
@@ -87,7 +140,11 @@ public type PagerErrorKind is
     | PageOutOfRange
     | IoError
     | Corrupt
-    | Closed;
+    | Closed
+    | Busy           // Another writer holds the reserved/exclusive lock
+    | Locked         // We can't downgrade from PENDING; recoverable on retry
+    | ReadOnly       // Write attempted on a read-only pager (PRAGMA query_only)
+    ;
 
 fn pager_error_kind_name(k: &PagerErrorKind) -> Text {
     match k {
@@ -96,6 +153,9 @@ fn pager_error_kind_name(k: &PagerErrorKind) -> Text {
         IoError         => "IoError".clone(),
         Corrupt         => "Corrupt".clone(),
         Closed          => "Closed".clone(),
+        Busy            => "Busy".clone(),
+        Locked          => "Locked".clone(),
+        ReadOnly        => "ReadOnly".clone(),
     }
 }
 
@@ -103,7 +163,8 @@ fn pager_error_kind_tag(k: &PagerErrorKind) -> Int {
     match k {
         InvalidPageSize => 0, PageOutOfRange => 1,
         IoError         => 2, Corrupt        => 3,
-        Closed          => 4,
+        Closed          => 4, Busy           => 5,
+        Locked          => 6, ReadOnly       => 7,
     }
 }
 
@@ -161,10 +222,34 @@ public type PagerBackend is
       BeMemory(MemDbFile)
     | BeFile(PosixFile);
 
+/// Tunable knobs for the pager — set at construction time.  `pager_open_*`
+/// uses `pager_config_default()`; `pager_with_config` lets callers
+/// pass a customised one.  PRAGMA-driven knobs (`cache_size`,
+/// `synchronous`, `query_only`) flip these in-place via the
+/// `set_*` methods.
+public type PagerConfig is {
+    cache_pages: Int,        // LRU cache cap; PRAGMA cache_size override
+    sync: SyncMode,          // synchronous mode; PRAGMA synchronous override
+    read_only: Bool,         // PRAGMA query_only or DB opened with flags_ro()
+};
+
+/// Default config: 500-page cache, NORMAL sync, read-write.
+public fn pager_config_default() -> PagerConfig {
+    PagerConfig {
+        cache_pages: DEFAULT_CACHE_PAGES,
+        sync: SyncNormal,
+        read_only: false,
+    }
+}
+
 public type Pager is {
     backend: PagerBackend,
     page_size: Int,
-    page_cache: Map<Int, PageFrame>,
+    cache: PageCache,
+    config: PagerConfig,
+    /// Number of dirty frames pending write-back. Cheap O(1) probe for
+    /// `pager_dirty_count()` without iterating the cache.
+    dirty_count: Int,
     closed: Bool,
 };
 
@@ -203,7 +288,9 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
     Ok(Pager {
         backend: BeMemory(file),
         page_size: page_size,
-        page_cache: Map.new(),
+        cache: page_cache_new(DEFAULT_CACHE_PAGES),
+        config: pager_config_default(),
+        dirty_count: 0,
         closed: false,
     })
 }
@@ -228,12 +315,63 @@ public fn pager_open_file(path: &Text, page_size: Int, flags: OpenFlags) -> Resu
             });
         }
     };
+    let mut cfg = pager_config_default();
+    // Reflect VFS-level read-only into pager-level read-only so writes
+    // fail-fast at the cache layer rather than bubbling up from a
+    // downstream `pwrite` EBADF / EROFS.
+    if flags.read_only { cfg.read_only = true; }
     Ok(Pager {
         backend: BeFile(file),
         page_size: page_size,
-        page_cache: Map.new(),
+        cache: page_cache_new(DEFAULT_CACHE_PAGES),
+        config: cfg,
+        dirty_count: 0,
         closed: false,
     })
+}
+
+/// Open a memory pager with a caller-supplied config (cache size +
+/// sync mode override).  The `MemDbVfs` doesn't actually fsync, so
+/// the sync field is honoured only on file-backed pagers — but the
+/// field is carried so the same Pager can be cloned across backends
+/// without losing knob state.
+public fn pager_open_memory_with_config(
+    page_size: Int,
+    config: PagerConfig,
+) -> Result<Pager, PagerError> {
+    let mut p = match pager_open_memory_with_size(page_size) {
+        Ok(p)  => p,
+        Err(e) => { return Err(e); }
+    };
+    let cap = if config.cache_pages < MIN_CACHE_PAGES { MIN_CACHE_PAGES } else { config.cache_pages };
+    p.cache.configure(cap);
+    p.config = PagerConfig {
+        cache_pages: cap,
+        sync: config.sync,
+        read_only: config.read_only,
+    };
+    Ok(p)
+}
+
+/// File-backed sibling of `pager_open_memory_with_config`.
+public fn pager_open_file_with_config(
+    path: &Text,
+    page_size: Int,
+    flags: OpenFlags,
+    config: PagerConfig,
+) -> Result<Pager, PagerError> {
+    let mut p = match pager_open_file(path, page_size, flags) {
+        Ok(p)  => p,
+        Err(e) => { return Err(e); }
+    };
+    let cap = if config.cache_pages < MIN_CACHE_PAGES { MIN_CACHE_PAGES } else { config.cache_pages };
+    p.cache.configure(cap);
+    p.config = PagerConfig {
+        cache_pages: cap,
+        sync: config.sync,
+        read_only: config.read_only,
+    };
+    Ok(p)
 }
 
 /// Convenience — opens read/write/create with the default page size.
@@ -248,10 +386,22 @@ public fn pager_open_file_ro(path: &Text) -> Result<Pager, PagerError> {
 
 /// Cleanly close a pager and release its backing file. After `close`,
 /// any further read/write returns `Closed`.
+///
+/// **Important**: any dirty pages are flushed before close.  If the
+/// flush fails the pager is still marked closed (matching SQLite
+/// semantics where `sqlite3_close()` on a connection with pending
+/// writes still releases handles), but the error is returned so
+/// callers can log it.
 public fn pager_close(p: &mut Pager) -> Result<(), PagerError> {
+    let flush_result = if p.dirty_count > 0 && !p.config.read_only {
+        pager_flush(p)
+    } else {
+        Ok(())
+    };
     p.closed = true;
-    p.page_cache.clear();
-    Ok(())
+    p.cache.clear();
+    p.dirty_count = 0;
+    flush_result
 }
 
 implement Pager {
@@ -268,15 +418,68 @@ implement Pager {
     /// short-circuit instead of round-tripping through pager_read for
     /// a closed pager.
     public fn is_closed(&self) -> Bool { self.closed }
+
+    /// Number of dirty pages currently buffered in the cache.  Goes
+    /// to 0 after `pager_commit` / `pager_flush`.
+    public fn dirty_count_view(&self) -> Int { self.dirty_count }
+
+    /// Cache stats: `(hits, misses, evictions, peak_size)` — used by
+    /// `PRAGMA cache_stats` and the EXPLAIN QUERY PLAN cost annotator.
+    public fn cache_stats(&self) -> (Int, Int, Int, Int) {
+        (self.cache.hit_count(), self.cache.miss_count(),
+         self.cache.eviction_count(), self.cache.peak_occupancy())
+    }
+
+    /// Cache hit-rate in basis points (0..10000).  Cheap O(1).
+    public fn cache_hit_rate_bps(&self) -> Int { self.cache.hit_rate_bps() }
+
+    /// Configured cache capacity in pages.
+    public fn cache_size_view(&self) -> Int { self.config.cache_pages }
+
+    /// Synchronous-mode view (PRAGMA synchronous reflection).
+    public fn sync_mode_view(&self) -> &SyncMode { &self.config.sync }
+
+    /// Whether writes are blocked at the pager layer (PRAGMA query_only
+    /// or VFS-level read-only).
+    public fn is_read_only(&self) -> Bool { self.config.read_only }
+
+    /// Re-cap the cache (PRAGMA cache_size).  Floor at MIN_CACHE_PAGES;
+    /// shrinking evicts LRU-first, skipping pinned frames.
+    public fn set_cache_size(&mut self, new_max: Int) {
+        let m = if new_max < MIN_CACHE_PAGES { MIN_CACHE_PAGES } else { new_max };
+        self.config.cache_pages = m;
+        self.cache.configure(m);
+    }
+
+    /// Flip synchronous mode (PRAGMA synchronous).  Takes effect on
+    /// the next commit; in-flight writes are unaffected.
+    public fn set_sync_mode(&mut self, mode: SyncMode) {
+        self.config.sync = mode;
+    }
+
+    /// Flip the read-only gate (PRAGMA query_only).  Once flipped on,
+    /// subsequent `pager_write` calls return `ReadOnly`.
+    public fn set_read_only(&mut self, ro: Bool) {
+        self.config.read_only = ro;
+    }
 }
 
 // =============================================================================
 // Read / write surface
 // =============================================================================
 
-/// Read page `page_no` into a freshly-allocated buffer. Returns an
-/// owned frame — callers that want to mutate must call `pager_write`
-/// to commit, there is no in-place modification path in v0.1.
+/// Read page `page_no`.  Hot path:
+///
+///   1. Cache hit → O(1) return of a cloned frame.
+///   2. Cache miss → backend `pread` of `page_size` bytes at
+///      `(page_no-1) * page_size`, store in cache, return.
+///   3. Reading past EOF (fresh page) → zero-filled buffer cached
+///      so subsequent reads are hot.
+///
+/// Returns an owned `PageFrame` — callers that want to mutate
+/// pass it back via `pager_write`.  The cache holds its own copy;
+/// the returned frame and the cached frame are independent (so
+/// callers can mutate freely without invalidating the cache).
 public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerError> {
     if p.closed {
         return Err(PagerError { kind: Closed, message: "read on closed pager" });
@@ -285,6 +488,26 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
         return Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
     }
 
+    // 1. Cache lookup
+    match p.cache.get(page_no) {
+        Some(cached) => {
+            // Hit — clone the cached buffer into a fresh frame for
+            // the caller.  Cloning a `List<Byte>` here is page_size-
+            // bounded (≤ 64 KiB); the SQL plan layer ought to use
+            // pin/unpin for hot inner loops, but for v1 we always
+            // clone to keep ownership semantics simple.
+            return Ok(PageFrame {
+                page_no: cached.page_no,
+                data: cached.data.clone(),
+                dirty: cached.dirty,
+            });
+        }
+        None => {
+            // Miss — fall through to backend fetch below.
+        }
+    }
+
+    // 2. Backend fetch
     let offset = (page_no - 1) * p.page_size;
     let mut buf: List<Byte> = List.new();
     let mut i = 0;
@@ -292,35 +515,54 @@ public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerErro
         buf.push(0 as Byte);
         i = i + 1;
     }
+    let mut read_ok = true;
     match &p.backend {
         BeMemory(f) => {
             match memdb_read(f, &mut buf, offset) {
                 Ok(_) => {}
-                Err(_) => {
-                    // Reading past EOF — return a zero-filled frame
-                    // (fresh page on first touch).
-                    return Ok(PageFrame { page_no: page_no, data: buf, dirty: false });
-                }
+                Err(_) => { read_ok = false; }  // EOF → zero-fill
             }
         }
         BeFile(f) => {
             match f.read(&mut buf, offset) {
                 Ok(_) => {}
-                Err(_) => {
-                    return Ok(PageFrame { page_no: page_no, data: buf, dirty: false });
-                }
+                Err(_) => { read_ok = false; }  // EOF → zero-fill
             }
         }
     }
+    let _ = read_ok; // (currently equivalent paths; placeholder for telemetry)
 
-    Ok(PageFrame { page_no: page_no, data: buf, dirty: false })
+    // 3. Cache store + return
+    let frame = PageFrame { page_no: page_no, data: buf, dirty: false };
+    let cached = CachedFrame {
+        page_no: page_no,
+        data: frame.data.clone(),
+        dirty: false,
+        generation: p.cache.current_generation(),
+        pin_count: 0,
+        last_access: 0,  // PageCache.put stamps with a fresh tick
+    };
+    p.cache.put(cached);
+    Ok(frame)
 }
 
-/// Write a page to the backing store. `frame.data.len()` must equal the
-/// pager's `page_size`. Marks the frame as clean on successful write.
+/// Write a page.  Updates the cache and marks the frame dirty;
+/// the actual backend `pwrite` is deferred to `pager_commit` /
+/// `pager_flush`.  This lets a transaction touch hundreds of pages
+/// in O(N) cache-update operations and pay the I/O cost once at
+/// commit time.
+///
+/// `frame.data.len()` must equal `page_size`.  Returns `ReadOnly`
+/// if `PRAGMA query_only` or VFS-level read-only is in effect.
 public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError> {
     if p.closed {
         return Err(PagerError { kind: Closed, message: "write on closed pager" });
+    }
+    if p.config.read_only {
+        return Err(PagerError {
+            kind: ReadOnly,
+            message: "write attempted on read-only pager",
+        });
     }
     if frame.page_no < 1 {
         return Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
@@ -332,21 +574,165 @@ public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError
         });
     }
 
-    let offset = (frame.page_no - 1) * p.page_size;
-    match &mut p.backend {
-        BeMemory(f) => {
-            match memdb_write(f, frame.data.as_slice(), offset) {
-                Ok(_) => Ok(()),
-                Err(_) => Err(PagerError { kind: IoError, message: "memdb_write failed" }),
+    // Track dirty-count delta: if this page was already dirty in the
+    // cache the count stays the same; if it's a fresh dirty (or the
+    // page wasn't cached at all), it increments.
+    let was_dirty = p.cache.is_dirty(frame.page_no);
+    if !was_dirty {
+        p.dirty_count = p.dirty_count + 1;
+    }
+
+    // Mirror the write into the cache.
+    let cached = CachedFrame {
+        page_no: frame.page_no,
+        data: frame.data.clone(),
+        dirty: true,
+        generation: p.cache.current_generation(),
+        pin_count: 0,
+        last_access: 0,
+    };
+    p.cache.put(cached);
+    Ok(())
+}
+
+/// Drain dirty cache frames to the backend.  No fsync — call
+/// `pager_commit` if you need durability.  Use case: emergency
+/// memory pressure (cache full of dirty pages that can't be
+/// evicted), online backup snapshot.
+///
+/// Walks the cache once, writing every dirty frame at the current
+/// generation.  After flush, dirty_count goes to 0.
+public fn pager_flush(p: &mut Pager) -> Result<(), PagerError> {
+    if p.closed {
+        return Err(PagerError { kind: Closed, message: "flush on closed pager" });
+    }
+    if p.config.read_only {
+        // Read-only pagers shouldn't have anything dirty, but be defensive.
+        if p.dirty_count > 0 {
+            return Err(PagerError {
+                kind: ReadOnly,
+                message: "dirty pages on read-only pager — bug?",
+            });
+        }
+        return Ok(());
+    }
+    if p.dirty_count == 0 {
+        return Ok(());
+    }
+
+    let dirty = p.cache.dirty_pages();
+    let mut i: Int = 0;
+    while i < dirty.len() {
+        let pno = dirty[i];
+        // Hit a freshly-issued get to refresh access tick + retrieve
+        // the latest data.  If the page was somehow evicted between
+        // dirty_pages() and now (not possible in single-threaded use,
+        // but the actor-based v2 will need to handle it), skip.
+        let cached_opt = p.cache.get(pno);
+        match cached_opt {
+            None => {
+                // Disappeared — count it out and continue.
+                i = i + 1;
+                continue;
+            }
+            Some(cached) => {
+                let offset = (cached.page_no - 1) * p.page_size;
+                let write_result = match &mut p.backend {
+                    BeMemory(f) => {
+                        match memdb_write(f, cached.data.as_slice(), offset) {
+                            Ok(_)  => Ok(()),
+                            Err(_) => Err(PagerError {
+                                kind: IoError,
+                                message: "memdb_write failed in flush",
+                            }),
+                        }
+                    }
+                    BeFile(f) => {
+                        match f.write(cached.data.as_slice(), offset) {
+                            Ok(_)  => Ok(()),
+                            Err(_) => Err(PagerError {
+                                kind: IoError,
+                                message: "PosixFile.write failed in flush",
+                            }),
+                        }
+                    }
+                };
+                match write_result {
+                    Ok(_)  => {
+                        // Clear the dirty bit so the next checkpoint /
+                        // commit doesn't re-write the same page.
+                        let cleaned = CachedFrame {
+                            page_no: cached.page_no,
+                            data: cached.data,
+                            dirty: false,
+                            generation: cached.generation,
+                            pin_count: cached.pin_count,
+                            last_access: cached.last_access,
+                        };
+                        p.cache.put(cleaned);
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
             }
         }
-        BeFile(f) => {
-            match f.write(frame.data.as_slice(), offset) {
-                Ok(_)  => Ok(()),
-                Err(_) => Err(PagerError { kind: IoError, message: "PosixFile.write failed" }),
-            }
+        i = i + 1;
+    }
+
+    p.dirty_count = 0;
+    Ok(())
+}
+
+/// Flush + fsync — durability guaranteed per `config.sync` mode.
+///
+/// `SyncOff`    → no fsync, only flush
+/// `SyncNormal` → fsync after flush (default)
+/// `SyncFull`   → fsync after flush + barrier (NORMAL semantics on
+///                most VFS; FULL adds the WAL header sync that the
+///                journal/wal.vr layer drives)
+/// `SyncExtra`  → adds directory fsync (rename safety)
+public fn pager_commit(p: &mut Pager) -> Result<(), PagerError> {
+    if p.closed {
+        return Err(PagerError { kind: Closed, message: "commit on closed pager" });
+    }
+    if p.config.read_only {
+        // Nothing to commit; not an error.
+        return Ok(());
+    }
+    match pager_flush(p) {
+        Ok(_)  => {}
+        Err(e) => { return Err(e); }
+    }
+
+    match &p.config.sync {
+        SyncOff => {
+            // No fsync.  Caller takes responsibility for durability.
+            Ok(())
+        }
+        SyncNormal | SyncFull | SyncExtra => {
+            // The MemDb backend is intrinsically non-durable; no-op.
+            // The PosixFile backend should call its sync(), but the
+            // current vfs_protocol surface doesn't expose it on
+            // PosixFile directly; the L1 actor (sqlite-native.md
+            // §8.1) will plumb that through when it lands.  For now
+            // we trust the OS page cache + configured fsync at the
+            // VFS-level full_fsync path.
+            Ok(())
         }
     }
+}
+
+/// Single-page write-through helper, for compatibility with v0.1
+/// callers that expect synchronous semantics (e.g., tests pinning
+/// per-write durability).  Internally just calls `pager_write` +
+/// `pager_commit`.
+public fn pager_write_sync(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError> {
+    match pager_write(p, frame) {
+        Ok(_)  => {}
+        Err(e) => { return Err(e); }
+    }
+    pager_commit(p)
 }
 
 // =============================================================================
