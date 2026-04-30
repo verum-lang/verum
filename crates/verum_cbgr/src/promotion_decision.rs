@@ -348,6 +348,38 @@ impl PromotionDecisionEngine {
     /// Runs Phase 2 (escape analysis) and prepares reference information
     /// for promotion decisions.
     pub fn analyze(&mut self) {
+        // Surface PromotionConfig.confidence_threshold via tracing
+        // when set to a non-default value. Pre-fix the field was set
+        // in defaults + aggressive()/conservative()/disabled() presets
+        // (0.95 / 0.80 / 0.99 / 1.0 respectively) but no decision
+        // path consulted it — `compute_decision` checks
+        // `enable_promotion`, `extra_conservative`, and
+        // `allow_heap_promotion` but never compares against per-
+        // reference confidence (ReferenceInfo doesn't yet carry a
+        // confidence field). Manifest declarations like
+        // `[cbgr.promotion] confidence_threshold = 0.7` silently
+        // fell through.
+        //
+        // Same fail-open recorder pattern as 270b84c8 / 2baa6500 /
+        // 07213987. When ReferenceInfo gains a confidence field,
+        // `compute_decision` will consult this threshold to gate
+        // marginal promotions; the surfacing here gives operators
+        // visibility now without rebuilding the analyzer when that
+        // wiring lands.
+        let defaults = PromotionConfig::default();
+        if (self.config.confidence_threshold - defaults.confidence_threshold).abs()
+            > f64::EPSILON
+        {
+            tracing::debug!(
+                target: "verum_cbgr::promotion_decision",
+                confidence_threshold = self.config.confidence_threshold,
+                "PromotionConfig.confidence_threshold set to non-default but \
+                 not yet consulted by compute_decision — ReferenceInfo doesn't \
+                 carry a per-reference confidence field. Forward-looking knob; \
+                 will be wired when the confidence-tracking pass lands."
+            );
+        }
+
         // Run escape analysis
         self.escape_analyzer.analyze();
 

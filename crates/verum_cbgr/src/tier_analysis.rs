@@ -365,6 +365,39 @@ impl TierAnalyzer {
     pub fn analyze(&self) -> TierAnalysisResult {
         use std::time::Instant;
 
+        // Surface TierAnalysisConfig.confidence_threshold via
+        // tracing when set to a non-default value. Pre-fix the
+        // field was set in defaults + minimal()/full() presets
+        // (0.95 / 0.95 / 0.99) but no decision path consulted it
+        // — the tier-analysis pipeline gates on
+        // `analyze_async_boundaries` / `analyze_exception_paths` /
+        // the four `enable_*_analysis` toggles, but never compares
+        // against a per-reference confidence value. Manifest
+        // declarations like `[cbgr.tier] confidence_threshold = 0.7`
+        // silently fell through.
+        //
+        // Same fail-open recorder pattern as 270b84c8 / 2baa6500 /
+        // the sibling PromotionConfig.confidence_threshold surface
+        // landing in this commit. When the tier-analysis pipeline
+        // gains a confidence-tracking sub-pass, this threshold
+        // will gate marginal Tier 1/2 promotions; the surfacing
+        // here gives operators visibility now without rebuilding
+        // the analyzer when that wiring lands.
+        let defaults = TierAnalysisConfig::default();
+        if (self.config.confidence_threshold - defaults.confidence_threshold).abs()
+            > f64::EPSILON
+        {
+            tracing::debug!(
+                target: "verum_cbgr::tier_analysis",
+                confidence_threshold = self.config.confidence_threshold,
+                "TierAnalysisConfig.confidence_threshold set to non-default but \
+                 not yet consulted by the tier-decision pipeline — there's no \
+                 per-reference confidence field to compare against. Forward-\
+                 looking knob; will be wired when the confidence-tracking \
+                 sub-pass lands."
+            );
+        }
+
         let start = Instant::now();
         let timeout = std::time::Duration::from_millis(self.config.timeout_ms);
         let mut decisions = Map::new();
