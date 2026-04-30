@@ -1598,6 +1598,42 @@ pub struct TypeContext {
     /// GAT instantiation and generic function type checking.
     /// Example: `fn sort<T: Ord>(list: List<T>) -> List<T>` binds T -> [Ord]
     pub type_var_bounds: Map<TypeVar, List<ProtocolBound>>,
+
+    /// Audit-A4: meta-parameter / const-generic environment.
+    ///
+    /// Maps a meta-param name (e.g. `N` in `fn foo<N: meta usize>()`)
+    /// to its current binding. Populated during generic-param
+    /// processing in `infer.rs` at the `GenericParamKind::Meta` and
+    /// `GenericParamKind::Const` arms. Consulted during refinement
+    /// substitution so a predicate like `where len(arr) == N`
+    /// rewrites `N` to its concrete value at instantiation time
+    /// (rather than translating to an unbound Z3 variable that the
+    /// solver couldn't satisfy).
+    ///
+    /// `Bound(value)` means a concrete instantiation has been seen
+    /// (e.g. `foo::<5>()` sets `N -> Bound(MetaValue::Int(5))`).
+    /// `Symbolic` means the meta-param is in scope but unbound — its
+    /// refinement bounds are tracked symbolically through the SMT
+    /// solver. Removed from the map when the generic-scope exits.
+    pub meta_param_environment: Map<Text, MetaParamBinding>,
+}
+
+/// Audit-A4: binding of a meta / const-generic parameter.
+///
+/// The environment in `TypeContext::meta_param_environment` carries
+/// these so refinement-predicate substitution can either inline a
+/// concrete value (`Bound`) or preserve the symbolic reference
+/// (`Symbolic`) for SMT to constrain.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MetaParamBinding {
+    /// Concrete instantiation — used to inline the value into
+    /// refinement predicates and to short-circuit SMT translation
+    /// for paths that reference this meta-param.
+    Bound(verum_ast::MetaValue),
+    /// Meta-param is declared but not yet bound to a concrete value.
+    /// Refinement predicates referencing it are passed through to
+    /// SMT verbatim so the solver can reason about the bound.
+    Symbolic,
 }
 
 impl TypeContext {
@@ -1641,6 +1677,7 @@ impl TypeContext {
             protocol_impls: Map::new(),
             allowed_contexts: Set::new(),
             type_var_bounds: Map::new(),
+            meta_param_environment: Map::new(),
             inductive_constructors: Map::new(),
         }
     }

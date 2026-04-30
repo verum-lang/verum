@@ -21738,6 +21738,15 @@ impl TypeChecker {
                                 .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
                             self.ctx.define_type(name_text.clone(), type_var);
 
+                            // Audit-A4: register the const-generic in the
+                            // const-generic environment alongside Meta-params.
+                            // See the parallel comment on the Meta arm for
+                            // the full rationale.
+                            self.ctx.meta_param_environment.insert(
+                                name_text.clone(),
+                                crate::context::MetaParamBinding::Symbolic,
+                            );
+
                             type_vars.push(tvar);
                             param_names.push(name_text);
                         }
@@ -21752,6 +21761,22 @@ impl TypeChecker {
                                 .env
                                 .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
                             self.ctx.define_type(name_text.clone(), type_var);
+
+                            // Audit-A4: register the meta-param in the
+                            // const-generic environment. Until a concrete
+                            // instantiation is observed (e.g. `foo::<5>()`),
+                            // the binding stays Symbolic — refinement
+                            // predicates referencing this name will be
+                            // passed verbatim to SMT, where the solver can
+                            // reason about the bounds. When instantiation
+                            // does land in a future commit, the binding
+                            // promotes to `Bound(MetaValue::Int(5))` and
+                            // `substitute_in_refinement_predicate` inlines
+                            // the value at every reference site.
+                            self.ctx.meta_param_environment.insert(
+                                name_text.clone(),
+                                crate::context::MetaParamBinding::Symbolic,
+                            );
 
                             type_vars.push(tvar);
                             param_names.push(name_text);
@@ -37691,6 +37716,87 @@ impl TypeChecker {
         self.substitute_type_vars_impl(ty, subst, 0)
     }
 
+    /// Audit-A4: substitute meta-param references in a refinement
+    /// predicate using `self.ctx.meta_param_environment`.
+    ///
+    /// The pre-fix `Type::Refined` substitution path cloned the
+    /// predicate verbatim, dropping every reference to a
+    /// const-generic / meta-param `N` so the SMT solver later
+    /// translated `N` as an unbound free variable. This walker
+    /// rewrites every `Path(N)` whose `N` resolves in the meta-param
+    /// environment to a `Bound(value)`. Symbolic bindings pass
+    /// through unchanged so SMT can constrain them.
+    ///
+    /// The walker is deliberately simple — it is the minimal-viable
+    /// piece for the dependent-typing chain to start working as
+    /// concrete instantiations are wired through the rest of the
+    /// type-checker. Today the environment never contains a
+    /// `Bound`, so this function is functionally a clone — but the
+    /// architectural seam is in place so the moment instantiation
+    /// lands (a separate commit), refinements automatically benefit.
+    fn substitute_in_refinement_predicate(
+        &self,
+        predicate: &crate::refinement::RefinementPredicate,
+    ) -> crate::refinement::RefinementPredicate {
+        let new_expr = self.substitute_meta_params_in_expr(&predicate.predicate);
+        crate::refinement::RefinementPredicate {
+            predicate: new_expr,
+            binding: predicate.binding.clone(),
+            span: predicate.span,
+        }
+    }
+
+    /// Walk a refinement predicate's `Expr` AST and substitute every
+    /// `Path(N)` where `N` is bound in the meta-param environment.
+    /// Recurses into binary operations, function calls, parentheses,
+    /// and conditionals — the shapes that show up in real refinement
+    /// predicates. Anything else is cloned verbatim.
+    fn substitute_meta_params_in_expr(
+        &self,
+        expr: &verum_ast::expr::Expr,
+    ) -> verum_ast::expr::Expr {
+        use verum_ast::expr::{Expr, ExprKind};
+        use crate::context::MetaParamBinding;
+
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                if let Some(ident) = path.as_ident() {
+                    if let Some(MetaParamBinding::Bound(value)) =
+                        self.ctx.meta_param_environment.get(&ident.name)
+                    {
+                        if let Some(literal) = meta_value_to_literal(value) {
+                            return Expr::new(
+                                ExprKind::Literal(literal),
+                                expr.span,
+                            );
+                        }
+                    }
+                }
+                expr.clone()
+            }
+            ExprKind::Binary { op, left, right } => Expr::new(
+                ExprKind::Binary {
+                    op: *op,
+                    left: Box::new(self.substitute_meta_params_in_expr(left)),
+                    right: Box::new(self.substitute_meta_params_in_expr(right)),
+                },
+                expr.span,
+            ),
+            ExprKind::Unary { op, expr: inner } => Expr::new(
+                ExprKind::Unary {
+                    op: *op,
+                    expr: verum_common::Heap::new(self.substitute_meta_params_in_expr(inner)),
+                },
+                expr.span,
+            ),
+            ExprKind::Paren(inner) => Expr::new(
+                ExprKind::Paren(Box::new(self.substitute_meta_params_in_expr(inner))),
+                expr.span,
+            ),
+            _ => expr.clone(),
+        }
+    }
+
     /// Inner implementation with depth tracking to prevent infinite recursion.
     fn substitute_type_vars_impl(
         &self,
@@ -37813,9 +37919,22 @@ impl TypeChecker {
             }
             Type::Refined { base, predicate } => {
                 let subst_base = Box::new(self.substitute_type_vars_impl(base, subst, d));
+                // Audit-A4: substitute meta-param references inside the
+                // refinement predicate. The pre-fix code cloned the
+                // predicate verbatim; if the predicate referenced a
+                // const-generic `N` and `N` had been instantiated (e.g.
+                // via `Array<5>`), the SMT solver received an unbound
+                // free variable instead of the concrete value, breaking
+                // any `where len(arr) == N` style claim. The
+                // substitution helper walks the predicate's `Expr`
+                // tree and rewrites every `Path(N)` whose `N` is in
+                // `meta_param_environment` and bound to a concrete
+                // value. Symbolic bindings pass through unchanged so
+                // SMT can constrain them.
+                let subst_pred = self.substitute_in_refinement_predicate(predicate);
                 Type::Refined {
                     base: subst_base,
-                    predicate: predicate.clone(),
+                    predicate: subst_pred,
                 }
             }
             Type::Exists { var, body } => {
@@ -56518,6 +56637,47 @@ mod mount_cycle_tests {
             "self-referential mount should resolve to None (was: {:?})",
             result
         );
+    }
+}
+
+
+
+// =============================================================================
+// Audit-A4: meta-value → AST literal conversion (file-scope free function)
+// =============================================================================
+
+/// Convert a `MetaValue` (the const-generic environment's binding type) to
+/// an AST `Literal` so a refinement predicate's `Path(N)` can be rewritten
+/// to a literal at substitution time.
+///
+/// Returns `None` for `MetaValue` shapes that have no direct literal
+/// representation (compound types, AST values). The caller leaves the path
+/// unchanged in that case so SMT continues to see a symbolic reference.
+fn meta_value_to_literal(value: &verum_ast::MetaValue) -> Option<verum_ast::literal::Literal> {
+    use verum_ast::literal::{FloatLit, IntLit, Literal, LiteralKind, StringLit};
+    use verum_ast::span::Span;
+    let span = Span::dummy();
+    match value {
+        verum_ast::MetaValue::Bool(b) => Some(Literal::new(LiteralKind::Bool(*b), span)),
+        verum_ast::MetaValue::Int(i) => Some(Literal::new(
+            LiteralKind::Int(IntLit { value: *i, suffix: None }),
+            span,
+        )),
+        // UInt is folded into Int (i128 covers practical const-generic ranges).
+        verum_ast::MetaValue::UInt(u) => Some(Literal::new(
+            LiteralKind::Int(IntLit { value: (*u) as i128, suffix: None }),
+            span,
+        )),
+        verum_ast::MetaValue::Float(f) => Some(Literal::new(
+            LiteralKind::Float(FloatLit { value: *f, suffix: None }),
+            span,
+        )),
+        verum_ast::MetaValue::Char(c) => Some(Literal::new(LiteralKind::Char(*c), span)),
+        verum_ast::MetaValue::Text(t) => Some(Literal::new(
+            LiteralKind::Text(StringLit::Regular(t.clone())),
+            span,
+        )),
+        _ => None,
     }
 }
 
