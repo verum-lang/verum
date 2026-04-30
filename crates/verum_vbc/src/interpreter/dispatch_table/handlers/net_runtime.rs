@@ -184,29 +184,107 @@ pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
         }
     }
 
-    register(NetResource::Listener(listener))
+    // **Real-kernel-fd return** (#25 cascade closure).
+    //
+    // Pre-#25 v2 returned a synthetic fd via `register(...)` and the
+    // std::net wrapper lived in the registry for resource lifetime
+    // tracking.  Synthetic fds are incompatible with the user-facing
+    // `core.net.tcp.TcpListener` surface, which threads its `fd` field
+    // through libc-bound operations (`accept`/`close`/`setsockopt`/
+    // `getsockname`) — those operations are dispatched via libffi in
+    // interpreter mode and require a real kernel fd.
+    //
+    // Resolution: `into_raw_fd()` consumes the std::net wrapper and
+    // returns the underlying kernel fd.  Ownership transfers to the
+    // caller — Verum-side `core/net/tcp.vr::TcpListener::Drop` calls
+    // libc `close()` to free the fd at the right scope boundary,
+    // mirroring the AOT path's lifecycle.  No registry tracking is
+    // needed: the kernel itself is the source of truth for fd
+    // existence, and the operating system reaps any leaked fds at
+    // process exit.
+    //
+    // Companion `tcp_local_port` updated alongside to call
+    // `getsockname(2)` directly on the raw fd (no registry lookup).
+    #[cfg(unix)]
+    {
+        use std::os::fd::IntoRawFd;
+        return listener.into_raw_fd() as i64;
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows: SOCKET handles are not directly compatible with
+        // libc fd APIs.  Keep the legacy registry path here and
+        // leave Windows fd-bridging as a follow-up.  Most weft
+        // production paths target Unix.
+        register(NetResource::Listener(listener))
+    }
 }
 
-/// Returns the OS-assigned local port of a registered TCP listener (or
-/// connected stream). Used to recover the kernel-chosen port after
-/// `tcp_listen_v2(_, 0, _, _)`. Returns `-1` for unknown fd or if the
-/// underlying `getsockname(2)` fails.
+/// Returns the OS-assigned local port for a TCP listener / stream / UDP
+/// socket fd. Used to recover the kernel-chosen port after
+/// `tcp_listen_v2(_, 0, _, _)`. Returns `-1` on `getsockname(2)`
+/// failure (bad fd, unbound socket, …).
+///
+/// **Real-fd path** (Unix): post-#25, `tcp_listen_v2` returns the raw
+/// kernel fd (no registry tracking).  We call `getsockname(2)`
+/// directly on the fd — works for any bound socket regardless of
+/// whether it was created via this intrinsic family or via a
+/// libffi-bridged libc `socket()` call.  This is the source of truth
+/// for the bound port and matches the semantics the AOT
+/// `verum_tcp_local_port` LLVM helper provides
+/// (`crates/verum_codegen/src/llvm/runtime.rs`).
+///
+/// **Legacy registry fallback**: pre-#25 listeners that were
+/// `register()`-ed with a synthetic fd still hit the registry path.
+/// The registry tries first, then falls through to `getsockname` if
+/// the fd isn't tracked — single API surface, two backing mechanisms.
 pub fn tcp_local_port(fd: i64) -> i64 {
-    REGISTRY.with(|r| {
+    // Fast path: registry lookup for legacy synthetic-fd flows.
+    let from_registry = REGISTRY.with(|r| {
         let map = r.borrow();
         match map.get(&fd) {
             Some(NetResource::Listener(l)) => {
-                l.local_addr().map(|a| a.port() as i64).unwrap_or(-1)
+                Some(l.local_addr().map(|a| a.port() as i64).unwrap_or(-1))
             }
             Some(NetResource::Stream(s)) => {
-                s.local_addr().map(|a| a.port() as i64).unwrap_or(-1)
+                Some(s.local_addr().map(|a| a.port() as i64).unwrap_or(-1))
             }
             Some(NetResource::Udp(s)) => {
-                s.local_addr().map(|a| a.port() as i64).unwrap_or(-1)
+                Some(s.local_addr().map(|a| a.port() as i64).unwrap_or(-1))
             }
-            None => -1,
+            None => None,
         }
-    })
+    });
+    if let Some(p) = from_registry {
+        return p;
+    }
+
+    // Real-fd path: call `getsockname(2)` directly on the fd.
+    #[cfg(unix)]
+    unsafe {
+        // sockaddr_in6 is the larger of v4/v6 — 28 bytes covers both
+        // and the kernel writes the actual size into the in/out
+        // length.  sin_port lives at offset 2 in either layout.
+        let mut sa = [0u8; 28];
+        let mut sa_len: libc::socklen_t = 28;
+        let rc = libc::getsockname(
+            fd as libc::c_int,
+            sa.as_mut_ptr() as *mut libc::sockaddr,
+            &mut sa_len,
+        );
+        if rc < 0 {
+            return -1;
+        }
+        // sin_port at offset 2, big-endian u16.
+        let port_be = u16::from_be_bytes([sa[2], sa[3]]);
+        port_be as i64
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows: synthetic-fd flow only.  Real-fd query path falls
+        // through to -1.
+        -1
+    }
 }
 
 pub fn tcp_accept(listen_fd: i64) -> i64 {
@@ -283,13 +361,28 @@ pub fn tcp_recv(fd: i64, max_len: i64) -> Option<String> {
 }
 
 pub fn tcp_close(fd: i64) -> i64 {
-    REGISTRY.with(|r| {
+    // Legacy synthetic-fd path: drop from registry, std::net Drop runs.
+    let registry_hit = REGISTRY.with(|r| {
         let mut map = r.borrow_mut();
-        match map.remove(&fd) {
-            Some(_) => 0,
-            None => -1,
-        }
-    })
+        map.remove(&fd).is_some()
+    });
+    if registry_hit {
+        return 0;
+    }
+
+    // Real-fd path (#25): call libc `close(2)` directly.  v2 listen
+    // returns raw kernel fds (no registry tracking), so close has to
+    // mirror that path.  Returns 0 on success, -errno on failure
+    // (matches the v2 errno-preserving convention).
+    #[cfg(unix)]
+    unsafe {
+        let rc = libc::close(fd as libc::c_int);
+        if rc == 0 { 0 } else { -1 }
+    }
+    #[cfg(not(unix))]
+    {
+        -1
+    }
 }
 
 // =============================================================================
