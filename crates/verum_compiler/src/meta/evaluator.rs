@@ -1093,8 +1093,22 @@ impl MetaContext {
                     _ => return Err(MetaError::Other(Text::from("Expected iterable in for loop"))),
                 };
 
+                // Iteration cap sourced from `MetaContext.iteration_limit`
+                // (default 1_000_000, override via `[meta] using
+                // [SecurityContext]` + `set_iteration_limit`). Pre-fix
+                // the For loop had NO cap — a meta function iterating
+                // over a 10M-element collection would run unbounded.
+                let limit = self.iteration_limit as usize;
+                let mut iterations: usize = 0;
                 let mut last = ConstValue::Unit;
                 for elem in elements {
+                    iterations = iterations.saturating_add(1);
+                    if iterations > limit {
+                        return Err(MetaError::IterationLimitExceeded {
+                            count: iterations,
+                            limit,
+                        });
+                    }
                     // Bind the loop variable
                     if !self.matches_pattern(&elem, pattern)? {
                         continue;
@@ -1109,8 +1123,15 @@ impl MetaContext {
 
             MetaExpr::While { condition, body } => {
                 let mut last = ConstValue::Unit;
-                let mut iterations = 0;
-                const MAX_ITERATIONS: usize = 10_000;
+                let mut iterations: usize = 0;
+                // Iteration cap sourced from `MetaContext.iteration_limit`
+                // (default 1_000_000). Pre-fix this used a hardcoded
+                // `const MAX_ITERATIONS: usize = 10_000` that ignored
+                // the embedder-configured value — a SecurityContext
+                // raising the limit to allow legitimate long-running
+                // meta computations was silently overridden by the
+                // 10K constant.
+                let limit = self.iteration_limit as usize;
 
                 loop {
                     let cond_val = self.eval_meta_expr(condition)?;
@@ -1118,11 +1139,11 @@ impl MetaContext {
                         break;
                     }
 
-                    iterations += 1;
-                    if iterations > MAX_ITERATIONS {
+                    iterations = iterations.saturating_add(1);
+                    if iterations > limit {
                         return Err(MetaError::IterationLimitExceeded {
                             count: iterations,
-                            limit: MAX_ITERATIONS,
+                            limit,
                         });
                     }
 
@@ -4521,6 +4542,93 @@ mod hygiene_diagnostic_tests {
             initial,
             "no violations on empty input → diagnostics count unchanged"
         );
+    }
+}
+
+#[cfg(test)]
+mod iteration_limit_tests {
+    //! Pin tests for `MetaContext.iteration_limit` enforcement
+    //! across `MetaExpr::For` and `MetaExpr::While`. Pre-fix the
+    //! While loop used a hardcoded `const MAX_ITERATIONS: usize =
+    //! 10_000` and the For loop had NO cap at all — a meta function
+    //! iterating 10M elements ran unbounded. These tests pin the
+    //! load-bearing connection from `MetaContext.iteration_limit`
+    //! (default 1_000_000, override via SecurityContext) to the
+    //! actual loop counters.
+    use super::*;
+    use crate::meta::ir::{
+        expr::MetaExpr,
+        pattern::MetaPattern,
+        stmt::MetaStmt,
+    };
+    use verum_common::{Heap, List};
+
+    #[test]
+    fn for_loop_honours_lowered_iteration_limit() {
+        let mut ctx = MetaContext::new();
+        ctx.iteration_limit = 3; // Cap to 3 iterations.
+        // Build a 5-element array iterable.
+        let elements: Vec<ConstValue> = (0..5)
+            .map(|i| ConstValue::Int(i as i128))
+            .collect();
+        let iter_expr = MetaExpr::Literal(ConstValue::Array(List::from(elements)));
+        let body: List<MetaStmt> = List::new();
+        let for_expr = MetaExpr::For {
+            pattern: MetaPattern::Wildcard,
+            iter: Heap::new(iter_expr),
+            body,
+        };
+        let result = ctx.eval_meta_expr(&for_expr);
+        match result {
+            Err(MetaError::IterationLimitExceeded { count, limit }) => {
+                assert_eq!(limit, 3, "limit must mirror configured iteration_limit");
+                assert!(count > limit, "count must exceed limit at trip point");
+            }
+            other => panic!("expected IterationLimitExceeded, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn for_loop_within_limit_completes_normally() {
+        let mut ctx = MetaContext::new();
+        ctx.iteration_limit = 100;
+        let elements: Vec<ConstValue> = (0..5)
+            .map(|i| ConstValue::Int(i as i128))
+            .collect();
+        let iter_expr = MetaExpr::Literal(ConstValue::Array(List::from(elements)));
+        let body: List<MetaStmt> = List::new();
+        let for_expr = MetaExpr::For {
+            pattern: MetaPattern::Wildcard,
+            iter: Heap::new(iter_expr),
+            body,
+        };
+        let result = ctx.eval_meta_expr(&for_expr);
+        assert!(
+            result.is_ok(),
+            "5 iterations under limit 100 must succeed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn while_loop_honours_lowered_iteration_limit() {
+        let mut ctx = MetaContext::new();
+        ctx.iteration_limit = 3;
+        // `while true { }` — unbounded condition.
+        let cond = MetaExpr::Literal(ConstValue::Bool(true));
+        let body: List<MetaStmt> = List::new();
+        let while_expr = MetaExpr::While {
+            condition: Heap::new(cond),
+            body,
+        };
+        let result = ctx.eval_meta_expr(&while_expr);
+        match result {
+            Err(MetaError::IterationLimitExceeded { count, limit }) => {
+                assert_eq!(limit, 3);
+                assert!(count > limit);
+            }
+            other => panic!("expected IterationLimitExceeded, got {:?}", other),
+        }
     }
 }
 
