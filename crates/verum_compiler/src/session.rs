@@ -492,6 +492,69 @@ impl Session {
             );
         }
 
+        // Phase-not-realised tracing for inert safety knobs.
+        // The `[safety]` manifest section parses 6 fields. Four
+        // are wired (unsafe_allowed / ffi / capability_required /
+        // forbid_stdlib_extern at pipeline.rs:6391-6393 gate FFI
+        // emission). Two are inert: `ffi_boundary` (default
+        // "strict"; validate() restricts to strict|lenient but
+        // no codegen reader) and `mls_level` (default "public";
+        // validate() restricts to public|secret|top_secret but
+        // no information-flow analysis pass currently consults
+        // it). Surface non-default values so a `[safety]
+        // mls_level = "secret"` setting doesn't silently fall
+        // through.
+        let sf = &opts.language_features.safety;
+        if sf.ffi_boundary.as_str() != "strict" || sf.mls_level.as_str() != "public" {
+            tracing::warn!(
+                "manifest [safety] surface: ffi_boundary={:?}, mls_level={:?} \
+                 (these fields land on LanguageFeatures.safety and validate() restricts \
+                 them to legal values, but no codegen / information-flow pass currently \
+                 consults them — FFI boundary checks are at the unsafe_allowed/ffi gate, \
+                 MLS classification has no production analysis path yet)",
+                sf.ffi_boundary,
+                sf.mls_level,
+            );
+        }
+
+        // Phase-not-realised tracing for inert test-harness knobs.
+        // The `[test]` manifest section parses 8 fields and
+        // feature_overrides forwards them to
+        // `LanguageFeatures.test`, but no production
+        // compilation path consults them — test orchestration
+        // lives in `verum_cli::commands::test` which reads CLI
+        // flags + Cargo-style discovery, not the manifest's
+        // [test] block. Surface non-default values so a
+        // `[test] proptest_cases = 1000` setting doesn't
+        // silently fall through.
+        let tt = &opts.language_features.test;
+        if tt.differential
+            || !tt.property_testing
+            || tt.proptest_cases != 256
+            || tt.fuzzing
+            || tt.timeout_secs != 60
+            || !tt.parallel
+            || tt.coverage
+            || tt.deny_warnings
+        {
+            tracing::warn!(
+                "manifest [test] surface: differential={}, property_testing={}, \
+                 proptest_cases={}, fuzzing={}, timeout_secs={}, parallel={}, \
+                 coverage={}, deny_warnings={} (these fields land on \
+                 LanguageFeatures.test but the test harness reads CLI flags + \
+                 Cargo-style discovery, not the manifest's [test] block — \
+                 production gating is not yet wired)",
+                tt.differential,
+                tt.property_testing,
+                tt.proptest_cases,
+                tt.fuzzing,
+                tt.timeout_secs,
+                tt.parallel,
+                tt.coverage,
+                tt.deny_warnings,
+            );
+        }
+
         // Phase-not-realised tracing for inert protocol-resolution
         // knobs. The `[protocols]` manifest section parses
         // `coherence`, `resolution_strategy`, `blanket_impls`,
