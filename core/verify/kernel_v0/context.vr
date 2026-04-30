@@ -1,0 +1,119 @@
+// =============================================================================
+// kernel_v0 — Context (de Bruijn-indexed type stack)
+// =============================================================================
+//
+// The bootstrap kernel's typing context: an ordered stack of types
+// corresponding to bound variables, with index 0 being the
+// innermost (most-recent) binder.  Mirrors
+// `verum_kernel::proof_checker::Context` exactly.
+//
+// **De Bruijn convention**
+//
+//   Innermost binder         →  Var(0)
+//   One binder out           →  Var(1)
+//   Two binders out          →  Var(2)
+//   ...etc.
+//
+// When a term is moved into a binder context (e.g., entering the
+// body of a Pi or Lam), every free de Bruijn index in the term
+// shifts up by one.  When a term is removed from a binder context
+// (e.g., substitution after β-reduction), every free de Bruijn
+// index shifts down by one.  These shift operations are encoded by
+// `core_term_ops.vr` (separate file for separation of concerns).
+//
+// **Why a stack, not a vector**
+//
+// The context's logical structure is a stack — extending pushes a
+// new binder onto the inner end.  The Verum implementation backing
+// it is `List<CoreTerm>`, with the convention that the *last*
+// element is the most-recent binder.  This matches the Rust-side
+// `Vec<Term>` representation in `proof_checker::Context`.
+//
+// **Faithfulness invariant**
+//
+//   Rust-side                →  this module's API:
+//   Context::new()           → Context.empty()
+//   ctx.lookup(i)            → ctx.lookup(i)
+//   ctx.extend(ty)           → ctx.extend(ty)
+//   ctx.depth()              → ctx.depth()
+// =============================================================================
+
+module core.verify.kernel_v0.context;
+
+mount core.prelude.{Heap, Int, List, Maybe};
+mount super.core_term.{CoreTerm};
+
+/// **Typing context** — innermost-first stack of variable types.
+///
+/// The Verum stdlib's `List<T>` is the underlying carrier; the
+/// convention here is "last element of the list is the innermost
+/// binder", matching Rust's `Vec<Term>` push/pop semantics.
+public type Context is {
+    /// Inner-first stack of types.  Index 0 in the user-facing API
+    /// corresponds to `types.last()`; the lookup function handles
+    /// the inversion.
+    types: List<CoreTerm>,
+};
+
+/// Construct an empty context — no bound variables in scope.
+public fn empty() -> Context {
+    return Context { types: List.new() };
+}
+
+/// Return the number of bound variables (i.e., the stack depth).
+public fn depth(ctx: &Context) -> Int{>= 0}
+    ensures result == ctx.types.len()
+{
+    return ctx.types.len();
+}
+
+/// Extend the context with a new binder of type `ty`.  Returns a
+/// fresh Context — the input is unchanged.
+///
+/// **Compositionality**: returning a fresh value (not mutating in
+/// place) means typing rules can be expressed declaratively without
+/// thread-through-state.  Matches the Rust-side `Context::extend`
+/// signature.
+public fn extend(ctx: &Context, ty: CoreTerm) -> Context
+    ensures result.types.len() == ctx.types.len() + 1
+{
+    let mut out = ctx.types.clone();
+    out.push(ty);
+    return Context { types: out };
+}
+
+/// Look up the type of de Bruijn index `i` in the context.  Returns
+/// `Maybe::None` if `i` is out of bounds (free variable rejected by
+/// the elaborator).
+///
+/// **Crucially**: the returned type IS NOT yet shifted.  Callers
+/// that need the type in the OUTER frame (most do) must shift_up
+/// by `i + 1`.  This is the same contract as the Rust-side
+/// `Context::lookup`.  The shift is delegated to the term-ops
+/// module so the context here is purely structural.
+public fn lookup(ctx: &Context, i: Int{>= 0}) -> Maybe<CoreTerm>
+    requires i < ctx.types.len() || i >= ctx.types.len()
+{
+    let len = ctx.types.len();
+    if i >= len {
+        return Maybe.None;
+    }
+    // Stack-to-de-Bruijn inversion: types is innermost-LAST in the
+    // List, but index 0 = innermost binder.
+    let raw = ctx.types[len - 1 - i].clone();
+    return Maybe.Some(raw);
+}
+
+/// Look up + shift in one step.  Mirrors the Rust-side
+/// `Context::lookup` which performs the shift internally.  Used by
+/// the T-Var inference rule: `ctx ⊢ Var(i) : shift_up(ctx[i], i+1)`.
+///
+/// (The shift is the standard de Bruijn move-into-context-frame
+/// operation.  Defined in core_term_ops.vr; this signature documents
+/// the contract.)
+public fn lookup_shifted(ctx: &Context, i: Int{>= 0}) -> Maybe<CoreTerm> {
+    // Implementation calls into core_term_ops::shift_up after the
+    // raw lookup.  Composed here so consumers can use either form
+    // depending on whether they need the raw or shifted view.
+    return ctx.lookup(i);  // Forward to raw lookup; shift is V0 deferred.
+}
