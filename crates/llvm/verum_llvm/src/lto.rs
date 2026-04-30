@@ -73,6 +73,33 @@ impl ThinLtoCache {
 
     /// Set maximum size in bytes
     pub fn with_max_size_bytes(mut self, bytes: u64) -> Self {
+        // Phase-not-realised tracing: `ThinLtoCache.max_size_bytes`
+        // (default 0 = unlimited) is set on the cache config but
+        // LLVM's ThinLTO C API only exposes `set_cache_size_percentage`
+        // (the percentage-based cap, which IS wired at lto.rs:287).
+        // There's no equivalent C API for an absolute-byte cap;
+        // implementing one would require a separate manual eviction
+        // pass that walks the cache directory and prunes by
+        // file-size sum. The `apply_config` consumer (line 278) only
+        // routes pruning_interval / expiration / max_size_percentage
+        // into the LLVM cache setters, dropping max_size_bytes.
+        //
+        // Surface a debug trace when the user sets a non-zero byte
+        // cap so embedders writing
+        // `[lto.cache] max_size_bytes = 1073741824` see the value
+        // was observed but won't be enforced. The default 0
+        // (unlimited) stays quiet.
+        if bytes != 0 {
+            tracing::debug!(
+                "ThinLtoCache::with_max_size_bytes({}) — value is stored on the \
+                 cache config but `apply_config` doesn't route it into LLVM. \
+                 LLVM's ThinLTO C API only exposes percentage-based caps \
+                 (max_size_percentage IS wired); an absolute-byte cap requires \
+                 a separate manual eviction pass that hasn't been written. \
+                 Forward-looking knob.",
+                bytes
+            );
+        }
         self.max_size_bytes = bytes;
         self
     }
