@@ -1276,7 +1276,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // fix every `"…".into()` call on a literal Text panicked with
     // "method 'Text.into' not found on value" — broke shell-script
     // execution the moment scripts actually ran past type-check.
-    if bare_method_name == "into" && args.is_empty() {
+    if bare_method_name == "into" && args.count == 0 {
         state.set_reg(dst, receiver);
         return Ok(DispatchResult::Continue);
     }
