@@ -346,7 +346,7 @@ impl TypeTranslator {
                 self.translate_type_to_sort(inner)
             }
 
-            Type::TypeConstructor { name, arity: _, .. } => {
+            Type::TypeConstructor { name, .. } => {
                 // Type constructors as uninterpreted sorts
                 Ok(Sort::uninterpreted(Symbol::String(format!(
                     "TypeConstructor_{}",

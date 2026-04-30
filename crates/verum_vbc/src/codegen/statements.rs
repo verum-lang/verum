@@ -655,11 +655,10 @@ impl VbcCodegen {
                         }
                         _ => false,
                     };
-                    if is_container {
-                        if let verum_ast::ty::GenericArg::Type(inner) = &args[0] {
+                    if is_container
+                        && let verum_ast::ty::GenericArg::Type(inner) = &args[0] {
                             return extract_let_variant_hint(this, inner);
                         }
-                    }
                     this.extract_base_type_name(ty)
                 }
                 _ => this.extract_base_type_name(ty),

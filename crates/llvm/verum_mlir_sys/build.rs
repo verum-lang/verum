@@ -226,7 +226,7 @@ fn mlir_lib_is_skipped(name: &str) -> bool {
 }
 
 fn llvm_lib_is_skipped(stem: &str) -> bool {
-    LLVM_LIB_SKIP_EXACT.iter().any(|exact| stem == *exact)
+    LLVM_LIB_SKIP_EXACT.contains(&stem)
 }
 
 /// Link MLIR static libraries

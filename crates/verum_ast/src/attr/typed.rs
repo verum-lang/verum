@@ -6676,12 +6676,14 @@ fn parse_named_characteristic_list_arg(
 /// Atkey QTT quantity. Default at parse sites without an annotation
 /// is `Many` (existing code stays unchanged).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Quantity {
     /// `@quantity(0)` — erased (compile-time only).
     Zero,
     /// `@quantity(1)` — linear (use exactly once).
     One,
     /// `@quantity(omega)` — unrestricted (the default).
+    #[default]
     Many,
 }
 
@@ -6728,9 +6730,6 @@ impl Quantity {
     }
 }
 
-impl Default for Quantity {
-    fn default() -> Self { Self::Many }
-}
 
 /// `@quantity(0 | 1 | omega)` — Atkey QTT quantity annotation on a
 /// binder (function parameter, let-binding, type-level binding, etc.).

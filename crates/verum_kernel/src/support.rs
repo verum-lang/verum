@@ -557,11 +557,10 @@ fn normalize_with_budget(term: &CoreTerm, budget: &mut u32) -> CoreTerm {
             // cubical::transp-const — transport along a constant
             // lambda is the identity.  We detect `λ _ → A` shape
             // (binder unused in body).
-            if let CoreTerm::Lam { binder, body, .. } = &path_n {
-                if !body_uses_binder(body, binder.as_str()) {
+            if let CoreTerm::Lam { binder, body, .. } = &path_n
+                && !body_uses_binder(body, binder.as_str()) {
                     return value_n;
                 }
-            }
             CoreTerm::Transp {
                 path: Heap::new(path_n),
                 regular: Heap::new(regular_n),
@@ -1802,15 +1801,12 @@ pub fn make_conjunction(p1: &CoreTerm, p2: &CoreTerm) -> CoreTerm {
 /// re-fold against any further predicate without first recognising
 /// the existing conjunction shape).
 pub fn is_conjunction(t: &CoreTerm) -> Option<(&CoreTerm, &CoreTerm)> {
-    if let CoreTerm::App(outer, p2) = t {
-        if let CoreTerm::App(conn, p1) = outer.as_ref() {
-            if let CoreTerm::Var(name) = conn.as_ref() {
-                if name.as_str() == CONJUNCTION_NAME {
+    if let CoreTerm::App(outer, p2) = t
+        && let CoreTerm::App(conn, p1) = outer.as_ref()
+            && let CoreTerm::Var(name) = conn.as_ref()
+                && name.as_str() == CONJUNCTION_NAME {
                     return Some((p1.as_ref(), p2.as_ref()));
                 }
-            }
-        }
-    }
     None
 }
 

@@ -179,11 +179,10 @@ pub fn build_infinity_topos(
     if !giraud.all_satisfied() {
         return None;
     }
-    if let Some(rs) = &reflective_inclusion {
-        if !rs.is_coherent() {
+    if let Some(rs) = &reflective_inclusion
+        && !rs.is_coherent() {
             return None;
         }
-    }
     Some(InfinityTopos {
         name: name.into(),
         underlying_category: underlying.clone(),

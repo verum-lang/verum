@@ -861,10 +861,9 @@ impl AstSink {
                 return None;
             }
             _ => {
-                if let Some(expr) = self.convert_expr(node) {
+                {
+                    let expr = self.convert_expr(node)?;
                     StmtKind::Expr { expr, has_semi: false }
-                } else {
-                    return None;
                 }
             }
         };
@@ -1004,10 +1003,9 @@ impl AstSink {
                 return None;
             }
             _ => {
-                if let Some(path) = self.convert_path(node) {
+                {
+                    let path = self.convert_path(node)?;
                     TypeKind::Path(path)
-                } else {
-                    return None;
                 }
             }
         };

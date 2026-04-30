@@ -32,7 +32,7 @@ fn emit(key: &str, value: String) {
 }
 
 fn sanitize(s: &str) -> String {
-    s.replace('\n', " ").replace('\r', " ")
+    s.replace(['\n', '\r'], " ")
 }
 
 fn git_sha() -> String {

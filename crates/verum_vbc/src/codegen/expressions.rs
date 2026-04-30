@@ -4562,8 +4562,8 @@ impl VbcCodegen {
         // a quotient registered in `newtype_names`; a non-quotient type
         // that happens to define its own `rep` method falls through to
         // the regular dispatch path below.
-        if method.name == "rep" && args.is_empty() {
-            if let Some(receiver_type_name) = self.infer_expr_type_name(receiver)
+        if method.name == "rep" && args.is_empty()
+            && let Some(receiver_type_name) = self.infer_expr_type_name(receiver)
                 && self.ctx.newtype_names.contains(&receiver_type_name)
             {
                 let base_reg = self
@@ -4578,7 +4578,6 @@ impl VbcCodegen {
                 }
                 return Ok(Some(dst));
             }
-        }
 
         // Intercept Heap.new(value) / Shared.new(value) — emit CBGR-tracked allocation
         // via CallM so the interpreter's `dispatch_primitive_method` runs the
@@ -4847,15 +4846,14 @@ impl VbcCodegen {
             // `super`/`cog`/`.` and let the simple-name fallback fire
             // on a name that resolves to the wrong module.
             let is_qualified_module_path = self.path_was_rooted_module_path(receiver);
-            if !is_qualified_module_path {
-                if let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
+            if !is_qualified_module_path
+                && let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
                     && func_info.param_count == args.len() {
                         if let Some(tag) = func_info.variant_tag {
                             return self.compile_variant_constructor_with_tag(tag, args);
                         }
                         return self.compile_static_method_call(&func_info, args);
                     }
-            }
 
             // If this is a module/type namespace (not a local variable),
             // emit a stub call rather than trying to compile the receiver as a value.
@@ -7612,7 +7610,7 @@ impl VbcCodegen {
                     let scrutinee_is_int = self.ctx
                         .match_scrutinee_type
                         .as_deref()
-                        .map_or(false, |t| {
+                        .is_some_and(|t| {
                             let base = t.split('<').next().unwrap_or(t);
                             matches!(base, "Int" | "Int64" | "Int32" | "Int16" | "Int8"
                                 | "UInt" | "UInt64" | "UInt32" | "UInt16" | "UInt8"
@@ -10843,7 +10841,7 @@ impl VbcCodegen {
                 // compile-time constants (handled by intrinsic_name path).
                 if info.variant_tag.is_none()
                     && info.intrinsic_name.as_ref()
-                        .map_or(true, |n| !n.starts_with("__const_"))
+                        .is_none_or(|n| !n.starts_with("__const_"))
                 {
                     let dest = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::NewClosure {
@@ -12576,11 +12574,10 @@ impl VbcCodegen {
                     //     type is what carries the methods (`Result`
                     //     declares `unwrap`, not the `Err` constructor).
                     if let Some(info) = self.ctx.lookup_function(&func_name) {
-                        if info.variant_tag.is_some() {
-                            if let Some(parent) = &info.parent_type_name {
+                        if info.variant_tag.is_some()
+                            && let Some(parent) = &info.parent_type_name {
                                 return Some(parent.clone());
                             }
-                        }
                         if let Some(rt) = &info.return_type_name {
                             return Some(rt.clone());
                         }

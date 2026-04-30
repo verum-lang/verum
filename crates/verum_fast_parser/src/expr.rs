@@ -2991,7 +2991,7 @@ impl<'a> RecursiveParser<'a> {
                 if self.stream.peek_nth_kind(1) == Some(&TokenKind::Lt) =>
             {
                 let span = self.stream.current_span();
-                return Err(ParseError::invalid_syntax(
+                Err(ParseError::invalid_syntax(
                     "Rust-style turbofish `::<T>` is not valid Verum",
                     span,
                 )
@@ -3000,7 +3000,7 @@ impl<'a> RecursiveParser<'a> {
                      \n    foo<T>(args)         instead of   foo::<T>(args)\n\
                      \n    obj.method<T>(args)  instead of   obj.method::<T>(args)\n\
                      \n(`::` is not a token in `grammar/verum.ebnf`.)",
-                ));
+                ))
             }
 
             // Function call: (args)

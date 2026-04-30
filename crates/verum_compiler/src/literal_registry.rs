@@ -805,6 +805,21 @@ fn read_balanced_brace(bytes: &[u8]) -> (String, usize) {
     (out, i)
 }
 
+impl Default for LiteralRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clone for LiteralRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            handlers: Arc::clone(&self.handlers),
+            formats: Arc::clone(&self.formats),
+        }
+    }
+}
+
 #[cfg(test)]
 mod brace_tests {
     use super::read_balanced_brace;
@@ -845,20 +860,5 @@ mod brace_tests {
     fn triple_quoted_block() {
         let (e, _) = read_balanced_brace(b"\"\"\"}}\"\"\"}");
         assert_eq!(e, "\"\"\"}}\"\"\"");
-    }
-}
-
-impl Default for LiteralRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Clone for LiteralRegistry {
-    fn clone(&self) -> Self {
-        Self {
-            handlers: Arc::clone(&self.handlers),
-            formats: Arc::clone(&self.formats),
-        }
     }
 }

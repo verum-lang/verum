@@ -26795,9 +26795,9 @@ impl TypeChecker {
             }
 
             // Upcast from unsafe/checked to managed (safe)
-            (UnsafeReference { inner: _, .. }, CheckedReference { .. })
-            | (UnsafeReference { inner: _, .. }, Reference { .. })
-            | (CheckedReference { inner: _, .. }, Reference { .. }) => {
+            (UnsafeReference { .. }, CheckedReference { .. })
+            | (UnsafeReference { .. }, Reference { .. })
+            | (CheckedReference { .. }, Reference { .. }) => {
                 // These are always safe - adding checks
                 Ok(())
             }
@@ -28530,9 +28530,8 @@ impl TypeChecker {
                         // works because the global stdlib pre-pass populated
                         // the methods first.
                         let synthetic_module = verum_ast::Module::new(
-                            module.items.as_ref()
-                                .map(|items| items.clone())
-                                .unwrap_or_else(List::new),
+                            module.items.clone()
+                                .unwrap_or_default(),
                             verum_common::span::FileId::dummy(),
                             module.span,
                         );
@@ -40493,7 +40492,7 @@ impl TypeChecker {
                             .lookup(n)
                             .map(|s| self.unifier.apply(&s.ty))
                             .or_else(|| match self.ctx.lookup_type(n) {
-                                Maybe::Some(t) => Some(self.unifier.apply(&t)),
+                                Maybe::Some(t) => Some(self.unifier.apply(t)),
                                 _ => None,
                             });
                         matches!(resolved, Some(Type::Var(_)) | Some(Type::TypeConstructor { .. }))
@@ -51718,7 +51717,7 @@ impl TypeChecker {
                                     if let Option::Some(Type::Var(v)) =
                                         self.ctx.lookup_type(name.as_str())
                                     {
-                                        if for_type_free.contains(&v) {
+                                        if for_type_free.contains(v) {
                                             impl_vars_in_for_type.push(*v);
                                         } else {
                                             impl_vars_outside.push(*v);
@@ -51995,7 +51994,7 @@ impl TypeChecker {
                                     if let Option::Some(Type::Var(v)) =
                                         self.ctx.lookup_type(name.as_str())
                                     {
-                                        if for_type_free.contains(&v) {
+                                        if for_type_free.contains(v) {
                                             impl_vars_in_for_type.push(*v);
                                         } else {
                                             impl_vars_outside.push(*v);
@@ -52116,7 +52115,7 @@ impl TypeChecker {
                                     if let Option::Some(Type::Var(v)) =
                                         self.ctx.lookup_type(name.as_str())
                                     {
-                                        if for_type_free.contains(&v) {
+                                        if for_type_free.contains(v) {
                                             impl_vars_in_for_type.push(*v);
                                         } else {
                                             impl_vars_outside.push(*v);
@@ -56036,7 +56035,8 @@ fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: usize) -> O
         Type::Bool => "bool",
         Type::Char => "char",
         Type::Named { path, .. } => {
-            if let Some(id) = path.as_ident() {
+            {
+                let id = path.as_ident()?;
                 let tn = id.name.as_str();
                 match tn {
                     _ if verum_common::well_known_types::type_names::is_integer_type(tn) && tn != "Byte" => "int",
@@ -56046,8 +56046,6 @@ fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: usize) -> O
                     "Bool" => "bool",
                     _ => return None,
                 }
-            } else {
-                return None;
             }
         }
         _ => return None,

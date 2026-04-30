@@ -2296,8 +2296,8 @@ impl VbcCodegen {
         //
         // Walk the inner decl's attributes when present.
         match &item.kind {
-            ItemKind::Type(type_decl) => {
-                if !type_decl.attributes.is_empty() {
+            ItemKind::Type(type_decl)
+                if !type_decl.attributes.is_empty() => {
                     let (include, failures) = self
                         .cfg_evaluator
                         .should_include_with_failures(&type_decl.attributes);
@@ -2306,9 +2306,8 @@ impl VbcCodegen {
                         return false;
                     }
                 }
-            }
-            ItemKind::Function(func) => {
-                if !func.attributes.is_empty() {
+            ItemKind::Function(func)
+                if !func.attributes.is_empty() => {
                     let (include, failures) = self
                         .cfg_evaluator
                         .should_include_with_failures(&func.attributes);
@@ -2317,7 +2316,6 @@ impl VbcCodegen {
                         return false;
                     }
                 }
-            }
             // ImplDecl carries its attributes in `Item.attributes`, not
             // an inner field — already covered by the outer check above.
             _ => {}
@@ -2602,12 +2600,11 @@ impl VbcCodegen {
         }
         let mut result = Ok(());
         for item in module.items.iter() {
-            if self.should_compile_item(item) {
-                if let Err(e) = self.compile_item(item) {
+            if self.should_compile_item(item)
+                && let Err(e) = self.compile_item(item) {
                     result = Err(e);
                     break;
                 }
-            }
         }
         self.ctx.current_source_module = prev;
         result
@@ -2633,11 +2630,10 @@ impl VbcCodegen {
                 // that fail.  In strict_codegen mode, the helper returns the
                 // first `BugClass` error encountered so we can halt the build
                 // at the call site instead of papering over a real defect.
-                if let Err(e) = self.compile_item_lenient(item) {
-                    if first_strict_err.is_none() {
+                if let Err(e) = self.compile_item_lenient(item)
+                    && first_strict_err.is_none() {
                         first_strict_err = Some(e);
                     }
-                }
             }
         }
         self.ctx.current_source_module = prev;
@@ -2938,15 +2934,14 @@ impl VbcCodegen {
         // letting it reach the interpreter / serializer where the
         // failure mode is far harder to localise. Default-off keeps
         // the codegen hot path unchanged for production builds.
-        if self.config.validate {
-            if let Err(e) = validate::validate_module(&module) {
+        if self.config.validate
+            && let Err(e) = validate::validate_module(&module) {
                 return Err(CodegenError::internal(format!(
                     "VBC structural validation failed for module `{}`: {}",
                     module.name,
                     e,
                 )));
             }
-        }
 
         Ok(module)
     }
@@ -3023,8 +3018,7 @@ impl VbcCodegen {
                     tag,
                     field_count,
                 } = ins
-                {
-                    if !valid.contains(&(*tag, *field_count)) {
+                    && !valid.contains(&(*tag, *field_count)) {
                         let fname = self
                             .ctx
                             .strings
@@ -3045,7 +3039,6 @@ impl VbcCodegen {
                         );
                         reported += 1;
                     }
-                }
             }
         }
         reported
@@ -3178,8 +3171,8 @@ impl VbcCodegen {
         let mut orphans = Vec::new();
         for f in &self.functions {
             for ins in &f.instructions {
-                if let Instruction::MakeVariant { dst: _, tag, field_count } = ins {
-                    if !valid.contains(&(*tag, *field_count)) {
+                if let Instruction::MakeVariant { dst: _, tag, field_count } = ins
+                    && !valid.contains(&(*tag, *field_count)) {
                         let fname = self
                             .ctx
                             .strings
@@ -3194,7 +3187,6 @@ impl VbcCodegen {
                             field_count: *field_count,
                         });
                     }
-                }
             }
         }
         orphans
@@ -7952,7 +7944,7 @@ impl VbcCodegen {
         // refinement Assert before the Ret instruction. These are
         // cleared right after `ensure_return` below so they never
         // leak across functions.
-        self.current_return_ast_type = func.return_type.as_ref().map(|t| t.clone());
+        self.current_return_ast_type = func.return_type.clone();
         self.current_fn_lookup_name = Some(lookup_name.clone());
 
         // Set `self` type name for method calls within impl methods.

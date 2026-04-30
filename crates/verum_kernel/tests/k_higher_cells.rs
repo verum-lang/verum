@@ -18,7 +18,7 @@
 //!     nesting beyond two levels.
 //!   • Default dim — `PathCtorSig::one_cell` constructs dim=1.
 
-use verum_common::{Heap, List, Text};
+use verum_common::{List, Text};
 use verum_kernel::{
     ConstructorSig, CoreTerm, PathCtorSig, RegisteredInductive,
     eliminator_type,

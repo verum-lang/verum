@@ -2949,7 +2949,7 @@ mod cache_tests {
             let a = Int::new_const("a");
             let b = Int::new_const("b");
             let sum = Int::add(&[&a, &b]);
-            let formula = sum.gt(&Int::from_i64(0));
+            let formula = sum.gt(Int::from_i64(0));
 
             let uncached = auto_select_tactic(&mut analyzer, &formula);
             let cached = auto_select_tactic_cached(&cache, &mut analyzer, &formula);
@@ -3001,7 +3001,7 @@ mod cache_tests {
             let f = Bool::new_const("z");
             let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f);
             let _ = auto_select_tactic_cached(&cache, &mut analyzer, &f);
-            assert!(cache.len() > 0);
+            assert!(!cache.is_empty());
             cache.clear();
             assert_eq!(cache.len(), 0);
             let stats = cache.stats();

@@ -2310,7 +2310,7 @@ impl LoweringContext {
                 };
 
                 if let PatternKind::Ident {
-                    name, mutable: _, ..
+                    name, ..
                 } = &pattern.kind
                 {
                     let local = self.new_local(name.name.clone(), local_ty, LocalKind::Var);
@@ -7130,7 +7130,7 @@ impl LoweringContext {
                 };
 
                 if let PatternKind::Ident {
-                    name, mutable: _, ..
+                    name, ..
                 } = &pattern.kind
                 {
                     let local = self.new_local(name.name.clone(), local_ty, LocalKind::Var);
@@ -7340,7 +7340,7 @@ impl LoweringContext {
             }
 
             PatternKind::Ident {
-                name, mutable: _, ..
+                name, ..
             } => {
                 // Bind name to source
                 let local = self.new_local(name.name.clone(), MirType::Infer, LocalKind::Var);

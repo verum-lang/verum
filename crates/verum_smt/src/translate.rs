@@ -385,7 +385,7 @@ impl<'ctx> Translator<'ctx> {
         let mut out = Vec::with_capacity(consts.len() + pending.len());
         for name in consts.iter() {
             let k = Int::new_const(name.as_str());
-            out.push(k.ge(&Int::from_i64(0)));
+            out.push(k.ge(Int::from_i64(0)));
         }
         consts.clear();
         out.append(&mut pending);

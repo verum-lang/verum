@@ -156,9 +156,7 @@ fn emit_manifest_lists_all_files() {
     let _ = dedukti::lower_term(&identity_lam());
     let _ = metamath::lower_term(&identity_lam());
 
-    let manifest = format!(
-        "lean/Identity.lean\ncoq/Identity.v\nagda/Identity.agda\ndedukti/Identity.dk\nmetamath/identity.mm\n"
-    );
+    let manifest = "lean/Identity.lean\ncoq/Identity.v\nagda/Identity.agda\ndedukti/Identity.dk\nmetamath/identity.mm\n".to_string();
     let path = out_dir().join("MANIFEST");
     fs::create_dir_all(out_dir()).unwrap();
     fs::write(&path, manifest).expect("write MANIFEST");

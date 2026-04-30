@@ -333,22 +333,16 @@ fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
         // visibility variants we don't care to model, so be lenient.
         let module_kw = if let Some(rest) = trimmed.strip_prefix("public module ") {
             Some(rest)
-        } else if let Some(rest) = trimmed.strip_prefix("module ") {
-            // pub-less module declarations also count for cfg gating.
-            Some(rest)
-        } else {
-            None
-        };
+        } else { trimmed.strip_prefix("module ").map(|rest| rest) };
         if let Some(rest) = module_kw {
             let name: String = rest
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
                 .collect();
-            if !name.is_empty() {
-                if let Some(cfg) = pending_cfg.take() {
+            if !name.is_empty()
+                && let Some(cfg) = pending_cfg.take() {
                     out.insert(name, cfg);
                 }
-            }
             continue;
         }
         // Non-attribute non-module line: drop pending cfg so it

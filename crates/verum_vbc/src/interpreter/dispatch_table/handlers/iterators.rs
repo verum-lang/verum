@@ -244,23 +244,21 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
         // Run generator until yield or completion
         let result = dispatch_loop_table_with_entry_depth(state, entry_depth);
 
-        match result {
-            Ok(value) => {
-                if state.generators.get(gen_id)
-                    .map(|g| g.status == GeneratorStatus::Yielded)
-                    .unwrap_or(false)
-                {
-                    let yielded = state.generators.get(gen_id)
-                        .and_then(|g| g.yielded_value)
-                        .unwrap_or(value);
-                    state.set_reg(dst, yielded);
-                    state.set_reg(has_next_dst, Value::from_bool(true));
-                } else {
-                    state.set_reg(dst, Value::unit());
-                    state.set_reg(has_next_dst, Value::from_bool(false));
-                }
+        {
+            let value = result?;
+            if state.generators.get(gen_id)
+                .map(|g| g.status == GeneratorStatus::Yielded)
+                .unwrap_or(false)
+            {
+                let yielded = state.generators.get(gen_id)
+                    .and_then(|g| g.yielded_value)
+                    .unwrap_or(value);
+                state.set_reg(dst, yielded);
+                state.set_reg(has_next_dst, Value::from_bool(true));
+            } else {
+                state.set_reg(dst, Value::unit());
+                state.set_reg(has_next_dst, Value::from_bool(false));
             }
-            Err(e) => return Err(e),
         }
 
         return Ok(DispatchResult::Continue);

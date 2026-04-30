@@ -2738,7 +2738,7 @@ impl ProofSearchEngine {
         //   Sat    → counterexample exists → goal is not valid.
         //   Unknown→ solver could not decide in its resource budget.
         let solver = context.solver();
-        solver.assert(&z3_bool.not());
+        solver.assert(z3_bool.not());
 
         match solver.check() {
             z3::SatResult::Unsat => {
@@ -3820,7 +3820,7 @@ impl ProofSearchEngine {
             let recursive_args: List<usize> = recursion
                 .and_then(|info| info.get(idx))
                 .map(|args| args.iter().copied().collect())
-                .unwrap_or_else(List::new);
+                .unwrap_or_default();
             constructors.push(SimpleConstructor {
                 name: ctor_name.clone(),
                 recursive_args,
@@ -4914,7 +4914,7 @@ impl ProofSearchEngine {
         // wrong: Sat on `F` only means *some* assignment satisfies
         // it, not that every assignment does. That is a satisfiability
         // oracle, not a validity oracle.
-        solver.assert(&z3_bool.not());
+        solver.assert(z3_bool.not());
 
         match solver.check() {
             z3::SatResult::Unsat => {
@@ -6662,12 +6662,7 @@ impl ProofSearchEngine {
             return None;
         };
         let ctor_name = ident.as_str();
-        for ctors in self.variant_map.values() {
-            if ctors.iter().any(|c| c.as_str() == ctor_name) {
-                return Some(ctors);
-            }
-        }
-        None
+        self.variant_map.values().find(|&ctors| ctors.iter().any(|c| c.as_str() == ctor_name)).map(|v| v as _)
     }
 
     /// Try exact proof term

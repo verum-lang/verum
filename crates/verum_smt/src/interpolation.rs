@@ -298,7 +298,7 @@ impl InterpolationEngine {
     /// `Solver::set_params` replaces the entire param set, so two
     /// separate calls would lose whichever came first.
     fn apply_timeout_only(&self, solver: &Solver) {
-        if let Maybe::Some(_) = self.config.timeout_ms {
+        if self.config.timeout_ms.is_some() {
             let mut params = z3::Params::new();
             self.apply_timeout_into(&mut params);
             solver.set_params(&params);

@@ -568,7 +568,7 @@ impl Heap {
         if ptr.is_null() {
             return false;
         }
-        self.objects.iter().any(|nn| nn.as_ptr() as *const ObjectHeader == ptr)
+        self.objects.iter().any(|nn| std::ptr::eq(nn.as_ptr(), ptr))
     }
 
     /// Validates a CBGR reference against an object.

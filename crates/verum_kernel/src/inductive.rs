@@ -284,12 +284,7 @@ impl InductiveRegistry {
 
     /// Look up an inductive by name.
     pub fn get(&self, name: &str) -> Maybe<&RegisteredInductive> {
-        for e in self.entries.iter() {
-            if e.name.as_str() == name {
-                return Maybe::Some(e);
-            }
-        }
-        Maybe::None
+        self.entries.iter().find(|&e| e.name.as_str() == name).map(|v| v as _)
     }
 
     /// Enumerate every registered inductive.

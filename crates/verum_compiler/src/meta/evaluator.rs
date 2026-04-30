@@ -1058,7 +1058,7 @@ impl MetaContext {
                 self.eval_index_access(val, idx)
             }
 
-            MetaExpr::Closure { params, body: _, .. } => {
+            MetaExpr::Closure { params, .. } => {
                 // Closures become ConstValue::Closure which can be called later
                 // For now, we represent closures as quoted expressions
                 // A full implementation would store the closure environment

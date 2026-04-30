@@ -355,11 +355,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             // dealloc with mismatched layout is undefined behaviour
             // in std::alloc; the leak is strictly the safer
             // failure mode.
-            if let Some(size) = state.gpu_context.allocated_buffers.remove(&ptr_addr) {
-                if let Ok(layout) = std::alloc::Layout::from_size_align(size, 8) {
+            if let Some(size) = state.gpu_context.allocated_buffers.remove(&ptr_addr)
+                && let Ok(layout) = std::alloc::Layout::from_size_align(size, 8) {
                     unsafe { std::alloc::dealloc(ptr, layout); }
                 }
-            }
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }

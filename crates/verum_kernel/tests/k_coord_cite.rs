@@ -176,7 +176,7 @@ fn register_with_coord_attaches_coord_to_entry() {
 
 #[test]
 fn register_with_coord_rejects_uip_shape() {
-    use verum_common::{Heap, List};
+    use verum_common::Heap;
     use verum_kernel::CoreTerm;
     use verum_kernel::UniverseLevel;
     let mut reg = AxiomRegistry::new();

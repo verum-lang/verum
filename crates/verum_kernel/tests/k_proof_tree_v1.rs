@@ -136,7 +136,7 @@ fn lam_node_has_two_premises() {
     // reconstruction returns None and is skipped. Premises
     // contains only the domain premise.
     assert!(
-        node.premises.len() >= 1,
+        !node.premises.is_empty(),
         "at least the domain premise: {}",
         node.premises.len()
     );

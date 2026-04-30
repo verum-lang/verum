@@ -814,7 +814,7 @@ impl SmtBackendSwitcher {
             let mut s = String::with_capacity(64 * assertions.len());
             for expr in assertions.iter() {
                 use std::fmt::Write;
-                let _ = write!(&mut s, "{:?}\n", expr);
+                let _ = writeln!(&mut s, "{:?}", expr);
             }
             s
         };

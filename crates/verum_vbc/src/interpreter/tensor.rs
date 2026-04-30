@@ -5304,10 +5304,9 @@ pub fn tensor_split(src: &TensorHandle, num_or_sizes: &[usize], axis: usize) -> 
         let mut ranges: Vec<(usize, usize)> = shape.iter().map(|&s| (0, s)).collect();
         ranges[axis] = (offset, offset + chunk_size);
 
-        if let Some(chunk) = tensor_slice(src, &ranges) {
+        {
+            let chunk = tensor_slice(src, &ranges)?;
             results.push(chunk);
-        } else {
-            return None;
         }
 
         offset += chunk_size;

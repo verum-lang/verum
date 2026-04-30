@@ -45,10 +45,10 @@ fn z3_returns_unknown_on_pathological_timeout() {
         let d = Int::new_const("d");
 
         let big = Int::from_i64(1_000_000_000);
-        solver.assert(&a.gt(&big));
-        solver.assert(&b.gt(&big));
-        solver.assert(&c.gt(&big));
-        solver.assert(&d.gt(&big));
+        solver.assert(a.gt(&big));
+        solver.assert(b.gt(&big));
+        solver.assert(c.gt(&big));
+        solver.assert(d.gt(&big));
 
         let a3 = &(&a * &a) * &a;
         let b2 = &b * &b;
@@ -57,7 +57,7 @@ fn z3_returns_unknown_on_pathological_timeout() {
         let one = Int::from_i64(1);
         let lhs = &a3 * &b2;
         let rhs = &(&c3 * &d2) + &one;
-        solver.assert(&lhs.eq(&rhs));
+        solver.assert(lhs.eq(&rhs));
 
         let r = solver.check();
         let reason = solver.get_reason_unknown();
@@ -107,8 +107,8 @@ fn z3_decides_routine_formula_when_given_time() {
         // Trivially Unsat: x > 0 ∧ x < 0
         let x = Int::new_const("x");
         let zero = Int::from_i64(0);
-        solver.assert(&x.gt(&zero));
-        solver.assert(&x.lt(&zero));
+        solver.assert(x.gt(&zero));
+        solver.assert(x.lt(&zero));
 
         solver.check()
     });
