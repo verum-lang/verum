@@ -2719,6 +2719,194 @@ fn audit_cross_format_roundtrip_inner(
 }
 
 // =============================================================================
+// audit --soundness-iou — task #152 / Phase-1 trust-base reduction
+// =============================================================================
+
+/// Run the kernel-soundness IOU dashboard.
+///
+/// Enumerates every kernel rule whose soundness lemma in
+/// `core/verify/kernel_soundness/` carries an `Admitted { reason }`
+/// status; groups by [`verum_kernel::soundness::RuleCategory`]; emits
+/// structured JSON + plain summary so reviewers + CI can track the
+/// IOU set over time.
+///
+/// **Architectural significance.**  This is the metric-driven
+/// foundation for the path to "constructively verified from first
+/// principles" (Phase 1 of the trust-base reduction roadmap).  The
+/// 38 kernel rules currently split as 4 proved + 34 admitted; each
+/// admit closed shrinks Verum's trusted base by one rule.  Without a
+/// dashboard surfacing the admit set, discharge effort has no
+/// measurable target.
+///
+/// **Discharge prioritisation.**  The output groups admits by
+/// category and lists each with its concrete IOU reason (e.g.,
+/// "substitution-lemma", "β-confluence", "CCHM Kan-filling", "modal-
+/// depth ordinal arithmetic", "κ-tower well-foundedness", "Schreiber
+/// DCCT cohesive triple-adjunction").  Domain experts pick the
+/// category matching their expertise and tackle the admits in batch.
+///
+/// **Exit semantics.**  Always exits 0 — this is an observability
+/// gate.  CI tracks the admit count over time via the JSON output;
+/// the proof-honesty CI gate's analogue ratchets the admit floor
+/// downward as Verum matures.
+pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
+    use std::collections::BTreeMap;
+    use verum_kernel::soundness::{LemmaStatus, RuleCategory, SoundnessExporter};
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Kernel-soundness IOU dashboard");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let exporter = SoundnessExporter::new();
+
+    // Group admits by RuleCategory.  Within each category sort by
+    // rule_name for stable ordering.
+    let mut by_category: BTreeMap<&'static str, Vec<&verum_kernel::soundness::RuleSpec>> =
+        BTreeMap::new();
+    let mut total_proved = 0usize;
+    let mut total_admitted = 0usize;
+    for rule in exporter.rules() {
+        match &rule.status {
+            LemmaStatus::Proved { .. } => total_proved += 1,
+            LemmaStatus::Admitted { .. } => {
+                total_admitted += 1;
+                by_category.entry(rule.category.tag()).or_default().push(rule);
+            }
+        }
+    }
+    for rules in by_category.values_mut() {
+        rules.sort_by_key(|r| r.rule_name.clone());
+    }
+
+    // Emit JSON to disk for CI tracking + bundle composition.
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let json_path = report_dir.join("soundness-iou.json");
+
+    let mut category_payloads: serde_json::Map<String, serde_json::Value> =
+        serde_json::Map::new();
+    for category_tag in [
+        RuleCategory::Structural.tag(),
+        RuleCategory::Cubical.tag(),
+        RuleCategory::Refinement.tag(),
+        RuleCategory::Quotient.tag(),
+        RuleCategory::Inductive.tag(),
+        RuleCategory::SmtAxiom.tag(),
+        RuleCategory::Diakrisis.tag(),
+    ] {
+        let rules = by_category.get(category_tag).cloned().unwrap_or_default();
+        let entries: Vec<serde_json::Value> = rules
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "rule_name": r.rule_name,
+                    "lemma_name": r.lemma_name,
+                    "iou_reason": r.status.admit_reason().unwrap_or(""),
+                    "premise_arity": r.premise_arity,
+                    "has_side_condition": r.has_side_condition,
+                })
+            })
+            .collect();
+        category_payloads.insert(
+            category_tag.to_string(),
+            serde_json::json!({
+                "admit_count": entries.len(),
+                "admits": entries,
+            }),
+        );
+    }
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-soundness-iou",
+        "total_rules": exporter.rules().len(),
+        "total_proved": total_proved,
+        "total_admitted": total_admitted,
+        "categories": category_payloads,
+    });
+    let _ = std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&payload).unwrap(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            print_soundness_iou_plain(
+                exporter.rules().len(),
+                total_proved,
+                total_admitted,
+                &by_category,
+                &json_path,
+            );
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+    }
+
+    Ok(())
+}
+
+fn print_soundness_iou_plain(
+    total_rules: usize,
+    total_proved: usize,
+    total_admitted: usize,
+    by_category: &std::collections::BTreeMap<
+        &'static str,
+        Vec<&verum_kernel::soundness::RuleSpec>,
+    >,
+    json_path: &std::path::Path,
+) {
+    use verum_kernel::soundness::RuleCategory;
+    println!();
+    println!("Kernel-soundness IOU dashboard");
+    println!("────────────────────────────────────────");
+    println!(
+        "  {} kernel rules total — {} structurally proved, {} admitted with IOU.",
+        total_rules, total_proved, total_admitted,
+    );
+    println!();
+    if total_admitted == 0 {
+        println!("  ✓ Every kernel rule is structurally proved — trusted base reduced to ZFC + 2-inacc + Verum kernel rules.");
+        return;
+    }
+
+    // Stable category ordering (matches the JSON output).
+    let category_order = [
+        RuleCategory::Structural.tag(),
+        RuleCategory::Cubical.tag(),
+        RuleCategory::Refinement.tag(),
+        RuleCategory::Quotient.tag(),
+        RuleCategory::Inductive.tag(),
+        RuleCategory::SmtAxiom.tag(),
+        RuleCategory::Diakrisis.tag(),
+    ];
+    for category_tag in category_order {
+        if let Some(rules) = by_category.get(category_tag) {
+            if rules.is_empty() {
+                continue;
+            }
+            println!("  {} ({} admit{})",
+                category_tag,
+                rules.len(),
+                if rules.len() == 1 { "" } else { "s" },
+            );
+            for rule in rules {
+                let reason = rule.status.admit_reason().unwrap_or("");
+                println!("    • {:<28} — {}", rule.rule_name, reason);
+            }
+            println!();
+        }
+    }
+    println!("  Report: {}", json_path.display());
+    println!();
+    println!("  Each admit's IOU is a concrete piece of meta-theory awaiting discharge.");
+    println!("  As discharges land, the admit count drops; the trusted base shrinks; Verum");
+    println!("  approaches \"constructively verified from first principles\" (Phase 1 goal).");
+}
+
+// =============================================================================
 // audit --apply-graph — task #150 / MSFS-L4.13
 // =============================================================================
 
@@ -2877,6 +3065,20 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     if summary.get("kernel_discharged_axioms") != Some(&"passed") {
         overall_l4 = false;
     }
+
+    // 2b. Kernel-soundness IOU dashboard — observability for the
+    //     trust-base reduction roadmap (Phase 1).  Doesn't flip
+    //     l4_load_bearing (the IOUs are accountability surface, not
+    //     L4 failures), but the bundle records the admit count so
+    //     CI tracks trust-base shrinkage over time.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "soundness_iou",
+        report_dir.join("soundness-iou.json"),
+        || audit_soundness_iou_with_format(AuditFormat::Json),
+    );
+    // Always passes (observability only).
 
     // 3. Apply-graph — transitive load-bearing verdict.  This is the
     //    headline gate for L4 closure.
