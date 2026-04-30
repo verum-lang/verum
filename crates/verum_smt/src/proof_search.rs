@@ -4493,6 +4493,97 @@ impl ProofSearchEngine {
             (Paren(e1), Paren(e2)) => Self::expr_eq(e1, e2),
             (Paren(e1), _) => Self::expr_eq(e1, e2),
             (_, Paren(e2)) => Self::expr_eq(e1, e2),
+
+            // Function calls — same callee + same arity + arg-by-arg
+            // structural equality. Type-args are not part of equality
+            // reasoning at this level (the type system has already
+            // monomorphized whatever is being compared).
+            (Call { func: f1, args: a1, .. }, Call { func: f2, args: a2, .. }) => {
+                Self::expr_eq(f1, f2)
+                    && a1.len() == a2.len()
+                    && a1.iter().zip(a2.iter()).all(|(x, y)| Self::expr_eq(x, y))
+            }
+
+            // Method calls — same receiver + method name + args.
+            (
+                MethodCall {
+                    receiver: r1,
+                    method: m1,
+                    args: a1,
+                    ..
+                },
+                MethodCall {
+                    receiver: r2,
+                    method: m2,
+                    args: a2,
+                    ..
+                },
+            ) => {
+                m1.name == m2.name
+                    && Self::expr_eq(r1, r2)
+                    && a1.len() == a2.len()
+                    && a1.iter().zip(a2.iter()).all(|(x, y)| Self::expr_eq(x, y))
+            }
+
+            // Field access — same base + same field name.
+            (Field { expr: b1, field: f1 }, Field { expr: b2, field: f2 }) => {
+                f1.name == f2.name && Self::expr_eq(b1, b2)
+            }
+
+            // Tuple field access (e.g. tuple.0).
+            (TupleIndex { expr: b1, index: i1 }, TupleIndex { expr: b2, index: i2 }) => {
+                i1 == i2 && Self::expr_eq(b1, b2)
+            }
+
+            // Indexing.
+            (Index { expr: b1, index: i1 }, Index { expr: b2, index: i2 }) => {
+                Self::expr_eq(b1, b2) && Self::expr_eq(i1, i2)
+            }
+
+            // Tuple literals.
+            (Tuple(es1), Tuple(es2)) => {
+                es1.len() == es2.len()
+                    && es1.iter().zip(es2.iter()).all(|(x, y)| Self::expr_eq(x, y))
+            }
+
+            // Array literals — handle both List and Repeat shapes.
+            (Array(a1), Array(a2)) => match (a1, a2) {
+                (
+                    verum_ast::expr::ArrayExpr::List(l1),
+                    verum_ast::expr::ArrayExpr::List(l2),
+                ) => {
+                    l1.len() == l2.len()
+                        && l1.iter().zip(l2.iter()).all(|(x, y)| Self::expr_eq(x, y))
+                }
+                (
+                    verum_ast::expr::ArrayExpr::Repeat { value: v1, count: c1 },
+                    verum_ast::expr::ArrayExpr::Repeat { value: v2, count: c2 },
+                ) => Self::expr_eq(v1, v2) && Self::expr_eq(c1, c2),
+                _ => false,
+            },
+
+            // Cast: same inner expression + same type. Types are
+            // compared by structural debug repr — the type system has
+            // already done its work so this only catches surface-level
+            // mismatches.
+            (Cast { expr: e1, ty: t1 }, Cast { expr: e2, ty: t2 }) => {
+                Self::expr_eq(e1, e2) && format!("{:?}", t1) == format!("{:?}", t2)
+            }
+
+            // Pipeline: x |> f is sugar for f(x); we compare structurally.
+            (Pipeline { left: l1, right: r1 }, Pipeline { left: l2, right: r2 }) => {
+                Self::expr_eq(l1, l2) && Self::expr_eq(r1, r2)
+            }
+
+            // Null coalesce.
+            (
+                NullCoalesce { left: l1, right: r1 },
+                NullCoalesce { left: l2, right: r2 },
+            ) => Self::expr_eq(l1, l2) && Self::expr_eq(r1, r2),
+
+            // Try operator.
+            (Try(e1), Try(e2)) => Self::expr_eq(e1, e2),
+
             _ => false,
         }
     }
@@ -5160,7 +5251,9 @@ impl ProofSearchEngine {
             return Maybe::Some(to.clone());
         }
 
-        // Recurse into subexpressions
+        // Recurse into subexpressions. Mirrors the variant coverage of
+        // `expr_eq` so the rewriter can locate matches anywhere the
+        // equality check would recognize them.
         match &expr.kind {
             ExprKind::Binary { op, left, right } => {
                 let new_left = Self::try_rewrite_once(left, from, to);
@@ -5186,6 +5279,179 @@ impl ProofSearchEngine {
                             op: *op,
                             expr: Box::new(new_inner),
                         },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::Paren(inner) => {
+                if let Maybe::Some(new_inner) = Self::try_rewrite_once(inner, from, to) {
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Paren(Box::new(new_inner)),
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::Call { func, type_args, args } => {
+                let new_func = Self::try_rewrite_once(func, from, to);
+                let mut new_args = List::new();
+                let mut any_changed = new_func.is_some();
+                for arg in args.iter() {
+                    match Self::try_rewrite_once(arg, from, to) {
+                        Maybe::Some(replaced) => {
+                            new_args.push(replaced);
+                            any_changed = true;
+                        }
+                        Maybe::None => new_args.push(arg.clone()),
+                    }
+                }
+                if any_changed {
+                    let result_func = new_func.unwrap_or_else(|| (**func).clone());
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Call {
+                            func: Box::new(result_func),
+                            type_args: type_args.clone(),
+                            args: new_args,
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                type_args,
+                args,
+            } => {
+                let new_receiver = Self::try_rewrite_once(receiver, from, to);
+                let mut new_args = List::new();
+                let mut any_changed = new_receiver.is_some();
+                for arg in args.iter() {
+                    match Self::try_rewrite_once(arg, from, to) {
+                        Maybe::Some(replaced) => {
+                            new_args.push(replaced);
+                            any_changed = true;
+                        }
+                        Maybe::None => new_args.push(arg.clone()),
+                    }
+                }
+                if any_changed {
+                    let result_receiver =
+                        new_receiver.unwrap_or_else(|| (**receiver).clone());
+                    return Maybe::Some(Expr::new(
+                        ExprKind::MethodCall {
+                            receiver: Box::new(result_receiver),
+                            method: method.clone(),
+                            type_args: type_args.clone(),
+                            args: new_args,
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::Field { expr: base, field } => {
+                if let Maybe::Some(new_base) = Self::try_rewrite_once(base, from, to) {
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Field {
+                            expr: Box::new(new_base),
+                            field: field.clone(),
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::TupleIndex { expr: base, index } => {
+                if let Maybe::Some(new_base) = Self::try_rewrite_once(base, from, to) {
+                    return Maybe::Some(Expr::new(
+                        ExprKind::TupleIndex {
+                            expr: Box::new(new_base),
+                            index: *index,
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::Index { expr: base, index } => {
+                let new_base = Self::try_rewrite_once(base, from, to);
+                let new_index = Self::try_rewrite_once(index, from, to);
+                if new_base.is_some() || new_index.is_some() {
+                    let result_base = new_base.unwrap_or_else(|| (**base).clone());
+                    let result_index = new_index.unwrap_or_else(|| (**index).clone());
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Index {
+                            expr: Box::new(result_base),
+                            index: Box::new(result_index),
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::Tuple(elems) => {
+                let mut new_elems = List::new();
+                let mut any_changed = false;
+                for e in elems.iter() {
+                    match Self::try_rewrite_once(e, from, to) {
+                        Maybe::Some(replaced) => {
+                            new_elems.push(replaced);
+                            any_changed = true;
+                        }
+                        Maybe::None => new_elems.push(e.clone()),
+                    }
+                }
+                if any_changed {
+                    return Maybe::Some(Expr::new(ExprKind::Tuple(new_elems), expr.span));
+                }
+            }
+            ExprKind::Array(arr) => match arr {
+                verum_ast::expr::ArrayExpr::List(elems) => {
+                    let mut new_elems = List::new();
+                    let mut any_changed = false;
+                    for e in elems.iter() {
+                        match Self::try_rewrite_once(e, from, to) {
+                            Maybe::Some(replaced) => {
+                                new_elems.push(replaced);
+                                any_changed = true;
+                            }
+                            Maybe::None => new_elems.push(e.clone()),
+                        }
+                    }
+                    if any_changed {
+                        return Maybe::Some(Expr::new(
+                            ExprKind::Array(verum_ast::expr::ArrayExpr::List(new_elems)),
+                            expr.span,
+                        ));
+                    }
+                }
+                verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                    let new_value = Self::try_rewrite_once(value, from, to);
+                    let new_count = Self::try_rewrite_once(count, from, to);
+                    if new_value.is_some() || new_count.is_some() {
+                        let result_value = new_value.unwrap_or_else(|| (**value).clone());
+                        let result_count = new_count.unwrap_or_else(|| (**count).clone());
+                        return Maybe::Some(Expr::new(
+                            ExprKind::Array(verum_ast::expr::ArrayExpr::Repeat {
+                                value: Box::new(result_value),
+                                count: Box::new(result_count),
+                            }),
+                            expr.span,
+                        ));
+                    }
+                }
+            },
+            ExprKind::Cast { expr: inner, ty } => {
+                if let Maybe::Some(new_inner) = Self::try_rewrite_once(inner, from, to) {
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Cast {
+                            expr: Box::new(new_inner),
+                            ty: ty.clone(),
+                        },
+                        expr.span,
+                    ));
+                }
+            }
+            ExprKind::Try(inner) => {
+                if let Maybe::Some(new_inner) = Self::try_rewrite_once(inner, from, to) {
+                    return Maybe::Some(Expr::new(
+                        ExprKind::Try(Box::new(new_inner)),
                         expr.span,
                     ));
                 }
