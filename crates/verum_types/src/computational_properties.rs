@@ -1175,6 +1175,209 @@ impl Default for PropertyInferrer {
     }
 }
 
+// =============================================================================
+// ComputationalSignature — unified function-level computational shape (#171)
+// =============================================================================
+
+/// **Computational signature** — a function's compile-time
+/// computational shape: which contexts it depends on (DI) PLUS which
+/// computational properties it has.
+///
+/// Verum's CLAUDE.md establishes a **clear architectural distinction**
+/// between these two concepts:
+///
+///   - **Contexts** (DI): runtime dependency injection via
+///     `using [Database, Logger]`.  Resolved at call time; ~5–30ns.
+///   - **Properties**: compile-time computational classification
+///     (`Pure`, `IO`, `Async`, `Fallible`, `Mutates`, etc.).
+///     Zero runtime cost.
+///
+/// The two are SEPARATE concepts ("Verum has no algebraic effects")
+/// but consumers that need a function's full computational shape —
+/// purity audits, capability checks, optimization decisions, FFI
+/// boundary analysis — typically need BOTH.  `ComputationalSignature`
+/// is the unified handle.
+///
+/// **Architectural notes** (per CLAUDE.md):
+///
+///   - Properties MUST NOT be called "Effects".  Verum doesn't have
+///     algebraic effects; the property system is a compile-time
+///     classification, not a runtime dispatch mechanism.
+///   - Contexts and Properties are co-existent on a function type;
+///     bundling them does NOT collapse the distinction.
+///   - The `ComputationalSignature` is descriptive, not prescriptive
+///     — it's a uniform read accessor; the underlying storage on
+///     `Type::Function` keeps the two fields separate.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ComputationalSignature {
+    /// Context names declared in the function's `using [...]` clause.
+    /// Strings to keep the API serde-friendly without dragging in
+    /// the full Context AST.  Empty list = no context dependencies.
+    pub contexts: List<Text>,
+    /// Compile-time computational properties.  Empty set = no
+    /// declared / inferred properties (typically a fully pure
+    /// function).
+    pub properties: PropertySet,
+}
+
+impl ComputationalSignature {
+    /// Construct a signature from raw context names + property set.
+    pub fn new(contexts: List<Text>, properties: PropertySet) -> Self {
+        Self {
+            contexts,
+            properties,
+        }
+    }
+
+    /// Construct an empty signature — no contexts.  Per Verum
+    /// convention (`PropertySet::from_properties(empty)` defaults to
+    /// `Pure`), this is the **pure baseline**: no context dependencies,
+    /// only the `Pure` property.  Architecturally equivalent to
+    /// [`Self::pure`].
+    pub fn empty() -> Self {
+        Self::pure()
+    }
+
+    /// Construct a pure signature — no contexts, explicitly Pure
+    /// property.  Different from `empty()` in that the Pure property
+    /// is asserted (not merely absent).
+    pub fn pure() -> Self {
+        Self {
+            contexts: List::new(),
+            properties: PropertySet::pure(),
+        }
+    }
+
+    /// Whether this signature has any context dependencies.
+    pub fn has_contexts(&self) -> bool {
+        !self.contexts.is_empty()
+    }
+
+    /// Whether this signature has any declared properties.
+    pub fn has_properties(&self) -> bool {
+        !self.properties.is_empty()
+    }
+
+    /// Whether this signature is fully pure — no contexts AND
+    /// either empty properties or only the `Pure` property.
+    pub fn is_pure(&self) -> bool {
+        if !self.contexts.is_empty() {
+            return false;
+        }
+        self.properties.is_empty()
+            || (self.properties.len() == 1
+                && self.properties.contains(&ComputationalProperty::Pure))
+    }
+
+    /// Whether the function is async (carries the `Async` property
+    /// or any context whose name suggests async — conservative
+    /// detection by property only).
+    pub fn is_async(&self) -> bool {
+        self.properties.contains(&ComputationalProperty::Async)
+    }
+
+    /// Whether the function is fallible (carries the `Fallible`
+    /// property).
+    pub fn is_fallible(&self) -> bool {
+        self.properties.contains(&ComputationalProperty::Fallible)
+    }
+
+    /// Whether the function performs IO.
+    pub fn is_io(&self) -> bool {
+        self.properties.contains(&ComputationalProperty::IO)
+    }
+
+    /// Whether the function mutates state.
+    pub fn mutates(&self) -> bool {
+        self.properties.contains(&ComputationalProperty::Mutates)
+    }
+
+    /// Whether the function is at the FFI boundary.
+    pub fn is_ffi(&self) -> bool {
+        self.properties.contains(&ComputationalProperty::FFI)
+    }
+
+    /// Number of context dependencies.
+    pub fn context_count(&self) -> usize {
+        self.contexts.len()
+    }
+
+    /// Number of declared properties.
+    pub fn property_count(&self) -> usize {
+        self.properties.len()
+    }
+
+    /// Whether this signature subsumes another — every context
+    /// required by `other` is also required by `self`, AND every
+    /// property in `other` is also in `self`.  Used by call-site
+    /// type-checking to verify the caller can supply everything
+    /// the callee needs.
+    pub fn subsumes(&self, other: &ComputationalSignature) -> bool {
+        // Every context in `other` must also appear in `self`.
+        let self_ctxs: std::collections::BTreeSet<&str> =
+            self.contexts.iter().map(|c| c.as_str()).collect();
+        for c in other.contexts.iter() {
+            if !self_ctxs.contains(c.as_str()) {
+                return false;
+            }
+        }
+        // Every property in `other` must also appear in `self`.
+        for p in other.properties.iter() {
+            if !self.properties.contains(p) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Union of two signatures — the minimum signature that
+    /// accommodates both.  Contexts are merged (deduplicated by
+    /// string equality); properties are unioned via PropertySet.
+    pub fn union(&self, other: &ComputationalSignature) -> ComputationalSignature {
+        let mut merged_ctxs: std::collections::BTreeSet<Text> =
+            self.contexts.iter().cloned().collect();
+        for c in other.contexts.iter() {
+            merged_ctxs.insert(c.clone());
+        }
+        let mut union_contexts = List::new();
+        for c in merged_ctxs {
+            union_contexts.push(c);
+        }
+        ComputationalSignature {
+            contexts: union_contexts,
+            properties: self.properties.union(&other.properties),
+        }
+    }
+
+    /// Diagnostic-friendly classification tag.
+    ///
+    ///   - `"pure"` if `is_pure()`
+    ///   - `"async"` if `is_async()`
+    ///   - `"io"` if `is_io()`
+    ///   - `"impure"` otherwise
+    pub fn classify(&self) -> &'static str {
+        if self.is_pure() {
+            "pure"
+        } else if self.is_async() {
+            "async"
+        } else if self.is_io() {
+            "io"
+        } else if self.mutates() {
+            "mutating"
+        } else if self.is_ffi() {
+            "ffi"
+        } else {
+            "impure"
+        }
+    }
+}
+
+impl Default for ComputationalSignature {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1711,5 +1914,214 @@ mod tests {
         assert_eq!(impure.len(), 1);
         assert!(impure.contains(&ComputationalProperty::IO));
         assert!(!impure.contains(&ComputationalProperty::Fallible));
+    }
+}
+
+#[cfg(test)]
+mod computational_signature_tests {
+    use super::*;
+
+    #[test]
+    fn empty_signature_has_no_contexts_and_pure_baseline() {
+        let sig = ComputationalSignature::empty();
+        assert!(!sig.has_contexts());
+        assert_eq!(sig.context_count(), 0);
+        // Per Verum convention, empty PropertySet defaults to Pure —
+        // the pure baseline.  `empty()` and `pure()` are equivalent.
+        assert!(sig.is_pure());
+        assert_eq!(sig, ComputationalSignature::pure());
+    }
+
+    #[test]
+    fn pure_signature_has_pure_property() {
+        let sig = ComputationalSignature::pure();
+        assert!(!sig.has_contexts());
+        assert!(sig.has_properties());
+        assert!(sig.is_pure());
+        assert_eq!(sig.classify(), "pure");
+    }
+
+    #[test]
+    fn empty_signature_is_pure_classification() {
+        let sig = ComputationalSignature::empty();
+        // Empty signature = no contexts + no properties = pure baseline.
+        assert!(sig.is_pure());
+        assert_eq!(sig.classify(), "pure");
+    }
+
+    #[test]
+    fn signature_with_io_property_is_io() {
+        let sig = ComputationalSignature::new(
+            List::new(),
+            PropertySet::single(ComputationalProperty::IO),
+        );
+        assert!(sig.is_io());
+        assert!(!sig.is_pure());
+        assert_eq!(sig.classify(), "io");
+    }
+
+    #[test]
+    fn signature_with_async_property_is_async() {
+        let sig = ComputationalSignature::new(
+            List::new(),
+            PropertySet::single(ComputationalProperty::Async),
+        );
+        assert!(sig.is_async());
+        assert_eq!(sig.classify(), "async");
+    }
+
+    #[test]
+    fn signature_with_context_is_not_pure() {
+        let mut ctxs = List::new();
+        ctxs.push(Text::from("Database"));
+        let sig = ComputationalSignature::new(ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+        assert!(sig.has_contexts());
+        assert!(!sig.is_pure());
+    }
+
+    #[test]
+    fn subsumes_requires_all_contexts() {
+        let mut superset_ctxs = List::new();
+        superset_ctxs.push(Text::from("Database"));
+        superset_ctxs.push(Text::from("Logger"));
+        let superset = ComputationalSignature::new(superset_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+
+        let mut subset_ctxs = List::new();
+        subset_ctxs.push(Text::from("Database"));
+        let subset = ComputationalSignature::new(subset_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+
+        assert!(superset.subsumes(&subset));
+        assert!(!subset.subsumes(&superset));
+    }
+
+    #[test]
+    fn subsumes_requires_all_properties() {
+        let superset = ComputationalSignature::new(
+            List::new(),
+            PropertySet::from_properties(vec![
+                ComputationalProperty::IO,
+                ComputationalProperty::Async,
+            ]),
+        );
+        let subset = ComputationalSignature::new(
+            List::new(),
+            PropertySet::single(ComputationalProperty::IO),
+        );
+        assert!(superset.subsumes(&subset));
+        assert!(!subset.subsumes(&superset));
+    }
+
+    #[test]
+    fn union_merges_contexts_and_properties() {
+        let mut a_ctxs = List::new();
+        a_ctxs.push(Text::from("Database"));
+        let a = ComputationalSignature::new(
+            a_ctxs,
+            PropertySet::single(ComputationalProperty::IO),
+        );
+
+        let mut b_ctxs = List::new();
+        b_ctxs.push(Text::from("Logger"));
+        let b = ComputationalSignature::new(
+            b_ctxs,
+            PropertySet::single(ComputationalProperty::Async),
+        );
+
+        let merged = a.union(&b);
+        assert_eq!(merged.context_count(), 2);
+        assert_eq!(merged.property_count(), 2);
+        assert!(merged.is_io());
+        assert!(merged.is_async());
+    }
+
+    #[test]
+    fn union_dedups_overlapping_contexts() {
+        let mut a_ctxs = List::new();
+        a_ctxs.push(Text::from("Database"));
+        a_ctxs.push(Text::from("Logger"));
+        let a = ComputationalSignature::new(a_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+
+        let mut b_ctxs = List::new();
+        b_ctxs.push(Text::from("Database"));
+        b_ctxs.push(Text::from("Telemetry"));
+        let b = ComputationalSignature::new(b_ctxs, PropertySet::from_properties(Vec::<ComputationalProperty>::new()));
+
+        let merged = a.union(&b);
+        assert_eq!(merged.context_count(), 3, "expect dedup of Database");
+    }
+
+    #[test]
+    fn classify_distinguishes_known_categories() {
+        assert_eq!(ComputationalSignature::pure().classify(), "pure");
+        assert_eq!(
+            ComputationalSignature::new(
+                List::new(),
+                PropertySet::single(ComputationalProperty::IO),
+            )
+            .classify(),
+            "io",
+        );
+        assert_eq!(
+            ComputationalSignature::new(
+                List::new(),
+                PropertySet::single(ComputationalProperty::Async),
+            )
+            .classify(),
+            "async",
+        );
+        assert_eq!(
+            ComputationalSignature::new(
+                List::new(),
+                PropertySet::single(ComputationalProperty::Mutates),
+            )
+            .classify(),
+            "mutating",
+        );
+        assert_eq!(
+            ComputationalSignature::new(
+                List::new(),
+                PropertySet::single(ComputationalProperty::FFI),
+            )
+            .classify(),
+            "ffi",
+        );
+    }
+
+    #[test]
+    fn predicates_match_property_membership() {
+        let sig_io = ComputationalSignature::new(
+            List::new(),
+            PropertySet::single(ComputationalProperty::IO),
+        );
+        assert!(sig_io.is_io());
+        assert!(!sig_io.is_async());
+        assert!(!sig_io.mutates());
+        assert!(!sig_io.is_ffi());
+        assert!(!sig_io.is_fallible());
+    }
+
+    #[test]
+    fn signature_serde_round_trip() {
+        let mut ctxs = List::new();
+        ctxs.push(Text::from("Database"));
+        let sig = ComputationalSignature::new(
+            ctxs,
+            PropertySet::from_properties(vec![
+                ComputationalProperty::IO,
+                ComputationalProperty::Fallible,
+            ]),
+        );
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: ComputationalSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.contexts, sig.contexts);
+        // PropertySet equality checks set membership regardless of order.
+        assert_eq!(restored.properties, sig.properties);
+    }
+
+    #[test]
+    fn default_is_empty_signature() {
+        let default_sig = ComputationalSignature::default();
+        let empty_sig = ComputationalSignature::empty();
+        assert_eq!(default_sig, empty_sig);
     }
 }
