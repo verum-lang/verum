@@ -76,6 +76,79 @@ fn test_dependent_refinement_verification() {
     assert!(result.is_ok());
 }
 
+fn bool_literal(value: bool) -> Expr {
+    Expr::new(
+        ExprKind::Literal(Literal::bool(value, Span::dummy())),
+        Span::dummy(),
+    )
+}
+
+fn float_literal(value: f64) -> Expr {
+    Expr::new(
+        ExprKind::Literal(Literal::float(value, Span::dummy())),
+        Span::dummy(),
+    )
+}
+
+/// Pre-fix `verify_dependent_refinement` created every dependency
+/// as `Int::new_const(name)` regardless of the value expression's
+/// actual sort — Bool dependencies dropped silently because the
+/// `as_int()` guard skipped the equality assertion. Post-fix the
+/// dependency loop dispatches on the translated value's sort, so
+/// a Bool dependency creates a Bool::new_const and asserts a Bool
+/// equality. The test pins that the call no longer panics or
+/// returns a translation error on a Bool dependency — pre-fix
+/// would have silently produced a vacuous binding.
+#[test]
+fn dependent_refinement_accepts_bool_dependency() {
+    let mut verifier = RefinementVerifier::new();
+    let dependencies = vec![("flag".into(), bool_literal(true))];
+    let ty = int_type();
+    let result = verifier.verify_dependent_refinement(&ty, &dependencies);
+    assert!(
+        result.is_ok(),
+        "Bool dependency must verify cleanly post-fix: {:?}",
+        result.err()
+    );
+}
+
+/// Same story for Real (Float) dependencies — pre-fix the
+/// `as_int()` guard rejected them, post-fix the Real arm
+/// dispatches.
+#[test]
+fn dependent_refinement_accepts_real_dependency() {
+    let mut verifier = RefinementVerifier::new();
+    let dependencies = vec![("ratio".into(), float_literal(0.5))];
+    let ty = int_type();
+    let result = verifier.verify_dependent_refinement(&ty, &dependencies);
+    assert!(
+        result.is_ok(),
+        "Real dependency must verify cleanly post-fix: {:?}",
+        result.err()
+    );
+}
+
+/// Mixed-sort dependencies — Int + Bool + Real in a single call
+/// must each route to their correct Z3 const sort. Pre-fix all
+/// three would have collapsed onto Int, with the non-Int two
+/// dropped silently.
+#[test]
+fn dependent_refinement_accepts_mixed_sort_dependencies() {
+    let mut verifier = RefinementVerifier::new();
+    let dependencies = vec![
+        ("count".into(), int_literal(7)),
+        ("active".into(), bool_literal(false)),
+        ("scale".into(), float_literal(1.5)),
+    ];
+    let ty = int_type();
+    let result = verifier.verify_dependent_refinement(&ty, &dependencies);
+    assert!(
+        result.is_ok(),
+        "mixed-sort dependencies must verify cleanly post-fix: {:?}",
+        result.err()
+    );
+}
+
 #[test]
 fn test_verify_mode_runtime() {
     let verifier = RefinementVerifier::with_mode(VerifyMode::Runtime);

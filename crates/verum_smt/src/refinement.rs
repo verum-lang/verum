@@ -20,7 +20,7 @@ use std::time::Duration;
 use verum_ast::{Expr, Type, TypeKind};
 use verum_common::{List, Maybe, Set, Text};
 use verum_common::ToText;
-use z3::ast::{Dynamic, Int};
+use z3::ast::{Bool, Dynamic, Int, Real};
 
 use crate::context::Context;
 use crate::cost::{CostMeasurement, VerificationCost};
@@ -579,21 +579,70 @@ impl RefinementVerifier {
         let translator = Translator::new(&self.context);
         let mut translator = translator;
 
-        // Bind all dependency variables
+        // Bind all dependency variables. Pre-fix every dependency
+        // was created as `Int::new_const(name)` regardless of the
+        // value expression's actual sort — Bool / Real dependencies
+        // (e.g. `Vector<f64, n: Real>`, `Validated<is_valid: Bool>`)
+        // dropped silently because the `as_int()` guard skipped the
+        // equality assertion. The predicate then translated against
+        // an unconstrained Int constant that wasn't tied to the
+        // value, producing trivially-true (unsound) verdicts.
+        //
+        // Dispatch on the translated value's sort and create a fresh
+        // const of the matching sort. Sorts the translator can
+        // currently produce: Bool, Int, Real. Other sorts fall back
+        // to the legacy Int default with a tracing warning so the
+        // gap is visible without a regression.
         let mut bound_vars = List::new();
         for (name, value_expr) in dependencies {
-            // For now, assume integer dependencies
-            let var = Int::new_const(name.as_str());
-            translator.bind(name.clone(), Dynamic::from_ast(&var));
+            let z3_value = match translator.translate_expr(value_expr) {
+                Ok(v) => v,
+                Err(_) => {
+                    // Translation failed — fall back to an Int
+                    // constant so the predicate at least sees a
+                    // stable binding shape (the assertion is
+                    // omitted; predicate translation may then fail
+                    // separately, which is the intended visible
+                    // failure mode).
+                    let var = Int::new_const(name.as_str());
+                    translator.bind(name.clone(), Dynamic::from_ast(&var));
+                    bound_vars.push((name.clone(), Dynamic::from_ast(&var)));
+                    continue;
+                }
+            };
 
-            bound_vars.push((name.clone(), Dynamic::from_ast(&var)));
+            let solver = self.context.solver();
 
-            // Translate the value expression and assert it equals the variable
-            if let Ok(z3_value) = translator.translate_expr(value_expr)
-                && let Some(z3_int) = z3_value.as_int()
-            {
-                let solver = self.context.solver();
+            if let Some(z3_bool) = z3_value.as_bool() {
+                let var = Bool::new_const(name.as_str());
+                solver.assert(var.eq(&z3_bool));
+                let var_dyn = Dynamic::from_ast(&var);
+                translator.bind(name.clone(), var_dyn.clone());
+                bound_vars.push((name.clone(), var_dyn));
+            } else if let Some(z3_real) = z3_value.as_real() {
+                let var = Real::new_const(name.as_str());
+                solver.assert(var.eq(&z3_real));
+                let var_dyn = Dynamic::from_ast(&var);
+                translator.bind(name.clone(), var_dyn.clone());
+                bound_vars.push((name.clone(), var_dyn));
+            } else if let Some(z3_int) = z3_value.as_int() {
+                let var = Int::new_const(name.as_str());
                 solver.assert(var.eq(&z3_int));
+                let var_dyn = Dynamic::from_ast(&var);
+                translator.bind(name.clone(), var_dyn.clone());
+                bound_vars.push((name.clone(), var_dyn));
+            } else {
+                tracing::warn!(
+                    "verify_dependent_refinement: dependency {:?} has unsupported \
+                     Z3 sort (not Bool/Int/Real) — falling back to Int default; \
+                     equality assertion omitted, predicate may translate \
+                     against an unconstrained constant",
+                    name.as_str()
+                );
+                let var = Int::new_const(name.as_str());
+                let var_dyn = Dynamic::from_ast(&var);
+                translator.bind(name.clone(), var_dyn.clone());
+                bound_vars.push((name.clone(), var_dyn));
             }
         }
 
