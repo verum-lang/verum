@@ -981,9 +981,19 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // which would otherwise be picked by "first suffix match wins"
             // and lead to wrong-layout return values.
             // See vcs/specs/L0-critical/vbc/struct_layout/ for reproducers.
+            // Use `dispatch_receiver` (post-deref) instead of the
+            // raw `receiver` so a `Shared<T>` carrier whose
+            // unrecognised method triggered the auto-deref above
+            // resolves to the inner `T`'s type name (e.g.,
+            // `Shared<AtomicInt>::load` → `receiver_type = "AtomicInt"`),
+            // which lets the qualified lookup at line ~1014
+            // build `"AtomicInt.load"` and find the user-compiled
+            // method. Pre-fix this saw `TypeId::SHARED` and
+            // produced no type name, falling through to the
+            // catch-all panic.
             let receiver_type: Option<String> =
-                if receiver.is_ptr() && !receiver.is_nil() && !is_already_qualified {
-                    let ptr = receiver.as_ptr::<u8>();
+                if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() && !is_already_qualified {
+                    let ptr = dispatch_receiver.as_ptr::<u8>();
                     if ptr.is_null() {
                         None
                     } else if (ptr as usize)
