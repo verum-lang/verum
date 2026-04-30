@@ -6306,13 +6306,45 @@ impl ProofValidator {
         let iff_conclusion = iff_proof.conclusion();
         self.validate_impl(iff_proof, &iff_conclusion)?;
 
-        // The expected result is an equality left = right
+        // The expected result is an equality left = right.
         let expected_eq = self.make_equality(left, right);
 
         if !self.expr_eq(&expected_eq, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
                 actual: self.expr_to_text(&expected_eq),
+            });
+        }
+
+        // Soundness gate: the iff_proof must actually conclude
+        // `left <=> right` (or its `=` shape over Bool, since
+        // Verum's parser surfaces both). Pre-fix `iff_proof`
+        // could conclude any iff (e.g. `P <=> Q`) while we claimed
+        // the equality `A = B` for unrelated `A`, `B` — the
+        // structural link between the iff and the (left, right)
+        // pair was never checked.
+        let mentions_pair = match &iff_conclusion.kind {
+            ExprKind::Binary {
+                op: BinOp::Iff,
+                left: l,
+                right: r,
+            }
+            | ExprKind::Binary {
+                op: BinOp::Eq,
+                left: l,
+                right: r,
+            } => self.expr_eq(l, left) && self.expr_eq(r, right),
+            _ => false,
+        };
+        if !mentions_pair {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "iff_oeq: iff_proof concludes {}, which is not (left <=> right) for the claimed pair (left = {}, right = {})",
+                    self.expr_to_text(&iff_conclusion),
+                    self.expr_to_text(left),
+                    self.expr_to_text(right)
+                )
+                .into(),
             });
         }
 
