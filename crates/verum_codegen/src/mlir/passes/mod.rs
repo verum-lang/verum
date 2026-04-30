@@ -404,6 +404,24 @@ impl InlinerPass {
     }
 
     pub fn with_threshold(mut self, threshold: usize) -> Self {
+        // Phase-not-realised tracing: `InlinerPass.threshold`
+        // (default 100) is set on the struct but the pass's
+        // `run` method (line 427) returns `PassResult::unmodified()`
+        // without consulting any field — the InlinerPass is a
+        // placeholder/stub for MLIR's standard Inliner pass that
+        // hasn't been wired through. The cost-threshold value
+        // never reaches any inlining decision. Surface a debug
+        // trace when the user supplies a non-default value so
+        // operators see the gap.
+        if threshold != 100 {
+            tracing::debug!(
+                "InlinerPass::with_threshold({}) — the value is stored on the \
+                 pass but `run` returns PassResult::unmodified() without \
+                 consulting any field. Forward-looking knob; the pass is a \
+                 placeholder for MLIR's standard Inliner conversion.",
+                threshold
+            );
+        }
         self.threshold = threshold;
         self
     }
