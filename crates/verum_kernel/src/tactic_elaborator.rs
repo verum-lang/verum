@@ -435,25 +435,28 @@ pub fn elaborate_tactic(
     }
 }
 
-/// **Elaborate a proof body.**  Phase-1 supports:
+/// **Elaborate a proof body.**  Phase-3 supports:
 ///
 ///   - `ProofBody::Tactic(t)` — delegates to [`elaborate_tactic`].
+///   - `ProofBody::Term(e)` — direct Curry-Howard proof term.
+///     Delegates to [`expr_to_term`] for the expression-to-term
+///     translation.  This handles the `proof = lemma_name(args)`
+///     syntax where the user writes a constructive witness directly
+///     (no tactic wrapping).
 ///
-/// Phase-2 adds `Term`, `Structured`, `ByMethod`.
+/// Phase-4 adds `Structured`, `ByMethod`.
 pub fn elaborate_proof_body(
     body: &ProofBody,
     ctx: &mut ElabContext,
 ) -> Result<Term, ElabError> {
     match body {
         ProofBody::Tactic(t) => elaborate_tactic(t, ctx),
-        ProofBody::Term(_) => Err(ElabError::UnsupportedTactic(
-            "ProofBody::Term — Phase-2 translates direct proof terms".into(),
-        )),
+        ProofBody::Term(e) => expr_to_term(e, ctx),
         ProofBody::Structured(_) => Err(ElabError::UnsupportedTactic(
-            "ProofBody::Structured — Phase-2 unrolls structured proofs".into(),
+            "ProofBody::Structured — Phase-4 unrolls structured proofs".into(),
         )),
         ProofBody::ByMethod(_) => Err(ElabError::UnsupportedTactic(
-            "ProofBody::ByMethod — Phase-2 dispatches by-induction / by-cases".into(),
+            "ProofBody::ByMethod — Phase-4 dispatches by-induction / by-cases".into(),
         )),
     }
 }
@@ -915,9 +918,36 @@ mod tests {
     }
 
     #[test]
-    fn elaborate_proof_body_term_unsupported() {
+    fn elaborate_proof_body_term_succeeds_with_axiom_witness() {
+        // Phase-3: ProofBody::Term(expr) — direct Curry-Howard term.
+        // `proof = foo` where foo is a registered axiom should produce
+        // the same Var(idx) the apply form would.
         let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::Universe(0));
         let body = ProofBody::Term(verum_common::Heap::new(path_expr("foo")));
+        let term = elaborate_proof_body(&body, &mut ctx).unwrap();
+        assert_eq!(term, Term::Var(0));
+    }
+
+    #[test]
+    fn elaborate_proof_body_term_undeclared_rejects() {
+        let mut ctx = ElabContext::new();
+        let body = ProofBody::Term(verum_common::Heap::new(path_expr("nope")));
+        match elaborate_proof_body(&body, &mut ctx) {
+            Err(ElabError::UndeclaredApplyTarget(name)) => assert_eq!(name, "nope"),
+            other => panic!("expected UndeclaredApplyTarget, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn elaborate_proof_body_structured_unsupported() {
+        use verum_ast::decl::ProofStructure;
+        let mut ctx = ElabContext::new();
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::new(),
+            conclusion: verum_common::Maybe::None,
+            span: Span::dummy(),
+        });
         match elaborate_proof_body(&body, &mut ctx) {
             Err(ElabError::UnsupportedTactic(_)) => {}
             other => panic!("expected UnsupportedTactic, got {:?}", other),
