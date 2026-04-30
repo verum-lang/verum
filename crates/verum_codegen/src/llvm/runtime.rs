@@ -4697,10 +4697,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let flags_phi = builder.build_phi(i32_type, "flags").or_llvm_err()?;
                 // macOS: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x200, O_TRUNC=0x400, O_APPEND=8
                 // Linux: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x40, O_TRUNC=0x200, O_APPEND=0x400
-                #[cfg(target_os = "macos")]
-                let (write_flags, append_flags, rdwr_flags) = (0x601i32, 0x209i32, 0x202i32);
-                #[cfg(not(target_os = "macos"))]
-                let (write_flags, append_flags, rdwr_flags) = (0x241i32, 0x441i32, 0x42i32);
+                // Cross-compilation-correct: TARGET-triple dispatch,
+                // never host `#[cfg]`.  open(2) flag numbers are
+                // ABI-divergent between Darwin and Linux — emitting
+                // host's table into a cross-target binary silently
+                // produces O_TRUNC where O_APPEND was intended.
+                let (write_flags, append_flags, rdwr_flags) = if Self::target_is_darwin(module) {
+                    (0x601i32, 0x209i32, 0x202i32)
+                } else {
+                    (0x241i32, 0x441i32, 0x42i32)
+                };
 
                 flags_phi.add_incoming(&[
                     (&i32_type.const_int(0, false), mode0_bb),       // O_RDONLY
@@ -6510,9 +6516,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     /// Allocate + zero a 16-byte sockaddr_in on stack with AF_INET, given port + addr.
+    /// `module` parameter is required for TARGET-triple dispatch:
+    /// the sockaddr_in layout differs between Darwin (sin_len byte at
+    /// offset 0, sin_family byte at offset 1) and Linux (sin_family
+    /// i16 at offset 0–1).  Selecting the layout based on the host OS
+    /// (via `#[cfg]`) would silently miscompile cross builds — Linux
+    /// targets would receive a Darwin-shaped sockaddr that the kernel
+    /// rejects with EINVAL, or vice versa.
     fn build_sockaddr_in(
         &self,
         builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
         memset_fn: FunctionValue<'ctx>,
         port_i64: IntValue<'ctx>,
         addr_i32: IntValue<'ctx>,
@@ -6524,20 +6538,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_call(memset_fn, &[
             alloca.into(), i32_type.const_zero().into(), i64_type.const_int(16, false).into(),
         ], "").or_llvm_err()?;
-        // sin_family = AF_INET
-        #[cfg(target_os = "macos")]
-        {
-            // macOS: byte 0 = sin_len=16, byte 1 = sin_family=2
+        // sin_family = AF_INET — TARGET-dependent layout.
+        if Self::target_is_darwin(module) {
+            // Darwin: byte 0 = sin_len=16, byte 1 = sin_family=2
             // SAFETY: GEP at offset 0 within a struct of known layout; the offset is within the allocation
             let p0 = unsafe { builder.build_gep(i8_type, alloca, &[i32_type.const_int(0, false)], "sl").or_llvm_err()? };
             builder.build_store(p0, i8_type.const_int(16, false)).or_llvm_err()?;
             // SAFETY: GEP at offset 1 within a struct of known layout; the offset is within the allocation
             let p1 = unsafe { builder.build_gep(i8_type, alloca, &[i32_type.const_int(1, false)], "sf").or_llvm_err()? };
             builder.build_store(p1, i8_type.const_int(2, false)).or_llvm_err()?;
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            // Linux: bytes 0-1 = sin_family (i16 = 2)
+        } else {
+            // Linux / other Unix: bytes 0-1 = sin_family (i16 = 2)
             let i16_type = self.context.i16_type();
             builder.build_store(alloca, i16_type.const_int(2, false)).or_llvm_err()?;
         }
@@ -6761,16 +6772,24 @@ impl<'ctx> RuntimeLowering<'ctx> {
             module.add_function("verum_text_get_ptr", ft, None)
         });
 
-        #[cfg(target_os = "macos")]
-        let (sol_socket, so_reuseaddr): (u64, u64) = (0xffff, 4);
-        #[cfg(not(target_os = "macos"))]
-        let (sol_socket, so_reuseaddr): (u64, u64) = (1, 2);
+        // SOL_SOCKET / SO_REUSEADDR — TARGET-dependent values.
+        // Cross-compilation-correct: dispatch on the LLVM module's
+        // target triple, never the compile host.  Pre-fix a Linux
+        // target binary built on macOS would emit Darwin's 0xFFFF /
+        // 4 into setsockopt, which Linux rejects with ENOPROTOOPT.
+        let (sol_socket, so_reuseaddr): (u64, u64) = if Self::target_is_darwin(module) {
+            (0xffff, 4)
+        } else {
+            (1, 2)
+        };
 
-        // ai_addr offset within struct addrinfo (differs macOS vs Linux)
-        #[cfg(target_os = "macos")]
-        let addrinfo_ai_addr_off: u64 = 32;
-        #[cfg(not(target_os = "macos"))]
-        let addrinfo_ai_addr_off: u64 = 24;
+        // ai_addr offset within struct addrinfo (differs macOS vs Linux).
+        // Same TARGET-triple discipline.
+        let addrinfo_ai_addr_off: u64 = if Self::target_is_darwin(module) {
+            32
+        } else {
+            24
+        };
 
         let neg1 = i64_type.const_int(u64::MAX, true); // -1
 
@@ -6828,7 +6847,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     i32_type.const_int(so_reuseaddr, false).into(),
                     opt.into(), i32_type.const_int(4, false).into(),
                 ], "")?;
-                let sa = self.build_sockaddr_in(&b, memset_fn, port, i32_type.const_zero())?;
+                let sa = self.build_sockaddr_in(&b, module, memset_fn, port, i32_type.const_zero())?;
                 let br_ = self.build_libc_call(&b, bind_fn, &[
                     fd32.into(), sa.into(), i32_type.const_int(16, false).into(),
                 ], "br")?;
@@ -6980,10 +6999,14 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 b.build_conditional_branch(reuseport_set, do_reuseport, after_reuseport).or_llvm_err()?;
 
                 b.position_at_end(do_reuseport);
-                #[cfg(target_os = "macos")]
-                let so_reuseport: u64 = 0x0200; // = 512
-                #[cfg(not(target_os = "macos"))]
-                let so_reuseport: u64 = 15;
+                // SO_REUSEPORT is TARGET-dependent: Darwin = 0x0200 (512),
+                // Linux = 15.  Cross-compilation-correct dispatch on the
+                // module's target triple.
+                let so_reuseport: u64 = if Self::target_is_darwin(module) {
+                    0x0200
+                } else {
+                    15
+                };
                 self.build_libc_call_void(&b, setsockopt_fn, &[
                     fd32.into(),
                     i32_type.const_int(sol_socket, false).into(),
@@ -6994,7 +7017,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 b.build_unconditional_branch(after_reuseport).or_llvm_err()?;
 
                 b.position_at_end(after_reuseport);
-                let sa = self.build_sockaddr_in(&b, memset_fn, port, addr_be)?;
+                let sa = self.build_sockaddr_in(&b, module, memset_fn, port, addr_be)?;
                 let br_ = self.build_libc_call(&b, bind_fn, &[
                     fd32.into(),
                     sa.into(),
@@ -7400,7 +7423,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 b.build_return(Some(&neg1)).or_llvm_err()?;
 
                 b.position_at_end(so);
-                let sa = self.build_sockaddr_in(&b, memset_fn, port, i32_type.const_zero())?;
+                let sa = self.build_sockaddr_in(&b, module, memset_fn, port, i32_type.const_zero())?;
                 let fd32 = b.build_int_truncate(fd, i32_type, "fd32").or_llvm_err()?;
                 let br_ = self.build_libc_call(&b, bind_fn, &[
                     fd32.into(), sa.into(), i32_type.const_int(16, false).into(),
@@ -7456,17 +7479,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 b.build_call(memset_fn, &[
                     sa.into(), i32_type.const_zero().into(), i64_type.const_int(16, false).into(),
                 ], "").or_llvm_err()?;
-                #[cfg(target_os = "macos")]
-                {
+                // sockaddr_in family field — Darwin: sin_len byte +
+                // sin_family byte; Linux: sin_family i16.  TARGET-triple
+                // dispatch keeps cross builds correct.
+                if Self::target_is_darwin(module) {
                     // SAFETY: GEP at offset 0 within a struct of known layout; the offset is within the allocation
                     let p0 = unsafe { b.build_gep(i8_type, sa, &[i32_type.const_int(0, false)], "sl").or_llvm_err()? };
                     b.build_store(p0, i8_type.const_int(16, false)).or_llvm_err()?;
                     // SAFETY: GEP at offset 1 within a struct of known layout; the offset is within the allocation
                     let p1 = unsafe { b.build_gep(i8_type, sa, &[i32_type.const_int(1, false)], "sf").or_llvm_err()? };
                     b.build_store(p1, i8_type.const_int(2, false)).or_llvm_err()?;
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
+                } else {
                     b.build_store(sa, i16_type.const_int(2, false)).or_llvm_err()?;
                 }
                 // SAFETY: GEP at offset 2 within a struct of known layout; the offset is within the allocation
