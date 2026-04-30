@@ -23,16 +23,18 @@
 //! tables the macro expander touches).
 
 use anyhow::Result;
+use tracing::debug;
 
+use verum_ast::visitor::{Visitor, walk_expr};
 use verum_ast::Item;
 use verum_ast::Span;
-use verum_common::{List, Text};
+use verum_common::{List, Maybe, Text};
 
-use crate::meta::MetaRegistry;// ==================== MACRO EXPANSION ====================
+use crate::meta::MetaRegistry;
 
 /// Types of macro/meta function arguments
 #[derive(Debug, Clone)]
-enum InvocationArgs {
+pub(super) enum InvocationArgs {
     /// Traditional macro args (unparsed token tree from macro!())
     MacroArgs(verum_ast::expr::MacroArgs),
     /// Meta function args (parsed expressions from @meta())
@@ -41,36 +43,36 @@ enum InvocationArgs {
 
 /// A macro or meta function invocation found in the AST
 #[derive(Debug, Clone)]
-struct MacroInvocation {
+pub(crate) struct MacroInvocation {
     /// Name of the macro/meta function being invoked
-    macro_name: Text,
+    pub(crate) macro_name: Text,
     /// Arguments to the invocation
-    args: InvocationArgs,
+    pub(crate) args: InvocationArgs,
     /// Span of the invocation
-    span: Span,
+    pub(crate) span: Span,
 }
 
 /// Visitor that collects and expands macro invocations
-struct MacroExpander<'a> {
+pub(crate) struct MacroExpander<'a> {
     /// Reference to the meta registry
-    registry: &'a MetaRegistry,
+    pub(crate) registry: &'a MetaRegistry,
     /// Meta execution context
-    context: crate::meta::MetaContext,
+    pub(crate) context: crate::meta::MetaContext,
     /// Current module path
-    module_path: Text,
+    pub(crate) module_path: Text,
     /// Collected macro invocations
-    expansions: List<MacroInvocation>,
+    pub(crate) expansions: List<MacroInvocation>,
 }
 
 impl<'a> MacroExpander<'a> {
     /// Collect macro invocations from an item
-    fn collect_macro_invocations(&mut self, item: &Item) {
+    pub(crate) fn collect_macro_invocations(&mut self, item: &Item) {
         use verum_ast::visitor::Visitor;
         self.visit_item(item);
     }
 
     /// Expand a macro or meta function invocation
-    fn expand_macro(&mut self, invocation: &MacroInvocation) -> Result<List<Item>> {
+    pub(crate) fn expand_macro(&mut self, invocation: &MacroInvocation) -> Result<List<Item>> {
         use crate::meta::ConstValue;
 
         let module_path_std = Text::from(self.module_path.as_str());
@@ -345,4 +347,15 @@ impl<'a> verum_ast::visitor::Visitor for MacroExpander<'a> {
         // Continue walking
         walk_expr(self, expr);
     }
+}
+
+/// Reset all mutable global state between test executions.
+///
+/// Called by the test executor before each test to prevent state leakage
+/// between tests in batch runs. Clears VBC value side-tables, exhaustiveness
+/// cache, and other per-compilation global state, while preserving expensive
+/// stdlib caches.
+pub fn reset_test_isolation() {
+    verum_vbc::reset_global_value_tables();
+    verum_types::exhaustiveness::clear_global_cache();
 }

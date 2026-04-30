@@ -107,6 +107,8 @@ mod dispatch;
 mod impl_axioms;
 mod interpreter;
 mod macros;
+pub use macros::reset_test_isolation;
+use crate::pipeline::macros::MacroExpander;
 mod loading;
 mod mlir;
 mod native_codegen;
@@ -3150,6 +3152,19 @@ impl<'s> CompilationPipeline<'s> {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         checker.register_builtins();
 
+        // Apply `[protocols].coherence` from manifest.  Closes the
+        // inert-defense pattern at session.rs:587 — pre-fix the CLI
+        // build path bypassed the field entirely (it only flowed
+        // through `run_common_pipeline` from api.rs).  Now both
+        // entry points consume the manifest value and gate
+        // `register_impl`'s orphan-rule + overlap checks.
+        {
+            let coherence = &self.session.language_features().protocols.coherence;
+            checker.set_protocol_coherence_mode(
+                verum_types::protocol::CoherenceMode::from_manifest_str(coherence.as_str()),
+            );
+        }
+
         // Post-cycle-break (2026-04-24): `RefinementChecker` no longer
         // auto-constructs a Z3 backend. Install the concrete bridge from
         // `verum_smt` so refinement subsumption keeps working.
@@ -3853,6 +3868,22 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
             drop(methods_guard);
+        }
+
+        // Drain coherence violations downgraded to warnings under
+        // `[protocols].coherence = "lenient"`. Strict / unchecked
+        // modes leave this empty.  Surfacing as Warning-severity
+        // diagnostics keeps the user informed without blocking the
+        // build — closes the inert-defense pattern around the
+        // manifest field by making lenient mode observable.
+        for warning in checker.drain_protocol_coherence_warnings() {
+            let diag = DiagnosticBuilder::new(Severity::Warning)
+                .message(format!(
+                    "[protocols].coherence=lenient: {}",
+                    warning
+                ))
+                .build();
+            self.session.emit_diagnostic(diag);
         }
 
         // Store the type registry for later use by codegen
