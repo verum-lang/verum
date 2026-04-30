@@ -267,6 +267,70 @@ impl ItemKind {
             _ => None,
         }
     }
+
+    // -----------------------------------------------------------
+    // Type / Protocol unified accessors (#175)
+    // -----------------------------------------------------------
+
+    /// Whether this is a type-or-protocol declaration — either
+    /// `Type(TypeDecl)` (canonical unified form) or
+    /// `Protocol(ProtocolDecl)` (legacy standalone form).
+    /// Consumers building IDE outlines, doc generators, or
+    /// type-classification audits work uniformly across both.
+    pub fn is_type_or_protocol(&self) -> bool {
+        matches!(self, ItemKind::Type(_) | ItemKind::Protocol(_))
+    }
+
+    /// Project to the underlying `TypeDecl` (canonical unified form).
+    pub fn as_type_decl(&self) -> Option<&TypeDecl> {
+        if let ItemKind::Type(d) = self {
+            Some(d)
+        } else {
+            None
+        }
+    }
+
+    /// Project to the underlying `ProtocolDecl` (legacy standalone form).
+    pub fn as_protocol_decl(&self) -> Option<&ProtocolDecl> {
+        if let ItemKind::Protocol(d) = self {
+            Some(d)
+        } else {
+            None
+        }
+    }
+
+    /// **Uniform name accessor** for type / protocol items.  Returns
+    /// the declaration name regardless of which variant carries it.
+    /// `None` for non-type-or-protocol items.
+    pub fn type_or_protocol_name(&self) -> Option<&Ident> {
+        match self {
+            ItemKind::Type(d) => Some(&d.name),
+            ItemKind::Protocol(d) => Some(&d.name),
+            _ => None,
+        }
+    }
+
+    /// **Uniform classification** of any type-or-protocol item by
+    /// its body shape.
+    ///
+    /// - `ItemKind::Type(d)` returns `Some(d.body.kind())`.
+    /// - `ItemKind::Protocol(_)` returns `Some(TypeDeclBodyKind::Protocol)`
+    ///   (the legacy standalone form is semantically equivalent to a
+    ///   `type Foo is protocol { ... }` body).
+    /// - Other variants return `None`.
+    ///
+    /// This is the load-bearing accessor for code that walks
+    /// `Module.items` and classifies type declarations by shape
+    /// (record / variant / protocol / newtype / inductive / etc.) —
+    /// the architectural commitment of #175 expressed at the API
+    /// surface.
+    pub fn type_decl_body_kind(&self) -> Option<TypeDeclBodyKind> {
+        match self {
+            ItemKind::Type(d) => Some(d.body.kind()),
+            ItemKind::Protocol(_) => Some(TypeDeclBodyKind::Protocol),
+            _ => None,
+        }
+    }
 }
 
 /// A function declaration.
@@ -855,6 +919,84 @@ impl Spanned for TypeDecl {
     }
 }
 
+/// Payload-free **type-decl body discriminator**.  Surfaces the
+/// 11 type-decl shapes (Alias / Record / Variant / Protocol /
+/// Newtype / Tuple / SigmaTuple / Unit / Inductive / Coinductive /
+/// Quotient) as a single typed enum so consumers that classify
+/// type declarations by shape — audit gates, JSON exporters,
+/// doc generators, IDE outlines — work uniformly without
+/// pattern-matching against all 11 variants.
+///
+/// Stable serde tags (snake_case form of each variant name) make
+/// this safe for round-trip pipelines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeDeclBodyKind {
+    /// Type alias: `type X is Y;`.
+    Alias,
+    /// Record type: `type Point is { x: Float, y: Float }`.
+    Record,
+    /// Variant (sum) type: `type Option<T> is Some(T) | None`.
+    Variant,
+    /// Protocol type: `type Serializable is protocol { ... }`.
+    Protocol,
+    /// Newtype: `type UserId is Int`.
+    Newtype,
+    /// Tuple type: `type Pair<T> is (T, T)`.
+    Tuple,
+    /// Sigma / dependent tuple: `(n: Int, arr: [Int; n])`.
+    SigmaTuple,
+    /// Unit type: `type Unit;`.
+    Unit,
+    /// Inductive type: `type Nat is inductive { | Zero | Succ(Nat) }`.
+    Inductive,
+    /// Coinductive type: `type Stream<A> is coinductive { ... }`.
+    Coinductive,
+    /// Quotient type: `type Q is T / R`.
+    Quotient,
+}
+
+impl TypeDeclBodyKind {
+    /// Stable string tag — used by audit gates and JSON exporters.
+    pub fn tag(self) -> &'static str {
+        match self {
+            TypeDeclBodyKind::Alias => "alias",
+            TypeDeclBodyKind::Record => "record",
+            TypeDeclBodyKind::Variant => "variant",
+            TypeDeclBodyKind::Protocol => "protocol",
+            TypeDeclBodyKind::Newtype => "newtype",
+            TypeDeclBodyKind::Tuple => "tuple",
+            TypeDeclBodyKind::SigmaTuple => "sigma_tuple",
+            TypeDeclBodyKind::Unit => "unit",
+            TypeDeclBodyKind::Inductive => "inductive",
+            TypeDeclBodyKind::Coinductive => "coinductive",
+            TypeDeclBodyKind::Quotient => "quotient",
+        }
+    }
+
+    /// Whether this body shape introduces a protocol surface
+    /// (Protocol or Coinductive — both contain method signatures).
+    pub fn is_protocol_like(self) -> bool {
+        matches!(self, TypeDeclBodyKind::Protocol | TypeDeclBodyKind::Coinductive)
+    }
+
+    /// Whether this body shape is a sum type (Variant or Inductive).
+    pub fn is_sum_type(self) -> bool {
+        matches!(self, TypeDeclBodyKind::Variant | TypeDeclBodyKind::Inductive)
+    }
+
+    /// Whether this body shape is a product type (Record / Tuple /
+    /// SigmaTuple).
+    pub fn is_product_type(self) -> bool {
+        matches!(
+            self,
+            TypeDeclBodyKind::Record
+                | TypeDeclBodyKind::Tuple
+                | TypeDeclBodyKind::SigmaTuple
+        )
+    }
+}
+
 /// Type declaration body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeDeclBody {
@@ -924,6 +1066,83 @@ pub enum TypeDeclBody {
         base: Type,
         relation: Heap<Expr>,
     },
+}
+
+impl TypeDeclBody {
+    /// Project the discriminator without unpacking the payload.
+    /// Constant-time; used by audit gates, JSON exporters, doc
+    /// generators that classify by shape.
+    pub fn kind(&self) -> TypeDeclBodyKind {
+        match self {
+            TypeDeclBody::Alias(_) => TypeDeclBodyKind::Alias,
+            TypeDeclBody::Record(_) => TypeDeclBodyKind::Record,
+            TypeDeclBody::Variant(_) => TypeDeclBodyKind::Variant,
+            TypeDeclBody::Protocol(_) => TypeDeclBodyKind::Protocol,
+            TypeDeclBody::Newtype(_) => TypeDeclBodyKind::Newtype,
+            TypeDeclBody::Tuple(_) => TypeDeclBodyKind::Tuple,
+            TypeDeclBody::SigmaTuple(_) => TypeDeclBodyKind::SigmaTuple,
+            TypeDeclBody::Unit => TypeDeclBodyKind::Unit,
+            TypeDeclBody::Inductive(_) => TypeDeclBodyKind::Inductive,
+            TypeDeclBody::Coinductive(_) => TypeDeclBodyKind::Coinductive,
+            TypeDeclBody::Quotient { .. } => TypeDeclBodyKind::Quotient,
+        }
+    }
+
+    /// Whether this body is a protocol-like shape (Protocol or
+    /// Coinductive).
+    pub fn is_protocol_like(&self) -> bool {
+        self.kind().is_protocol_like()
+    }
+
+    /// Whether this body is a sum type (Variant or Inductive).
+    pub fn is_sum_type(&self) -> bool {
+        self.kind().is_sum_type()
+    }
+
+    /// Whether this body is a product type (Record / Tuple / SigmaTuple).
+    pub fn is_product_type(&self) -> bool {
+        self.kind().is_product_type()
+    }
+
+    /// Whether this is the `Protocol` variant specifically.
+    pub fn is_protocol(&self) -> bool {
+        matches!(self, TypeDeclBody::Protocol(_))
+    }
+
+    /// Whether this is the `Record` variant specifically.
+    pub fn is_record(&self) -> bool {
+        matches!(self, TypeDeclBody::Record(_))
+    }
+
+    /// Whether this is the `Variant` (sum-type) variant specifically.
+    pub fn is_variant(&self) -> bool {
+        matches!(self, TypeDeclBody::Variant(_))
+    }
+
+    /// Whether this is the `Newtype` variant specifically.
+    pub fn is_newtype(&self) -> bool {
+        matches!(self, TypeDeclBody::Newtype(_))
+    }
+
+    /// Whether this is the `Alias` variant specifically.
+    pub fn is_alias(&self) -> bool {
+        matches!(self, TypeDeclBody::Alias(_))
+    }
+
+    /// Whether this is an inductive type.
+    pub fn is_inductive(&self) -> bool {
+        matches!(self, TypeDeclBody::Inductive(_))
+    }
+
+    /// Whether this is a coinductive type.
+    pub fn is_coinductive(&self) -> bool {
+        matches!(self, TypeDeclBody::Coinductive(_))
+    }
+
+    /// Whether this is a quotient type.
+    pub fn is_quotient(&self) -> bool {
+        matches!(self, TypeDeclBody::Quotient { .. })
+    }
 }
 
 /// Protocol body containing optional extends clause, where clause, and items.
@@ -3551,5 +3770,109 @@ mod proof_item_kind_tests {
         .map(|k| k.tag())
         .collect();
         assert_eq!(tags.len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod type_decl_body_kind_tests {
+    use super::*;
+
+    #[test]
+    fn type_decl_body_kind_classifies_each_variant() {
+        let t = crate::ty::Type {
+            kind: crate::ty::TypeKind::Bool,
+            span: Span::dummy(),
+        };
+        assert_eq!(TypeDeclBody::Alias(t.clone()).kind(), TypeDeclBodyKind::Alias);
+        assert_eq!(TypeDeclBody::Record(List::new()).kind(), TypeDeclBodyKind::Record);
+        assert_eq!(TypeDeclBody::Variant(List::new()).kind(), TypeDeclBodyKind::Variant);
+        assert_eq!(TypeDeclBody::Newtype(t.clone()).kind(), TypeDeclBodyKind::Newtype);
+        assert_eq!(TypeDeclBody::Tuple(List::new()).kind(), TypeDeclBodyKind::Tuple);
+        assert_eq!(TypeDeclBody::SigmaTuple(List::new()).kind(), TypeDeclBodyKind::SigmaTuple);
+        assert_eq!(TypeDeclBody::Unit.kind(), TypeDeclBodyKind::Unit);
+        assert_eq!(TypeDeclBody::Inductive(List::new()).kind(), TypeDeclBodyKind::Inductive);
+    }
+
+    #[test]
+    fn type_decl_body_kind_predicates_match() {
+        let alias = TypeDeclBody::Alias(crate::ty::Type {
+            kind: crate::ty::TypeKind::Bool,
+            span: Span::dummy(),
+        });
+        assert!(alias.is_alias());
+        assert!(!alias.is_record());
+
+        let record = TypeDeclBody::Record(List::new());
+        assert!(record.is_record());
+        assert!(!record.is_variant());
+        assert!(record.is_product_type());
+
+        let variant = TypeDeclBody::Variant(List::new());
+        assert!(variant.is_variant());
+        assert!(variant.is_sum_type());
+
+        let inductive = TypeDeclBody::Inductive(List::new());
+        assert!(inductive.is_inductive());
+        assert!(inductive.is_sum_type());
+
+        let unit = TypeDeclBody::Unit;
+        assert!(!unit.is_record());
+        assert!(!unit.is_protocol_like());
+    }
+
+    #[test]
+    fn type_decl_body_kind_tags_are_distinct() {
+        let kinds = [
+            TypeDeclBodyKind::Alias,
+            TypeDeclBodyKind::Record,
+            TypeDeclBodyKind::Variant,
+            TypeDeclBodyKind::Protocol,
+            TypeDeclBodyKind::Newtype,
+            TypeDeclBodyKind::Tuple,
+            TypeDeclBodyKind::SigmaTuple,
+            TypeDeclBodyKind::Unit,
+            TypeDeclBodyKind::Inductive,
+            TypeDeclBodyKind::Coinductive,
+            TypeDeclBodyKind::Quotient,
+        ];
+        let tags: std::collections::BTreeSet<_> = kinds.iter().map(|k| k.tag()).collect();
+        assert_eq!(tags.len(), 11, "all 11 variants must have distinct tags");
+    }
+
+    #[test]
+    fn type_decl_body_kind_serde_round_trip() {
+        for kind in [
+            TypeDeclBodyKind::Alias,
+            TypeDeclBodyKind::Record,
+            TypeDeclBodyKind::Variant,
+            TypeDeclBodyKind::Protocol,
+            TypeDeclBodyKind::Newtype,
+            TypeDeclBodyKind::Tuple,
+            TypeDeclBodyKind::SigmaTuple,
+            TypeDeclBodyKind::Unit,
+            TypeDeclBodyKind::Inductive,
+            TypeDeclBodyKind::Coinductive,
+            TypeDeclBodyKind::Quotient,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let restored: TypeDeclBodyKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, kind);
+        }
+    }
+
+    #[test]
+    fn classification_helpers_match_expected_variants() {
+        assert!(TypeDeclBodyKind::Protocol.is_protocol_like());
+        assert!(TypeDeclBodyKind::Coinductive.is_protocol_like());
+        assert!(!TypeDeclBodyKind::Record.is_protocol_like());
+
+        assert!(TypeDeclBodyKind::Variant.is_sum_type());
+        assert!(TypeDeclBodyKind::Inductive.is_sum_type());
+        assert!(!TypeDeclBodyKind::Record.is_sum_type());
+
+        assert!(TypeDeclBodyKind::Record.is_product_type());
+        assert!(TypeDeclBodyKind::Tuple.is_product_type());
+        assert!(TypeDeclBodyKind::SigmaTuple.is_product_type());
+        assert!(!TypeDeclBodyKind::Protocol.is_product_type());
     }
 }
