@@ -398,6 +398,15 @@ pub struct TypeChecker {
     instance_search_enabled: bool,
     /// Maximum coherence-check depth (`[types] coherence_check_depth`).
     coherence_check_depth: u32,
+    /// Whether protocols may declare HKT generic parameters
+    /// (e.g. `protocol Functor<F<_>> { ... }`). Controlled by
+    /// `[protocols].higher_kinded_protocols` in Verum.toml.
+    /// Default `false` — must be explicitly enabled in the
+    /// manifest. Pre-condition: `[types].higher_kinded` must also
+    /// be true (enforced at manifest validation time, see
+    /// `LanguageFeatures::validate` at language_features.rs:412).
+    /// Closes the inert-defense pattern at session.rs:590.
+    higher_kinded_protocols_enabled: bool,
     /// Name resolver for cross-module resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Name resolution across modules
     pub(crate) module_resolver: NameResolver,
@@ -1030,6 +1039,7 @@ impl TypeChecker {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            higher_kinded_protocols_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -1215,6 +1225,7 @@ impl TypeChecker {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            higher_kinded_protocols_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -1842,6 +1853,7 @@ impl TypeChecker {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            higher_kinded_protocols_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: registry,
             current_module_path: verum_common::Text::from("cog"),
@@ -1958,6 +1970,7 @@ impl TypeChecker {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            higher_kinded_protocols_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -2075,6 +2088,7 @@ impl TypeChecker {
             quotient_enabled: true,
             instance_search_enabled: true,
             coherence_check_depth: 16,
+            higher_kinded_protocols_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -6520,6 +6534,24 @@ impl TypeChecker {
 
     pub fn set_higher_kinded_enabled(&mut self, enabled: bool) {
         self.higher_kinded_enabled = enabled;
+    }
+
+    /// Apply `[protocols].higher_kinded_protocols` to the type
+    /// checker. When false (the default), protocol declarations
+    /// that include an HKT generic parameter (e.g. `protocol
+    /// Functor<F<_>>`) are rejected at registration time with
+    /// `TypeError::Other` citing the manifest field.
+    ///
+    /// Manifest validation enforces that this field can be true
+    /// only when `[types].higher_kinded` is also true.
+    pub fn set_higher_kinded_protocols_enabled(&mut self, enabled: bool) {
+        self.higher_kinded_protocols_enabled = enabled;
+    }
+
+    /// Read-only accessor — exposed for diagnostics + tests.
+    #[inline]
+    pub fn higher_kinded_protocols_enabled(&self) -> bool {
+        self.higher_kinded_protocols_enabled
     }
 
     pub fn set_universe_poly_enabled(&mut self, enabled: bool) {
@@ -51408,6 +51440,37 @@ impl TypeChecker {
     fn register_protocol_decl_item(&mut self, proto_decl: &verum_ast::ProtocolDecl) -> Result<()> {
         let type_name: verum_common::Text = proto_decl.name.name.as_str().into();
 
+        // Manifest-driven gate for HKT-bearing protocol declarations.
+        // When `[protocols].higher_kinded_protocols = false` (the
+        // default) a protocol that declares any `GenericParamKind::
+        // HigherKinded` parameter (e.g. `protocol Functor<F<_>>`)
+        // is rejected with a manifest-citing diagnostic.  Closes the
+        // inert-defense pattern at session.rs:590 — pre-fix the
+        // resolver always accepted HKT protocols regardless of
+        // manifest.
+        //
+        // Manifest validation also enforces that this flag can only
+        // be true when `[types].higher_kinded = true`, so a
+        // user-set HKT protocol path always reaches a fully-enabled
+        // HKT pipeline.
+        if !self.higher_kinded_protocols_enabled {
+            for generic in proto_decl.generics.iter() {
+                if let verum_ast::ty::GenericParamKind::HigherKinded { name, arity, .. } = &generic.kind {
+                    let placeholders = (0..*arity).map(|_| "_").collect::<Vec<_>>().join(",");
+                    return Err(TypeError::Other(verum_common::Text::from(format!(
+                        "[protocols].higher_kinded_protocols = false rejects \
+                         higher-kinded type parameter `{}<{}>` on protocol \
+                         `{}`. Set [protocols].higher_kinded_protocols = true \
+                         in Verum.toml to enable HKT protocol declarations \
+                         (also requires [types].higher_kinded = true).",
+                        name.name.as_str(),
+                        placeholders,
+                        type_name.as_str(),
+                    ))));
+                }
+            }
+        }
+
         // Register type name
         self.ctx.define_type(type_name.clone(), Type::Named {
             path: verum_ast::ty::Path::single(proto_decl.name.clone()),
@@ -56819,6 +56882,170 @@ mod mount_cycle_tests {
         assert!(
             result.is_none(),
             "self-referential mount should resolve to None (was: {:?})",
+            result
+        );
+    }
+
+    // ============================================================
+    // [protocols].higher_kinded_protocols wire-up pins (task #264).
+    // ============================================================
+
+    #[test]
+    fn hkt_protocols_default_is_disabled() {
+        // Pin: documented Verum.toml default — HKT-bearing protocol
+        // declarations are rejected unless the user explicitly opts
+        // in via `[protocols].higher_kinded_protocols = true`.
+        let checker = TypeChecker::new();
+        assert!(!checker.higher_kinded_protocols_enabled(),
+            "default must be false");
+    }
+
+    #[test]
+    fn hkt_protocols_setter_round_trips() {
+        let mut checker = TypeChecker::new();
+        checker.set_higher_kinded_protocols_enabled(true);
+        assert!(checker.higher_kinded_protocols_enabled());
+        checker.set_higher_kinded_protocols_enabled(false);
+        assert!(!checker.higher_kinded_protocols_enabled());
+        // Idempotent.
+        checker.set_higher_kinded_protocols_enabled(false);
+        assert!(!checker.higher_kinded_protocols_enabled());
+    }
+
+    #[test]
+    fn hkt_protocols_disabled_rejects_higher_kinded_param() {
+        // Pin: when [protocols].higher_kinded_protocols is false, a
+        // protocol declaring an HKT generic parameter is rejected at
+        // registration time with TypeError::Other citing the manifest.
+        use verum_ast::ty::{GenericParam, GenericParamKind, Ident};
+        use verum_ast::decl::{ProtocolDecl, Visibility};
+        use verum_common::Maybe as VMaybe;
+
+        let mut checker = TypeChecker::new();
+        // Default false → reject.
+        assert!(!checker.higher_kinded_protocols_enabled());
+
+        let proto_decl = ProtocolDecl {
+            visibility: Visibility::Internal,
+            name: Ident::new("Functor", Span::default()),
+            generics: verum_common::List::from(vec![GenericParam {
+                kind: GenericParamKind::HigherKinded {
+                    name: Ident::new("F", Span::default()),
+                    arity: 1,
+                    bounds: verum_common::List::new(),
+                },
+                is_implicit: false,
+                span: Span::default(),
+            }]),
+            bounds: verum_common::List::new(),
+            items: verum_common::List::new(),
+            generic_where_clause: VMaybe::None,
+            meta_where_clause: VMaybe::None,
+            span: Span::default(),
+            is_context: false,
+        };
+
+        let result = checker.register_protocol_decl_item(&proto_decl);
+        match result {
+            Err(TypeError::Other(msg)) => {
+                assert!(
+                    msg.as_str().contains("higher_kinded_protocols"),
+                    "rejection must cite the manifest field; got: {}",
+                    msg
+                );
+                assert!(
+                    msg.as_str().contains("Functor"),
+                    "rejection must name the protocol; got: {}",
+                    msg
+                );
+                assert!(
+                    msg.as_str().contains("F<"),
+                    "rejection must show the HKT param syntax; got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected TypeError::Other, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hkt_protocols_enabled_accepts_higher_kinded_param() {
+        // Pin: with [protocols].higher_kinded_protocols = true (and
+        // [types].higher_kinded already implicit at the manifest
+        // validation layer), HKT-bearing protocol declarations
+        // register successfully.
+        use verum_ast::ty::{GenericParam, GenericParamKind, Ident};
+        use verum_ast::decl::{ProtocolDecl, Visibility};
+        use verum_common::Maybe as VMaybe;
+
+        let mut checker = TypeChecker::new();
+        checker.set_higher_kinded_protocols_enabled(true);
+
+        let proto_decl = ProtocolDecl {
+            visibility: Visibility::Internal,
+            name: Ident::new("Functor", Span::default()),
+            generics: verum_common::List::from(vec![GenericParam {
+                kind: GenericParamKind::HigherKinded {
+                    name: Ident::new("F", Span::default()),
+                    arity: 1,
+                    bounds: verum_common::List::new(),
+                },
+                is_implicit: false,
+                span: Span::default(),
+            }]),
+            bounds: verum_common::List::new(),
+            items: verum_common::List::new(),
+            generic_where_clause: VMaybe::None,
+            meta_where_clause: VMaybe::None,
+            span: Span::default(),
+            is_context: false,
+        };
+
+        let result = checker.register_protocol_decl_item(&proto_decl);
+        assert!(
+            result.is_ok(),
+            "with hkt protocols enabled, registration must succeed; got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn hkt_protocols_disabled_accepts_regular_protocol() {
+        // Pin: the gate ONLY rejects HigherKinded params.  Regular
+        // type params (`protocol Eq<T>`) register fine even when
+        // the HKT flag is false.  No false positives.
+        use verum_ast::ty::{GenericParam, GenericParamKind, Ident};
+        use verum_ast::decl::{ProtocolDecl, Visibility};
+        use verum_common::Maybe as VMaybe;
+
+        let mut checker = TypeChecker::new();
+        // Default false.
+        assert!(!checker.higher_kinded_protocols_enabled());
+
+        let proto_decl = ProtocolDecl {
+            visibility: Visibility::Internal,
+            name: Ident::new("Eq", Span::default()),
+            generics: verum_common::List::from(vec![GenericParam {
+                kind: GenericParamKind::Type {
+                    name: Ident::new("T", Span::default()),
+                    bounds: verum_common::List::new(),
+                    default: VMaybe::None,
+                },
+                is_implicit: false,
+                span: Span::default(),
+            }]),
+            bounds: verum_common::List::new(),
+            items: verum_common::List::new(),
+            generic_where_clause: VMaybe::None,
+            meta_where_clause: VMaybe::None,
+            span: Span::default(),
+            is_context: false,
+        };
+
+        let result = checker.register_protocol_decl_item(&proto_decl);
+        assert!(
+            result.is_ok(),
+            "regular type-param protocol must register even with hkt disabled; got {:?}",
             result
         );
     }
