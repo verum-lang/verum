@@ -54,7 +54,7 @@ mount core.shell.context.{ShellContext, MockResponse, PermissionSet};
 /// caller and the kernel exec.
 public async fn run(program: &Text, args: List<Text>)
     -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
 
@@ -117,7 +117,7 @@ public async fn run(program: &Text, args: List<Text>)
 ///
 /// Returns a `ShellResult` regardless of exit status; call `.ok()?` on
 /// the result to convert non-zero exits into `Err`.
-public async fn sh(cmd_text: &Text) -> ShellResult using [ShellContext] {
+public async fn sh(cmd_text: &Text) -> ShellResult {
     match sh_check(cmd_text).await {
         Ok(r)  => r,
         Err(e) => ShellResult.from_error(e),
@@ -128,7 +128,7 @@ public async fn sh(cmd_text: &Text) -> ShellResult using [ShellContext] {
 /// operator works at the call site without an extra `.ok()`.
 public async fn sh_check(cmd_text: &Text)
     -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
 
@@ -196,7 +196,7 @@ public async fn run_with_cancel(
     token: &CancellationToken,
     grace: Duration,
 ) -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     ctx.permissions.check_run(program)?;
@@ -265,7 +265,7 @@ public async fn sh_with_cancel(
     token: &CancellationToken,
     grace: Duration,
 ) -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();

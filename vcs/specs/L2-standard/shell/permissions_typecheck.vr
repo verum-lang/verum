@@ -40,9 +40,7 @@ fn exercise_env_check() {
 }
 
 fn exercise_frontmatter_parse() {
-    let source = "// !@permission(run: [\"git\", \"kubectl\"])\n\
-                  // !@permission(fs_read: [\"/etc/*\"])\n\
-                  fn main() { }".into();
+    let source: Text = "// !@permission(run: [\"git\", \"kubectl\"])\n// !@permission(fs_read: [\"/etc/*\"])\nfn main() { }".into();
     let _: Result<PermissionSet, ShellError> = parse_frontmatter(&source);
 
     let no_frontmatter = "fn main() {}".into();

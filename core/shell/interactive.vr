@@ -149,7 +149,7 @@ public fn select<T: Clone>(prompt: &Text, options: &[(Text, T)]) -> T {
     }
     loop {
         let raw = input(&"Choice: ".into());
-        match raw.parse::<Int>() {
+        match raw.parse_int() {
             Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
                 return options[(n - 1) as usize].1.clone(),
             _ => println(&"Invalid choice, try again.".into()),
@@ -169,7 +169,7 @@ public fn multi_select(prompt: &Text, options: &[Text]) -> List<Int> {
     if raw.is_empty() { return chosen; }
     for token in raw.split(",") {
         let t: Text = token.trim().into();
-        match t.parse::<Int>() {
+        match t.parse_int() {
             Ok(n) if n >= 1 && (n as Int) <= options.len() as Int =>
                 chosen.push(n - 1),
             _ => {},  // silently skip unparseable

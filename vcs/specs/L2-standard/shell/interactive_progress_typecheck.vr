@@ -26,7 +26,7 @@ fn exercise_input_signatures() {
     let _: Bool = confirm(&"continue?".into());
     let _: Bool = confirm_default_yes(&"continue?".into());
     let _: Text = input_validated(&"age: ".into(), |s: &Text| {
-        s.parse::<Int>().map(|n| f"{n}").map_err(|_| "not a number".into())
+        s.parse_int().map(|n| f"{n}").map_err(|_| "not a number".into())
     });
 }
 
@@ -48,7 +48,7 @@ fn exercise_progress() {
     p.done("ok".into());
 }
 
-async fn exercise_spinner() using [ShellContext] {
+async fn exercise_spinner() {
     let mut s = Spinner.new("Working".into());
     s.start().await;
     s.stop("done".into()).await;
@@ -63,7 +63,7 @@ fn exercise_signal() {
     let _: Result<SignalGuard, SignalError> = SignalGuard.install(Signal.Int, || {});
 }
 
-async fn main() using [ShellContext] {
+async fn main() {
     exercise_input_signatures();
     exercise_select();
     exercise_progress();

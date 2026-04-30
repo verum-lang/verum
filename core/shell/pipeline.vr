@@ -125,7 +125,7 @@ implement<A, B> Pipeline<A, B> {
     /// are connected via kernel pipes; transducer stages are applied to
     /// the captured stdout of the most recent command.
     public async fn run(&self) -> Result<ShellResult, ShellError>
-        using [ShellContext]
+
     {
         let ctx = ShellContext.default();
         if self.stages.is_empty() {

@@ -26,7 +26,7 @@ implement DockerImage {
     /// `[registry/]name[:tag][@digest]` — relaxed but rejects unmistakable
     /// shell-metacharacters.
     public fn parse(s: Text) -> Result<DockerImage, ShellError> {
-        let r = Regex.compile(r"^[a-z0-9]([a-z0-9._\-/])*(:[a-zA-Z0-9._\-]+)?(@sha256:[a-f0-9]{64})?$").unwrap();
+        let r = Regex.new("""^[a-z0-9]([a-z0-9._\\-/])*(:[a-zA-Z0-9._\\-]+)?(@sha256:[a-f0-9]{64})?$""").unwrap();
         if r.is_match(&s) {
             Ok(DockerImage(s))
         } else {
@@ -47,7 +47,7 @@ public type DockerTag is (Text);
 
 implement DockerTag {
     public fn parse(s: Text) -> Result<DockerTag, ShellError> {
-        let r = Regex.compile(r"^[a-zA-Z0-9._\-]{1,128}$").unwrap();
+        let r = Regex.new("""^[a-zA-Z0-9._\\-]{1,128}$""").unwrap();
         if r.is_match(&s) { Ok(DockerTag(s)) }
         else { Err(ShellError.SpawnFailed {
             command: "<DockerTag::parse>".into(),
@@ -218,7 +218,7 @@ fn quote_join(args: &List<Text>, flav: ShellFlavour) -> Text {
 // =============================================================================
 
 public async fn docker(cmd: DockerCmd) -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let line = cmd.render();
     sh_check(&line).await

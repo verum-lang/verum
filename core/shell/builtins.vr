@@ -151,7 +151,7 @@ public fn append(path: &Path, content: &[Byte]) -> Result<(), ShellError> {
 // Filesystem queries
 // =============================================================================
 
-public fn exists(path: &Path) -> Bool {
+public fn path_exists(path: &Path) -> Bool {
     fs_metadata(path).is_ok()
 }
 
@@ -170,7 +170,7 @@ public fn which(program: &Text) -> Maybe<PathBuf> {
         Some(p) => p,
         None    => return None,
     };
-    let separator: Char = @cfg(target_os = "windows") { ';' } @cfg(any(target_os = "linux", target_os = "macos")) { ':' };
+    let separator: Char = path_separator();
     for entry in path_var.split(separator) {
         let mut candidate = PathBuf.from(entry);
         candidate.push(&PathBuf.from(program));
@@ -206,3 +206,9 @@ public fn temp_dir() -> PathBuf {
 public fn temp_file() -> Result<core.shell.resources.TempFile, ShellError> {
     core.shell.resources.TempFile.new()
 }
+
+@cfg(target_os = "windows")
+fn path_separator() -> Char { ';' }
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn path_separator() -> Char { ':' }

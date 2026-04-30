@@ -206,9 +206,9 @@ public fn native_spawn(
 
         // ── Parent path ─────────────────────────────────────────────
         // Close child-only pipe ends; keep parent ends.
-        if capture_stdin  { let _ = sys_close(FileDesc::from_raw(stdin_pipe[0])); }
-        if capture_stdout { let _ = sys_close(FileDesc::from_raw(stdout_pipe[1])); }
-        if capture_stderr { let _ = sys_close(FileDesc::from_raw(stderr_pipe[1])); }
+        if capture_stdin  { let _ = sys_close(FileDesc.from_raw(stdin_pipe[0])); }
+        if capture_stdout { let _ = sys_close(FileDesc.from_raw(stdout_pipe[1])); }
+        if capture_stderr { let _ = sys_close(FileDesc.from_raw(stderr_pipe[1])); }
 
         // The parent's `blob` lives until function return — its drop
         // happens AFTER we have observed the spawn success. The child's
@@ -271,19 +271,19 @@ fn child_setup_stdio(
     // STDIN_FILENO = 0, STDOUT_FILENO = 1, STDERR_FILENO = 2.
     // Each dup2/close is a single syscall — async-signal-safe.
     if stdin_pipe[0] >= 0 {
-        let _ = sys_dup2(FileDesc::from_raw(stdin_pipe[0]), FileDesc::from_raw(0 as Int32));
-        let _ = sys_close(FileDesc::from_raw(stdin_pipe[0]));
-        let _ = sys_close(FileDesc::from_raw(stdin_pipe[1]));
+        let _ = sys_dup2(FileDesc.from_raw(stdin_pipe[0]), FileDesc.from_raw(0 as Int32));
+        let _ = sys_close(FileDesc.from_raw(stdin_pipe[0]));
+        let _ = sys_close(FileDesc.from_raw(stdin_pipe[1]));
     }
     if stdout_pipe[1] >= 0 {
-        let _ = sys_dup2(FileDesc::from_raw(stdout_pipe[1]), FileDesc::from_raw(1 as Int32));
-        let _ = sys_close(FileDesc::from_raw(stdout_pipe[0]));
-        let _ = sys_close(FileDesc::from_raw(stdout_pipe[1]));
+        let _ = sys_dup2(FileDesc.from_raw(stdout_pipe[1]), FileDesc.from_raw(1 as Int32));
+        let _ = sys_close(FileDesc.from_raw(stdout_pipe[0]));
+        let _ = sys_close(FileDesc.from_raw(stdout_pipe[1]));
     }
     if stderr_pipe[1] >= 0 {
-        let _ = sys_dup2(FileDesc::from_raw(stderr_pipe[1]), FileDesc::from_raw(2 as Int32));
-        let _ = sys_close(FileDesc::from_raw(stderr_pipe[0]));
-        let _ = sys_close(FileDesc::from_raw(stderr_pipe[1]));
+        let _ = sys_dup2(FileDesc.from_raw(stderr_pipe[1]), FileDesc.from_raw(2 as Int32));
+        let _ = sys_close(FileDesc.from_raw(stderr_pipe[0]));
+        let _ = sys_close(FileDesc.from_raw(stderr_pipe[1]));
     }
 }
 
@@ -299,8 +299,8 @@ fn child_exit(code: Int) -> ! {
 
 @cfg(any(target_os = "linux", target_os = "macos"))
 fn close_pipe(p: &[Int32; 2]) {
-    if p[0] >= 0 { let _ = sys_close(FileDesc::from_raw(p[0])); }
-    if p[1] >= 0 { let _ = sys_close(FileDesc::from_raw(p[1])); }
+    if p[0] >= 0 { let _ = sys_close(FileDesc.from_raw(p[0])); }
+    if p[1] >= 0 { let _ = sys_close(FileDesc.from_raw(p[1])); }
 }
 
 // =============================================================================
@@ -356,7 +356,7 @@ public fn native_fd_write_all(fd: Int, data: &[Byte]) -> Result<Int, Text> {
         let total_len = data.len() as Int;
         while total < total_len {
             let remaining: &[Byte] = &data[total as usize..];
-            let r = sys_write(FileDesc::from_raw(fd as Int32), remaining);
+            let r = sys_write(FileDesc.from_raw(fd as Int32), remaining);
             match r {
                 Ok(n) => {
                     if n == 0 { return Err("write returned 0".into()); }
@@ -384,7 +384,7 @@ public fn native_fd_read_chunk(fd: Int, max: Int) -> Result<List<Byte>, Text> {
         let mut buf: List<Byte> = List.with_capacity(max as usize);
         let mut i: Int = 0;
         while i < max { buf.push(0); i = i + 1; }
-        let r = sys_read(FileDesc::from_raw(fd as Int32), &mut buf);
+        let r = sys_read(FileDesc.from_raw(fd as Int32), &mut buf);
         match r {
             Ok(n)  => {
                 buf.truncate(n as usize);

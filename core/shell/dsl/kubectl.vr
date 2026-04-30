@@ -89,7 +89,7 @@ implement KubeResource for Namespace {
 public type KubeName is (Text);
 implement KubeName {
     public fn parse(s: Text) -> Result<KubeName, ShellError> {
-        let r = Regex.compile(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$").unwrap();
+        let r = Regex.new("""^[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?$""").unwrap();
         if r.is_match(&s) { Ok(KubeName(s)) }
         else { Err(ShellError.SpawnFailed {
             command: "<KubeName::parse>".into(),
@@ -102,7 +102,7 @@ implement KubeName {
 public type KubeNamespace is (Text);
 implement KubeNamespace {
     public fn parse(s: Text) -> Result<KubeNamespace, ShellError> {
-        let r = Regex.compile(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$").unwrap();
+        let r = Regex.new("""^[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?$""").unwrap();
         if r.is_match(&s) { Ok(KubeNamespace(s)) }
         else { Err(ShellError.SpawnFailed {
             command: "<KubeNamespace::parse>".into(),
@@ -246,7 +246,7 @@ fn quote_join(args: &List<Text>, flav: ShellFlavour) -> Text {
 
 public async fn kubectl<R: KubeResource>(cmd: KubectlCmd<R>)
     -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let line = cmd.render();
     sh_check(&line).await

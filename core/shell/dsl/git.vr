@@ -41,7 +41,7 @@ implement GitUrl {
     public fn parse(s: Text) -> Result<GitUrl, ShellError> {
         // Allow http(s)://…, git://…, ssh://…, git@host:path[.git], and
         // local paths starting with /.
-        let r = Regex.compile(r"^((https?|git|ssh)://.+|git@[\w.-]+:.+|/.+)$").unwrap();
+        let r = Regex.new("""^((https?|git|ssh)://.+|git@[\\w.-]+:.+|/.+)$""").unwrap();
         if r.is_match(&s) {
             Ok(GitUrl(s))
         } else {
@@ -65,7 +65,7 @@ public type GitRefspec is (Text);
 
 implement GitRefspec {
     public fn parse(s: Text) -> Result<GitRefspec, ShellError> {
-        let r = Regex.compile(r"^[+]?[a-zA-Z0-9_/.\-]+(?::[a-zA-Z0-9_/.\-]+)?$").unwrap();
+        let r = Regex.new("""^[+]?[a-zA-Z0-9_/.\\-]+(?::[a-zA-Z0-9_/.\\-]+)?$""").unwrap();
         if r.is_match(&s) {
             Ok(GitRefspec(s))
         } else {
@@ -89,7 +89,7 @@ public type GitBranch is (Text);
 
 implement GitBranch {
     public fn parse(s: Text) -> Result<GitBranch, ShellError> {
-        let r = Regex.compile(r"^[a-zA-Z0-9_./\-]+$").unwrap();
+        let r = Regex.new("""^[a-zA-Z0-9_./\\-]+$""").unwrap();
         if r.is_match(&s) && !s.starts_with("-") {
             Ok(GitBranch(s))
         } else {
@@ -344,7 +344,7 @@ fn quote_join(args: &List<Text>, flav: core.shell.escape.ShellFlavour) -> Text {
 // =============================================================================
 
 public async fn git(cmd: GitCmd) -> Result<ShellResult, ShellError>
-    using [ShellContext]
+
 {
     let line = cmd.render();
     sh_check(&line).await

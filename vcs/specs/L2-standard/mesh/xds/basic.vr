@@ -144,7 +144,7 @@ fn typecheck_route_matches() -> List<RouteMatch> {
     let mut xs: List<RouteMatch> = List.new();
     xs.push(RouteMatch.Prefix("/api".into()));
     xs.push(RouteMatch.Path("/healthz".into()));
-    xs.push(RouteMatch.Regex("^/v[0-9]+".into()));
+    xs.push(RouteMatch.RegexMatch("^/v[0-9]+".into()));
     xs.push(RouteMatch.Connect);
     xs
 }

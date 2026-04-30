@@ -129,7 +129,7 @@ public type Route is {
 public type RouteMatch is
     | Prefix(Text)
     | Path(Text)
-    | Regex(Text)
+    | RegexMatch(Text)
     | Connect;
 
 public type RouteAction is

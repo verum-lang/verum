@@ -55,7 +55,7 @@ public type JobHandle is {
 
 implement JobHandle {
     /// Awaits the job to completion. Returns the typed result or error.
-    public async fn await(self) -> Result<ShellResult, ShellError> {
+    public async fn wait(self) -> Result<ShellResult, ShellError> {
         match self.inner.join().await {
             Ok(r)  => r,
             Err(e) => Err(ShellError.SpawnFailed {
@@ -73,7 +73,7 @@ implement JobHandle {
     /// Returns the eventual result (typically `Err(Cancelled)`).
     public async fn kill(self) -> Result<ShellResult, ShellError> {
         self.cancel.cancel_with(CancelReason.Cancelled);
-        self.await().await
+        self.wait().await
     }
 
     /// True if the underlying task has resolved.
@@ -89,14 +89,14 @@ implement JobHandle {
 
 /// Spawns a shell command and returns a `JobHandle`. The handle must be
 /// `await()`ed (or `kill()`ed) eventually — `JobHandle` is `@must_consume`.
-public fn background(cmd_text: &Text) -> JobHandle using [ShellContext] {
+public fn background(cmd_text: &Text) -> JobHandle {
     background_with_grace(cmd_text, Duration.from_millis(5000))
 }
 
 /// Variant that lets the caller pick the SIGTERM→SIGKILL grace window.
 public fn background_with_grace(cmd_text: &Text, grace: Duration)
     -> JobHandle
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     let cmd = cmd_text.clone();
@@ -128,7 +128,7 @@ public async fn wait_all(jobs: List<JobHandle>)
 {
     let mut out: List<Result<ShellResult, ShellError>> = [];
     for job in jobs.into_iter() {
-        out.push(job.await().await);
+        out.push(job.wait().await);
     }
     out
 }
@@ -138,7 +138,7 @@ public async fn wait_all(jobs: List<JobHandle>)
 /// outcome per input.
 public async fn parallel(cmds: List<Text>)
     -> List<Result<ShellResult, ShellError>>
-    using [ShellContext]
+
 {
     let mut jobs: List<JobHandle> = [];
     for cmd in cmds.iter() { jobs.push(background(cmd)); }
@@ -149,7 +149,7 @@ public async fn parallel(cmds: List<Text>)
 /// Useful to avoid file-descriptor or server-load explosions.
 public async fn parallel_bounded(cmds: List<Text>, max_in_flight: Int)
     -> List<Result<ShellResult, ShellError>>
-    using [ShellContext]
+
 {
     if max_in_flight <= 0 {
         return parallel(cmds).await;
@@ -161,11 +161,11 @@ public async fn parallel_bounded(cmds: List<Text>, max_in_flight: Int)
         if buffer.len() as Int >= max_in_flight {
             // Drain one slot before queuing more
             let head = buffer.remove(0);
-            out.push(head.await().await);
+            out.push(head.wait().await);
         }
     }
     for job in buffer.into_iter() {
-        out.push(job.await().await);
+        out.push(job.wait().await);
     }
     out
 }
@@ -180,7 +180,7 @@ public async fn parallel_bounded(cmds: List<Text>, max_in_flight: Int)
 ///   * `Err(ShellError)` otherwise (the first error encountered)
 public async fn fail_fast(cmds: List<Text>)
     -> Result<List<ShellResult>, ShellError>
-    using [ShellContext]
+
 {
     let mut jobs: List<JobHandle> = [];
     for cmd in cmds.iter() { jobs.push(background(cmd)); }
@@ -191,7 +191,7 @@ public async fn fail_fast(cmds: List<Text>)
     ))); }
     let mut error: Maybe<ShellError> = None;
     for (i, job) in jobs.into_iter().enumerate() {
-        match job.await().await {
+        match job.wait().await {
             Ok(r)  => { results[i] = Ok(r); },
             Err(e) => {
                 if error.is_none() { error = Some(e.clone()); }
@@ -219,7 +219,7 @@ public async fn fanout(
     cmds: List<Text>,
     policy: NurseryErrorBehavior,
 ) -> Result<List<Result<ShellResult, ShellError>>, ShellError>
-    using [ShellContext]
+
 {
     let opts = NurseryOptions { error_behavior: policy, ..NurseryOptions.default() };
     let outcome = with_nursery(opts, |nursery| {
