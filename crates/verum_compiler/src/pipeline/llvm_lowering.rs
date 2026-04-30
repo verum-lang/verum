@@ -25,10 +25,15 @@ use anyhow::Result;
 use tracing::{debug, info};
 
 use verum_ast::Module;
-use verum_codegen::llvm::LoweringStats as LlvmLoweringStats;
+use verum_codegen::llvm::{
+    LoweringConfig as LlvmLoweringConfig, LoweringStats as LlvmLoweringStats, VbcToLlvmLowering,
+};
 use verum_vbc::module::VbcModule;
 
-use crate::compilation_path::{CompilationPath, analyze_function, determine_compilation_path};
+use crate::compilation_path::{
+    CompilationPath, TargetConfig as PathTargetConfig, analyze_function,
+    determine_compilation_path,
+};
 
 use super::CompilationPipeline;
 
@@ -37,7 +42,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// This is the core of the CPU compilation path. It translates VBC bytecode
     /// instructions to LLVM IR, applying tier-aware CBGR optimizations.
-    fn lower_vbc_to_llvm<'ctx>(
+    pub(super) fn lower_vbc_to_llvm<'ctx>(
         &self,
         llvm_context: &'ctx verum_codegen::llvm::verum_llvm::context::Context,
         vbc_module: &std::sync::Arc<verum_vbc::module::VbcModule>,
@@ -112,7 +117,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Execute an LLVM module using the JIT engine.
-    fn execute_llvm_jit(
+    pub(super) fn execute_llvm_jit(
         &self,
         llvm_module: &verum_codegen::llvm::verum_llvm::module::Module<'_>,
         _ast_module: &Module, // Reserved for future: extract metadata for runtime
@@ -150,7 +155,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Generate a native executable from an LLVM module.
-    fn generate_native_from_llvm(
+    pub(super) fn generate_native_from_llvm(
         &self,
         llvm_module: &verum_codegen::llvm::verum_llvm::module::Module<'_>,
     ) -> Result<PathBuf> {
@@ -254,7 +259,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Returns Ok(()) if all functions can be compiled, or an error if GPU
     /// compilation is required but unavailable.
-    fn analyze_compilation_paths(
+    pub(super) fn analyze_compilation_paths(
         &self,
         vbc_module: &std::sync::Arc<verum_vbc::module::VbcModule>,
         target_config: &PathTargetConfig,
@@ -345,5 +350,4 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(())
     }
-}
 }
