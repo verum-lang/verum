@@ -1701,12 +1701,21 @@ impl ProtocolEncoder {
     /// # Returns
     /// An SMT Bool expressing that the type has the method
     fn encode_has_method(&self, ty: &Type, method_name: &Text, method_signature: &Type) -> Bool {
-        // Create a predicate hasMethod(Type, MethodName)
-        // In a full implementation, this would encode the signature checking too
-
-        // For now, we create an uninterpreted boolean constant representing
-        // whether the type has this method
-        let method_key = format!("hasMethod_{:?}_{}", ty, method_name);
+        // Predicate `hasMethod(Type, MethodName, Signature)` —
+        // uninterpreted at the SMT level (the verifier asserts what
+        // it knows about the predicate via separate axioms), but
+        // the *identity* of the predicate must include the
+        // signature. Pre-fix the key was just `Type_MethodName` and
+        // `method_signature` was discarded — two methods sharing a
+        // name but differing in arity / parameter types collapsed
+        // onto the same Z3 constant, so a `T.foo(Int) -> Int`
+        // claim and a `T.foo() -> Bool` claim were equivalent under
+        // the encoding. That made signature-mismatch impossible to
+        // detect via this predicate.
+        let method_key = format!(
+            "hasMethod_{:?}_{}_{:?}",
+            ty, method_name, method_signature
+        );
         Bool::new_const(Symbol::String(method_key))
     }
 
