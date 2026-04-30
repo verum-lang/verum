@@ -19,6 +19,13 @@
 
 module core.math.s_definable;
 
+// Public module declarations — namespace-tree visibility for the
+// 2 child files. Pre-fix `mod.vr` only forwarded specific symbols
+// via `mount {...}`; the children weren't addressable through the
+// umbrella's namespace tree.
+public module class_s_s;
+public module lemma_3_4;
+
 mount core.math.s_definable.class_s_s.{
     SSMembership,
     RefinedSSMembership,

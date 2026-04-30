@@ -22,6 +22,15 @@
 
 module core.math.rich_s;
 
+// Public module declarations — namespace-tree visibility for the
+// 3 child files. Pre-fix `mod.vr` only forwarded specific symbols
+// via `mount {...}`; the children were unaddressable through the
+// umbrella's namespace tree (`mount core.math.rich_s.examples;`
+// would silently fail to resolve through this umbrella).
+public module conditions;
+public module examples;
+public module non_examples;
+
 mount core.math.rich_s.conditions.{
     RobinsonQInterpretation,
     ModelInU2,
