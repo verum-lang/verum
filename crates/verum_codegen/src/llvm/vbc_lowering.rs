@@ -917,6 +917,47 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // unimplemented intrinsics). Skip gracefully.
                     if is_tracked { tracing::debug!("[LOWER] {} FAILED: {:?}", func_name, e); }
                     tracing::warn!("Skipping function '{}': {:?}", func_name, e);
+
+                    // **Extern-function preservation gate** (#15 Failure 2
+                    // closure).  Pre-fix the skipped_entry fallback below
+                    // indiscriminately wrapped EVERY bodyless declaration
+                    // with a `mov w0, #0; ret`-shaped local stub.  For
+                    // genuine `extern fn` declarations (Verum-side
+                    // `extern fn pthread_threadid_np(...)`) this poisoned
+                    // the link: the linker stopped looking for the dylib
+                    // symbol and bound calls to the synthetic local stub,
+                    // turning every libc call that lower_vbc_function
+                    // happened to fail through into a zero-returning
+                    // no-op.  Live evidence: `verum_sys_gettid` called
+                    // `pthread_threadid_np` which the binary's `nm -m`
+                    // showed at `(__TEXT,__text) non-external` — local
+                    // stub, not the system dylib's symbol.
+                    //
+                    // Detection: `func_desc.instructions` is `None` for
+                    // extern declarations (no Verum bytecode body) and
+                    // `Some(_)` for regular Verum functions.  Skip the
+                    // skipped_entry synthesis for extern declarations —
+                    // the LLVM function stays bodyless, the linker
+                    // resolves the call to the real dylib symbol.
+                    //
+                    // Trade-off: extern declarations whose lowering
+                    // genuinely fails (rare — they're just declarations,
+                    // little to lower) miss the SIGSEGV-graceful
+                    // skipped_entry safety net.  But the SIGSEGV
+                    // scenario was about CALL sites resolving to null
+                    // function pointers at dyld init — extern
+                    // declarations don't have that issue because the
+                    // linker DOES resolve them at link time.  Net win.
+                    if func_desc.instructions.is_none() {
+                        if is_tracked {
+                            tracing::debug!(
+                                "[LOWER] {} skipping skipped_entry (extern fn, no body)",
+                                func_name,
+                            );
+                        }
+                        continue;
+                    }
+
                     // Patch up partially-emitted function: add unreachable terminators
                     // to any blocks missing them. Without this, GlobalDCE can't remove
                     // the function if it's referenced, causing module verification failure.
