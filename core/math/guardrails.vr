@@ -20,6 +20,7 @@ module core.math.guardrails;
 mount core.math.tensor;
 mount core.math.nn;
 mount core.math.agent;
+mount core.sync.mutex.{Mutex};
 
 // =============================================================================
 // Guardrail Result Types
@@ -802,14 +803,26 @@ implement Guardrail for LengthGuardrail {
 
 // Rate limiting guardrail
 //
-// Limits the rate of requests within a time window.
+// Limits the rate of requests within a time window. The
+// `request_times` list lives behind a `Mutex` so the
+// `Guardrail::check_input(&self, ...)` implementation (which
+// receives an immutable `&self`) can still mutate the timestamp
+// log via interior mutability — this is the canonical
+// concurrent-rate-limiter pattern.
+//
+// Pre-fix `check_input` was an `always-pass` placeholder
+// because the field was a bare `List<U64>` that needed
+// `&mut self` to update — incompatible with the protocol's
+// `&self` signature. The `// For now, always pass` comment
+// admitted the gap; the rate limiter was decorative.
 public type RateLimitGuardrail is {
     // Maximum requests per window
     max_requests: USize,
     // Window duration in seconds
     window_seconds: USize,
-    // Request timestamps
-    request_times: List<U64>,
+    // Request timestamps (mutex-protected for &self mutation
+    // through the Guardrail protocol).
+    request_times: Mutex<List<U64>>,
 };
 
 implement RateLimitGuardrail {
@@ -818,21 +831,36 @@ implement RateLimitGuardrail {
         RateLimitGuardrail {
             max_requests,
             window_seconds,
-            request_times: List.new(),
+            request_times: Mutex.new(List.new()),
         }
     }
 
-    // Clean old entries and check if request is allowed
-    fn is_allowed(&mut self) -> Bool {
+    // Clean old entries and check if request is allowed.
+    //
+    // Takes `&self` — the `Mutex` provides interior mutability so
+    // the timestamp list can be updated even when called through
+    // the `Guardrail::check_input` protocol's immutable receiver.
+    // Returns `true` if the request fits within the configured
+    // window's quota and pushes its timestamp; `false` otherwise.
+    fn is_allowed(&self) -> Bool {
         let now = @vbc(TIME_NOW_UNIX);
         let window_start = now - (self.window_seconds as U64);
 
-        // Remove old entries
-        self.request_times.retain(|&t| t > window_start);
+        // Acquire the lock. Poisoning isn't fatal here — a poisoned
+        // mutex still has consistent timestamp data; we treat
+        // poisoned/Ok identically since the rate-limiter has no
+        // panic-sensitive invariant beyond list ordering.
+        let mut guard = match self.request_times.lock() {
+            Ok(g)  => g,
+            Err(p) => p.into_inner(),
+        };
 
-        // Check if under limit
-        if self.request_times.len() < self.max_requests {
-            self.request_times.push(now);
+        // Remove old entries.
+        guard.retain(|&t| t > window_start);
+
+        // Check if under limit.
+        if guard.len() < self.max_requests {
+            guard.push(now);
             true
         } else {
             false
@@ -841,13 +869,23 @@ implement RateLimitGuardrail {
 }
 
 implement Guardrail for RateLimitGuardrail {
+    // Per-input rate-limit gate. Calls is_allowed which
+    // atomically prunes stale timestamps and accepts the
+    // request iff the window's quota isn't yet filled.
     fn check_input(&self, _input: &Text) -> GuardrailResult {
-        // Note: self is immutable here, so we need interior mutability
-        // In practice, this would use a mutex or similar
-        // For now, always pass (real implementation would track state)
-        GuardrailResult.Pass
+        if self.is_allowed() {
+            GuardrailResult.Pass
+        } else {
+            GuardrailResult.Block {
+                reason: f"rate limit exceeded: {self.max_requests} requests \
+                          per {self.window_seconds}s window".into(),
+            }
+        }
     }
 
+    // Output side has no rate-limit semantics — only ingress
+    // requests count toward the quota. A response is always
+    // allowed to flow once the input was accepted.
     fn check_output(&self, _output: &Text) -> GuardrailResult {
         GuardrailResult.Pass
     }
