@@ -1180,9 +1180,41 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     | "mmap" | "munmap" | "mprotect" | "madvise"
                     // pthread
                     | "pthread_create" | "pthread_join" | "pthread_mutex_init"
+                    | "pthread_mutex_destroy" | "pthread_mutex_trylock"
                     | "pthread_mutex_lock" | "pthread_mutex_unlock"
-                    | "pthread_cond_init" | "pthread_cond_wait" | "pthread_cond_signal"
+                    | "pthread_cond_init" | "pthread_cond_destroy"
+                    | "pthread_cond_wait" | "pthread_cond_timedwait"
+                    | "pthread_cond_signal" | "pthread_cond_broadcast"
                     | "pthread_self" | "pthread_setname_np"
+                    | "pthread_threadid_np" | "pthread_detach" | "pthread_exit"
+                    | "pthread_getspecific" | "pthread_setspecific"
+                    | "pthread_key_create" | "pthread_key_delete"
+                    // thread/process id (Linux gettid, Darwin/Windows wrappers)
+                    | "gettid" | "getpid" | "getppid" | "getuid" | "geteuid"
+                    | "fork" | "wait" | "waitpid" | "execve" | "execvp"
+                    | "kill" | "raise" | "signal" | "sigaction"
+                    // socket extras
+                    | "shutdown" | "getsockname" | "getpeername" | "getsockopt"
+                    | "sendmsg" | "recvmsg" | "sendfile"
+                    // file descriptor extras
+                    | "dup" | "dup2" | "dup3" | "fcntl" | "ioctl"
+                    | "pipe" | "pipe2" | "select" | "poll" | "epoll_create"
+                    | "epoll_create1" | "epoll_ctl" | "epoll_wait" | "epoll_pwait"
+                    | "kqueue" | "kevent" | "kevent64"
+                    // errno_location alias (positive — `__error` already in list above)
+                    | "errno_location"
+                    // dynamic loading
+                    | "dlopen" | "dlsym" | "dlclose" | "dlerror"
+                    // libsystem-specific (mach_absolute_time already in time/clock above)
+                    | "mach_host_self" | "mach_thread_self" | "mach_port_deallocate"
+                    | "mach_continuous_time"
+                    | "host_statistics64" | "task_info" | "thread_info"
+                    | "vm_allocate" | "vm_deallocate" | "vm_protect"
+                    // entropy / RNG
+                    | "getentropy" | "getrandom" | "arc4random" | "arc4random_buf"
+                    // futex (Linux) / __ulock (Darwin)
+                    | "__ulock_wait" | "__ulock_wake"
+                    | "futex" | "syscall"
                     // file ops
                     | "stat" | "fstat" | "lstat" | "access" | "unlink" | "rename"
                     | "mkdir" | "rmdir" | "chdir" | "getcwd"
