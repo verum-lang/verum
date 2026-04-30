@@ -1147,6 +1147,33 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         }
     }
 
+    // Last-chance native variant dispatch — applies when
+    // `prefer_user_compiled` short-circuited the early native check
+    // (line ~325) AND the user-compiled lookup itself fell through
+    // every codepath without finding a runtime-typed instance. The
+    // generic `Result<T, E>::map_err<F>` definition exists in
+    // `core/base/result.vr` and gets registered as a function, but
+    // VBC monomorphisation does not always produce a callable body
+    // for the concrete `Result<i32, IoError>` instances synthesised
+    // at runtime (see e.g. `core/net/tcp.vr:321`
+    // `socket(...).map_err(IoError.from_os)?`). The native variant
+    // handler in `dispatch_variant_method` is monomorphisation-free
+    // — the variant layout is type-erased and the closure carries
+    // the type-specific work — so it is sound to retry here as a
+    // safety net before panicking.
+    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
+        && let Some(result) = dispatch_variant_method(
+            state,
+            dispatch_receiver,
+            &bare_method_name,
+            &args,
+            &method_name,
+        )?
+    {
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
+    }
+
     Err(InterpreterError::Panic {
         message: format!("method '{}' not found on value", method_name),
     })
