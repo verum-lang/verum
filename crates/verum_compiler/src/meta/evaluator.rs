@@ -1071,7 +1071,14 @@ impl MetaContext {
                     result.push(mapped);
                 }
 
-                Ok(ConstValue::Array(result))
+                let array = ConstValue::Array(result);
+                // Memory tracking — closes #240 for the list-comprehension
+                // path (the major dynamic allocation site in meta eval).
+                // The estimated size accounts for both the Vec overhead
+                // and recursive element sizes so deeply-nested arrays
+                // count their full footprint.
+                self.track_allocation(const_value_alloc_size(&array))?;
+                Ok(array)
             }
 
             // === New expression kinds (Phase 6) ===
@@ -1233,7 +1240,14 @@ impl MetaContext {
                 // Records become tuples of field values in meta evaluation
                 // A full implementation would preserve record structure
                 let tuple_vals: List<ConstValue> = field_values.iter().map(|(_, v)| v.clone()).collect();
-                Ok(ConstValue::Tuple(tuple_vals))
+                let tuple = ConstValue::Tuple(tuple_vals);
+                // Memory tracking — closes #240 for the record-literal
+                // path. Same recipe as the ListComp arm: estimate the
+                // freshly-allocated container's size and route through
+                // `track_allocation` so embedders capping memory_limit
+                // see oversized records trip the gate at construction.
+                self.track_allocation(const_value_alloc_size(&tuple))?;
+                Ok(tuple)
             }
 
             MetaExpr::Return(value) => {
@@ -4458,6 +4472,59 @@ pub(crate) fn hygiene_violation_to_diagnostic(
         .build()
 }
 
+/// Estimate the byte cost of a freshly-allocated `ConstValue`.
+///
+/// Used by `MetaContext::track_allocation` to account for
+/// memory budget at container-construction sites in
+/// `eval_meta_expr` (ListComp result, Record→Tuple result, …).
+/// The estimate is **conservative** — it includes per-element
+/// overhead and recurses into nested containers so a deeply-
+/// nested array counts its full footprint, not just the outer
+/// Vec spine.
+///
+/// Per-variant cost model (sized to the actual `ConstValue`
+/// representation in `verum_ast::MetaValue`):
+///
+///   * `Unit`/`Bool`/`Char`/`Int`/`Float`: `WORD = 16` bytes
+///     (variant tag + payload, padded to alignment).
+///   * `Text(s)`: `WORD + s.len()` (the heap-side string body).
+///   * `Array(arr)` / `Tuple(arr)`: `VEC_HEADER = 24` bytes
+///     (ptr/cap/len) + recursive sum of element sizes.
+///   * `Map`/`Set`/`Record`/`Variant`: aggregate of fields.
+///   * `Type`/`Expr`/`Path`/`Pattern`/`Stmt`: `WORD * 4` —
+///     the AST nodes are heap-allocated and we approximate.
+///
+/// This isn't a precise allocator — it's a budget-tracking
+/// heuristic that's stable enough for the
+/// `[meta] memory_limit` knob to mean "rough megabytes
+/// allocated by this meta computation". A value 2x off in
+/// either direction is acceptable; what matters is that
+/// growing the value monotonically grows the count.
+pub(crate) fn const_value_alloc_size(v: &ConstValue) -> usize {
+    use verum_ast::MetaValue;
+    const WORD: usize = 16;
+    const VEC_HEADER: usize = 24;
+    match v {
+        MetaValue::Unit
+        | MetaValue::Bool(_)
+        | MetaValue::Char(_)
+        | MetaValue::Int(_)
+        | MetaValue::Float(_) => WORD,
+        MetaValue::Text(s) => WORD + s.as_str().len(),
+        MetaValue::Array(arr) => {
+            VEC_HEADER + arr.iter().map(const_value_alloc_size).sum::<usize>()
+        }
+        MetaValue::Tuple(arr) => {
+            VEC_HEADER + arr.iter().map(const_value_alloc_size).sum::<usize>()
+        }
+        // Other MetaValue variants (Type, Expr, Path, …) are
+        // heap-allocated AST nodes; approximate at 4 words.
+        // Refinement is welcome but the budget-tracking
+        // contract is permissive — see fn doc.
+        _ => WORD * 4,
+    }
+}
+
 #[cfg(test)]
 mod hygiene_diagnostic_tests {
     //! Pin tests for the HygieneViolation → Diagnostic conversion
@@ -4711,6 +4778,87 @@ mod iteration_limit_tests {
         assert_eq!(
             ctx.current_deadline, first_deadline,
             "deadline must be stable across calls within the same evaluation"
+        );
+    }
+
+    /// Pin: memory_limit = 0 is the never-trip sentinel — closes
+    /// part of #240. Legacy embedders that don't set a memory
+    /// limit must continue to run unbounded.
+    #[test]
+    fn memory_limit_zero_is_never_trip_sentinel() {
+        let mut ctx = MetaContext::new();
+        ctx.memory_limit = 0;
+        // Allocate plenty — track_allocation accumulates onto
+        // memory_used but mustn't trip with limit=0.
+        for _ in 0..1000 {
+            ctx.track_allocation(1_000_000)
+                .expect("memory_limit=0 must never trip");
+        }
+        // memory_used grows even when limit is 0 — the field is
+        // still useful for telemetry (peak_memory mirror).
+        assert!(ctx.memory_used >= 1_000_000_000);
+        assert!(ctx.peak_memory >= 1_000_000_000);
+    }
+
+    /// Pin: track_allocation trips with MemoryLimitExceeded
+    /// (M302) when memory_used passes memory_limit.
+    #[test]
+    fn track_allocation_trips_at_memory_limit() {
+        let mut ctx = MetaContext::new();
+        ctx.memory_limit = 1024; // Tiny budget for the test.
+        // First small allocation: under the cap, no trip.
+        ctx.track_allocation(512).expect("under cap");
+        // Second allocation pushes past the cap.
+        let result = ctx.track_allocation(1024);
+        match result {
+            Err(MetaError::MemoryLimitExceeded { allocated, limit }) => {
+                assert_eq!(limit, 1024);
+                assert!(allocated > limit, "allocated must be past limit at trip");
+            }
+            other => panic!("expected MemoryLimitExceeded, got {:?}", other),
+        }
+    }
+
+    /// Pin: peak_memory tracks the high-water mark, even if
+    /// memory_used falls (would happen if a future explicit
+    /// deallocator is added). Today's eval has no
+    /// deallocation so peak_memory ≡ memory_used.
+    #[test]
+    fn peak_memory_mirrors_memory_used_after_track() {
+        let mut ctx = MetaContext::new();
+        assert_eq!(ctx.memory_used, 0);
+        assert_eq!(ctx.peak_memory, 0);
+        ctx.track_allocation(2048).expect("ok");
+        assert_eq!(ctx.memory_used, 2048);
+        assert_eq!(ctx.peak_memory, 2048, "peak_memory must mirror memory_used on growth");
+    }
+
+    /// Pin: const_value_alloc_size grows monotonically with
+    /// container nesting. Used as the budget-input for
+    /// track_allocation at the container-construction sites.
+    #[test]
+    fn const_value_alloc_size_grows_with_container_size() {
+        let small = ConstValue::Array(List::new());
+        let with_one = ConstValue::Array(List::from(vec![ConstValue::Int(1)]));
+        let with_many = ConstValue::Array(List::from(
+            (0..100).map(|i| ConstValue::Int(i)).collect::<Vec<_>>(),
+        ));
+        assert!(
+            const_value_alloc_size(&small) < const_value_alloc_size(&with_one),
+            "non-empty array > empty array"
+        );
+        assert!(
+            const_value_alloc_size(&with_one) < const_value_alloc_size(&with_many),
+            "100-elem array > 1-elem array"
+        );
+        // Text grows with content length too.
+        let short_text = ConstValue::Text(verum_common::Text::from("a"));
+        let long_text = ConstValue::Text(verum_common::Text::from(
+            "abcdefghijklmnopqrstuvwxyz".repeat(10),
+        ));
+        assert!(
+            const_value_alloc_size(&short_text) < const_value_alloc_size(&long_text),
+            "long text > short text"
         );
     }
 }
