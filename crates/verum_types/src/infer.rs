@@ -28000,12 +28000,23 @@ impl TypeChecker {
                     }
                     let ret_type = self.ast_to_type(&ffi_func.signature.return_type)
                         .unwrap_or(Type::Unit);
+                    // S7 FIX: lift the FFI declarations onto the function's
+                    // computational-property set so the property-inference
+                    // engine propagates them through every call site.
+                    // Without this lift, `thread_safe = false`,
+                    // `memory_effects = Allocates`, `error_protocol = Errno`
+                    // were dropped at registration time and a `pure fn`
+                    // could call an `Allocates` FFI function with no
+                    // diagnostic. The property-set mapping itself lives
+                    // in `lift_ffi_function_to_properties` so the rule is
+                    // testable in isolation.
+                    let properties = crate::lift_ffi_function_to_properties(ffi_func);
                     let fn_type = Type::Function {
                         params: param_types,
                         return_type: Box::new(ret_type),
                         contexts: None,
                         type_params: verum_common::List::new(),
-                        properties: None,
+                        properties,
                     };
                     // Register function individually (for unqualified access)
                     self.ctx.env.insert(

@@ -204,6 +204,83 @@ impl<'de> serde::Deserialize<'de> for PropertySet {
     }
 }
 
+/// Lift an FFI function declaration into a `PropertySet` so the
+/// property-inference engine propagates its safety surface to every
+/// caller.
+///
+/// Without this lift the FFI registration in `infer.rs` set
+/// `properties: None`, dropping the four declared safety facts
+/// (`memory_effects`, `thread_safe`, `error_protocol`, plus the
+/// implicit "this is an FFI call" tag) at the type-system boundary.
+/// A `pure fn` could then call an `Allocates` extern with no
+/// diagnostic — the master-audit ranked this E-3 / S7 SOUNDNESS.
+///
+/// Mapping (each FFI declaration → one or more `ComputationalProperty`):
+///
+/// | FFI declaration                 | Properties added             |
+/// |---------------------------------|------------------------------|
+/// | every FFI function              | `FFI`                        |
+/// | `thread_safe = false`           | `Mutates`                    |
+/// | `memory_effects = Pure`         | (nothing — already pure)     |
+/// | `memory_effects = Reads(_)`     | `IO`, `ReadsExternal`        |
+/// | `memory_effects = Writes(_)`    | `IO`, `WritesExternal`,      |
+/// |                                 | `Mutates`                    |
+/// | `memory_effects = Allocates`    | `Allocates`                  |
+/// | `memory_effects = Deallocates(_)`| `Deallocates`               |
+/// | `memory_effects = Combined(xs)` | union of mapped(xs)          |
+/// | `error_protocol != None`        | `Fallible`                   |
+///
+/// The result is `Some(PropertySet)` whenever ANY non-trivial
+/// property would be set. A truly pure thread-safe FFI with
+/// `error_protocol = None` still returns `Some({FFI})` — the FFI
+/// tag is always added so capability audits can recognise the
+/// boundary even on otherwise-pure externs.
+pub fn lift_ffi_function_to_properties(
+    ffi: &verum_ast::ffi::FFIFunction,
+) -> Option<PropertySet> {
+    use verum_ast::ffi::{ErrorProtocol, MemoryEffects};
+
+    let mut props = Set::<ComputationalProperty>::new();
+    props.insert(ComputationalProperty::FFI);
+
+    if !ffi.thread_safe {
+        props.insert(ComputationalProperty::Mutates);
+    }
+
+    fn collect(eff: &MemoryEffects, out: &mut Set<ComputationalProperty>) {
+        match eff {
+            MemoryEffects::Pure => {}
+            MemoryEffects::Reads(_) => {
+                out.insert(ComputationalProperty::IO);
+                out.insert(ComputationalProperty::ReadsExternal);
+            }
+            MemoryEffects::Writes(_) => {
+                out.insert(ComputationalProperty::IO);
+                out.insert(ComputationalProperty::WritesExternal);
+                out.insert(ComputationalProperty::Mutates);
+            }
+            MemoryEffects::Allocates => {
+                out.insert(ComputationalProperty::Allocates);
+            }
+            MemoryEffects::Deallocates(_) => {
+                out.insert(ComputationalProperty::Deallocates);
+            }
+            MemoryEffects::Combined(xs) => {
+                for x in xs.iter() {
+                    collect(x, out);
+                }
+            }
+        }
+    }
+    collect(&ffi.memory_effects, &mut props);
+
+    if !matches!(ffi.error_protocol, ErrorProtocol::None) {
+        props.insert(ComputationalProperty::Fallible);
+    }
+
+    Some(PropertySet { properties: props })
+}
+
 impl PropertySet {
     /// Create an empty property set (pure computation)
     pub fn pure() -> Self {
@@ -1108,6 +1185,114 @@ mod tests {
         assert!(pure.is_pure());
         assert_eq!(pure.len(), 1);
         assert!(pure.contains(&ComputationalProperty::Pure));
+    }
+
+    // -----------------------------------------------------------------
+    // S7 — FFI safety lift to PropertySet
+    // -----------------------------------------------------------------
+
+    fn ffi_fn_for(
+        thread_safe: bool,
+        memory_effects: verum_ast::ffi::MemoryEffects,
+        error_protocol: verum_ast::ffi::ErrorProtocol,
+    ) -> verum_ast::ffi::FFIFunction {
+        use verum_ast::span::Span;
+        verum_ast::ffi::FFIFunction {
+            name: verum_ast::ty::Ident::new("f", Span::dummy()),
+            signature: verum_ast::ffi::FFISignature {
+                params: List::new(),
+                return_type: verum_ast::ty::Type::unit(Span::dummy()),
+                calling_convention: verum_ast::ffi::CallingConvention::C,
+                is_variadic: false,
+                span: Span::dummy(),
+            },
+            requires: List::new(),
+            ensures: List::new(),
+            memory_effects,
+            thread_safe,
+            error_protocol,
+            ownership: verum_ast::ffi::Ownership::Borrow,
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn lift_ffi_pure_thread_safe_no_error_only_marks_ffi() {
+        let f = ffi_fn_for(
+            true,
+            verum_ast::ffi::MemoryEffects::Pure,
+            verum_ast::ffi::ErrorProtocol::None,
+        );
+        let ps = lift_ffi_function_to_properties(&f).unwrap();
+        assert!(ps.contains(&ComputationalProperty::FFI));
+        assert!(!ps.contains(&ComputationalProperty::Mutates));
+        assert!(!ps.contains(&ComputationalProperty::Fallible));
+        assert!(!ps.contains(&ComputationalProperty::Allocates));
+    }
+
+    #[test]
+    fn lift_ffi_thread_unsafe_adds_mutates() {
+        let f = ffi_fn_for(
+            false,
+            verum_ast::ffi::MemoryEffects::Pure,
+            verum_ast::ffi::ErrorProtocol::None,
+        );
+        let ps = lift_ffi_function_to_properties(&f).unwrap();
+        assert!(ps.contains(&ComputationalProperty::Mutates));
+        assert!(ps.contains(&ComputationalProperty::FFI));
+    }
+
+    #[test]
+    fn lift_ffi_allocates_propagates() {
+        let f = ffi_fn_for(
+            true,
+            verum_ast::ffi::MemoryEffects::Allocates,
+            verum_ast::ffi::ErrorProtocol::None,
+        );
+        let ps = lift_ffi_function_to_properties(&f).unwrap();
+        assert!(ps.contains(&ComputationalProperty::Allocates));
+    }
+
+    #[test]
+    fn lift_ffi_writes_adds_io_writes_external_mutates() {
+        let f = ffi_fn_for(
+            true,
+            verum_ast::ffi::MemoryEffects::Writes(verum_common::Maybe::None),
+            verum_ast::ffi::ErrorProtocol::None,
+        );
+        let ps = lift_ffi_function_to_properties(&f).unwrap();
+        assert!(ps.contains(&ComputationalProperty::IO));
+        assert!(ps.contains(&ComputationalProperty::WritesExternal));
+        assert!(ps.contains(&ComputationalProperty::Mutates));
+    }
+
+    #[test]
+    fn lift_ffi_errno_propagates_fallible() {
+        let f = ffi_fn_for(
+            true,
+            verum_ast::ffi::MemoryEffects::Pure,
+            verum_ast::ffi::ErrorProtocol::Errno,
+        );
+        let ps = lift_ffi_function_to_properties(&f).unwrap();
+        assert!(ps.contains(&ComputationalProperty::Fallible));
+    }
+
+    #[test]
+    fn lift_ffi_combined_effects_unions_mappings() {
+        let f = ffi_fn_for(
+            true,
+            verum_ast::ffi::MemoryEffects::Combined({
+                let mut xs = List::new();
+                xs.push(verum_ast::ffi::MemoryEffects::Allocates);
+                xs.push(verum_ast::ffi::MemoryEffects::Reads(verum_common::Maybe::None));
+                xs
+            }),
+            verum_ast::ffi::ErrorProtocol::None,
+        );
+        let ps = lift_ffi_function_to_properties(&f).unwrap();
+        assert!(ps.contains(&ComputationalProperty::Allocates));
+        assert!(ps.contains(&ComputationalProperty::IO));
+        assert!(ps.contains(&ComputationalProperty::ReadsExternal));
     }
 
     #[test]

@@ -425,7 +425,10 @@ pub use control_flow::{
 };
 pub use where_clause::{DisambiguatedWhereClause, WhereClauseContext, WhereClauseKind};
 // Note: DI module DependencyGraph renamed to avoid conflict with module_context::DependencyGraph
-pub use computational_properties::{ComputationalProperty, PropertyInferenceContext, PropertySet};
+pub use computational_properties::{
+    ComputationalProperty, PropertyInferenceContext, PropertySet,
+    lift_ffi_function_to_properties,
+};
 pub use dependency_injection::{
     DITypeChecker,
     DependencyGraph as DIGraph, // Renamed to avoid conflict
