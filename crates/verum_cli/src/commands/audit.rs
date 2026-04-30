@@ -1982,12 +1982,26 @@ fn print_kernel_soundness_report_json(
                 "status": match &r.status {
                     verum_kernel::soundness::LemmaStatus::Proved { .. } => "Proved",
                     verum_kernel::soundness::LemmaStatus::Admitted { .. } => "Admitted",
+                    verum_kernel::soundness::LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
                 },
                 "admit_reason": match &r.status {
                     verum_kernel::soundness::LemmaStatus::Proved { .. } => serde_json::Value::Null,
                     verum_kernel::soundness::LemmaStatus::Admitted { reason } => {
                         serde_json::Value::String(reason.clone())
                     }
+                    verum_kernel::soundness::LemmaStatus::DischargedByFramework { citation, .. } => {
+                        serde_json::Value::String(citation.clone())
+                    }
+                },
+                "discharge": match &r.status {
+                    verum_kernel::soundness::LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => {
+                        serde_json::json!({
+                            "lemma_path": lemma_path,
+                            "framework": framework,
+                            "citation": citation,
+                        })
+                    }
+                    _ => serde_json::Value::Null,
                 },
             })
         })
@@ -3202,16 +3216,23 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
     let exporter = SoundnessExporter::new();
 
     // Group admits by RuleCategory.  Within each category sort by
-    // rule_name for stable ordering.
+    // rule_name for stable ordering.  `DischargedByFramework` rules
+    // are tracked separately — they're L4-acceptable but downstream
+    // of an external proof.
     let mut by_category: BTreeMap<&'static str, Vec<&verum_kernel::soundness::RuleSpec>> =
         BTreeMap::new();
     let mut total_proved = 0usize;
     let mut total_admitted = 0usize;
+    let mut total_discharged = 0usize;
     for rule in exporter.rules() {
         match &rule.status {
             LemmaStatus::Proved { .. } => total_proved += 1,
             LemmaStatus::Admitted { .. } => {
                 total_admitted += 1;
+                by_category.entry(rule.category.tag()).or_default().push(rule);
+            }
+            LemmaStatus::DischargedByFramework { .. } => {
+                total_discharged += 1;
                 by_category.entry(rule.category.tag()).or_default().push(rule);
             }
         }
@@ -3240,10 +3261,27 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
         let entries: Vec<serde_json::Value> = rules
             .iter()
             .map(|r| {
+                let status_kind = match &r.status {
+                    LemmaStatus::Proved { .. } => "Proved",
+                    LemmaStatus::Admitted { .. } => "Admitted",
+                    LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
+                };
+                let discharge = match &r.status {
+                    LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => {
+                        serde_json::json!({
+                            "lemma_path": lemma_path,
+                            "framework": framework,
+                            "citation": citation,
+                        })
+                    }
+                    _ => serde_json::Value::Null,
+                };
                 serde_json::json!({
                     "rule_name": r.rule_name,
                     "lemma_name": r.lemma_name,
+                    "status": status_kind,
                     "iou_reason": r.status.admit_reason().unwrap_or(""),
+                    "discharge": discharge,
                     "premise_arity": r.premise_arity,
                     "has_side_condition": r.has_side_condition,
                 })
@@ -3259,11 +3297,12 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
     }
 
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "command": "audit-soundness-iou",
         "total_rules": exporter.rules().len(),
         "total_proved": total_proved,
         "total_admitted": total_admitted,
+        "total_discharged_by_framework": total_discharged,
         "categories": category_payloads,
     });
     let _ = std::fs::write(
@@ -3277,6 +3316,7 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
                 exporter.rules().len(),
                 total_proved,
                 total_admitted,
+                total_discharged,
                 &by_category,
                 &json_path,
             );
@@ -3293,6 +3333,7 @@ fn print_soundness_iou_plain(
     total_rules: usize,
     total_proved: usize,
     total_admitted: usize,
+    total_discharged: usize,
     by_category: &std::collections::BTreeMap<
         &'static str,
         Vec<&verum_kernel::soundness::RuleSpec>,
@@ -3304,13 +3345,18 @@ fn print_soundness_iou_plain(
     println!("Kernel-soundness IOU dashboard");
     println!("────────────────────────────────────────");
     println!(
-        "  {} kernel rules total — {} structurally proved, {} admitted with IOU.",
-        total_rules, total_proved, total_admitted,
+        "  {} kernel rules total — {} structurally proved, {} admitted with open IOU, {} discharged by framework citation.",
+        total_rules, total_proved, total_admitted, total_discharged,
     );
     println!();
-    if total_admitted == 0 {
+    if total_admitted == 0 && total_discharged == 0 {
         println!("  ✓ Every kernel rule is structurally proved — trusted base reduced to ZFC + 2-inacc + Verum kernel rules.");
         return;
+    }
+    if total_admitted == 0 {
+        println!("  ✓ Zero open IOUs — every admitted rule is discharged by upstream framework citation.");
+        println!("    L4-acceptable: the trust base is ZFC + 2-inacc + cited mathlib4 / Coq stdlib proofs.");
+        println!();
     }
 
     // Stable category ordering (matches the JSON output).
@@ -3638,9 +3684,7 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
     // declarations.  Discovery: VERUM_STDLIB_ROOT env override, then
     // a small walk from the verum binary location, then the cargo
     // workspace root (for dev builds).
-    let stdlib_files = discover_stdlib_vr_files();
-    let stdlib_count = stdlib_files.len();
-    vr_files.extend(stdlib_files);
+    vr_files.extend(discover_stdlib_vr_files());
 
     // Pass 1: build the workspace-wide symbol table.  Every theorem
     // gets its proof-body's apply-targets pre-extracted; every axiom

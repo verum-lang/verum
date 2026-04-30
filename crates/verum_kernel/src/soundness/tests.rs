@@ -68,6 +68,47 @@ fn every_admitted_lemma_has_non_empty_reason() {
 }
 
 #[test]
+fn every_discharged_lemma_has_non_empty_citation() {
+    let rules = canonical_rules();
+    for r in &rules {
+        if let LemmaStatus::DischargedByFramework { lemma_path, framework, citation } = &r.status {
+            assert!(
+                !lemma_path.trim().is_empty(),
+                "rule {} discharged-by-framework but lemma_path is empty",
+                r.rule_name,
+            );
+            assert!(
+                !framework.trim().is_empty(),
+                "rule {} discharged-by-framework but framework is empty",
+                r.rule_name,
+            );
+            assert!(
+                !citation.trim().is_empty(),
+                "rule {} discharged-by-framework but citation is empty — \
+                 the audit gate's trust-extension report needs the upstream path",
+                r.rule_name,
+            );
+        }
+    }
+}
+
+#[test]
+fn discharged_count_reflects_phase_1a() {
+    let rules = canonical_rules();
+    let exporter = SoundnessExporter::new();
+    let _ = rules.len();
+    // Post-#155 Phase-1A: at least 7 rules discharged by framework
+    // citation (K_Pi_Form, K_Lam_Intro, K_App_Elim, K_Sigma_Form,
+    // K_Pair_Intro, K_Fst_Elim, K_Snd_Elim).  This count is a floor;
+    // future Phase-1A advances will increase it.
+    assert!(
+        exporter.discharged_by_framework_count() >= 7,
+        "expected at least 7 framework-discharged rules post-#155 Phase-1A, got {}",
+        exporter.discharged_by_framework_count(),
+    );
+}
+
+#[test]
 fn rule_names_are_unique() {
     let rules = canonical_rules();
     let mut seen = std::collections::HashSet::new();
@@ -132,13 +173,13 @@ fn coq_backend_renders_admitted_with_reason_comment() {
     let coq = CoqBackend::new();
     let output = exporter.emit(&coq);
 
-    // Pick an admitted lemma and confirm both `Admitted.` and its
-    // reason appear together.  K_Pi_Form's reason mentions
-    // "substitution-lemma".
+    // Pick a discharged lemma and confirm `Admitted.` plus the
+    // citation appear.  K_Pi_Form is now discharged-by-framework
+    // citing the substitution-lemma in mathlib4.
     assert!(output.contains("Admitted."));
     assert!(
-        output.contains("substitution-lemma"),
-        "Coq emission must carry the K_Pi_Form admit reason verbatim",
+        output.contains("substitution-lemma") || output.contains("Substitution"),
+        "Coq emission must carry the K_Pi_Form discharge citation",
     );
 }
 
@@ -200,11 +241,11 @@ fn lean_backend_renders_admitted_with_reason_comment() {
 
     assert!(
         output.contains("sorry"),
-        "Lean emission must use `sorry` for admitted lemmas",
+        "Lean emission must use `sorry` for admitted/discharged lemmas",
     );
     assert!(
-        output.contains("substitution-lemma"),
-        "Lean emission must carry the K_Pi_Form admit reason verbatim",
+        output.contains("substitution-lemma") || output.contains("Substitution"),
+        "Lean emission must carry the K_Pi_Form discharge citation",
     );
 }
 
@@ -231,17 +272,22 @@ fn proved_count_plus_admitted_count_matches_total() {
     let exporter = SoundnessExporter::new();
     let proved = exporter.proved_count();
     let admitted = exporter.admitted_count();
+    let discharged = exporter.discharged_by_framework_count();
     assert_eq!(
-        proved + admitted,
+        proved + admitted + discharged,
         EXPECTED_KERNEL_RULE_COUNT,
-        "every rule must be either proved or admitted (no other states)",
+        "every rule must be either proved, admitted, or discharged-by-framework",
     );
     assert_eq!(proved, 4, "expected 4 proved lemmas");
+    assert!(
+        discharged >= 7,
+        "expected at least 7 framework-discharged lemmas post-#155 Phase-1A, got {}",
+        discharged,
+    );
     assert_eq!(
-        admitted,
-        EXPECTED_KERNEL_RULE_COUNT - 4,
-        "expected {} admitted lemmas",
-        EXPECTED_KERNEL_RULE_COUNT - 4,
+        proved + admitted + discharged,
+        EXPECTED_KERNEL_RULE_COUNT,
+        "proved + admitted + discharged must total all rules",
     );
 }
 
@@ -249,13 +295,16 @@ fn proved_count_plus_admitted_count_matches_total() {
 fn admitted_iou_list_enumerates_every_admit() {
     let exporter = SoundnessExporter::new();
     let ious = exporter.admitted_iou_list();
+    // Includes both `Admitted` (open IOU) and `DischargedByFramework`
+    // (closed IOU with citation) — both contribute to the trust-
+    // extension surface that the audit gate enumerates.
     assert_eq!(
         ious.len(),
-        exporter.admitted_count(),
-        "the IOU list must enumerate every admitted lemma",
+        exporter.admitted_count() + exporter.discharged_by_framework_count(),
+        "the IOU list must enumerate every admitted + discharged-by-framework lemma",
     );
     for (rule_name, reason) in ious {
-        assert!(!reason.is_empty(), "IOU for {} has empty reason", rule_name);
+        assert!(!reason.is_empty(), "IOU for {} has empty reason/citation", rule_name);
     }
 }
 

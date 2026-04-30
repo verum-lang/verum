@@ -196,6 +196,10 @@ impl SoundnessBackend for CoqBackend {
                 "Proof.\nAdmitted.\n(* reason: {} *)",
                 reason
             ),
+            LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => format!(
+                "Proof.\nAdmitted.\n(* discharged-by: {} *)\n(* framework: {} *)\n(* citation: {} *)",
+                lemma_path, framework, citation
+            ),
         };
 
         format!("{}\n{}\n{}", category_comment, stmt, body)
