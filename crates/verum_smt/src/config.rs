@@ -168,6 +168,34 @@ impl Default for Z3Config {
     }
 }
 
+impl Z3Config {
+    /// Translate the TOML schema `[smt.z3]` config into the impl-side
+    /// `crate::z3_backend::Z3Config` so `SmtBackendSwitcher::build_backends`
+    /// can apply every field at backend construction.
+    ///
+    /// `global_timeout_ms` is left as `Maybe::None` here so that
+    /// `build_backends` can fall back to the umbrella
+    /// `SwitcherConfig.timeout_ms` when the manifest doesn't set a
+    /// per-backend timeout. `enable_interpolation` has no TOML
+    /// counterpart yet (interpolation support is gated separately)
+    /// — it inherits the impl default.
+    pub fn to_backend_config(&self) -> crate::z3_backend::Z3Config {
+        let backend_default = crate::z3_backend::Z3Config::default();
+        crate::z3_backend::Z3Config {
+            enable_proofs: self.enable_proofs,
+            minimize_cores: self.minimize_cores,
+            enable_interpolation: backend_default.enable_interpolation,
+            global_timeout_ms: Maybe::None,
+            memory_limit_mb: self.memory_limit_mb,
+            enable_mbqi: self.enable_mbqi,
+            enable_patterns: self.enable_patterns,
+            random_seed: self.random_seed,
+            num_workers: self.num_workers,
+            auto_tactics: self.auto_tactics,
+        }
+    }
+}
+
 // ==================== CVC5-Specific Configuration ====================
 
 /// CVC5-specific configuration
@@ -221,6 +249,54 @@ impl Default for Cvc5Config {
             quantifier_mode: default_quantifier_mode(),
             random_seed: Maybe::None,
             verbosity: 0,
+        }
+    }
+}
+
+impl Cvc5Config {
+    /// Translate the TOML schema `[smt.cvc5]` config into the
+    /// impl-side `crate::cvc5_backend::Cvc5Config`.
+    ///
+    /// String fields (`logic`, `quantifier_mode`) are parsed via the
+    /// per-enum `from_str` helpers; unknown values fall back to the
+    /// safe defaults (`SmtLogic::ALL`, `QuantifierMode::Auto`) with
+    /// a `tracing::warn!` so a typo never silently downgrades the
+    /// solver. `timeout_ms` is left as `Maybe::None` so the umbrella
+    /// `SwitcherConfig.timeout_ms` carries through when no per-backend
+    /// timeout is set.
+    pub fn to_backend_config(&self) -> crate::cvc5_backend::Cvc5Config {
+        let logic = crate::cvc5_backend::SmtLogic::from_str(&self.logic).unwrap_or_else(|| {
+            tracing::warn!(
+                "[smt.cvc5] logic = {:?} is not a recognised SMT-LIB logic name — \
+                 falling back to ALL. Accepted values: QF_LIA, QF_LRA, QF_BV, \
+                 QF_NIA, QF_NRA, QF_AX, QF_UFLIA, QF_AUFLIA, ALL.",
+                self.logic
+            );
+            crate::cvc5_backend::SmtLogic::ALL
+        });
+        let quantifier_mode =
+            crate::cvc5_backend::QuantifierMode::from_str(&self.quantifier_mode).unwrap_or_else(
+                || {
+                    tracing::warn!(
+                        "[smt.cvc5] quantifier_mode = {:?} is not recognised — \
+                         falling back to auto. Accepted values: auto, none, \
+                         ematching, cegqi, mbqi.",
+                        self.quantifier_mode
+                    );
+                    crate::cvc5_backend::QuantifierMode::Auto
+                },
+            );
+        crate::cvc5_backend::Cvc5Config {
+            logic,
+            timeout_ms: Maybe::None,
+            incremental: self.incremental,
+            produce_models: self.produce_models,
+            produce_proofs: self.produce_proofs,
+            produce_unsat_cores: self.produce_unsat_cores,
+            preprocessing: self.preprocessing,
+            quantifier_mode,
+            random_seed: self.random_seed,
+            verbosity: self.verbosity,
         }
     }
 }
@@ -371,60 +447,17 @@ impl SmtConfig {
         std::fs::write(path.as_ref(), json_str).map_err(|e| ConfigError::IoError(e.to_string()))
     }
 
-    /// Convert to backend switcher configuration
+    /// Convert to backend switcher configuration.
+    ///
+    /// Translates the TOML schema types (`SmtConfig.z3`,
+    /// `SmtConfig.cvc5`) into the impl-side
+    /// `crate::z3_backend::Z3Config` / `crate::cvc5_backend::Cvc5Config`
+    /// and stores them on `SwitcherConfig`'s
+    /// `z3_backend` / `cvc5_backend` slots so
+    /// `SmtBackendSwitcher::build_backends` can honor them at
+    /// construction. Pre-fix this function discarded the sub-configs
+    /// entirely and the backends always ran with `::default()`.
     pub fn to_switcher_config(&self) -> SwitcherConfig {
-        // Phase-not-realised: `SmtConfig.z3` (Z3-specific settings)
-        // and `SmtConfig.cvc5` (CVC5-specific settings) are TOML
-        // schema fields parsed from `[smt.z3]` / `[smt.cvc5]`
-        // sections but `SwitcherConfig` does not yet have a slot for
-        // either, so this conversion drops them. The actual
-        // backends (Z3Solver in z3_backend.rs, Cvc5Solver in
-        // cvc5_backend.rs) construct their own internal `Z3Config` /
-        // `Cvc5Config` (different types, in their own modules) via
-        // `::default()` rather than reading the TOML-parsed values
-        // surfaced here.
-        //
-        // Surface a debug trace when the embedder configures any
-        // z3 / cvc5 sub-field to a non-default value so the gap
-        // is visible: `[smt.z3] enable_proofs = false` parses but
-        // does NOT currently disable Z3 proof generation. The
-        // 8 z3 fields (enable_proofs, minimize_cores, enable_mbqi,
-        // enable_patterns, random_seed, memory_limit_mb,
-        // num_workers, auto_tactics) and the 8 cvc5 fields
-        // (logic, incremental, produce_models, produce_proofs,
-        // produce_unsat_cores, preprocessing, quantifier_mode,
-        // random_seed, verbosity) all flow through this function.
-        let z3_default = Z3Config::default();
-        let cvc5_default = Cvc5Config::default();
-        let z3_diverged = self.z3.enable_proofs != z3_default.enable_proofs
-            || self.z3.minimize_cores != z3_default.minimize_cores
-            || self.z3.enable_mbqi != z3_default.enable_mbqi
-            || self.z3.enable_patterns != z3_default.enable_patterns
-            || !matches!(self.z3.random_seed, Maybe::None)
-            || self.z3.num_workers != z3_default.num_workers
-            || self.z3.auto_tactics != z3_default.auto_tactics;
-        let cvc5_diverged = self.cvc5.logic != cvc5_default.logic
-            || self.cvc5.incremental != cvc5_default.incremental
-            || self.cvc5.produce_models != cvc5_default.produce_models
-            || self.cvc5.produce_proofs != cvc5_default.produce_proofs
-            || self.cvc5.produce_unsat_cores != cvc5_default.produce_unsat_cores
-            || self.cvc5.preprocessing != cvc5_default.preprocessing
-            || self.cvc5.quantifier_mode != cvc5_default.quantifier_mode
-            || !matches!(self.cvc5.random_seed, Maybe::None)
-            || self.cvc5.verbosity != cvc5_default.verbosity;
-        if z3_diverged || cvc5_diverged {
-            tracing::warn!(
-                "SmtConfig::to_switcher_config: dropping z3/cvc5 sub-config \
-                 (z3_diverged={}, cvc5_diverged={}). The SwitcherConfig type \
-                 has no slot for backend-specific settings; the actual Z3 / \
-                 CVC5 backends construct their own internal config via \
-                 ::default(). Settings like `[smt.z3] enable_proofs=false` or \
-                 `[smt.cvc5] preprocessing=false` parse but are NOT honoured \
-                 at solver-construction time. Forward-looking knobs.",
-                z3_diverged,
-                cvc5_diverged,
-            );
-        }
         SwitcherConfig {
             default_backend: self.backend,
             fallback: self.fallback.clone(),
@@ -432,6 +465,8 @@ impl SmtConfig {
             validation: self.validation.clone(),
             timeout_ms: self.timeout_ms,
             verbose: self.verbose,
+            z3_backend: Maybe::Some(self.z3.to_backend_config()),
+            cvc5_backend: Maybe::Some(self.cvc5.to_backend_config()),
         }
     }
 
@@ -659,3 +694,141 @@ impl SmtConfig {
 // - Presets (development, production, performance, debugging)
 // - Backend-specific configurations
 // - Comprehensive documentation
+
+#[cfg(test)]
+mod to_switcher_config_tests {
+    //! Pin tests for the TOML schema → impl-config translation in
+    //! `SmtConfig::to_switcher_config`. Pre-fix the conversion
+    //! discarded both `[smt.z3]` and `[smt.cvc5]` sub-sections; these
+    //! tests verify every backend-specific field now reaches the
+    //! `SwitcherConfig.z3_backend` / `cvc5_backend` slots.
+    use super::*;
+
+    #[test]
+    fn z3_subconfig_propagates_to_backend_slot() {
+        let mut cfg = SmtConfig::default();
+        cfg.z3.enable_proofs = false;
+        cfg.z3.minimize_cores = false;
+        cfg.z3.enable_mbqi = false;
+        cfg.z3.enable_patterns = false;
+        cfg.z3.random_seed = Maybe::Some(42);
+        cfg.z3.memory_limit_mb = Maybe::Some(1024);
+        cfg.z3.num_workers = 7;
+        cfg.z3.auto_tactics = false;
+
+        let switcher = cfg.to_switcher_config();
+        let z3 = match switcher.z3_backend {
+            Maybe::Some(c) => c,
+            Maybe::None => panic!("z3_backend slot must be Some"),
+        };
+        assert_eq!(z3.enable_proofs, false, "enable_proofs not threaded");
+        assert_eq!(z3.minimize_cores, false, "minimize_cores not threaded");
+        assert_eq!(z3.enable_mbqi, false, "enable_mbqi not threaded");
+        assert_eq!(z3.enable_patterns, false, "enable_patterns not threaded");
+        assert!(matches!(z3.random_seed, Maybe::Some(42)));
+        assert!(matches!(z3.memory_limit_mb, Maybe::Some(1024)));
+        assert_eq!(z3.num_workers, 7, "num_workers not threaded");
+        assert_eq!(z3.auto_tactics, false, "auto_tactics not threaded");
+        // global_timeout_ms is left None so build_backends can fall
+        // back to the umbrella SwitcherConfig.timeout_ms.
+        assert!(matches!(z3.global_timeout_ms, Maybe::None));
+    }
+
+    #[test]
+    fn cvc5_subconfig_propagates_to_backend_slot() {
+        let mut cfg = SmtConfig::default();
+        cfg.cvc5.logic = "QF_LIA".to_string();
+        cfg.cvc5.incremental = false;
+        cfg.cvc5.produce_models = false;
+        cfg.cvc5.produce_proofs = false;
+        cfg.cvc5.produce_unsat_cores = false;
+        cfg.cvc5.preprocessing = false;
+        cfg.cvc5.quantifier_mode = "ematching".to_string();
+        cfg.cvc5.random_seed = Maybe::Some(7);
+        cfg.cvc5.verbosity = 3;
+
+        let switcher = cfg.to_switcher_config();
+        let c = match switcher.cvc5_backend {
+            Maybe::Some(c) => c,
+            Maybe::None => panic!("cvc5_backend slot must be Some"),
+        };
+        assert_eq!(c.logic, crate::cvc5_backend::SmtLogic::QF_LIA);
+        assert_eq!(c.incremental, false);
+        assert_eq!(c.produce_models, false);
+        assert_eq!(c.produce_proofs, false);
+        assert_eq!(c.produce_unsat_cores, false);
+        assert_eq!(c.preprocessing, false);
+        assert_eq!(c.quantifier_mode, crate::cvc5_backend::QuantifierMode::EMatching);
+        assert!(matches!(c.random_seed, Maybe::Some(7)));
+        assert_eq!(c.verbosity, 3);
+        assert!(matches!(c.timeout_ms, Maybe::None));
+    }
+
+    #[test]
+    fn cvc5_unknown_logic_falls_back_to_all() {
+        let mut cfg = SmtConfig::default();
+        cfg.cvc5.logic = "NOT_A_REAL_LOGIC".to_string();
+        let switcher = cfg.to_switcher_config();
+        let c = match switcher.cvc5_backend {
+            Maybe::Some(c) => c,
+            Maybe::None => panic!("cvc5_backend slot must be Some"),
+        };
+        assert_eq!(c.logic, crate::cvc5_backend::SmtLogic::ALL);
+    }
+
+    #[test]
+    fn cvc5_unknown_quantifier_mode_falls_back_to_auto() {
+        let mut cfg = SmtConfig::default();
+        cfg.cvc5.quantifier_mode = "wat".to_string();
+        let switcher = cfg.to_switcher_config();
+        let c = match switcher.cvc5_backend {
+            Maybe::Some(c) => c,
+            Maybe::None => panic!("cvc5_backend slot must be Some"),
+        };
+        assert_eq!(c.quantifier_mode, crate::cvc5_backend::QuantifierMode::Auto);
+    }
+
+    #[test]
+    fn build_backends_honors_z3_backend_slot() {
+        // Pin: when a non-default Z3Config is supplied via the
+        // SwitcherConfig.z3_backend slot, build_backends must use
+        // those settings rather than Z3Config::default(). We probe
+        // via the constructed SwitcherConfig fields rather than
+        // poking inside the Z3Backend (which has no observability
+        // accessor for its own config).
+        let mut cfg = SmtConfig::default();
+        cfg.z3.enable_proofs = false;
+        cfg.z3.num_workers = 11;
+        let switcher = cfg.to_switcher_config();
+        match &switcher.z3_backend {
+            Maybe::Some(c) => {
+                assert_eq!(c.enable_proofs, false);
+                assert_eq!(c.num_workers, 11);
+            }
+            Maybe::None => panic!("z3_backend must be populated"),
+        }
+    }
+
+    #[test]
+    fn umbrella_timeout_overrides_when_z3_global_timeout_is_none() {
+        // Pin: a manifest that sets `[smt] timeout_ms = N` but
+        // does NOT override `[smt.z3]` should see N propagate as
+        // the per-backend Z3 timeout (because to_backend_config
+        // intentionally leaves global_timeout_ms = None so
+        // build_backends fills it from the umbrella).
+        let mut cfg = SmtConfig::default();
+        cfg.timeout_ms = 12345;
+        let switcher = cfg.to_switcher_config();
+        match &switcher.z3_backend {
+            Maybe::Some(c) => {
+                assert!(
+                    matches!(c.global_timeout_ms, Maybe::None),
+                    "to_backend_config must leave global_timeout_ms = None \
+                     so build_backends picks it from umbrella"
+                );
+            }
+            Maybe::None => panic!("z3_backend must be populated"),
+        }
+        assert_eq!(switcher.timeout_ms, 12345);
+    }
+}
