@@ -1506,6 +1506,15 @@ impl VbcCodegen {
             ("CAP_READ", 1),
             ("CAP_WRITE", 2),
             ("CAP_OWNED", 4),
+            // Per-thread context slot table (core/sys/common.vr).
+            // Without these, `core/runtime/ctx_bridge.vr` cannot lower
+            // env_ctx_get/set/end/active_slot_count/install_parent_contexts
+            // and AOT skips them with `[lenient] SKIP top-level fn …
+            // undefined variable: CONTEXT_SLOT_COUNT`, leading to
+            // SIGSEGV at runtime when the dropped helpers are called.
+            ("CONTEXT_SLOT_COUNT", 256),
+            ("MAX_CONTEXT_SLOTS", 256),
+            ("CONTEXT_STACK_DEPTH", 8),
             // Page allocator / mmap constants
             ("PAGE_SIZE", 4096),
             ("SIZE_CLASS_COUNT", 8),
