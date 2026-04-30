@@ -1511,6 +1511,26 @@ pub struct ProtocolChecker {
     /// `find_impl`'s candidate set.  Threaded from manifest via
     /// `set_blanket_impls`.  Default true (Rust-like ergonomics).
     blanket_impls: bool,
+
+    /// `[types].instance_search` — when false, `find_impl` skips
+    /// the Stage-2 generic-candidate scan entirely.  Only the
+    /// O(1) exact-match path runs, so any call site that relied
+    /// on the resolver finding a generic `impl<T> Protocol for
+    /// List<T>` (or similar substitution-based match) for a
+    /// concrete type returns `None`.
+    ///
+    /// Mirrors the Idris-style "no implicit instance search"
+    /// semantic: every protocol-method dispatch must hit a
+    /// concretely-registered impl for the exact type, or the
+    /// caller must thread the instance explicitly.  Useful for
+    /// projects that want compile-time predictability (no
+    /// surprising blanket-impl resolution) at the cost of more
+    /// verbose impl declarations.
+    ///
+    /// Threaded from manifest via `set_instance_search_enabled`.
+    /// Default true (current behaviour — the resolver runs the
+    /// full multi-stage candidate scan).
+    instance_search_enabled: bool,
 }
 
 impl ProtocolChecker {
@@ -1532,6 +1552,7 @@ impl ProtocolChecker {
             checker_id: allocate_checker_id(),
             resolution_strategy: Text::from("most_specific"),
             blanket_impls: true,
+            instance_search_enabled: true,
         };
 
         // Register standard protocols
@@ -1564,6 +1585,7 @@ impl ProtocolChecker {
             checker_id: allocate_checker_id(),
             resolution_strategy: Text::from("most_specific"),
             blanket_impls: true,
+            instance_search_enabled: true,
         }
     }
 
@@ -1593,6 +1615,23 @@ impl ProtocolChecker {
     /// bare type variable from the candidate set.
     pub fn set_blanket_impls(&mut self, allowed: bool) {
         self.blanket_impls = allowed;
+    }
+
+    /// Apply the manifest-side `[types].instance_search`. When
+    /// false, `find_impl` skips the Stage-2 generic-candidate scan
+    /// — only the O(1) exact-match path runs.  Closes the
+    /// inert-defense pattern around the field at session.rs:472:
+    /// pre-fix the setter on `TypeChecker.set_instance_search_
+    /// enabled` stored the value but no production code path
+    /// consulted it.
+    pub fn set_instance_search_enabled(&mut self, enabled: bool) {
+        self.instance_search_enabled = enabled;
+    }
+
+    /// Read-only accessor — exposed for diagnostics + tests.
+    #[inline]
+    pub fn instance_search_enabled(&self) -> bool {
+        self.instance_search_enabled
     }
 
     /// Read-only accessor — exposed for diagnostics + tests.
@@ -4345,6 +4384,16 @@ impl ProtocolChecker {
             return self.impls.get(idx);
         }
 
+        // Honour `[types].instance_search = false`: skip Stage 2
+        // entirely — caller must thread the instance explicitly or
+        // register a concrete `impl Protocol for ConcreteType`.
+        // Mirrors the Idris-style "no implicit instance search"
+        // semantic.  Performance: returns immediately on the
+        // exact-match miss with zero allocation.
+        if !self.instance_search_enabled {
+            return Maybe::None;
+        }
+
         // Stage 2: Try generic/conditional matching
         // Collect all candidate implementations for this protocol
         let mut candidates: List<(usize, &ProtocolImpl, Map<Text, Type>)> = List::new();
@@ -4442,6 +4491,13 @@ impl ProtocolChecker {
                 // Exact match has empty substitution
                 return Maybe::Some((impl_, Map::new()));
             }
+        }
+
+        // Honour `[types].instance_search = false` — sibling gate
+        // to the one in `find_impl`. Skip Stage 2 generic-candidate
+        // scan when the manifest disables instance search.
+        if !self.instance_search_enabled {
+            return Maybe::None;
         }
 
         // Stage 2: Try generic/conditional matching
@@ -13932,5 +13988,118 @@ mod tests {
         assert!(!checker.blanket_impls_allowed());
         checker.set_blanket_impls(true);
         assert!(checker.blanket_impls_allowed());
+    }
+
+    #[test]
+    fn instance_search_default_is_enabled() {
+        // Pin: documented Verum.toml default + Rust-like
+        // ergonomics.
+        assert!(ProtocolChecker::new().instance_search_enabled());
+        assert!(ProtocolChecker::new_empty().instance_search_enabled());
+    }
+
+    #[test]
+    fn instance_search_setter_round_trips() {
+        // Pin: `set_instance_search_enabled(false)` flips the
+        // gate; setter is idempotent.  Used at semantic_analysis
+        // to wire `[types].instance_search` from manifest.
+        let mut checker = ProtocolChecker::new();
+        checker.set_instance_search_enabled(false);
+        assert!(!checker.instance_search_enabled());
+        checker.set_instance_search_enabled(false);
+        assert!(!checker.instance_search_enabled());
+        checker.set_instance_search_enabled(true);
+        assert!(checker.instance_search_enabled());
+    }
+
+    #[test]
+    fn instance_search_disabled_returns_none_on_generic_match_path() {
+        // Pin: with `[types].instance_search = false`, `find_impl`
+        // skips Stage-2 generic-candidate scan and returns None
+        // for any non-exact match.  The exact-match path still
+        // works (Stage 1 is unaffected) — only implicit blanket /
+        // generic resolution is gated.
+        //
+        // Setup: register a single blanket impl `impl<T>
+        // CustomProto for T`. With instance_search ON,
+        // find_impl(Type::Int) returns the blanket impl via
+        // Stage-2. With it OFF, returns None — caller must
+        // register `impl CustomProto for Int` explicitly.
+        //
+        // Use `new_empty()` so no standard protocols collide with
+        // our test impl at `register_impl` time.
+        let mut checker = ProtocolChecker::new_empty();
+        let proto_path =
+            Path::single(Ident::new("CustomProto_InstanceSearchTest", Span::default()));
+        let blanket = ProtocolImpl {
+            protocol: proto_path.clone(),
+            protocol_args: List::new(),
+            for_type: Type::Var(crate::ty::TypeVar::fresh()),
+            where_clauses: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        };
+        checker.register_impl(blanket).unwrap();
+
+        // Default ON: blanket-impl scan reaches Type::Int.
+        match checker.find_impl(&Type::Int, &proto_path) {
+            Maybe::Some(_) => {} // expected
+            Maybe::None => panic!(
+                "default instance_search=true must find the blanket impl"
+            ),
+        }
+
+        // Flip OFF: Stage 2 skipped → None.
+        checker.set_instance_search_enabled(false);
+        assert!(
+            matches!(checker.find_impl(&Type::Int, &proto_path), Maybe::None),
+            "instance_search=false must skip the generic-candidate scan"
+        );
+    }
+
+    #[test]
+    fn instance_search_disabled_keeps_exact_match_path_working() {
+        // Pin: instance_search=false ONLY gates Stage 2 (generic
+        // candidate scan). Stage 1 (exact-match O(1) lookup)
+        // remains active — concretely-registered impls still
+        // resolve. This makes the gate a "no implicit blanket
+        // search" knob, not a complete protocol-resolver
+        // disable.
+        let mut checker = ProtocolChecker::new_empty();
+        let proto_path =
+            Path::single(Ident::new("CustomProto_ExactMatchTest", Span::default()));
+        let concrete = ProtocolImpl {
+            protocol: proto_path.clone(),
+            protocol_args: List::new(),
+            for_type: Type::Int,
+            where_clauses: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        };
+        checker.register_impl(concrete).unwrap();
+        checker.set_instance_search_enabled(false);
+        // Exact match still resolves via Stage 1 (impl_index O(1)
+        // hit).
+        match checker.find_impl(&Type::Int, &proto_path) {
+            Maybe::Some(impl_) => {
+                assert!(
+                    matches!(&impl_.for_type, Type::Int),
+                    "exact-match path must still return the concrete impl"
+                );
+            }
+            Maybe::None => panic!(
+                "instance_search=false must NOT block exact-match resolution"
+            ),
+        }
     }
 }

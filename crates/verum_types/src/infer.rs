@@ -6534,8 +6534,19 @@ impl TypeChecker {
         self.quotient_enabled = enabled;
     }
 
+    /// Apply `[types].instance_search` to both the TypeChecker
+    /// (where downstream type-system flow may consult it) AND the
+    /// embedded `ProtocolChecker.instance_search_enabled` field
+    /// where `find_impl` actually gates the Stage-2 generic-
+    /// candidate scan.  Closes the inert-defense pattern around
+    /// the field — pre-fix only the type-checker store happened
+    /// here, so even when the manifest disabled instance search
+    /// the resolver still ran the full multi-stage candidate scan.
     pub fn set_instance_search_enabled(&mut self, enabled: bool) {
         self.instance_search_enabled = enabled;
+        self.protocol_checker
+            .write()
+            .set_instance_search_enabled(enabled);
     }
 
     pub fn set_coherence_check_depth(&mut self, depth: u32) {

@@ -468,47 +468,48 @@ impl Session {
 
         // Phase-not-realised tracing for inert type-system
         // knobs. The `[types]` manifest section parses 7 bool
-        // fields beyond `refinement` (which IS wired via
+        // fields beyond `refinement` (wired via
         // `refinement_typing_on`) and `coherence_check_depth`
-        // (which IS wired in semantic_analysis):
-        // `dependent`, `cubical`, `higher_kinded`,
-        // `universe_polymorphism`, `coinductive`, `quotient`,
-        // `instance_search`. feature_overrides forwards them to
-        // `LanguageFeatures.types` and `validate()` enforces a
-        // small coherence lattice (e.g., cubical requires
-        // dependent), but no production type-checker pass gates
-        // on any of them — dependent / cubical / quotient
-        // syntactic forms parse and elaborate regardless of the
-        // flag, and instance-search runs unconditionally.
+        // (wired in semantic_analysis).  Five are wired:
+        //   - `dependent` flows to `TypeChecker.dependent_enabled`
+        //     and is consulted at `infer.rs:13439` (gates
+        //     dependent pattern matching on inductive types with
+        //     indices).
+        //   - `cubical` flows to `Unifier.cubical_enabled` and
+        //     selects between strict syntactic equality and the
+        //     cubical `whnf` normaliser at `unify.rs:186`.
+        //   - `higher_kinded` flows to
+        //     `TypeChecker.higher_kinded_enabled` and is consulted
+        //     at `infer.rs:55696` (gates higher-kinded type
+        //     parameter elaboration).
+        //   - `coinductive` flows to
+        //     `TypeChecker.coinductive_enabled` and is consulted
+        //     at `infer.rs:36286` (gates `cofix` semantics).
+        //   - `instance_search` flows through
+        //     `TypeChecker.set_instance_search_enabled` →
+        //     `ProtocolChecker.instance_search_enabled` and gates
+        //     the Stage-2 generic-candidate scan in `find_impl`
+        //     at `protocol.rs:4356-4361`.
+        // Two remain inert (setter stores but no production
+        // consumer):
+        //   - `quotient`: HIT-based modular equivalence syntactic
+        //     forms parse and elaborate regardless.
+        //   - `universe_polymorphism`: typed-surface declarations
+        //     land on `TypeChecker.universe_poly_enabled` but no
+        //     production unifier pass gates on them.
         //
-        // Surface a warning when any of these is set to a
-        // non-default value so a `[types] dependent = false`
-        // setting in verum.toml doesn't silently elaborate
-        // dependent types anyway. Default-valued configs stay
-        // log-quiet.
+        // Surface a warning when either of those two is set to a
+        // non-default value.
         let ty = &opts.language_features.types;
-        if !ty.dependent
-            || !ty.cubical
-            || !ty.higher_kinded
-            || ty.universe_polymorphism
-            || !ty.coinductive
-            || !ty.quotient
-            || !ty.instance_search
-        {
+        if !ty.quotient || ty.universe_polymorphism {
             tracing::warn!(
-                "manifest [types] surface: dependent={}, cubical={}, higher_kinded={}, \
-                 universe_polymorphism={}, coinductive={}, quotient={}, instance_search={} \
+                "manifest [types] surface: quotient={}, universe_polymorphism={} \
                  (these fields land on LanguageFeatures.types and validate() enforces \
                  their coherence lattice, but no production type-check pass currently \
-                 gates on them — dependent/cubical/quotient/coinductive syntactic forms \
-                 parse and elaborate regardless; instance-search runs unconditionally)",
-                ty.dependent,
-                ty.cubical,
-                ty.higher_kinded,
-                ty.universe_polymorphism,
-                ty.coinductive,
+                 gates on them — quotient / universe-polymorphism syntactic forms \
+                 parse and elaborate regardless of the flag)",
                 ty.quotient,
-                ty.instance_search,
+                ty.universe_polymorphism,
             );
         }
 
