@@ -5434,47 +5434,67 @@ impl ProofSearchEngine {
         }
     }
 
-    /// Rewrite using equality hypothesis
+    /// Rewrite the goal using a specific equality hypothesis.
+    ///
+    /// `hypothesis` is the user-named hypothesis (e.g. `h0`, `h1`, or a
+    /// pattern-bound name). It is resolved to an index via
+    /// [`find_hypothesis_index`]; the hypothesis at that index must be
+    /// an equality `a = b`, otherwise we error out naming both the
+    /// hypothesis and its actual shape.
+    ///
+    /// Pre-fix this scanned for the first equality hypothesis in the
+    /// goal regardless of the user's chosen name, silently rewriting
+    /// with the wrong hypothesis when the user asked for `rewrite h2`
+    /// but `h0` was also an equality.
     fn try_rewrite(
         &mut self,
         hypothesis: &Text,
         reverse: bool,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // Find hypothesis in goal's hypotheses
-        for (idx, hyp) in goal.hypotheses.iter().enumerate() {
-            // Check if this hypothesis matches the name (simplified check)
-            if let ExprKind::Binary {
-                op: BinOp::Eq,
-                left,
-                right,
-            } = &hyp.kind
-            {
-                // Found an equality hypothesis
-                let (from, to) = if reverse {
-                    (right, left)
-                } else {
-                    (left, right)
-                };
+        let idx = self.find_hypothesis_index(hypothesis, goal)?;
+        let hyp = &goal.hypotheses[idx];
+        let ExprKind::Binary { op: BinOp::Eq, left, right } = &hyp.kind else {
+            return Err(ProofError::TacticFailed(
+                format!(
+                    "rewrite: hypothesis '{}' is not an equality (got {:?})",
+                    hypothesis,
+                    std::mem::discriminant(&hyp.kind)
+                )
+                .into(),
+            ));
+        };
 
-                // Rewrite goal
-                if let Maybe::Some(new_goal_expr) = Self::try_rewrite_once(&goal.goal, from, to) {
-                    let mut new_goal = goal.clone();
-                    new_goal.goal = new_goal_expr;
+        let (from, to) = if reverse { (right, left) } else { (left, right) };
 
-                    let mut result = List::new();
-                    result.push(new_goal);
-                    return Ok(result);
-                }
+        let new_goal_expr = match Self::try_rewrite_once(&goal.goal, from, to) {
+            Maybe::Some(expr) => expr,
+            Maybe::None => {
+                return Err(ProofError::TacticFailed(
+                    format!(
+                        "rewrite: equality '{}' did not match any subterm of the goal",
+                        hypothesis
+                    )
+                    .into(),
+                ));
             }
-        }
-
-        Err(ProofError::TacticFailed(
-            format!("Cannot find equality hypothesis '{}'", hypothesis).into(),
-        ))
+        };
+        let mut new_goal = goal.clone();
+        new_goal.goal = new_goal_expr;
+        let mut result = List::new();
+        result.push(new_goal);
+        Ok(result)
     }
 
-    /// Rewrite at specific target
+    /// Rewrite at a specific named target inside the goal using the
+    /// given equality hypothesis.
+    ///
+    /// Same hypothesis resolution as [`try_rewrite`]: the named
+    /// hypothesis is looked up by index, not via first-equality scan.
+    /// Target-localised rewriting (limit substitution to the named
+    /// subterm of the goal) is a future refinement; for now this
+    /// uses whole-goal rewriting after resolving the correct
+    /// hypothesis.
     fn try_rewrite_at(
         &mut self,
         hypothesis: &Text,
@@ -5482,7 +5502,6 @@ impl ProofSearchEngine {
         reverse: bool,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
-        // For now, same as try_rewrite (would target specific hypothesis)
         self.try_rewrite(hypothesis, reverse, goal)
     }
 
