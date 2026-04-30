@@ -102,6 +102,15 @@ pub mod tactic_elaborator;
 // but *practically* unused — no real Verum theorem reduces to a
 // kernel-readable term.  The de Bruijn criterion lives here.
 
+pub mod verification_goal;
+// Single VerificationGoal type (#167) — the unified verification
+// surface.  Pre-#167 fn-contracts, theorem propositions, and
+// refinement predicates went through three parallel pipelines with
+// no shared type.  Post-#167 every source produces the same
+// `VerificationGoal { hypotheses, conclusion, source }` shape, and
+// every dispatcher consumes it.  Prerequisite for #160
+// (refinement-driven development unification).
+
 pub mod proof_tree;
 pub use proof_tree::{KernelProofNode, KernelRule, record_inference};
 
