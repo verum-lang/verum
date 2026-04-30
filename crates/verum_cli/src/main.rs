@@ -1254,6 +1254,19 @@ enum Commands {
         #[clap(long = "ladder-monotonicity")]
         ladder_monotonicity: bool,
 
+        /// Run the cross-format roundtrip audit (task #138 / MSFS-L4.5).
+        /// Walks every `@theorem`/`@lemma`/`@corollary` in the
+        /// project, emits per-theorem `.v` (Coq) and `.lean` (Lean 4)
+        /// files into `target/audit-reports/cross-format-roundtrip/`,
+        /// and invokes `coqc` / `lean` against each emitted file.
+        /// Aggregates per-theorem foreign-tool verdicts.  Exits
+        /// non-zero only when an AVAILABLE foreign tool reports a
+        /// real failure on at least one emitted file.  Hosts without
+        /// the foreign tools installed get `tool_missing`
+        /// observability without failing the gate.
+        #[clap(long = "cross-format-roundtrip")]
+        cross_format_roundtrip: bool,
+
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
@@ -3546,6 +3559,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_soundness,
             bridge_discharge,
             ladder_monotonicity,
+            cross_format_roundtrip,
             epsilon,
             coord,
             no_coord,
@@ -3592,6 +3606,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {
                 commands::audit::audit_ladder_monotonicity_with_format(output_format)
+            } else if cross_format_roundtrip {
+                commands::audit::audit_cross_format_roundtrip_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {
