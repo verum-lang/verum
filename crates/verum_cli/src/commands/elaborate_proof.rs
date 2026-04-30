@@ -47,7 +47,9 @@ use crate::error::{CliError, Result};
 use crate::ui;
 use std::path::{Path, PathBuf};
 use verum_ast::decl::ItemKind;
-use verum_kernel::tactic_elaborator::{elaborate_theorem, ElabContext, ElabError};
+use verum_kernel::tactic_elaborator::{
+    elaborate_theorem, register_propositional_connectives, ElabContext, ElabError,
+};
 
 /// One row in the elaboration report — what happened for one
 /// theorem.
@@ -196,6 +198,10 @@ fn walk_and_elaborate(
         };
 
         let mut ctx = ElabContext::new();
+        // Phase-5: pre-register propositional connectives so theorems
+        // with `Binary`/`Unary` propositions (a == b, a && b, !x) can
+        // be translated rather than falling back to placeholder.
+        register_propositional_connectives(&mut ctx);
         let row = match elaborate_theorem(theorem, &mut ctx) {
             Ok(cert) => {
                 let vproof_path = out_dir.join(format!("{}.vproof", name));
