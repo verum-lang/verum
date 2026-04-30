@@ -30,6 +30,10 @@ public module set;
 public module deque;
 public module heap;
 public module btree;
+// Prefix-tree (trie) — Map<&Text, V>-style structure with O(|key|)
+// access, useful for routing tables, autocomplete, longest-prefix-
+// match dispatch. Pre-fix the file existed but was unregistered.
+public module trie;
 public module adjacency_list;
 public module ttl_cache;
 public module bloom;

@@ -38,6 +38,11 @@
 
 module core.simd;
 public module gpu;
+// High-level byte-scan primitives built on portable SIMD —
+// memchr / strchr-style fast byte search, used by the JSON / CBOR
+// / lexer hot paths to avoid scalar byte loops. Pre-fix the file
+// existed but had no umbrella declaration.
+public module bytes;
 
 // =============================================================================
 // SIMD ELEMENT PROTOCOL

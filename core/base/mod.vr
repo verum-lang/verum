@@ -57,6 +57,20 @@ public module ulid;       // 128-bit time-ordered IDs (26-char Crockford Base32)
 public module string_distance;  // Levenshtein + Jaro-Winkler for fuzzy matching
 
 // =============================================================================
+// Foundational submodules — the file existed in `core/base/` but had
+// no `public module` declaration in this umbrella. Reachable via
+// direct file-path mounting (`mount core.base.coercion;`) but
+// invisible to namespace enumeration / wildcard re-exports.
+// Closes the audit pass that found 5 omissions in this layer.
+// =============================================================================
+
+public module coercion;     // Marker protocols driving unifier coercion behaviour
+public module coinductive;  // Coinductive types + bisimulation primitives
+public module error;        // Standard error trait + common error categories
+public module log;          // Lightweight structured logging facade
+public module serde;        // Generic serialise/deserialise protocol surface
+
+// =============================================================================
 // Prelude re-exports (commonly used items)
 // =============================================================================
 

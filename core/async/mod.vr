@@ -59,6 +59,15 @@ public module backoff;
 // Async concurrency-limiter semaphore — cooperative (task-based).
 public module semaphore;
 
+// Read-only introspection of async runtime state — task identities,
+// lifecycle states, last-poll provenance — for post-mortem dumps,
+// debugger / observer integrations, live monitoring dashboards.
+// `core.diagnostics` (the user-facing umbrella) re-exports
+// `MemHeaderView`, `TaskInfo`, `TaskLifecycleState` from this
+// module; the umbrella declaration here makes the full namespace
+// addressable as `core.async.diagnostics.*`.
+public module diagnostics;
+
 // =============================================================================
 // Re-exports
 // =============================================================================
