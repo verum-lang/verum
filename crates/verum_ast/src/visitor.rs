@@ -950,7 +950,7 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                             }
                         }
                     }
-                    crate::decl::ProtocolItemKind::Type { name, bounds: _, .. } => {
+                    crate::decl::ProtocolItemKind::Type { name, .. } => {
                         visitor.visit_ident(name);
                     }
                     crate::decl::ProtocolItemKind::Const { name, ty } => {
@@ -1011,7 +1011,7 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                             }
                         }
                     }
-                    crate::decl::ProtocolItemKind::Type { name, bounds: _, .. } => {
+                    crate::decl::ProtocolItemKind::Type { name, .. } => {
                         visitor.visit_ident(name);
                     }
                     crate::decl::ProtocolItemKind::Const { name, ty } => {

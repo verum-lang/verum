@@ -37,6 +37,17 @@
 #![allow(clippy::should_implement_trait)]
 // Allow while let loop
 #![allow(clippy::while_let_loop)]
+// Reasoning: SMT translator code uses uniform `match Some/None`
+// templates and explicit `match → ?` patterns to keep generic
+// proof-search heuristics readable. Replacing with `?` / `.map`
+// fragments the deliberately uniform shape.
+#![allow(clippy::question_mark)]
+#![allow(clippy::manual_map)]
+#![allow(clippy::doc_overindented_list_items)]
+// Config-propagation tests use `assert_eq!(x, false, "field not threaded")`
+// to make it visually obvious which field is being checked. The clippy
+// suggestion (`assert!(!x)`) loses the message-side label.
+#![allow(clippy::bool_assert_comparison)]
 // Allow useless conversion
 #![allow(clippy::useless_conversion)]
 // Allow redundant reference

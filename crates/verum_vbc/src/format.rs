@@ -443,7 +443,12 @@ mod tests {
     /// a strictly lower minor MUST be readable.
     #[test]
     fn test_accepts_lower_minor_version() {
-        if VERSION_MINOR > 0 {
+        // The lower-minor branch is statically dead while
+        // VERSION_MINOR == 0 — kept intentionally so the assertion
+        // wakes back up the moment we cut a 0.1 release.
+        #[allow(clippy::absurd_extreme_comparisons)]
+        let has_lower_minor = VERSION_MINOR > 0;
+        if has_lower_minor {
             let mut header = VbcHeader::new();
             header.version_minor = VERSION_MINOR - 1;
             assert!(header.is_version_compatible());

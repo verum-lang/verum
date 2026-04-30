@@ -1,6 +1,5 @@
 //! End-to-end integration tests for `verum cog-registry`.
 
-use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output};
