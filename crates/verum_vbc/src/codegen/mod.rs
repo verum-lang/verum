@@ -9013,6 +9013,31 @@ impl VbcCodegen {
                     field.name = *mapped;
                 }
             }
+            // Remap variant names AND each variant's inner field names
+            // (record-style variant payloads).  Pre-fix this remap was
+            // skipped — variant.name carried the codegen-index StringId
+            // while the runtime's `state.module.strings.get(StringId)`
+            // expected a byte offset, so every typed-variant name
+            // lookup at `format_variant_for_print_depth` either
+            // returned None (rendering "Variant(N, ...)") or read from
+            // the wrong offset (rendering an unrelated symbol like
+            // "tcp_connect" or "file_write_all").  This is the
+            // load-bearing fix for VBC-3's user-facing display: now
+            // the typed-variant TypeDescriptor's variant names
+            // resolve to the same string id-space the rest of the
+            // runtime uses, so the constructor name displays
+            // correctly (e.g., `SpawnFailed(...)` for
+            // `ShellError.SpawnFailed`).
+            for variant in &mut remapped_ty.variants {
+                if let Some(mapped) = string_id_map.get(variant.name.0 as usize) {
+                    variant.name = *mapped;
+                }
+                for f in &mut variant.fields {
+                    if let Some(mapped) = string_id_map.get(f.name.0 as usize) {
+                        f.name = *mapped;
+                    }
+                }
+            }
             // Remap drop_fn from sparse ID to contiguous 0-based ID
             if let Some(drop_fn) = remapped_ty.drop_fn
                 && let Some(&new_id) = func_id_remap.get(&drop_fn) {
