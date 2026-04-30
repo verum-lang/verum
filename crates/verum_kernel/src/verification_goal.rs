@@ -226,6 +226,7 @@ impl VerificationGoal {
 
 use verum_ast::decl::{FunctionDecl, TheoremDecl};
 use verum_ast::expr::Expr;
+use verum_ast::ty::{Type, TypeKind};
 
 /// **Convert a theorem (or lemma / corollary) declaration to a
 /// VerificationGoal.**
@@ -350,6 +351,98 @@ pub fn from_refinement(
             ty_name: ty_name.to_string(),
         },
     ))
+}
+
+/// **High-level converter: `Type::Refined` + witness → VerificationGoal.**
+///
+/// This is the load-bearing function for the
+/// "specification ≡ refinement type ≡ proof obligation" unification
+/// (#160).  Given:
+///
+///   - `refined_ty`: a `Type` whose `kind` is `TypeKind::Refined { base,
+///     predicate }`.  Other type kinds return
+///     [`ElabError::UnsupportedExpression`] — the caller is expected
+///     to dispatch only refined types here.
+///   - `ty_name`: a human-readable name for the refinement (e.g.
+///     `"NonNegInt"` or an auto-generated tag for an inline `T{...}`).
+///
+/// Algorithm: extract the predicate expression from
+/// `refined_ty.kind = TypeKind::Refined { predicate, .. }`, hand it
+/// to [`from_refinement`] with `Universe(0)` as the base-type term
+/// (the placeholder encoding while a full Type-to-Term translator
+/// remains future work).
+///
+/// **Why this matters for #160**: by routing every refinement-type
+/// application through [`VerificationGoal`], the type checker, the
+/// SMT dispatcher, and the audit gate see *the same shape* whether
+/// the obligation came from a `requires` clause, an `ensures`
+/// clause, a theorem proposition, or a refinement-type predicate.
+/// One verification surface, four sources.
+pub fn from_refined_type(
+    refined_ty: &Type,
+    ty_name: &str,
+    ctx: &ElabContext,
+) -> Result<VerificationGoal, ElabError> {
+    match &refined_ty.kind {
+        TypeKind::Refined { base: _, predicate } => from_refinement(
+            Term::Universe(0),
+            &predicate.expr,
+            ty_name,
+            ctx,
+        ),
+        other => Err(ElabError::UnsupportedExpression(format!(
+            "from_refined_type: expected TypeKind::Refined, got {:?}",
+            other,
+        ))),
+    }
+}
+
+/// **The full spec-≡-refinement-≡-obligation unification handle.**
+///
+/// Given any of the four sources of a verification obligation,
+/// produce a [`VerificationGoal`] of the same shape.  This is the
+/// deep semantic unification driving #160: regardless of where the
+/// obligation arose, downstream consumers see ONE type.
+///
+/// The dispatch is by the `source` discriminant; each branch routes
+/// through the existing `from_*` converter.  Adding a new
+/// obligation source (e.g., a CBGR escape-analysis check) is one
+/// new variant + one new converter.
+#[derive(Debug, Clone)]
+pub enum ObligationSource<'a> {
+    /// A theorem / lemma / corollary declaration.
+    Theorem {
+        /// The theorem AST.
+        theorem: &'a TheoremDecl,
+        /// Theorem / Lemma / Corollary discriminator.
+        kind: TheoremKind,
+    },
+    /// A function declaration with `requires` / `ensures` clauses.
+    FnContract(&'a FunctionDecl),
+    /// A refinement type used at a let / parameter binding.
+    RefinedType {
+        /// The refinement type.
+        refined_ty: &'a Type,
+        /// Human-readable refinement-type name.
+        ty_name: &'a str,
+    },
+}
+
+/// Dispatch the universal converter.  Returns the same shape of
+/// [`VerificationGoal`] regardless of source.
+pub fn from_obligation_source(
+    source: ObligationSource<'_>,
+    ctx: &ElabContext,
+) -> Result<VerificationGoal, ElabError> {
+    match source {
+        ObligationSource::Theorem { theorem, kind } => {
+            from_theorem_decl(theorem, kind, ctx)
+        }
+        ObligationSource::FnContract(fn_decl) => from_fn_decl(fn_decl, ctx),
+        ObligationSource::RefinedType { refined_ty, ty_name } => {
+            from_refined_type(refined_ty, ty_name, ctx)
+        }
+    }
 }
 
 /// Translate a sequence of clauses (`requires` or `ensures` Expr
@@ -621,6 +714,97 @@ mod tests {
             let restored: GoalSource = serde_json::from_str(&json).unwrap();
             assert_eq!(src, restored);
         }
+    }
+
+    // ----- Refined-type + ObligationSource converters (#160) -----
+
+    use verum_ast::ty::{RefinementPredicate, Type, TypeKind};
+    use verum_common::Heap;
+
+    fn refined_type_with_path_predicate(pred_name: &str) -> Type {
+        let span = Span::dummy();
+        let predicate = RefinementPredicate {
+            expr: path_expr(pred_name),
+            binding: verum_common::Maybe::None,
+            span,
+        };
+        Type {
+            kind: TypeKind::Refined {
+                base: Heap::new(Type {
+                    kind: TypeKind::Int,
+                    span,
+                }),
+                predicate: Heap::new(predicate),
+            },
+            span,
+        }
+    }
+
+    #[test]
+    fn from_refined_type_extracts_predicate() {
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("is_positive", Term::Universe(0));
+        let ty = refined_type_with_path_predicate("is_positive");
+        let goal = from_refined_type(&ty, "PosInt", &ctx).unwrap();
+        assert_eq!(goal.hypothesis_count(), 1, "base type as hypothesis");
+        assert_eq!(goal.conclusion, Term::Var(0));
+        assert!(matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt"));
+    }
+
+    #[test]
+    fn from_refined_type_rejects_non_refined_kind() {
+        let span = Span::dummy();
+        let plain_int = Type {
+            kind: TypeKind::Int,
+            span,
+        };
+        let ctx = ElabContext::new();
+        match from_refined_type(&plain_int, "PlainInt", &ctx) {
+            Err(ElabError::UnsupportedExpression(msg)) => {
+                assert!(
+                    msg.contains("expected TypeKind::Refined"),
+                    "got: {}",
+                    msg,
+                );
+            }
+            other => panic!("expected UnsupportedExpression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn obligation_source_dispatches_theorem_source() {
+        let span = Span::dummy();
+        let theorem = TheoremDecl::new(
+            Ident { name: "trivial".into(), span },
+            bool_true_expr(),
+            span,
+        );
+        let ctx = ElabContext::new();
+        let goal = from_obligation_source(
+            ObligationSource::Theorem {
+                theorem: &theorem,
+                kind: TheoremKind::Theorem,
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert!(matches!(goal.source, GoalSource::Theorem { .. }));
+    }
+
+    #[test]
+    fn obligation_source_dispatches_refinement_source() {
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("is_positive", Term::Universe(0));
+        let ty = refined_type_with_path_predicate("is_positive");
+        let goal = from_obligation_source(
+            ObligationSource::RefinedType {
+                refined_ty: &ty,
+                ty_name: "PosInt",
+            },
+            &ctx,
+        )
+        .unwrap();
+        assert!(matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt"));
     }
 
     // FunctionDecl tests deferred to integration suite — the type
