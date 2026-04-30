@@ -160,6 +160,10 @@ public fn wal_scan(
     let mut last_commit_idx: Int = -1;
     let mut db_size_after: Int = 0;
     let mut page_map: Map<Int, Int> = Map.new();
+    // Parallel ordered key list — workaround for the in-tree
+    // `MapKeys.next` dispatch gap, and zero-cost relative to the
+    // hash iteration we'd otherwise perform.
+    let mut page_keys: List<Int> = List.new();
 
     while offset + frame_stride <= wal_bytes.len() {
         // Parse the frame header.
@@ -205,7 +209,9 @@ public fn wal_scan(
         running = new_running;
 
         // Frame is valid — record its position.
-        let _ = page_map.insert(fh.page_number as Int, offset);
+        let pn = fh.page_number as Int;
+        if !page_map.contains_key(pn) { page_keys.push(pn); }
+        let _ = page_map.insert(pn, offset);
         if fh.db_size_after_commit != 0_u32 {
             last_commit_idx = valid_count;
             db_size_after = fh.db_size_after_commit as Int;
@@ -220,11 +226,10 @@ public fn wal_scan(
         Map.new()
     } else {
         // Keep only entries whose frame index is ≤ last_commit_idx.
-        let keys = page_map.keys_list();
         let mut out: Map<Int, Int> = Map.new();
         let mut ii: Int = 0;
-        while ii < keys.len() {
-            let k2 = keys[ii];
+        while ii < page_keys.len() {
+            let k2 = page_keys[ii];
             let off = page_map.get(k2);
             // Frame index = (off - WAL_HEADER_SIZE) / frame_stride
             let idx = (off - WAL_HEADER_SIZE) / frame_stride;

@@ -63,8 +63,18 @@ public type CachedFrame is {
 // -----------------------------------------------------------------------------
 
 /// Bounded LRU cache. Caller invariant: `max_frames > 0`.
+///
+/// `page_nos` mirrors the resident `frames` keys to support O(N)
+/// iteration without going through `Map.keys()` — the in-tree iterator
+/// dispatch has a known monomorphisation gap on `MapKeys<Int, _>` that
+/// surfaces as `Panic: method 'MapKeys.next' not found on value`.
+/// Maintaining a parallel `List<Int>` is also a perf win on the hot
+/// scan paths (`evict_one`, `dirty_pages`, `total_bytes`) — no
+/// per-call `keys_list()` allocation, and indexed access is cache-
+/// friendlier than the hash-iter walk.
 public type PageCache is {
     frames: Map<Int, CachedFrame>,
+    page_nos: List<Int>,
     max_frames: Int,
     current_gen: Int,
     next_tick: Int,
@@ -83,6 +93,7 @@ public fn page_cache_new(max_frames: Int) -> PageCache {
     let m: Int = if max_frames <= 0 { 1 } else { max_frames };
     PageCache {
         frames: Map.new(),
+        page_nos: List.new(),
         max_frames: m,
         current_gen: 0,
         next_tick: 0,
@@ -131,6 +142,7 @@ implement PageCache {
         if existing.generation != self.current_gen {
             // Stale. Evict and report miss — caller will re-load.
             let _ = self.frames.remove(page_no);
+            self.remove_page_no(page_no);
             self.misses = self.misses + 1;
             return None;
         }
@@ -176,7 +188,9 @@ implement PageCache {
         f.generation = self.current_gen;
         f.last_access = self.next_tick;
         self.next_tick = self.next_tick + 1;
-        let _ = self.frames.insert(f.page_no, f);
+        let pn = f.page_no;
+        let _ = self.frames.insert(pn, f);
+        self.page_nos.push(pn);
 
         let n = self.frames.len();
         if n > self.peak_size { self.peak_size = n; }
@@ -271,15 +285,13 @@ implement PageCache {
     /// Evict the LRU unpinned frame. Returns true on success.
     /// Used by `configure` and `put`; tests may call it directly.
     public fn evict_one(&mut self) -> Bool {
-        // Scan entries for the lowest last_access with pin_count == 0.
-        // `Map` doesn't expose a direct iterator over (K, V) in the
-        // style we need, so pull keys via `keys()` and probe.
-        let keys = self.frames.keys_list();
+        // Scan resident pages via the parallel `page_nos` index for
+        // the lowest `last_access` with `pin_count == 0`.
         let mut victim: Int = -1;
         let mut victim_access: Int = 0x7FFFFFFFFFFFFFFF;
         let mut i: Int = 0;
-        while i < keys.len() {
-            let k = keys[i];
+        while i < self.page_nos.len() {
+            let k = self.page_nos[i];
             let f = self.frames.get(k);
             if f.pin_count == 0 && f.last_access < victim_access {
                 victim = k;
@@ -289,6 +301,7 @@ implement PageCache {
         }
         if victim < 0 { return false; }
         let _ = self.frames.remove(victim);
+        self.remove_page_no(victim);
         self.evictions = self.evictions + 1;
         true
     }
@@ -297,7 +310,28 @@ implement PageCache {
     /// for having flushed dirty frames first.
     public fn clear(&mut self) {
         self.frames = Map.new();
+        self.page_nos = List.new();
         self.current_gen = self.current_gen + 1;
+    }
+
+    /// Remove `pn` from the parallel `page_nos` index.  Linear scan
+    /// + swap-remove preserves O(N) worst-case without disturbing
+    /// the LRU access order tracking (which lives on the frame, not
+    /// the index).
+    fn remove_page_no(&mut self, pn: Int) {
+        let mut i: Int = 0;
+        while i < self.page_nos.len() {
+            if self.page_nos[i] == pn {
+                let last = self.page_nos.len() - 1;
+                if i != last {
+                    let tail = self.page_nos[last];
+                    self.page_nos[i] = tail;
+                }
+                let _ = self.page_nos.pop();
+                return;
+            }
+            i = i + 1;
+        }
     }
 
     // =========================================================================
@@ -337,11 +371,10 @@ implement PageCache {
     /// the generation.  Returns owned page numbers so the caller
     /// can iterate without holding a borrow on the map.
     public fn dirty_pages(&self) -> List<Int> {
-        let keys = self.frames.keys_list();
         let mut out: List<Int> = List.new();
         let mut i: Int = 0;
-        while i < keys.len() {
-            let k = keys[i];
+        while i < self.page_nos.len() {
+            let k = self.page_nos[i];
             let f = self.frames.get(k);
             if f.dirty && f.generation == self.current_gen {
                 out.push(k);
@@ -355,11 +388,10 @@ implement PageCache {
     /// the cap is per-frame-count, not bytes.  O(N) walk; intended
     /// for `PRAGMA cache_stats` reporting and tuning UIs.
     public fn total_bytes(&self) -> Int {
-        let keys = self.frames.keys_list();
         let mut total: Int = 0;
         let mut i: Int = 0;
-        while i < keys.len() {
-            let k = keys[i];
+        while i < self.page_nos.len() {
+            let k = self.page_nos[i];
             let f = self.frames.get(k);
             total = total + f.data.len();
             i = i + 1;
