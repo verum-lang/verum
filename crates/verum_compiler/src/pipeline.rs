@@ -1543,8 +1543,12 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
-    /// Compile the standard library to a VBC archive.
-    /// Run multi-pass compilation on multiple source files
+    // compile_core + parse_stdlib_module_files + register_stdlib_types_globally
+    // + compile_core_module_from_ast + is_forward_reference_to_later_module
+    // + merge_stdlib_vbc_modules + build_stdlib_archive extracted to
+    // crate::pipeline::stdlib_bootstrap (#106 Phase 8 — pipeline.rs split).
+
+    /// Run multi-pass compilation on multiple source files.
     ///
     /// This is the main entry point for the multi-pass architecture.
     /// It processes all source files through three distinct passes.
