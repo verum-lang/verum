@@ -177,6 +177,7 @@ pub mod literal_registry;
 pub mod options;
 pub mod pipeline;
 pub mod target_spec; // Audit-E2: cross-compile-aware target spec for cfg evaluation
+pub mod cfg_eval;    // #106: pure cfg-predicate evaluation extracted from pipeline.rs
 pub mod camg;        // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
 pub mod stdlib_symbol_manifest; // #102: Build-time per-module symbol table (target-independent)
 // Centralised hardcoded-stdlib-name registry for the unifier.
