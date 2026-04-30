@@ -267,6 +267,38 @@ public module advanced;
 public module internal;
 
 // =============================================================================
+// Diakrisis foundation modules (MSFS / VVA)
+// =============================================================================
+//
+// Sub-tree of foundational categorical / proof-theoretic infrastructure
+// shipped under `core.math` that the prior registration list omitted.
+// Each module shipped production code + downstream consumers but had
+// no `public module` declaration in `core/math/mod.vr`, so callers
+// had to traverse direct file paths (`mount core.math.strata`,
+// `mount core.math.foundations.self_recognition`, etc.) without the
+// umbrella surface enumerating them. Side-by-side compare of
+// `ls core/math/*.vr` against the registered-modules grep surfaced
+// 14 omissions: 10 top-level files + 4 sub-directory umbrellas.
+
+// Top-level Diakrisis / MSFS modules (10 files)
+public module absolute_layer;        // MSFS — Absolute Layer (F_S, Π_4, …)
+public module accessible;            // Adámek-Rosický accessible categories
+public module concrete_accessible;   // Concrete (∞,1)-cat instances
+public module diakrisis_primitive;   // Carrier protocol for Axi-0..9 + T-α / T-2f*
+public module dual_absolute_layer;   // MSFS §10 — Dual Absolute Layer (F̃_S, …)
+public module meta_cls;              // Meta_Cls + Meta_Cls^⊤ (M-PROOFS-E)
+public module open_question;         // MSFS open-question registry
+public module stack_model;           // (∞,2)-stack semantics + κ-universe tower
+public module strata;                // L_Fnd / L_Cls / L_Cls_top / L_Abs
+public module syn_mod;               // Syn(F) / Mod(F) bridge layer
+
+// Sub-directory umbrellas (4 dirs, each with its own mod.vr)
+public module foundations;           // VVA foundational lemmas + structures
+public module frameworks;            // Per-framework axiom + theorem catalogues
+public module rich_s;                // R-S (rich-S) framework membership axioms
+public module s_definable;           // S-definability hierarchy
+
+// =============================================================================
 // Prelude re-exports (commonly used items)
 // =============================================================================
 

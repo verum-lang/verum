@@ -73,6 +73,16 @@ public module coord;
 // shipped today; VVA §16.6 F6 catalogue is the V2 destination).
 public module bridges;
 
+// Congruence-closure decision procedure — Nelson-Oppen style
+// equality reasoning over uninterpreted function symbols, used
+// by the descent-coherence checker to decide whether two
+// translation chains agree on every common axiom. Pre-fix
+// `congruence_closure.vr` shipped production code but had no
+// declaration here, so `mount core.theory_interop.
+// congruence_closure;` (the only way to use the module) silently
+// failed to resolve through the umbrella.
+public module congruence_closure;
+
 // JSON-RPC wire protocol for external tooling
 public module protocol;
 
