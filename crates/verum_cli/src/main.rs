@@ -1281,6 +1281,18 @@ enum Commands {
         #[clap(long = "docker")]
         docker: bool,
 
+        /// Run the unified audit-bundle (#151).  Executes each of the
+        /// load-bearing L1+L2+L3+L4 gates in dependency order
+        /// (`--bridge-discharge`, `--kernel-discharged-axioms`,
+        /// `--apply-graph`, `--cross-format-roundtrip`) and aggregates
+        /// their JSON outputs into a single `target/audit-reports/
+        /// bundle.json`.  Top-level `l4_load_bearing: bool` summarises
+        /// the corpus's L4 verdict in one boolean.  The bundle is the
+        /// user-facing UX for the verum-corpus L4-readiness gate: one
+        /// command, one verdict, all evidence in one place.
+        #[clap(long = "bundle")]
+        bundle: bool,
+
         /// Run the apply-graph transitive bridge-discharge audit
         /// (task #150 / MSFS-L4.13).  Walks every theorem in the
         /// project and classifies its TRANSITIVE apply-chain leaves
@@ -3593,6 +3605,7 @@ fn run_command(cli: Cli) -> Result<()> {
             ladder_monotonicity,
             cross_format_roundtrip,
             docker,
+            bundle,
             apply_graph,
             epsilon,
             coord,
@@ -3649,6 +3662,8 @@ fn run_command(cli: Cli) -> Result<()> {
                         verum_smt::cross_format_runner::CheckerBackend::from_env()
                     },
                 )
+            } else if bundle {
+                commands::audit::audit_bundle_with_format(output_format)
             } else if apply_graph {
                 commands::audit::audit_apply_graph_with_format(output_format)
             } else if framework_axioms {
