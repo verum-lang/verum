@@ -28,7 +28,10 @@
 //!   * `phase_ffi_validation` — Phase 5b FFI boundary
 //!     validation.
 
+use std::time::Instant;
+
 use anyhow::Result;
+use colored::Colorize;
 use tracing::{debug, info, warn};
 
 use verum_ast::Module;
@@ -52,7 +55,7 @@ impl<'s> CompilationPipeline<'s> {
     /// interpreter and AOT paths before type-checking. Emits a
     /// diagnostic for each rejected construct and returns Err if any
     /// were rejected.
-    fn phase_safety_gate(&self, module: &Module) -> Result<()> {
+    pub(super) fn phase_safety_gate(&self, module: &Module) -> Result<()> {
         let features = self.session.language_features();
         // Fast path: when every relevant [safety] flag is permissive,
         // skip the walker entirely — zero cost on the default
@@ -92,7 +95,7 @@ impl<'s> CompilationPipeline<'s> {
     /// the build (the lint's `default_level()` is `Warn`); CI
     /// teams that want stricter enforcement set `-Dmap_get_hazard`
     /// in their lint configuration.
-    fn phase_stdlib_lints(&self, module: &Module) {
+    pub(super) fn phase_stdlib_lints(&self, module: &Module) {
         use crate::lint::{
             walk_module_for_stdlib_hazards, StdlibLintFinding,
         };
@@ -107,7 +110,7 @@ impl<'s> CompilationPipeline<'s> {
                     summary_text,
                     finding.lint.name()
                 ))
-                .span(super::phases::ast_span_to_diagnostic_span(
+                .span(crate::phases::ast_span_to_diagnostic_span(
                     finding.span,
                     None,
                 ))
@@ -121,7 +124,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Phase 3: Type checking
-    fn phase_type_check(&mut self, module: &Module) -> Result<()> {
+    pub(super) fn phase_type_check(&mut self, module: &Module) -> Result<()> {
         debug!("Type checking module");
 
         // Safety-gate pre-pass. Still invoked here (in addition to the
@@ -913,7 +916,7 @@ impl<'s> CompilationPipeline<'s> {
     /// analyzing their dependency requirements.
     ///
     /// Validates items against target profile constraints (no_alloc, no_std, etc.).
-    fn phase_dependency_analysis(&self, module: &Module) -> Result<()> {
+    pub(super) fn phase_dependency_analysis(&self, module: &Module) -> Result<()> {
         use crate::phases::dependency_analysis::DependencyAnalyzer;
 
         // Get target profile from compiler options
@@ -976,7 +979,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Phase 4: Refinement verification
-    fn phase_verify(&self, module: &Module) -> Result<()> {
+    pub(super) fn phase_verify(&self, module: &Module) -> Result<()> {
         let _bc = verum_error::breadcrumb::enter("compiler.phase.verify", "");
         debug!("Running refinement verification");
 
@@ -1323,7 +1326,7 @@ impl<'s> CompilationPipeline<'s> {
     /// negative context violations (direct + transitive), and conflicts.
     /// Runs as warnings for now (errors would break existing code that
     /// doesn't yet declare all contexts).
-    fn phase_context_validation(&self, module: &Module) {
+    pub(super) fn phase_context_validation(&self, module: &Module) {
         use crate::phases::context_validation::ContextValidationPhase;
 
         // Gate on the unified language-feature flag.
@@ -1381,7 +1384,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Validates that types crossing thread boundaries (spawn, Channel.send, Shared)
     /// satisfy Send/Sync bounds. Emits warnings (not errors) for now.
-    fn phase_send_sync_validation(&self, module: &Module) {
+    pub(super) fn phase_send_sync_validation(&self, module: &Module) {
         use crate::phases::send_sync_validation::SendSyncValidationPhase;
 
         let phase = SendSyncValidationPhase::new();
@@ -1398,7 +1401,7 @@ impl<'s> CompilationPipeline<'s> {
     /// `extern {}` blocks: warn-only (stdlib compatibility).
     /// `ffi {}` blocks: strict errors (user-written contracts must be correct).
 
-    fn phase_ffi_validation(&self, module: &Module) -> Result<()> {
+    pub(super) fn phase_ffi_validation(&self, module: &Module) -> Result<()> {
         use crate::phases::ffi_boundary::validate_module_ffi;
         let t0 = Instant::now();
         let result = validate_module_ffi(module, false);
