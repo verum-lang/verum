@@ -702,7 +702,7 @@ impl CompilationPhase for FfiBoundaryPhase {
         let boundaries = phase.extract_ffi_boundaries(_hir, profile)?;
 
         // Process FFI boundaries
-        let _processing_result = phase.process_boundaries(&boundaries)?;
+        phase.process_boundaries(&boundaries)?;
 
         let duration = start.elapsed();
         let mut metrics = PhaseMetrics::new(self.name()).with_duration(duration);

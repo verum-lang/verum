@@ -285,7 +285,7 @@ fn unnecessary_heap_fires() {
 #[test]
 fn max_line_length_fires_when_over_budget() {
     let cfg = style_policy(80, 80, 5, 12);
-    let long_line: String = "//".chars().chain(std::iter::repeat('x').take(200)).collect();
+    let long_line: String = "//".chars().chain(std::iter::repeat_n('x', 200)).collect();
     let src = format!("fn main() {{}}\n{long_line}\n");
     fires_with("max-line-length", &src, &cfg);
 }
@@ -299,7 +299,7 @@ fn max_line_length_silent_under_budget() {
 #[test]
 fn max_line_length_off_when_zero() {
     let cfg = style_policy(0, 80, 5, 12);
-    let long_line: String = "//".chars().chain(std::iter::repeat('x').take(200)).collect();
+    let long_line: String = "//".chars().chain(std::iter::repeat_n('x', 200)).collect();
     let src = format!("fn main() {{}}\n{long_line}\n");
     silent_with("max-line-length", &src, &cfg);
 }

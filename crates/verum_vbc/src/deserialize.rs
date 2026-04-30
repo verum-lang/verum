@@ -557,7 +557,7 @@ impl<'a> Deserializer<'a> {
         // platform-portable and zero-cost when no overflow occurs.
         let end = self.offset
             .checked_add(size as usize)
-            .ok_or_else(|| VbcError::SectionOverflow {
+            .ok_or(VbcError::SectionOverflow {
                 section: "string_table",
                 offset: self.offset as u32,
                 size,
@@ -631,7 +631,7 @@ impl<'a> Deserializer<'a> {
         }
         let section_end = self.offset
             .checked_add(section_size as usize)
-            .ok_or_else(|| VbcError::SectionOverflow {
+            .ok_or(VbcError::SectionOverflow {
                 section: "bytecode",
                 offset: self.offset as u32,
                 size: section_size,
@@ -690,9 +690,8 @@ impl<'a> Deserializer<'a> {
 
                 // Decompress
                 decompress(compressed, algorithm, uncompressed_size)
-                    .map(|out| {
+                    .inspect(|_out| {
                         let _ = compressed_size; // explicitly silence unused
-                        out
                     })
             }
         }

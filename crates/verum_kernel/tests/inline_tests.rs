@@ -1113,7 +1113,7 @@ fn module_with_axiom(
 ) -> verum_ast::Module {
     use verum_ast::attr::Attribute;
     use verum_ast::decl::{AxiomDecl, Visibility};
-    use verum_ast::expr::{Expr, ExprKind};
+    use verum_ast::expr::Expr;
     use verum_ast::literal::{Literal, LiteralKind, StringLit};
     use verum_ast::span::Span;
     use verum_ast::{Ident, Item, ItemKind};
@@ -1222,7 +1222,7 @@ fn load_framework_axioms_skips_non_axiom_items() {
     // when a proof term is submitted.)
     use verum_ast::attr::Attribute;
     use verum_ast::decl::{TheoremDecl, Visibility};
-    use verum_ast::expr::{Expr, ExprKind};
+    use verum_ast::expr::Expr;
     use verum_ast::literal::{Literal, LiteralKind, StringLit};
     use verum_ast::span::Span;
     use verum_ast::{Ident, Item, ItemKind};

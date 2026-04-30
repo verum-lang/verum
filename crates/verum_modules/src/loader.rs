@@ -214,15 +214,7 @@ pub fn validate_module_headers_against_filesystem(
                         .map(|s| s.join(submodule_name.as_str()));
                     let overlapping = if primary_dir.exists() && primary_dir.is_dir() {
                         Some(primary_dir)
-                    } else if let Some(sec) = secondary_dir_opt {
-                        if sec.exists() && sec.is_dir() {
-                            Some(sec)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
+                    } else { secondary_dir_opt.filter(|sec| sec.exists() && sec.is_dir()) };
                     if let Some(conflicting_dir) = overlapping {
                         warnings.push(ModuleHeaderWarning::InlineFilesystemOverlap {
                             file: file_path.to_path_buf(),

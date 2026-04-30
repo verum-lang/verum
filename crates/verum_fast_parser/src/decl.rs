@@ -3745,8 +3745,8 @@ impl<'a> RecursiveParser<'a> {
         // depths plus 1 (since the range itself is one dimension).
         let path_dim: u32 = match &path_endpoints {
             Maybe::Some((lhs, rhs)) => {
-                let d = path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)) + 1;
-                d
+                
+                path_endpoint_depth(lhs).max(path_endpoint_depth(rhs)) + 1
             }
             Maybe::None => 1,
         };

@@ -139,7 +139,7 @@ mod tests {
         };
         match refined.underlying_sort() {
             IrType::Int => {}
-            other => panic!("expected Int base, got {:?}", other),
+            other => panic!("expected Int base, got {other:?}"),
         }
     }
 

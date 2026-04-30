@@ -164,11 +164,9 @@ impl MetaFunction {
         for param in &decl.params {
             match &param.kind {
                 FunctionParamKind::Regular { pattern, .. } => {
-                    if let Some(name) = Self::extract_pattern_name(pattern) {
+                    {
+                        let name = Self::extract_pattern_name(pattern)?;
                         param_names.push(name);
-                    } else {
-                        // Complex patterns not supported in meta functions yet
-                        return None;
                     }
                 }
                 // Self parameters are not valid in meta functions

@@ -322,9 +322,9 @@ pub const CVC5_ALETHE_KNOWN_RULES: &[&str] = &[
 /// `KernelError::UnknownBackend` for those.
 pub fn is_known_rule(backend: &str, rule: &str) -> bool {
     match backend {
-        "z3" => Z3_KNOWN_RULES.iter().any(|r| *r == rule),
+        "z3" => Z3_KNOWN_RULES.contains(&rule),
         "cvc5" | "aletha" => {
-            CVC5_ALETHE_KNOWN_RULES.iter().any(|r| *r == rule)
+            CVC5_ALETHE_KNOWN_RULES.contains(&rule)
         }
         _ => false,
     }
@@ -624,19 +624,16 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                 if idx == 0 {
                     continue;
                 }
-                if let ProofNode::List(sub_children) = child {
-                    if let Some(ProofNode::Atom(head_atom)) =
+                if let ProofNode::List(sub_children) = child
+                    && let Some(ProofNode::Atom(head_atom)) =
                         sub_children.iter().next()
-                    {
-                        if is_known_rule("aletha", head_atom.as_str()) {
+                        && is_known_rule("aletha", head_atom.as_str()) {
                             let child_witness = replay_aletha_tree(child)?;
                             witness = CoreTerm::App(
                                 Heap::new(witness),
                                 Heap::new(child_witness),
                             );
                         }
-                    }
-                }
             }
 
             Ok(witness)
@@ -655,13 +652,11 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
 fn extract_aletha_rule_name(children: &List<ProofNode>) -> Option<String> {
     let mut iter = children.iter();
     while let Some(node) = iter.next() {
-        if let ProofNode::Atom(t) = node {
-            if t.as_str() == ":rule" {
-                if let Some(ProofNode::Atom(rule)) = iter.next() {
+        if let ProofNode::Atom(t) = node
+            && t.as_str() == ":rule"
+                && let Some(ProofNode::Atom(rule)) = iter.next() {
                     return Some(rule.as_str().to_string());
                 }
-            }
-        }
     }
     None
 }

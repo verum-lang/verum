@@ -251,7 +251,7 @@ impl Ordinal {
     /// True iff this ordinal is *regular* (its cofinality equals itself).
     /// Per the standard set-theoretic definition: every finite ordinal
     /// > 0 is regular trivially, ω is regular, every successor cardinal
-    /// is regular; singular limit cardinals are not.
+    /// > is regular; singular limit cardinals are not.
     ///
     /// In our normalised form: ω is regular, every κ_n is regular
     /// (inaccessibles are by construction regular limit cardinals),

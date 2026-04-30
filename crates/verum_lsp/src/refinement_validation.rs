@@ -935,7 +935,6 @@ impl RefinementValidator {
                     verum_ast::StmtKind::Let {
                         pattern,
                         ty,
-                        value: _,
                         ..
                     } => {
                         // If the let has a refined type, add it as a constraint

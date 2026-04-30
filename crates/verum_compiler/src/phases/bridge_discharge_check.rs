@@ -326,7 +326,7 @@ fn expr_to_text(e: &Expr) -> String {
 mod tests {
     use super::*;
     use verum_ast::decl::{ProofStructure, ProofStep};
-    use verum_ast::literal::IntLit;
+    
     use verum_ast::ty::{Ident, Path};
     use verum_ast::{Span};
     use verum_common::Heap;

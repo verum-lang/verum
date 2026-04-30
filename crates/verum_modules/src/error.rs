@@ -621,7 +621,7 @@ impl fmt::Display for ModuleError {
         // link to the remediation page. Skipped when the message itself
         // already references a docs URL (PathCollision does this in its
         // own hint stanza, for example).
-        let _ = result?;
+        result?;
         Ok(())
     }
 }

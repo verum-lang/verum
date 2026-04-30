@@ -214,7 +214,7 @@ fn find_project_root(start: &std::path::Path) -> Option<PathBuf> {
 /// Pull a string field out of a JSON line without parsing the whole
 /// object. Useful when we need the file path before we've decided
 /// whether the rest of the record is for us.
-fn line_field<'a>(line: &'a str, field: &str) -> Option<String> {
+fn line_field(line: &str, field: &str) -> Option<String> {
     let needle = format!("\"{field}\":\"");
     let start = line.find(&needle)? + needle.len();
     let after = &line[start..];

@@ -187,13 +187,13 @@ pub fn find_word_bounds(
 pub fn char_before_satisfies(
     text: &str,
     byte_offset: usize,
-    mut pred: impl FnMut(char) -> bool,
+    pred: impl FnMut(char) -> bool,
 ) -> Option<bool> {
     if byte_offset == 0 || byte_offset > text.len() {
         return None;
     }
     let clamped = clamp_to_char_boundary(text, byte_offset);
-    text[..clamped].chars().next_back().map(|c| pred(c))
+    text[..clamped].chars().next_back().map(pred)
 }
 
 /// Whether the character at `byte_offset` in `text` (if any) satisfies
@@ -212,13 +212,13 @@ pub fn char_before_satisfies(
 pub fn char_at_satisfies(
     text: &str,
     byte_offset: usize,
-    mut pred: impl FnMut(char) -> bool,
+    pred: impl FnMut(char) -> bool,
 ) -> Option<bool> {
     if byte_offset >= text.len() {
         return None;
     }
     let clamped = clamp_to_char_boundary(text, byte_offset);
-    text[clamped..].chars().next().map(|c| pred(c))
+    text[clamped..].chars().next().map(pred)
 }
 
 #[cfg(test)]

@@ -39,8 +39,7 @@ impl SoundnessBackend for CoqBackend {
     }
 
     fn render_preamble(&self) -> String {
-        format!(
-            "(* ============================================================== *)\n\
+        "(* ============================================================== *)\n\
              (* kernel_soundness.v — meta-circular soundness of Verum's kernel *)\n\
              (* ============================================================== *)\n\
              (* *)\n\
@@ -61,8 +60,7 @@ impl SoundnessBackend for CoqBackend {
              From Coq Require Import Strings.String.\n\
              From Coq Require Import Lists.List.\n\
              Import ListNotations.\n\
-             Open Scope string_scope."
-        )
+             Open Scope string_scope.".to_string()
     }
 
     fn render_core_term_inductive(&self) -> String {
@@ -73,8 +71,7 @@ impl SoundnessBackend for CoqBackend {
         // quantify over `CoreTerm`, not into specific fields), and
         // keeps the Coq encoding small enough for `coqc` to digest in
         // CI without long-running positivity checks.
-        format!(
-            "(* CoreTerm — kernel calculus syntax (mirror of *)\n\
+        "(* CoreTerm — kernel calculus syntax (mirror of *)\n\
              (* `verum_kernel::CoreTerm` at term.rs:31-377). *)\n\
              Inductive CoreTerm : Type :=\n  \
                | Var (name : string)\n  \
@@ -107,13 +104,11 @@ impl SoundnessBackend for CoqBackend {
                | ModalBigAnd (components : list CoreTerm)\n  \
                | Shape (inner : CoreTerm)\n  \
                | Flat (inner : CoreTerm)\n  \
-               | Sharp (inner : CoreTerm).",
-        )
+               | Sharp (inner : CoreTerm).".to_string()
     }
 
     fn render_core_type_inductive(&self) -> String {
-        format!(
-            "(* CoreType — structural type-head view (mirror of *)\n\
+        "(* CoreType — structural type-head view (mirror of *)\n\
              (* `verum_kernel::CoreType` at term.rs:386-403). *)\n\
              Inductive CoreType : Type :=\n  \
                | UniverseTy (level : nat)\n  \
@@ -123,8 +118,7 @@ impl SoundnessBackend for CoqBackend {
                | RefineTy\n  \
                | GlueTy\n  \
                | InductiveTy (path : string)\n  \
-               | OtherTy."
-        )
+               | OtherTy.".to_string()
     }
 
     fn render_kernel_rule_inductive(&self, rules: &[RuleSpec]) -> String {

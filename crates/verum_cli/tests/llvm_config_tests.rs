@@ -650,16 +650,14 @@ fn test_cross_compile_config() {
         }
         // Sysroot and linker are optional — host defaults are used when
         // either is None — but if explicitly set they must be non-empty.
-        if let Some(sr) = &config.sysroot {
-            if sr.as_os_str().is_empty() {
+        if let Some(sr) = &config.sysroot
+            && sr.as_os_str().is_empty() {
                 return Err("Cross-compilation sysroot is empty");
             }
-        }
-        if let Some(ln) = &config.linker {
-            if ln.as_os_str().is_empty() {
+        if let Some(ln) = &config.linker
+            && ln.as_os_str().is_empty() {
                 return Err("Cross-compilation linker is empty");
             }
-        }
         Ok(())
     }
 

@@ -477,7 +477,7 @@ impl<'ctx> Z3Solver<'ctx> {
         // set as an SMT-LIB file. Both are no-ops when the
         // env vars are unset.
         crate::solver_diagnostics::log_send("(check-sat)");
-        if let Some(_) = crate::solver_diagnostics::dump_smt_dir() {
+        if crate::solver_diagnostics::dump_smt_dir().is_some() {
             let mut content = String::new();
             for assertion in self.solver.get_assertions() {
                 content.push_str(&format!("(assert {})\n", assertion));

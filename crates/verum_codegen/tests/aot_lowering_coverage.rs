@@ -88,13 +88,11 @@ fn parse_vbc_variants(src: &str) -> BTreeSet<String> {
         // variant is seen). For brace-form variants the line then opens
         // the variant body; for tuple/unit variants the depth stays at
         // 1.
-        if depth_at_line_start == 1 {
-            if let Some(name) = leading_pascal(trimmed) {
-                if !name.is_empty() {
+        if depth_at_line_start == 1
+            && let Some(name) = leading_pascal(trimmed)
+                && !name.is_empty() {
                     set.insert(name.to_string());
                 }
-            }
-        }
     }
     set
 }

@@ -149,7 +149,7 @@ impl TacticPackageRegistry {
     /// Returns `None` if no package contains the name.
     pub fn lookup(&self, name: &str) -> Maybe<&TacticDecl> {
         // Phase 1: search every Project-scoped package.
-        for (_, (scope, decls)) in &self.entries {
+        for (scope, decls) in self.entries.values() {
             if matches!(scope, PackageScope::Project) {
                 for d in decls {
                     if d.name.as_str() == name {
@@ -172,7 +172,7 @@ impl TacticPackageRegistry {
         }
 
         // Phase 3: search Stdlib-scoped packages.
-        for (_, (scope, decls)) in &self.entries {
+        for (scope, decls) in self.entries.values() {
             if matches!(scope, PackageScope::Stdlib) {
                 for d in decls {
                     if d.name.as_str() == name {

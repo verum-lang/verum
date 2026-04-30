@@ -281,15 +281,14 @@ impl PermissionRouter {
         self.stats.total = self.stats.total.saturating_add(1);
 
         // (1) one-entry warm path — ≤2ns, single compare.
-        if let Some(last) = self.last {
-            if last.scope == scope && last.target_id == target_id {
+        if let Some(last) = self.last
+            && last.scope == scope && last.target_id == target_id {
                 self.stats.last_entry_hits = self.stats.last_entry_hits.saturating_add(1);
                 if last.decision == PermissionDecision::Deny {
                     self.stats.denials = self.stats.denials.saturating_add(1);
                 }
                 return last.decision;
             }
-        }
 
         // (2) backing map.
         if let Some(decision) = self.map.get(&(scope, target_id)).copied() {

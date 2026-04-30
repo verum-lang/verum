@@ -578,7 +578,7 @@ impl SmtGuardVerifier {
                     let refs: Vec<&Bool> = block_clauses.iter().collect();
                     Bool::and(&refs)
                 };
-                solver.assert(&conjunction.not());
+                solver.assert(conjunction.not());
             }
 
             witnesses

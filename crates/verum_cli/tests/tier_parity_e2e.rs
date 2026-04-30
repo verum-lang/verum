@@ -388,7 +388,7 @@ fn tier1_repeated_aot_build_is_stable() {
     // Fail only if failures exceed a quarter of the runs — that's
     // far below the regression signal (~5/8) but well above any
     // single-run flakiness in debug mode.
-    let max_tolerable = (runs + 3) / 4;
+    let max_tolerable = runs.div_ceil(4);
     assert!(
         failures.len() <= max_tolerable,
         "tier1 AOT build of {} crashed {}/{} time(s) (tolerance: {}): {:?}\n\

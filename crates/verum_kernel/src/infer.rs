@@ -504,7 +504,7 @@ fn infer_inner_with_coord(
             // rule in the Verum kernel.
             let base_depth = m_depth(base);
             let pred_depth = m_depth(predicate);
-            if pred_depth >= base_depth + 1 {
+            if pred_depth > base_depth {
                 return Err(KernelError::DepthViolation {
                     binder: binder.clone(),
                     base_depth,

@@ -247,11 +247,10 @@ impl MonomorphizationPhase {
         // the stdlib hit path or force every specialization through
         // the user-module pipeline (e.g. for differential testing of
         // the specializer against the precompiled cache).
-        if self.config.use_stdlib {
-            if let Some(ref stdlib) = self.stdlib {
+        if self.config.use_stdlib
+            && let Some(ref stdlib) = self.stdlib {
                 resolver = resolver.with_core(stdlib.clone());
             }
-        }
         if let Some(ref cache) = self.cache {
             resolver = resolver.with_cache(cache.clone());
         }

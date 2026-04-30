@@ -735,7 +735,7 @@ fn capture_backtrace() -> Option<String> {
     #[cfg(feature = "backtrace")]
     {
         let bt = backtrace::Backtrace::new();
-        return Some(format!("{:?}", bt));
+        Some(format!("{:?}", bt))
     }
     #[cfg(not(feature = "backtrace"))]
     {
@@ -810,7 +810,7 @@ fn write_and_notify(report: &CrashReport) {
     );
     match &report.kind {
         CrashKind::Panic => {
-            let _ = writeln!(stderr, "       ({}: {})", "panic", report.message);
+            let _ = writeln!(stderr, "       (panic: {})", report.message);
         }
         CrashKind::Signal { name, .. } => {
             let _ = writeln!(

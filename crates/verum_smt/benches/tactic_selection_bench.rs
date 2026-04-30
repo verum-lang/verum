@@ -392,7 +392,7 @@ fn bench_cache_speedup(c: &mut Criterion) {
     let workload: Vec<Bool> = (0..16)
         .map(|i| {
             let v = Int::new_const(format!("v{}", i));
-            v.gt(&Int::from_i64((i * 7) as i64))
+            v.gt(Int::from_i64((i * 7) as i64))
         })
         .collect();
 

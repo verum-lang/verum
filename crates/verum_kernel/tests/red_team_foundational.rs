@@ -9,7 +9,7 @@
 use verum_kernel::diakrisis_bridge::{BridgeAudit, BridgeId};
 use verum_kernel::infinity_category::{
     CellLevel, InfinityCategory, InfinityMorphism, compose,
-    compose_is_associative, identity_is_equivalence, is_equivalence_at,
+    compose_is_associative, is_equivalence_at,
 };
 use verum_kernel::ordinal::Ordinal;
 

@@ -339,11 +339,10 @@ impl AxiomRegistry {
         // coord. The entries list is append-only via
         // `register_with_regime`; the just-admitted axiom is
         // therefore the tail.
-        if let Some(entry) = self.entries.iter_mut().rev().next() {
-            if entry.name == name {
+        if let Some(entry) = self.entries.iter_mut().next_back()
+            && entry.name == name {
                 entry.coord = Some(coord);
             }
-        }
         Ok(())
     }
 
@@ -389,12 +388,7 @@ impl AxiomRegistry {
 
     /// Look up an axiom by name.
     pub fn get(&self, name: &str) -> Maybe<&RegisteredAxiom> {
-        for e in self.entries.iter() {
-            if e.name.as_str() == name {
-                return Maybe::Some(e);
-            }
-        }
-        Maybe::None
+        self.entries.iter().find(|&e| e.name.as_str() == name).map(|v| v as _)
     }
 
     /// Enumerate every registered axiom.

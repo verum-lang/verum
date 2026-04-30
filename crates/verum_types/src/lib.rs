@@ -2682,10 +2682,8 @@ impl TypeError {
                          `Try` protocol (e.g. `Result<T, E>`, `Maybe<T>`)"
                             .to_string(),
                     )
-                    .help(format!(
-                        "pattern-match instead: `match expr {{ Some(v) => v, None => ... }}` \
-                         (or `Ok`/`Err` for Result)"
-                    ))
+                    .help("pattern-match instead: `match expr { Some(v) => v, None => ... }` \
+                         (or `Ok`/`Err` for Result)".to_string())
                     .help(
                         "for `Map`/`Set`/`List` lookups, use the `_optional` \
                          variants (e.g. `map.get_optional(key)`) which return `Maybe<V>`"

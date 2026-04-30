@@ -69,11 +69,10 @@ fn watch_responds_to_file_change() {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut saw_initial = false;
     while Instant::now() < deadline && !saw_initial {
-        if let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) {
-            if line.contains("Watching for changes") {
+        if let Ok(line) = rx.recv_timeout(Duration::from_millis(500))
+            && line.contains("Watching for changes") {
                 saw_initial = true;
             }
-        }
     }
     assert!(
         saw_initial,
@@ -95,11 +94,10 @@ fn watch_responds_to_file_change() {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut saw_rerun = false;
     while Instant::now() < deadline && !saw_rerun {
-        if let Ok(line) = rx.recv_timeout(Duration::from_millis(500)) {
-            if line.contains("change detected") {
+        if let Ok(line) = rx.recv_timeout(Duration::from_millis(500))
+            && line.contains("change detected") {
                 saw_rerun = true;
             }
-        }
     }
 
     let _ = child.kill();

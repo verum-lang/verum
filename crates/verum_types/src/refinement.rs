@@ -2164,23 +2164,23 @@ impl RefinementChecker {
                 let r = Self::try_extract_int_value(right);
                 match (l, r) {
                     (Maybe::Some(lv), Maybe::Some(rv)) => match op {
-                        BinOp::Add => lv.checked_add(rv).map_or(Maybe::None, Maybe::Some),
-                        BinOp::Sub => lv.checked_sub(rv).map_or(Maybe::None, Maybe::Some),
-                        BinOp::Mul => lv.checked_mul(rv).map_or(Maybe::None, Maybe::Some),
+                        BinOp::Add => lv.checked_add(rv).and_then(Maybe::Some),
+                        BinOp::Sub => lv.checked_sub(rv).and_then(Maybe::Some),
+                        BinOp::Mul => lv.checked_mul(rv).and_then(Maybe::Some),
                         BinOp::Div => {
                             if rv == 0 { Maybe::None }
-                            else { lv.checked_div(rv).map_or(Maybe::None, Maybe::Some) }
+                            else { lv.checked_div(rv).and_then(Maybe::Some) }
                         }
                         BinOp::Rem => {
                             if rv == 0 { Maybe::None }
                             else { Maybe::Some(lv.rem_euclid(rv)) }
                         }
                         BinOp::Shl => {
-                            if rv < 0 || rv >= 64 { Maybe::None }
+                            if !(0..64).contains(&rv) { Maybe::None }
                             else { Maybe::Some(lv << rv) }
                         }
                         BinOp::Shr => {
-                            if rv < 0 || rv >= 64 { Maybe::None }
+                            if !(0..64).contains(&rv) { Maybe::None }
                             else { Maybe::Some(lv >> rv) }
                         }
                         BinOp::BitAnd => Maybe::Some(lv & rv),

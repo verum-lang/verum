@@ -243,8 +243,8 @@ pub fn check_eps_mu_coherence_v3_final(
     if lhs == rhs {
         return Ok(audit);
     }
-    if let (CoreTerm::EpsilonOf(m_alpha), CoreTerm::AlphaOf(inner_rhs)) = (lhs, rhs) {
-        if let CoreTerm::EpsilonOf(alpha_rhs) = inner_rhs.as_ref() {
+    if let (CoreTerm::EpsilonOf(m_alpha), CoreTerm::AlphaOf(inner_rhs)) = (lhs, rhs)
+        && let CoreTerm::EpsilonOf(alpha_rhs) = inner_rhs.as_ref() {
             // V1 identity sub-case (structural).
             if m_alpha.as_ref() == alpha_rhs.as_ref() {
                 return Ok(audit);
@@ -259,7 +259,6 @@ pub fn check_eps_mu_coherence_v3_final(
             admit_eps_mu_tau_witness(&mut audit, context, lhs);
             return Ok(audit);
         }
-    }
 
     // V3-incremental admitted via some path we don't recognise here
     // — surface as A-3 admit conservatively (one-sided over-admit

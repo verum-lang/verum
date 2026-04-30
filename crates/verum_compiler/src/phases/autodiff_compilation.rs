@@ -985,7 +985,7 @@ impl DerivativeGenerator {
         let var_name = format!("_v{}", node.id);
 
         let expr = match &node.op {
-            ComputeOp::Parameter { name: _, .. } => {
+            ComputeOp::Parameter { .. } => {
                 // Parameters are already bound, just reference them
                 return None;
             }
