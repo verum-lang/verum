@@ -162,6 +162,69 @@ impl Span {
     pub const fn is_dummy(&self) -> bool {
         self.file_id.is_dummy()
     }
+
+    /// Walk the synthetic-origin chain to the deepest user-source
+    /// ancestor (#274).  `resolver` looks up `SyntheticOrigin`
+    /// entries by FileId — typically the session's source registry.
+    ///
+    /// Returns the topmost user-visible span (one whose FileId has
+    /// no synthetic origin) plus the chain of synthetic kinds that
+    /// were traversed, ordered from leaf (this span's file) to
+    /// user source.  When this span itself is already user-source,
+    /// returns `(self, [])` — the empty chain signals "already
+    /// resolved".
+    ///
+    /// Cycle defence: bails after `max_depth` iterations and
+    /// returns the deepest reached span.  Synthetic chains
+    /// shouldn't loop in well-formed compiler output, but
+    /// defence-in-depth keeps a malformed invariant from hanging
+    /// the diagnostic renderer.
+    pub fn resolve_to_user_source<F>(
+        self,
+        resolver: F,
+    ) -> ResolvedSpan
+    where
+        F: Fn(FileId) -> Option<SyntheticOrigin>,
+    {
+        const MAX_DEPTH: usize = 32;
+        let mut chain: Vec<SyntheticKind> = Vec::new();
+        let mut current = self;
+        for _ in 0..MAX_DEPTH {
+            match resolver(current.file_id) {
+                None => {
+                    return ResolvedSpan {
+                        user_span: current,
+                        expansion_chain: chain,
+                    };
+                }
+                Some(origin) => {
+                    chain.push(origin.kind);
+                    current = origin.call_site_span;
+                }
+            }
+        }
+        ResolvedSpan {
+            user_span: current,
+            expansion_chain: chain,
+        }
+    }
+}
+
+/// Result of `Span::resolve_to_user_source` (#274).
+///
+/// Pairs the user-visible span with the chain of synthetic
+/// expansions that were traversed to reach it.  The renderer uses
+/// the chain to construct labels like
+/// "in @derive expansion → in macro expansion".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedSpan {
+    /// User-visible span (or the deepest reached if MAX_DEPTH
+    /// terminated the walk).
+    pub user_span: Span,
+    /// Chain of synthetic expansion kinds traversed, ordered from
+    /// the original (leaf) span's file outward to user source.
+    /// Empty when the input span was already user-source.
+    pub expansion_chain: Vec<SyntheticKind>,
 }
 
 impl Default for Span {
@@ -274,6 +337,64 @@ impl fmt::Display for LineColSpan {
     }
 }
 
+/// What kind of expansion produced a synthetic source file.
+///
+/// Recorded on `SourceFile.synthetic_origin` so the diagnostic
+/// renderer can produce labels like "in macro expansion of @derive"
+/// vs "in monomorphization of `List<T>`".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SyntheticKind {
+    /// Macro invocation expansion (`@my_macro(...)` callsite).
+    MacroExpansion,
+    /// `@derive(Eq)` / `@derive(Show)` etc. attribute expansion.
+    DeriveExpansion,
+    /// Monomorphization of a generic function or type.
+    Monomorphization,
+    /// `@delegate(target)` body synthesis.
+    DelegateBody,
+    /// Other synthetic origin (forward-compatibility).
+    Other,
+}
+
+impl SyntheticKind {
+    /// Human-readable label used by the diagnostic renderer.
+    pub fn label(&self) -> &'static str {
+        match self {
+            SyntheticKind::MacroExpansion => "macro expansion",
+            SyntheticKind::DeriveExpansion => "@derive expansion",
+            SyntheticKind::Monomorphization => "monomorphization",
+            SyntheticKind::DelegateBody => "@delegate body synthesis",
+            SyntheticKind::Other => "synthetic expansion",
+        }
+    }
+}
+
+/// Provenance record for a synthetic source file (#274).
+///
+/// When a macro / derive / monomorphization / @delegate produces a
+/// new source artefact, the resulting `SourceFile` carries this
+/// origin pointing back at the user-source span that triggered the
+/// expansion. The diagnostic renderer walks `.parent` chains
+/// transitively (via `Span::resolve_to_user_source`) to find the
+/// deepest user-visible location.
+///
+/// Without this, errors in generated code surface with synthetic
+/// `FileId` locations like `<macro:Eq>:1:1` — opaque to users
+/// debugging their own program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyntheticOrigin {
+    /// FileId of the parent (the file in which the expansion was
+    /// triggered). May itself be synthetic — chains are walked
+    /// transitively.
+    pub parent_file: FileId,
+    /// Span within `parent_file` that triggered the expansion.
+    /// Where the user typed `@derive(Eq)` / `my_macro!()` /
+    /// the generic call that monomorphized to this artefact.
+    pub call_site_span: Span,
+    /// What kind of expansion produced this synthetic source.
+    pub kind: SyntheticKind,
+}
+
 /// Information about a source file for span conversion.
 ///
 /// This type maintains the mapping between byte offsets and line/column
@@ -290,6 +411,14 @@ pub struct SourceFile {
     pub source: Text,
     /// Line start positions (byte offsets) for quick line lookup
     pub line_starts: Vec<u32>,
+    /// Synthetic-origin provenance.  `None` for user-source files
+    /// loaded from disk; `Some` for files produced by macro /
+    /// derive / monomorphization / @delegate expansions.  The
+    /// diagnostic renderer walks the chain via
+    /// `Span::resolve_to_user_source` to surface user-visible
+    /// locations even for errors in generated code.  Closes #274.
+    #[serde(default)]
+    pub synthetic_origin: Option<SyntheticOrigin>,
 }
 
 impl SourceFile {
@@ -302,6 +431,29 @@ impl SourceFile {
             name: Text::from(name),
             source: Text::from(source),
             line_starts,
+            synthetic_origin: None,
+        }
+    }
+
+    /// Create a synthetic source file produced by macro/derive/
+    /// monomorphization/@delegate expansion.  Carries a
+    /// `SyntheticOrigin` back-pointer at the parent span so the
+    /// diagnostic renderer can resolve errors to user-visible
+    /// locations via `Span::resolve_to_user_source`.  Closes #274.
+    pub fn synthetic(
+        id: FileId,
+        name: String,
+        source: String,
+        origin: SyntheticOrigin,
+    ) -> Self {
+        let line_starts = Self::compute_line_starts(&source);
+        Self {
+            id,
+            path: None,
+            name: Text::from(name),
+            source: Text::from(source),
+            line_starts,
+            synthetic_origin: Some(origin),
         }
     }
 
@@ -320,6 +472,7 @@ impl SourceFile {
             name: Text::from(name),
             source: Text::from(source),
             line_starts,
+            synthetic_origin: None,
         })
     }
 
@@ -519,4 +672,179 @@ pub fn global_get_filename(id: FileId) -> Option<String> {
         .ok()?
         .get(&id.raw())
         .map(|f| f.name.clone().into_string())
+}
+
+// =============================================================================
+// Source-map synthetic-origin pin tests (task #274).
+//
+// The architectural primitive is `Span::resolve_to_user_source` plus the
+// `SourceFile.synthetic_origin` field that lets the diagnostic renderer
+// walk the parent chain from a synthetic FileId back to the user-source
+// span that triggered the expansion.  Each test pins a layer of the
+// architecture so a future refactor that breaks the contract trips loudly.
+// =============================================================================
+
+#[cfg(test)]
+mod source_map_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn user_source_span(file_id_raw: u32) -> Span {
+        Span::new(0, 10, FileId::new(file_id_raw))
+    }
+
+    #[test]
+    fn synthetic_origin_round_trips_through_source_file() {
+        // Pin: SyntheticOrigin lands on SourceFile.synthetic_origin
+        // and round-trips through `synthetic` constructor.
+        let parent_span = user_source_span(7);
+        let origin = SyntheticOrigin {
+            parent_file: parent_span.file_id,
+            call_site_span: parent_span,
+            kind: SyntheticKind::DeriveExpansion,
+        };
+        let sf = SourceFile::synthetic(
+            FileId::new(99),
+            "<derive:Eq>".into(),
+            "fn eq(...) { ... }".into(),
+            origin,
+        );
+        let stored = sf.synthetic_origin
+            .expect("synthetic_origin must be Some");
+        assert_eq!(stored.parent_file, FileId::new(7));
+        assert_eq!(stored.call_site_span, parent_span);
+        assert_eq!(stored.kind, SyntheticKind::DeriveExpansion);
+    }
+
+    #[test]
+    fn user_source_files_have_no_synthetic_origin() {
+        // Pin: regular SourceFile::new produces a None origin so
+        // user-source files don't accidentally appear synthetic.
+        let sf = SourceFile::new(FileId::new(1), "main.vr".into(), "".into());
+        assert!(sf.synthetic_origin.is_none(),
+            "user-source SourceFile must have None origin");
+        let mut sf2 = SourceFile::new(FileId::new(2), "main.vr".into(), "".into());
+        sf2.path = Some(std::path::PathBuf::from("/tmp/main.vr"));
+        assert!(sf2.synthetic_origin.is_none());
+    }
+
+    #[test]
+    fn resolve_user_source_span_returns_self_with_empty_chain() {
+        // Pin: when input span is already user-source (resolver
+        // returns None for its FileId), result is (input, []).
+        let user_span = user_source_span(1);
+        let resolver = |_: FileId| None;
+        let result = user_span.resolve_to_user_source(resolver);
+        assert_eq!(result.user_span, user_span);
+        assert!(result.expansion_chain.is_empty(),
+            "user-source span must produce empty expansion_chain");
+    }
+
+    #[test]
+    fn resolve_walks_single_synthetic_layer() {
+        // Pin: a one-layer synthetic span resolves to its
+        // call_site_span with chain = [kind].
+        let user_file = FileId::new(1);
+        let synth_file = FileId::new(99);
+        let user_span = Span::new(100, 200, user_file);
+
+        let mut chain: HashMap<FileId, SyntheticOrigin> = HashMap::new();
+        chain.insert(synth_file, SyntheticOrigin {
+            parent_file: user_file,
+            call_site_span: user_span,
+            kind: SyntheticKind::MacroExpansion,
+        });
+
+        let synth_span = Span::new(0, 50, synth_file);
+        let resolver = |fid: FileId| chain.get(&fid).copied();
+        let result = synth_span.resolve_to_user_source(resolver);
+
+        assert_eq!(result.user_span, user_span,
+            "single-layer resolution must return call_site_span");
+        assert_eq!(result.expansion_chain,
+            vec![SyntheticKind::MacroExpansion]);
+    }
+
+    #[test]
+    fn resolve_walks_nested_synthetic_chain() {
+        // Pin: derive-expanded code that itself macro-expands
+        // resolves through both layers.  Chain order is leaf-to-
+        // root: [DeriveExpansion, MacroExpansion] when the
+        // synthetic file came from a derive within a macro body.
+        let user_file = FileId::new(1);
+        let macro_file = FileId::new(50);
+        let derive_file = FileId::new(99);
+
+        let user_span = Span::new(100, 200, user_file);
+        let macro_call_in_user = user_span;
+        let derive_call_in_macro = Span::new(0, 30, macro_file);
+
+        let mut chain: HashMap<FileId, SyntheticOrigin> = HashMap::new();
+        chain.insert(macro_file, SyntheticOrigin {
+            parent_file: user_file,
+            call_site_span: macro_call_in_user,
+            kind: SyntheticKind::MacroExpansion,
+        });
+        chain.insert(derive_file, SyntheticOrigin {
+            parent_file: macro_file,
+            call_site_span: derive_call_in_macro,
+            kind: SyntheticKind::DeriveExpansion,
+        });
+
+        // Span inside the derive output:
+        let leaf_span = Span::new(0, 5, derive_file);
+        let resolver = |fid: FileId| chain.get(&fid).copied();
+        let result = leaf_span.resolve_to_user_source(resolver);
+
+        assert_eq!(result.user_span, macro_call_in_user,
+            "two-layer resolution must reach user source");
+        assert_eq!(
+            result.expansion_chain,
+            vec![SyntheticKind::DeriveExpansion, SyntheticKind::MacroExpansion],
+            "chain must be ordered leaf-to-root"
+        );
+    }
+
+    #[test]
+    fn resolve_terminates_on_cyclic_chain() {
+        // Pin: defence-in-depth — a malformed synthetic chain that
+        // cycles must NOT hang the renderer.  After MAX_DEPTH
+        // (32) iterations the resolver returns whatever it has.
+        let file_a = FileId::new(10);
+        let file_b = FileId::new(20);
+        let mut chain: HashMap<FileId, SyntheticOrigin> = HashMap::new();
+        // A → B → A cycle.
+        chain.insert(file_a, SyntheticOrigin {
+            parent_file: file_b,
+            call_site_span: Span::new(0, 5, file_b),
+            kind: SyntheticKind::Other,
+        });
+        chain.insert(file_b, SyntheticOrigin {
+            parent_file: file_a,
+            call_site_span: Span::new(0, 5, file_a),
+            kind: SyntheticKind::Other,
+        });
+
+        let leaf = Span::new(0, 5, file_a);
+        let resolver = |fid: FileId| chain.get(&fid).copied();
+        // Must not hang.  The chain must be capped.
+        let result = leaf.resolve_to_user_source(resolver);
+        assert!(
+            result.expansion_chain.len() <= 32,
+            "cycle defence must cap chain length at MAX_DEPTH; got {}",
+            result.expansion_chain.len()
+        );
+    }
+
+    #[test]
+    fn synthetic_kind_label_is_human_readable() {
+        // Pin: every variant has a label suitable for diagnostic
+        // output ("in <label>").  Future SyntheticKind variants
+        // must add a label (compile-time exhaustiveness via match).
+        assert_eq!(SyntheticKind::MacroExpansion.label(), "macro expansion");
+        assert_eq!(SyntheticKind::DeriveExpansion.label(), "@derive expansion");
+        assert_eq!(SyntheticKind::Monomorphization.label(), "monomorphization");
+        assert_eq!(SyntheticKind::DelegateBody.label(), "@delegate body synthesis");
+        assert_eq!(SyntheticKind::Other.label(), "synthetic expansion");
+    }
 }
