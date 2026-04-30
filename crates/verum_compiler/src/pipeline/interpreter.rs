@@ -23,8 +23,9 @@
 //!     full compile + interpret-for-test flow.
 
 use std::path::PathBuf;
+use std::time::Instant;
 
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::Result;
 use tracing::{debug, info, warn};
 
 use verum_ast::Module;
@@ -32,13 +33,11 @@ use verum_common::{List, Text};
 use verum_vbc::interpreter::Interpreter as VbcInterpreter;
 use verum_vbc::module::{FunctionId as VbcFunctionId, VbcModule};
 
-use crate::api::TestExecutionResult;
-
-use super::CompilationPipeline;
+use super::{CompilationPipeline, TestExecutionResult};
 
 impl<'s> CompilationPipeline<'s> {
     /// VBC-first architecture: AST → VBC Codegen → VBC Interpreter
-    fn phase_interpret(&mut self, module: &Module) -> Result<()> {
+    pub(super) fn phase_interpret(&mut self, module: &Module) -> Result<()> {
         let _bc = verum_error::breadcrumb::enter(
             "compiler.phase.interpret",
             self.session.options().input.display().to_string(),
@@ -137,7 +136,7 @@ impl<'s> CompilationPipeline<'s> {
     /// Script wrappers (`__verum_script_main`) pass through transparently:
     /// the parser lifts an unsemicoloned tail expression into the
     /// wrapper's return slot, so a script ending in `42` records 42 here.
-    fn propagate_main_exit_code(&self, value: &verum_vbc::Value) {
+    pub(super) fn propagate_main_exit_code(&self, value: &verum_vbc::Value) {
         if value.is_int() {
             let code = value.as_i64() as i32;
             self.session.record_exit_code(code);
@@ -158,7 +157,7 @@ impl<'s> CompilationPipeline<'s> {
     /// flush, future telemetry) *before* the OS terminates. Any
     /// other `Err` is a real runtime failure; `Ok` carries the
     /// script's terminal value which feeds `propagate_main_exit_code`.
-    fn finalize_run_result(
+    pub(super) fn finalize_run_result(
         &self,
         result: verum_vbc::interpreter::InterpreterResult<verum_vbc::Value>,
     ) -> Result<()> {
@@ -179,7 +178,7 @@ impl<'s> CompilationPipeline<'s> {
     /// Phase 5b: Interpretation with arguments
     ///
     /// VBC-first architecture: AST → VBC Codegen → VBC Interpreter with args
-    fn phase_interpret_with_args(&mut self, module: &Module, args: List<Text>) -> Result<()> {
+    pub(super) fn phase_interpret_with_args(&mut self, module: &Module, args: List<Text>) -> Result<()> {
         debug!("Interpreting module with {} args via VBC-first architecture", args.len());
 
         if args.is_empty() {
@@ -259,7 +258,7 @@ impl<'s> CompilationPipeline<'s> {
     /// preserve the precedence (`main` first, then wrapper) only as
     /// a defence-in-depth: if both names somehow appear in the VBC,
     /// the application entry still wins.
-    fn find_main_function_id(&self, vbc_module: &VbcModule) -> Result<VbcFunctionId> {
+    pub(super) fn find_main_function_id(&self, vbc_module: &VbcModule) -> Result<VbcFunctionId> {
         // First pass: script entry `__verum_script_main`. Its presence
         // is sufficient evidence that the source was a script, and the
         // strict-role contract says a script's entry is the wrapper —
@@ -347,7 +346,7 @@ impl<'s> CompilationPipeline<'s> {
     /// 1. **main() mode**: If the module has a `main` function, execute it (traditional).
     /// 2. **@test mode**: If no `main` exists, discover all `@test`-annotated functions
     ///    and run them sequentially as a test suite.
-    fn phase_interpret_for_test(&mut self, module: &Module) -> Result<(String, String, i32)> {
+    pub(super) fn phase_interpret_for_test(&mut self, module: &Module) -> Result<(String, String, i32)> {
         debug!("Interpreting module for test via VBC-first architecture");
 
         // Step 0: Reset global VBC value side-tables for test isolation.
@@ -790,6 +789,4 @@ impl<'s> CompilationPipeline<'s> {
 
         Ok(output_path)
     }
-
-    /// Phase 6: Generate native executable
 }
