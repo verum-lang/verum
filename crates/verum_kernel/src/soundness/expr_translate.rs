@@ -413,10 +413,33 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
             args,
             ..
         } => {
+            // Lean 4 dot-notation: `obj.method args...` (#147 /
+            // MSFS-L4.16).  Lean's namespace-resolution machinery uses
+            // the receiver's type to find the method declaration
+            // (e.g., `MetaClsTopWitness.max_1_full_classification` is
+            // located via the `.max_1_full_classification` syntax),
+            // which is more idiomatic than the applicative form
+            // `(method obj args)` and matches what a Lean user writes
+            // by hand.  The receiver renders bare (no extra parens)
+            // when it is a Path or another MethodCall/Field — Lean's
+            // dot is left-associative, so chains nest naturally as
+            // `a.b.c args`.  When the inner sub-expression returned
+            // its result wrapped in `(...)` (every render_expr_lean
+            // arm wraps), strip those parens for the dot-binder so
+            // the chain reads as one flat path.  Receivers that are
+            // not naturally bare (literals, binary expressions, etc.)
+            // keep their parentheses so `<dot>` doesn't bind into a
+            // sub-fragment.
             let receiver_text = render_expr_lean(receiver)?;
-            let mut out = method.as_str().to_string();
-            out.push(' ');
-            out.push_str(&parens_if_complex(&receiver_text));
+            let receiver_render = if needs_parens_before_dot(receiver) {
+                parens_if_complex(&receiver_text)
+            } else {
+                strip_outer_parens(&receiver_text)
+            };
+            let mut out = String::with_capacity(64);
+            out.push_str(&receiver_render);
+            out.push('.');
+            out.push_str(method.as_str());
             for a in args.iter() {
                 let arg_text = render_expr_lean(a)?;
                 out.push(' ');
@@ -425,12 +448,16 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
             Some(format!("({})", out))
         }
         ExprKind::Field { expr: inner, field } => {
+            // Lean dot-notation for record projections: `obj.field`.
+            // Same paren-stripping rule as MethodCall — chains stay
+            // flat, complex receivers keep their parentheses.
             let recv_text = render_expr_lean(inner)?;
-            Some(format!(
-                "({} {})",
-                field.as_str(),
+            let recv_render = if needs_parens_before_dot(inner) {
                 parens_if_complex(&recv_text)
-            ))
+            } else {
+                strip_outer_parens(&recv_text)
+            };
+            Some(format!("({}.{})", recv_render, field.as_str()))
         }
         ExprKind::Block(block) => {
             if block.stmts.iter().count() == 0 {
@@ -541,6 +568,55 @@ fn parens_if_complex(text: &str) -> String {
         text.to_string()
     } else if text.contains(' ') {
         format!("({})", text)
+    } else {
+        text.to_string()
+    }
+}
+
+/// True when an expression's rendered form needs to be parenthesised
+/// before a Lean dot-token attaches to it.  Bare Path / MethodCall /
+/// Field forms attach naturally (Lean's dot is left-associative);
+/// literals, binary expressions, and other shapes need `(…)` so
+/// `<dot>` doesn't bind to a sub-fragment.  Used by Lean
+/// MethodCall / Field arms to produce idiomatic dot-notation.
+fn needs_parens_before_dot(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Path(_) | ExprKind::MethodCall { .. } | ExprKind::Field { .. } => false,
+        ExprKind::Paren(_) => false,
+        _ => true,
+    }
+}
+
+/// Strip a balanced outer pair of parentheses from a rendered
+/// expression's text — used by Lean dot-notation chains where the
+/// inner sub-expression's outer wrap is redundant once the receiver
+/// is dot-attached to a method.  Only strips when the parens are
+/// genuinely the outermost layer (matched by depth-tracked scan), so
+/// `(a + b)` strips to `a + b` but `(a) + (b)` is left untouched.
+fn strip_outer_parens(text: &str) -> String {
+    if !(text.starts_with('(') && text.ends_with(')')) {
+        return text.to_string();
+    }
+    // Verify the first '(' matches the last ')' — i.e. the parens are
+    // genuinely outermost, not two separate balanced groups.
+    let bytes = text.as_bytes();
+    let mut depth: i32 = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 && i != bytes.len() - 1 {
+                    // The matching `)` is not the last byte → the
+                    // outer parens are NOT a single balanced wrap.
+                    return text.to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth == 0 {
+        text[1..text.len() - 1].to_string()
     } else {
         text.to_string()
     }
@@ -1246,9 +1322,26 @@ mod tests {
 
     #[test]
     fn lean_translates_zero_arg_method_call() {
+        // Lean uses dot-notation `obj.method` (#147 / MSFS-L4.16).
+        // Lean's namespace resolver finds the method declaration via
+        // the receiver's type, which is more idiomatic than the
+        // applicative form Coq uses.
         let e = method_call(ident_expr("obj"), "foo", vec![]);
         let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
-        assert_eq!(text, "(foo obj)");
+        assert_eq!(text, "(obj.foo)");
+    }
+
+    #[test]
+    fn lean_translates_method_call_with_args_dot_notation() {
+        // obj.foo(a, b) → (obj.foo a b) — Lean dot-notation with
+        // applicative args following the dot-call.
+        let e = method_call(
+            ident_expr("obj"),
+            "foo",
+            vec![ident_expr("a"), ident_expr("b")],
+        );
+        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(obj.foo a b)");
     }
 
     #[test]
@@ -1290,6 +1383,13 @@ mod tests {
 
     #[test]
     fn lean_translates_chained_method_calls() {
+        // cand.articulation_view().cond_F_S().has_phi_X()
+        //   → (cand.articulation_view.cond_F_S.has_phi_X)
+        // Lean dot-notation chains naturally — left-associative,
+        // each `.method` attaches to the preceding receiver-or-call,
+        // matching the Verum source structure exactly.  The Lean
+        // namespace resolver locates each method via the receiver's
+        // type, so this form type-checks idiomatically.
         let chain = method_call(
             method_call(
                 method_call(ident_expr("cand"), "articulation_view", vec![]),
@@ -1304,10 +1404,9 @@ mod tests {
             .text()
             .unwrap()
             .to_string();
-        // Both backends produce the same applicative form.
         assert_eq!(
             text,
-            "(has_phi_X (cond_F_S (articulation_view cand)))"
+            "(cand.articulation_view.cond_F_S.has_phi_X)"
         );
     }
 
@@ -1336,9 +1435,36 @@ mod tests {
 
     #[test]
     fn lean_translates_field_access() {
+        // Lean dot-notation for record projections: `obj.field`.
         let e = field(ident_expr("obj"), "depth");
         let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
-        assert_eq!(text, "(depth obj)");
+        assert_eq!(text, "(obj.depth)");
+    }
+
+    #[test]
+    fn lean_translates_chained_field_then_method_dot_notation() {
+        // obj.field.method(a) → (obj.field.method a) — common pattern
+        // in record-based proofs (project a field, call a method on
+        // the projected value).  Lean's left-associative dot binds
+        // chains naturally without explicit parens around `obj.field`.
+        let e = method_call(
+            field(ident_expr("obj"), "field"),
+            "method",
+            vec![ident_expr("a")],
+        );
+        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(obj.field.method a)");
+    }
+
+    #[test]
+    fn lean_dot_notation_parenthesises_complex_receiver() {
+        // (a + b).method() — receiver is a Binary expression, NOT a
+        // bare path or method-chain.  The dot must not bind to `b`,
+        // so the receiver gets parenthesised: ((a + b).method).
+        let plus = binop(BinOp::Add, ident_expr("a"), ident_expr("b"));
+        let e = method_call(plus, "method", vec![]);
+        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "((a + b).method)");
     }
 
     #[test]
