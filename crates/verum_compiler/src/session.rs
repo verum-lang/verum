@@ -382,19 +382,24 @@ impl Session {
         }
         // 3. [runtime].panic → declared as "recorded for codegen"
         //    but no LLVM codegen path currently consults it; the
-        //    panic-block emitter calls abort() unconditionally.
-        //    Surfaced below alongside the rest of the inert
-        //    [runtime] knobs via the phase-not-realised tracing
-        //    block.
+        //    panic-block emitter routes to the body shape selected
+        //    by `[runtime].panic` (commit 85090093 — Unwind or
+        //    Abort).  No longer tracing-only.
 
         // Phase-not-realised tracing for inert runtime knobs.
-        // The `[runtime]` manifest section parses 8 fields. Three
-        // (`cbgr_mode`, `async_scheduler`, `heap_policy`) are
-        // wired through pipeline.rs:9401/11430/11435 to the VBC
-        // interpreter state; the remaining five are inert:
+        // The `[runtime]` manifest section parses 8 fields. Four
+        // are wired:
+        //   - `cbgr_mode`, `async_scheduler`, `heap_policy` flow
+        //     through pipeline.rs:9401/11430/11435 to the VBC
+        //     interpreter state;
+        //   - `panic` flows through pipeline.rs:11760 →
+        //     `LoweringConfig.panic_strategy` → `PlatformIR::
+        //     emit_panic_ir` (commit 85090093) and selects the
+        //     `verum_panic` body shape (Unwind / Abort).
+        // Three remain inert:
         //   - `futures` / `nurseries`: the async runtime is
         //     compiled in unconditionally; toggling these in
-        //     verum.toml has no effect on whether `async fn` /
+        //     Verum.toml has no effect on whether `async fn` /
         //     `nursery {}` parse and elaborate.
         //   - `task_stack_size`: the work-stealing scheduler
         //     uses platform-default thread stacks; this number
@@ -402,33 +407,25 @@ impl Session {
         //   - `async_worker_threads`: the scheduler picks worker
         //     count from `num_cpus::get()` and ignores this
         //     override.
-        //   - `panic`: declared as "abort vs unwind" routing for
-        //     LLVM codegen but no codegen pass reads it; panic
-        //     blocks call abort() unconditionally.
         //
-        // Surface a warning when any of these is set to a
-        // non-default value so a `[runtime] panic = "abort"`
-        // setting in verum.toml doesn't silently fall through to
-        // the unconditional abort() emitter. Default-valued
-        // configs stay log-quiet.
+        // Surface a warning when any of these three is set to a
+        // non-default value so they don't silently fall through.
         let rt = &opts.language_features.runtime;
         if !rt.futures
             || !rt.nurseries
             || rt.task_stack_size != 0
             || rt.async_worker_threads != 0
-            || rt.panic.as_str() != "unwind"
         {
             tracing::warn!(
                 "manifest [runtime] surface: futures={}, nurseries={}, task_stack_size={}, \
-                 async_worker_threads={}, panic={:?} (these fields land on \
-                 LanguageFeatures.runtime but no production codegen / scheduler path \
-                 consults them — async runtime is compiled in unconditionally, panic \
-                 blocks call abort() regardless of routing)",
+                 async_worker_threads={} (these fields land on \
+                 LanguageFeatures.runtime but no production scheduler path consults them \
+                 — the async runtime is compiled in unconditionally and uses platform \
+                 defaults for thread stacks / num_cpus())",
                 rt.futures,
                 rt.nurseries,
                 rt.task_stack_size,
                 rt.async_worker_threads,
-                rt.panic,
             );
         }
 
