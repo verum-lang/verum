@@ -2315,8 +2315,25 @@ impl ProofValidator {
 
         match rule_str {
             // Simplification - accepts any transformation that preserves logical equivalence
+            //
+            // Pre-fix this arm returned `Ok(())` unconditionally —
+            // any source→target pair (even Forall→Path) would
+            // validate under `simp`. Now gates on
+            // `structurally_compatible` to reject cross-kind
+            // pairs while preserving the legitimate simp uses
+            // (same-kind reductions plus the Literal↔Path
+            // definition-unfolding cross-pair). Same trust-the-
+            // user soundness pattern as 7ef97a6d.
             "simp" | "simplify" => {
-                // Simplification rules are trusted transformations
+                if !self.structurally_compatible(source, target) {
+                    return Err(ValidationError::RewriteError {
+                        message: format!(
+                            "{} requires structurally-compatible source/target",
+                            rule_str
+                        )
+                        .into(),
+                    });
+                }
                 Ok(())
             }
 
@@ -2333,16 +2350,35 @@ impl ProofValidator {
                 }
             }
 
-            // Field operations
+            // Field operations — extend ring with division/inverses
+            // Same arithmetic-expr gate as `ring` above; pre-fix
+            // accepted any source→target unconditionally.
             "field" => {
-                // Field rules extend ring with division/inverses
-                Ok(())
+                if self.is_arithmetic_expr(source) && self.is_arithmetic_expr(target) {
+                    Ok(())
+                } else {
+                    Err(ValidationError::RewriteError {
+                        message: "field tactic requires arithmetic expressions".into(),
+                    })
+                }
             }
 
-            // Linear arithmetic
+            // Linear integer arithmetic — same arithmetic-expr gate
+            // as `ring` and `field`. Pre-fix accepted any
+            // source→target unconditionally; arith claiming
+            // `Forall x. P(x) ↦ 42` would validate trivially.
             "arith" | "omega" | "lia" => {
-                // Linear integer arithmetic solver
-                Ok(())
+                if self.is_arithmetic_expr(source) && self.is_arithmetic_expr(target) {
+                    Ok(())
+                } else {
+                    Err(ValidationError::RewriteError {
+                        message: format!(
+                            "{} tactic requires arithmetic expressions",
+                            rule_str
+                        )
+                        .into(),
+                    })
+                }
             }
 
             // Beta reduction: (\x.e) v -> e[v/x]
@@ -2351,9 +2387,24 @@ impl ProofValidator {
             // Eta reduction/expansion
             "eta" => self.validate_eta_conversion(source, target),
 
-            // Definition unfolding
+            // Definition unfolding — replaces a name (Path) with
+            // its definition. Pre-fix accepted any source→target
+            // pair under any rule starting with "unfold_". The
+            // structural gate allows the legitimate Path↔Literal
+            // cross-pair (per `structurally_compatible`'s explicit
+            // arm) and same-discriminant pairs, while rejecting
+            // arbitrary cross-kind transformations claimed under
+            // an `unfold_*` name.
             _ if rule_str.starts_with("unfold_") => {
-                // Definition unfolding is trusted
+                if !self.structurally_compatible(source, target) {
+                    return Err(ValidationError::RewriteError {
+                        message: format!(
+                            "{} requires structurally-compatible source/target",
+                            rule_str
+                        )
+                        .into(),
+                    });
+                }
                 Ok(())
             }
 

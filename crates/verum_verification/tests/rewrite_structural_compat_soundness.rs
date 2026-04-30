@@ -140,6 +140,101 @@ fn unknown_rewrite_with_same_kind_pair_still_accepted() {
 }
 
 #[test]
+fn simp_rule_rejects_cross_kind_pair() {
+    // Pin: `simp` / `simplify` previously accepted any source→target
+    // unconditionally. Cross-kind pairs (Path → Binary) MUST now
+    // reject. Same trust-the-user pattern as the unknown-rule arm
+    // closed in 7ef97a6d.
+    let mut validator = ProofValidator::new();
+    let source_axiom = ProofTerm::Axiom {
+        name: "p_holds".into(),
+        formula: ident_expr("p"),
+    };
+    validator.register_axiom("p_holds", ident_expr("p"));
+
+    let target = binary_and(ident_expr("p"), ident_expr("p"));
+
+    let proof = ProofTerm::Rewrite {
+        source: Heap::new(source_axiom),
+        rule: "simp".into(),
+        target: target.clone(),
+    };
+
+    let result = validator.validate(&proof, &target);
+    assert!(
+        result.is_err(),
+        "simp must reject cross-kind source/target — pre-fix accepted unconditionally"
+    );
+    let msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        msg.contains("simp requires structurally-compatible") || msg.contains("not compatible"),
+        "error must explain the gate. got: {}",
+        msg
+    );
+}
+
+#[test]
+fn arith_rule_rejects_non_arithmetic_pair() {
+    // Pin: `arith` / `omega` / `lia` were unconditional `Ok(())`
+    // pre-fix. Now require BOTH source and target to be arithmetic
+    // expressions. A Bool literal is not arithmetic, so this MUST
+    // reject.
+    let mut validator = ProofValidator::new();
+    let source_axiom = ProofTerm::Axiom {
+        name: "axiom_true".into(),
+        formula: bool_lit(true),
+    };
+    validator.register_axiom("axiom_true", bool_lit(true));
+
+    let target = bool_lit(false);
+
+    let proof = ProofTerm::Rewrite {
+        source: Heap::new(source_axiom),
+        rule: "arith".into(),
+        target: target.clone(),
+    };
+
+    let result = validator.validate(&proof, &target);
+    assert!(
+        result.is_err(),
+        "arith must reject non-arithmetic source/target pair"
+    );
+    let msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        msg.contains("arith tactic requires arithmetic"),
+        "error must explain the arithmetic gate. got: {}",
+        msg
+    );
+}
+
+#[test]
+fn unfold_rule_rejects_cross_kind_pair() {
+    // Pin: any rule starting with `unfold_` was unconditional
+    // `Ok(())` pre-fix. Cross-kind pairs (Path → Binary) MUST
+    // now reject. Same gate as `simp`.
+    let mut validator = ProofValidator::new();
+    let source_axiom = ProofTerm::Axiom {
+        name: "p_holds".into(),
+        formula: ident_expr("p"),
+    };
+    validator.register_axiom("p_holds", ident_expr("p"));
+
+    let target = binary_and(ident_expr("p"), ident_expr("p"));
+
+    let proof = ProofTerm::Rewrite {
+        source: Heap::new(source_axiom),
+        rule: "unfold_p".into(),
+        target: target.clone(),
+    };
+
+    let result = validator.validate(&proof, &target);
+    assert!(
+        result.is_err(),
+        "unfold_* must reject cross-kind source/target — pre-fix accepted unconditionally"
+    );
+}
+
+#[test]
 fn unknown_rewrite_literal_path_cross_pair_still_accepted() {
     // Pin the explicit Literal↔Path cross-pair — preserved from the
     // pre-fix code as a legitimate definition-unfolding
