@@ -73,11 +73,11 @@ use verum_smt::{Context as SmtContext, CostTracker};
 use verum_common::{Maybe, Shared};
 use verum_types::TypeChecker;
 
-use crate::lint::{IntrinsicDiagnostics, IntrinsicLint};
 use crate::linker_config::ProjectConfig;
 use crate::meta::MetaRegistry;
-use crate::module_utils;
 use crate::options::VerifyMode;
+// IntrinsicDiagnostics / IntrinsicLint / module_utils now used only inside
+// crate::pipeline::stdlib_bootstrap (#106 Phase 8).
 use crate::phases::linking::{FinalLinker, LinkingConfig, ObjectFile};
 use crate::phases::phase0_stdlib::{Phase0CoreCompiler, StdlibArtifacts};
 use crate::phases::ExecutionTier;
@@ -85,7 +85,9 @@ use crate::phases::type_error_to_diagnostic;
 use crate::session::Session;
 use crate::core_cache::global_cache_or_init;
 use crate::core_source::CoreSource;
-use crate::core_compiler::{CoreConfig, StdlibCompilationResult, StdlibModule, StdlibModuleResolver};
+use crate::core_compiler::{CoreConfig, StdlibModuleResolver};
+// StdlibCompilationResult / StdlibModule now used only inside
+// crate::pipeline::stdlib_bootstrap (#106 Phase 8).
 use crate::hash::compute_item_hashes_from_module;
 use crate::incremental_compiler::IncrementalCompiler;
 use crate::staged_pipeline::{StagedPipeline, StagedConfig};
@@ -807,24 +809,28 @@ pub struct CompilationPipeline<'s> {
     staged_pipeline: StagedPipeline,
 }
 
-/// Context for building CFG blocks in escape analysis
+/// Context for building CFG blocks in escape analysis.
 ///
 /// This struct holds the state needed during CFG construction for
 /// a single function, including the block ID allocator, reference
 /// counter, and pending blocks to be added to the CFG.
-struct CfgBuildContext<'a> {
-    /// The CFG builder for allocating block and reference IDs
-    builder: &'a mut verum_cbgr::CfgBuilder,
-    /// Counter for allocating reference IDs
-    ref_counter: &'a mut u64,
-    /// Entry block ID for the function
-    entry_id: verum_cbgr::analysis::BlockId,
-    /// Exit block ID for the function
-    exit_id: verum_cbgr::analysis::BlockId,
-    /// Blocks built during CFG construction, to be added at the end
-    pending_blocks: List<verum_cbgr::analysis::BasicBlock>,
-    /// Closure captures detected during analysis (ref_id, is_mutable)
-    closure_captures: List<(verum_cbgr::analysis::RefId, bool)>,
+///
+/// Visibility: `pub(super)` so the extracted CBGR cluster
+/// (`crate::pipeline::cbgr`) can construct + match against it via
+/// `super::CfgBuildContext` (#106 Phase 9).
+pub(super) struct CfgBuildContext<'a> {
+    /// The CFG builder for allocating block and reference IDs.
+    pub(super) builder: &'a mut verum_cbgr::CfgBuilder,
+    /// Counter for allocating reference IDs.
+    pub(super) ref_counter: &'a mut u64,
+    /// Entry block ID for the function.
+    pub(super) entry_id: verum_cbgr::analysis::BlockId,
+    /// Exit block ID for the function.
+    pub(super) exit_id: verum_cbgr::analysis::BlockId,
+    /// Blocks built during CFG construction, to be added at the end.
+    pub(super) pending_blocks: List<verum_cbgr::analysis::BasicBlock>,
+    /// Closure captures detected during analysis (ref_id, is_mutable).
+    pub(super) closure_captures: List<(verum_cbgr::analysis::RefId, bool)>,
 }
 
 // =====================================================================

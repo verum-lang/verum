@@ -23,13 +23,15 @@
 //! `collect_exit_predecessors`).  Plus two leaf utilities
 //! (`param_is_reference`, `hash_function_name`).
 
+use std::time::Instant;
+
 use anyhow::Result;
 use tracing::{debug, info};
 
-use verum_ast::Module;
+use verum_ast::{decl::ItemKind, Module};
 use verum_common::List;
 
-use super::CompilationPipeline;
+use super::{CfgBuildContext, CompilationPipeline};
 
 impl<'s> CompilationPipeline<'s> {
     /// Phase 4a: Tier analysis
@@ -42,7 +44,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// CBGR analysis: builds CFGs, runs escape analysis to promote references from
     /// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe, `&checked T`).
-    fn phase_cbgr_analysis(&self, module: &Module) -> Result<()> {
+    pub(super) fn phase_cbgr_analysis(&self, module: &Module) -> Result<()> {
         use verum_cbgr::tier_analysis::{TierAnalysisConfig, TierAnalyzer};
         use verum_cbgr::tier_types::TierStatistics;
         use crate::session::FunctionId;
@@ -191,7 +193,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// CFG construction for escape analysis: creates basic blocks for branches,
     /// match arms, loops, with control flow edges for dataflow analysis.
-    fn build_function_cfg(
+    pub(super) fn build_function_cfg(
         &self,
         func: &verum_ast::decl::FunctionDecl,
     ) -> verum_cbgr::analysis::ControlFlowGraph {
@@ -308,7 +310,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for a function body
-    fn build_body_cfg(
+    pub(super) fn build_body_cfg(
         &self,
         body: &verum_ast::decl::FunctionBody,
         ctx: &mut CfgBuildContext<'_>,
@@ -355,7 +357,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for a block expression, returning the starting block ID
-    fn build_block_cfg(
+    pub(super) fn build_block_cfg(
         &self,
         block: &verum_ast::expr::Block,
         ctx: &mut CfgBuildContext<'_>,
@@ -648,7 +650,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for if/else expression
-    fn build_if_cfg(
+    pub(super) fn build_if_cfg(
         &self,
         condition: &verum_ast::expr::IfCondition,
         then_branch: &verum_ast::expr::Block,
@@ -754,7 +756,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for match expression
-    fn build_match_cfg(
+    pub(super) fn build_match_cfg(
         &self,
         scrutinee: &verum_ast::expr::Expr,
         arms: &verum_common::List<verum_ast::pattern::MatchArm>,
@@ -839,7 +841,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for loop expression
-    fn build_loop_cfg(
+    pub(super) fn build_loop_cfg(
         &self,
         body: &verum_ast::expr::Block,
         ctx: &mut CfgBuildContext<'_>,
@@ -871,7 +873,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for while loop
-    fn build_while_cfg(
+    pub(super) fn build_while_cfg(
         &self,
         condition: &verum_ast::expr::Expr,
         body: &verum_ast::expr::Block,
@@ -915,7 +917,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Build CFG for for loop
-    fn build_for_cfg(
+    pub(super) fn build_for_cfg(
         &self,
         iter: &verum_ast::expr::Expr,
         body: &verum_ast::expr::Block,
@@ -976,7 +978,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Extract definitions and uses from an if condition
-    fn extract_defs_and_uses_from_condition(
+    pub(super) fn extract_defs_and_uses_from_condition(
         &self,
         condition: &verum_ast::expr::IfCondition,
         block_id: verum_cbgr::analysis::BlockId,
@@ -1015,7 +1017,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Extract reference definitions and uses from an expression
-    fn extract_defs_and_uses_from_expr(
+    pub(super) fn extract_defs_and_uses_from_expr(
         &self,
         expr: &verum_ast::expr::Expr,
         block_id: verum_cbgr::analysis::BlockId,
@@ -1693,7 +1695,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Extract definitions and uses from a statement
-    fn extract_defs_and_uses_from_stmt(
+    pub(super) fn extract_defs_and_uses_from_stmt(
         &self,
         stmt: &verum_ast::stmt::Stmt,
         block_id: verum_cbgr::analysis::BlockId,
@@ -1784,7 +1786,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Collect all predecessors of the exit block
-    fn collect_exit_predecessors(
+    pub(super) fn collect_exit_predecessors(
         &self,
         cfg: &verum_cbgr::analysis::ControlFlowGraph,
         exit_id: verum_cbgr::analysis::BlockId,
@@ -1802,7 +1804,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Check if a function parameter contains reference types
-    fn param_is_reference(param: &verum_ast::decl::FunctionParam) -> bool {
+    pub(super) fn param_is_reference(param: &verum_ast::decl::FunctionParam) -> bool {
         use verum_ast::decl::FunctionParamKind;
         use verum_ast::ty::TypeKind;
 
@@ -1821,7 +1823,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Hash function name to create a stable function ID
-    fn hash_function_name(name: &str) -> u64 {
+    pub(super) fn hash_function_name(name: &str) -> u64 {
         let mut hasher = crate::hash::ContentHash::new();
         hasher.update_str(name);
         hasher.finalize().to_u64()
