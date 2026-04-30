@@ -120,6 +120,29 @@ impl Default for TranslationConfig {
 impl TranslationConfig {
     /// Create a configuration with precise IEEE 754 float support enabled.
     pub fn with_precise_floats() -> Self {
+        // Phase-not-realised tracing: `TranslationConfig::with_precise_floats`
+        // produces a config with `precise_floats = true`, but the
+        // production verification path at refinement.rs:173, 579 and
+        // proof_search.rs:2666, 4746, 7712 calls `Translator::new(context)`
+        // (default config: precise_floats = false / Real-approximation),
+        // never `Translator::with_config(context, config)`. Embedders
+        // selecting `with_precise_floats()` get a config struct, but to
+        // reach the FPA encoding they must also construct the Translator
+        // via `with_config`. The standard refinement / proof-search
+        // entry points don't expose this hookup.
+        //
+        // Surface a debug trace at config construction so embedders see
+        // the gap rather than silently believing IEEE 754 FPA semantics
+        // were applied to their floats during refinement verification.
+        tracing::debug!(
+            "TranslationConfig::with_precise_floats() — config produced with \
+             precise_floats=true, but production verification paths construct \
+             Translator via `Translator::new(context)` (default Real-approximation), \
+             not `Translator::with_config(context, config)`. Embedders selecting \
+             this preset must also thread the config through to the Translator \
+             constructor. Forward-looking: a future refinement-path API surface \
+             should accept TranslationConfig and forward it."
+        );
         Self {
             precise_floats: true,
             ..Default::default()
