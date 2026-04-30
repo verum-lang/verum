@@ -284,6 +284,27 @@ public module mesh;
 // Layer A: Application (Depends on: math, io, collections)
 // =============================================================================
 
+// Action layer (Diakrisis Actic) — DC-side stdlib mirror of
+// `core.math` (OC-side). Exposes the eight ε-primitives, articulation
+// / enactment algebra, the Theorem 17.T1 effect catalogue with
+// concrete monad implementations (Pure, Reader, Writer, State,
+// Probability, Quantum, Exception, Nondeterm, Io), Ludics
+// designs (Theorem 120.T), and gauge-coherence audit helpers
+// (`verify_epsilon`, `gauge_consistency`, streaming
+// `CoherenceMonitor`).
+//
+// Pre-fix `core.action` was reachable only via direct file-path
+// mounting (`mount core.action.articulation`) — it had NO
+// declaration in `core/mod.vr`, so it was missing from the
+// stdlib root surface. Downstream modules that want
+// `core.action.*` could mount sub-paths but couldn't reach the
+// umbrella, and `core.prelude.*` couldn't re-export anything from
+// it. Wiring it as a peer module of `theory_interop` (the OC-DC
+// duality bridge sits under theory_interop/bridges) restores the
+// symmetric module-tree shape and lets the prelude evolve to
+// re-export common Actic helpers in a follow-up.
+public module action;
+
 // Theory interoperation: a computational ∞-topos of formally
 // represented theories. Theory loading (Yoneda), translation
 // (Kan extensions), coherence (descent), auditing, and a
