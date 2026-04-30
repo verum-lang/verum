@@ -5504,29 +5504,61 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 #[cfg(target_os = "linux")]
                 {
-                    // Linux libc exposes `pid_t gettid(void)` (glibc ≥ 2.30).
-                    // Older glibc users would need `syscall(SYS_gettid)`,
-                    // but we link against modern glibc / musl in the
-                    // AOT runtime — the helper is added on demand if
-                    // not already declared.
-                    let _ = ptr_type; // silence unused warning on linux path
-                    let gettid_fn = module
-                        .get_function("gettid")
-                        .unwrap_or_else(|| {
-                            let ft = i32_type.fn_type(&[], false);
-                            module.add_function("gettid", ft, None)
-                        });
-                    let raw = builder
-                        .build_call(gettid_fn, &[], "tid")
+                    // **Direct syscall — libc-free** (per user 2026-05-01
+                    // directive: "for AOT we don't use libc on any
+                    // platform").  Pre-fix this path called `gettid`
+                    // through libc which forced a glibc/musl link
+                    // dependency for the AOT binary.  Post-fix we emit
+                    // the kernel trap inline — same shape as
+                    // `Opcode::SyscallLinux` lowering at instruction.rs.
+                    //
+                    // Per-architecture trap encoding:
+                    //   * x86_64: `syscall` instruction; rax = SYS_gettid,
+                    //     no args; return in rax.  SYS_gettid x86_64 = 186.
+                    //   * aarch64: `svc #0` instruction; x8 = SYS_gettid,
+                    //     no args; return in x0.  SYS_gettid arm64 = 178.
+                    let _ = (ptr_type, getpid_fn); // silence unused warnings on linux path
+
+                    #[cfg(target_arch = "x86_64")]
+                    let (asm_str, constraints, sys_num) = (
+                        "syscall",
+                        "={rax},{rax},~{rcx},~{r11},~{memory}",
+                        186_u64,
+                    );
+                    #[cfg(target_arch = "aarch64")]
+                    let (asm_str, constraints, sys_num) = (
+                        "svc #0",
+                        "={x0},{x8},~{memory}",
+                        178_u64,
+                    );
+                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+                    let (asm_str, constraints, sys_num): (&str, &str, u64) =
+                        ("", "=r,r", 0);
+
+                    let syscall_fn_type = i64_type.fn_type(&[i64_type.into()], false);
+                    let asm_fn = self.context.create_inline_asm(
+                        syscall_fn_type,
+                        asm_str.to_string(),
+                        constraints.to_string(),
+                        true,  // has side effects
+                        true,  // align stack
+                        Some(verum_llvm::InlineAsmDialect::ATT),
+                        false, // can't throw
+                    );
+                    let num_const = i64_type.const_int(sys_num, false);
+                    let tid = builder
+                        .build_indirect_call(
+                            syscall_fn_type,
+                            asm_fn,
+                            &[num_const.into()],
+                            "tid",
+                        )
                         .or_llvm_err()?
                         .try_as_basic_value()
                         .basic()
-                        .or_internal("gettid returned void")?
+                        .or_internal("syscall returned void")?
                         .into_int_value();
-                    let result = builder
-                        .build_int_s_extend(raw, i64_type, "ext")
-                        .or_llvm_err()?;
-                    builder.build_return(Some(&result)).or_llvm_err()?;
+                    builder.build_return(Some(&tid)).or_llvm_err()?;
                 }
 
                 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
