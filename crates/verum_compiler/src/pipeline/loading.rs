@@ -74,7 +74,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Loads stdlib with two-tier caching: (1) registry cache from prior compilation,
     /// (2) parsed module cache to avoid re-parsing ~166 stdlib modules.
-    fn load_stdlib_modules(&mut self) -> Result<()> {
+    pub(super) fn load_stdlib_modules(&mut self) -> Result<()> {
         let start = Instant::now();
         debug!("load_stdlib_modules called");
 
@@ -515,7 +515,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// No-op when no resolver is installed (project mode, plain
     /// scripts without `dependencies = [...]`).
-    fn load_external_cog_modules(&mut self) -> Result<()> {
+    pub(super) fn load_external_cog_modules(&mut self) -> Result<()> {
         let cog_locations: Vec<(String, PathBuf)> = match self.session.cog_resolver() {
             Some(resolver) => resolver
                 .cog_names()
@@ -656,7 +656,7 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
-    fn load_project_modules(&mut self) -> Result<()> {
+    pub(super) fn load_project_modules(&mut self) -> Result<()> {
         let input_path = self.session.options().input.clone();
         let input_dir = match input_path.parent() {
             Some(dir) if dir.as_os_str().is_empty() => std::env::current_dir()?,
@@ -1076,7 +1076,7 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Parse source and register meta declarations (Pass 1)
-    fn parse_and_register(&mut self, path: &Text, source: &Text) -> Result<Module> {
+    pub(super) fn parse_and_register(&mut self, path: &Text, source: &Text) -> Result<Module> {
         // Load source as a string (files are already loaded in sources map)
         let virtual_path = PathBuf::from(path.as_str());
         let file_id = self

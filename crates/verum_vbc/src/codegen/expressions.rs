@@ -360,6 +360,74 @@ impl VbcCodegen {
         }
     }
 
+    /// Emit a variant-construction instruction, choosing between the
+    /// typed (`MakeVariantTyped`) and legacy (`MakeVariant`) forms
+    /// based on whether the parent sum-type is registered in
+    /// `type_name_to_id`.  Single source of truth for variant-emit
+    /// dispatch across the codegen — every other site that wants to
+    /// produce a variant routes through here so the typed-emission
+    /// rule (carry concrete TypeId in the heap header so the runtime
+    /// can disambiguate variant tags across sum types) lands
+    /// uniformly.
+    ///
+    /// `parent_type_name` is the `Option<&str>` name of the sum type
+    /// (e.g. "ShellError", "Result", "Maybe"); when it resolves to a
+    /// registered TypeId, the typed form is emitted, otherwise the
+    /// legacy form is the fallback so historical sites without
+    /// type-name plumbing still produce bit-equivalent runtime state.
+    pub(super) fn emit_make_variant(
+        &mut self,
+        dst: Reg,
+        tag: u32,
+        field_count: u32,
+        parent_type_name: Option<&str>,
+    ) {
+        let parent_type_id = parent_type_name
+            .and_then(|name| self.type_name_to_id.get(name).copied());
+        if std::env::var("VERUM_TRACE_VARIANT_EMIT").is_ok() {
+            eprintln!(
+                "[variant-emit] parent={:?} tag={} fc={} tid={:?}",
+                parent_type_name, tag, field_count, parent_type_id,
+            );
+        }
+        if let Some(tid) = parent_type_id {
+            self.ctx.emit(Instruction::MakeVariantTyped {
+                dst,
+                type_id: tid.0,
+                tag,
+                field_count,
+            });
+        } else {
+            self.ctx.emit(Instruction::MakeVariant { dst, tag, field_count });
+        }
+    }
+
+    /// Convenience wrapper: resolve the parent type from a function
+    /// (variant constructor) info and route through `emit_make_variant`.
+    /// Used by call-form and record-form variant constructor paths
+    /// that already have a `parent_type_name` field on the FunctionInfo.
+    pub(super) fn emit_make_variant_for_function(
+        &mut self,
+        dst: Reg,
+        tag: u32,
+        field_count: u32,
+        primary_lookup_name: &str,
+        fallback_lookup_name: Option<&str>,
+    ) {
+        let parent_name = self
+            .ctx
+            .lookup_function(primary_lookup_name)
+            .and_then(|info| info.parent_type_name.clone())
+            .or_else(|| {
+                fallback_lookup_name.and_then(|n| {
+                    self.ctx
+                        .lookup_function(n)
+                        .and_then(|info| info.parent_type_name.clone())
+                })
+            });
+        self.emit_make_variant(dst, tag, field_count, parent_name.as_deref());
+    }
+
     /// Detects if an expression is an array element reference pattern (`&arr[idx]` or `&mut arr[idx]`).
     ///
     /// This pattern needs special handling for FFI calls because VBC arrays store NaN-boxed Values,
@@ -975,9 +1043,13 @@ impl VbcCodegen {
                     // Check if this is a variant constructor
                     if let Some(tag) = func_info.variant_tag {
                         if func_info.param_count == 0 {
-                            // Nullary variant constructor — emit MakeVariant directly
+                            // Nullary variant constructor — emit through
+                            // the typed-or-legacy helper so the parent
+                            // sum-type id (when known) lands in the heap
+                            // header for downstream variant-name lookup.
                             let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::MakeVariant { dst: dest, tag, field_count: 0 });
+                            let parent = func_info.parent_type_name.clone();
+                            self.emit_make_variant(dest, tag, 0, parent.as_deref());
                             return Ok(Some(dest));
                         } else {
                             // Variant with args — will be handled by compile_call
@@ -1002,11 +1074,8 @@ impl VbcCodegen {
                         // treats an Int 0 as "tag 0".
                         if let Some(tag) = func_info.variant_tag {
                             let dest = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::MakeVariant {
-                                dst: dest,
-                                tag,
-                                field_count: 0,
-                            });
+                            let parent = func_info.parent_type_name.clone();
+                            self.emit_make_variant(dest, tag, 0, parent.as_deref());
                             return Ok(Some(dest));
                         }
                         // Check if this is a constant with a known value.
@@ -1102,7 +1171,8 @@ impl VbcCodegen {
                         && let Some(tag) = info.variant_tag {
                             let result = self.ctx.alloc_temp();
                             if info.param_count == 0 {
-                                self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: 0 });
+                                let parent = info.parent_type_name.clone();
+                                self.emit_make_variant(result, tag, 0, parent.as_deref());
                             } else {
                                 self.ctx.emit(Instruction::LoadI {
                                     dst: result,
@@ -2743,7 +2813,42 @@ impl VbcCodegen {
                     t.starts_with("Heap<") || t.starts_with("Shared<")
                         || self.is_allocating_wrapper(t)
                 });
-                if is_heap_deref {
+                // Typed-primitive deref dispatch (#26 codegen tail).
+                //
+                // The generic `Deref` instruction reads `sizeof(Value)=8`
+                // bytes regardless of the pointee size — for FFI-returned
+                // references to sub-Value-sized C primitives (`Int32`
+                // errno slot, `UInt8` byte field, `Bool` flag, …) it
+                // leaks 1–7 bytes of adjacent memory into the high half
+                // of the loaded i64.  Pre-fix: `errno()` on macOS
+                // returned `0x7E04ED1B 30000002` (high 32 = TLS
+                // bookkeeping leak, low 32 = real errno).  Post-fix:
+                // emit `FfiExtended { DerefRawSigned, size=N }` for
+                // signed C primitives or `DerefRaw, size=N` for
+                // unsigned/byte — read exactly N bytes and sign- or
+                // zero-extend per the pointee's signedness.
+                //
+                // Heap<T>/Shared<T> derefs always carry full
+                // Value-sized payloads, so they continue through the
+                // existing `Deref` path below.
+                let typed_deref = if !is_heap_deref {
+                    inner_type
+                        .as_ref()
+                        .and_then(|t| typed_primitive_pointee_deref(t))
+                } else {
+                    None
+                };
+
+                if let Some((sub_op, size)) = typed_deref {
+                    let mut operands = Vec::<u8>::with_capacity(5);
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, inner_reg.0);
+                    operands.push(size);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: sub_op as u8,
+                        operands,
+                    });
+                } else if is_heap_deref {
                     // Heap<T> is transparent — emit Deref so the CBGR runtime sets
                     // cbgr_deref_source. This enables `&*value` to produce a pointer
                     // reference to the original CBGR allocation (via RefCreate
@@ -2754,7 +2859,7 @@ impl VbcCodegen {
                     // falls through to identity deref which matches Mov semantics.
                     self.ctx.emit(Instruction::Deref { dst: dest, ref_reg: inner_reg });
                 } else {
-                    // Dereference - tier affects whether we emit ChkRef
+                    // Generic Value-sized deref - tier affects whether we emit ChkRef.
                     let tier = self.get_deref_tier_for_expr(inner);
                     self.emit_deref_instruction(dest, inner_reg, tier);
                 }
@@ -2989,42 +3094,17 @@ impl VbcCodegen {
                     .unwrap_or(tag)
             };
             let result = self.ctx.alloc_temp();
-            // Prefer the typed `MakeVariantTyped` (Extended sub-op
-            // 0x01) when the parent sum-type id is known — encodes
-            // the concrete TypeId in the heap header so the runtime
-            // can resolve the variant constructor name correctly
-            // when distinct sum types share variant tags (e.g.
-            // `Result.Err` and `ShellError.SpawnFailed` both have
-            // tag=1).  Falls back to legacy `MakeVariant` (synthetic
-            // `0x8000+tag` type_id sentinel) when the parent name
-            // doesn't resolve to a registered TypeId — preserves
-            // bit-equivalent runtime state for any historical caller
-            // that lacked the type-name plumbing.
-            let parent_type_id = func_info
-                .parent_type_name
-                .as_deref()
-                .and_then(|name| self.type_name_to_id.get(name).copied());
-            if let Some(tid) = parent_type_id {
-                // Use the typed IR variant — the encoder writes the
-                // canonical wire format (`[0x1F][0x01][reg:dst]
-                // [varint:type_id][varint:tag][varint:field_count]`)
-                // and the validator + disassembler get a structural
-                // view (Phase 3a #146).  Cleaner than the previous
-                // manual operand-blob encoding which bypassed the
-                // typed IR layer.
-                self.ctx.emit(Instruction::MakeVariantTyped {
-                    dst: result,
-                    type_id: tid.0,
-                    tag: final_tag,
-                    field_count: args.len() as u32,
-                });
-            } else {
-                self.ctx.emit(Instruction::MakeVariant {
-                    dst: result,
-                    tag: final_tag,
-                    field_count: args.len() as u32,
-                });
-            }
+            // Route through the unified emit-variant helper so the
+            // typed-vs-legacy decision lives in one place.  See
+            // `emit_make_variant`'s docstring for the SHELL-5a-related
+            // rationale (sum types sharing variant tags need the
+            // concrete TypeId in the heap header to disambiguate).
+            self.emit_make_variant(
+                result,
+                final_tag,
+                args.len() as u32,
+                func_info.parent_type_name.as_deref(),
+            );
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self
                     .compile_expr(arg)?
@@ -4450,27 +4530,12 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
-        let parent_type_id = variant_name.and_then(|n| {
+        let parent = variant_name.and_then(|n| {
             self.ctx
                 .lookup_function(n)
                 .and_then(|info| info.parent_type_name.clone())
-                .as_deref()
-                .and_then(|tname| self.type_name_to_id.get(tname).copied())
         });
-        if let Some(tid) = parent_type_id {
-            self.ctx.emit(Instruction::MakeVariantTyped {
-                dst: result,
-                type_id: tid.0,
-                tag,
-                field_count: args.len() as u32,
-            });
-        } else {
-            self.ctx.emit(Instruction::MakeVariant {
-                dst: result,
-                tag,
-                field_count: args.len() as u32,
-            });
-        }
+        self.emit_make_variant(result, tag, args.len() as u32, parent.as_deref());
         if !args.is_empty() {
             let data_val = self
                 .compile_expr(&args[0])?
@@ -4558,34 +4623,7 @@ impl VbcCodegen {
 
         let result = self.ctx.alloc_temp();
 
-        // Prefer typed MakeVariantTyped (Phase 3a) when the parent
-        // sum-type id is resolvable.  The disambiguation logic
-        // above has already picked the right variant; we re-derive
-        // the parent_type_name through the same FunctionInfo
-        // lookup and turn it into a TypeId via
-        // `type_name_to_id`.  Falls back to legacy `MakeVariant`
-        // when the parent type isn't registered (cross-cog forward
-        // refs, mid-pass-1 lookups, etc.).
-        let parent_type_id = self
-            .ctx
-            .lookup_function(name)
-            .and_then(|info| info.parent_type_name.clone())
-            .as_deref()
-            .and_then(|tname| self.type_name_to_id.get(tname).copied());
-        if let Some(tid) = parent_type_id {
-            self.ctx.emit(Instruction::MakeVariantTyped {
-                dst: result,
-                type_id: tid.0,
-                tag,
-                field_count: args.len() as u32,
-            });
-        } else {
-            self.ctx.emit(Instruction::MakeVariant {
-                dst: result,
-                tag,
-                field_count: args.len() as u32,
-            });
-        }
+        self.emit_make_variant_for_function(result, tag, args.len() as u32, name, None);
 
         // If there are arguments, set the variant data
         if !args.is_empty() {
@@ -6525,31 +6563,12 @@ impl VbcCodegen {
         // SIGBUS during pattern matching.
         if let Some(tag) = func_info.variant_tag {
             let result = self.ctx.alloc_temp();
-            // Phase 3a — emit typed MakeVariantTyped when the
-            // parent sum-type id is resolvable through the
-            // FunctionInfo's `parent_type_name`.  `func_info` is
-            // the variant's own constructor info, so its
-            // parent_type_name IS the sum type.  Falls back to
-            // legacy `MakeVariant` when type_name_to_id has no
-            // entry (cross-cog forward ref, mid-pass-1 lookup).
-            let parent_type_id = func_info
-                .parent_type_name
-                .as_deref()
-                .and_then(|tname| self.type_name_to_id.get(tname).copied());
-            if let Some(tid) = parent_type_id {
-                self.ctx.emit(Instruction::MakeVariantTyped {
-                    dst: result,
-                    type_id: tid.0,
-                    tag,
-                    field_count: args.len() as u32,
-                });
-            } else {
-                self.ctx.emit(Instruction::MakeVariant {
-                    dst: result,
-                    tag,
-                    field_count: args.len() as u32,
-                });
-            }
+            self.emit_make_variant(
+                result,
+                tag,
+                args.len() as u32,
+                func_info.parent_type_name.as_deref(),
+            );
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self
                     .compile_expr(arg)?
@@ -10830,11 +10849,12 @@ impl VbcCodegen {
                         let qualified_variant = format!("{}.{}", type_name, field);
                         let result = self.ctx.alloc_temp();
                         let variant_tag = self.intern_string(&qualified_variant);
-                        self.ctx.emit(Instruction::MakeVariant {
-                            dst: result,
-                            tag: variant_tag,
-                            field_count: 0,
-                        });
+                        // We know the parent type name (it's `type_name`),
+                        // so route through the unified helper.  When
+                        // type_name is a registered sum type, this lifts
+                        // the synthesised "qualified-name as tag" path
+                        // into the typed form too.
+                        self.emit_make_variant(result, variant_tag, 0, Some(type_name));
                         return Ok(Some(result));
                     }
 
@@ -11240,40 +11260,22 @@ impl VbcCodegen {
             });
 
         if let Some(tag) = variant_tag {
-            // Record variant: create variant object and set fields as
-            // variant data.  Prefer `MakeVariantTyped` when the parent
-            // sum-type is registered — encodes the concrete TypeId in
-            // the heap header so `format_variant_for_print_depth`
-            // resolves the variant constructor name correctly when
-            // distinct sum types share variant tags (e.g. `Result.Err`
-            // and `ShellError.SpawnFailed` both tag=1).
-            let parent_type_id = self
-                .ctx
-                .lookup_function(&variant_name)
-                .and_then(|info| info.parent_type_name.clone())
-                .or_else(|| self
-                    .ctx
-                    .lookup_function(&dot_name)
-                    .and_then(|info| info.parent_type_name.clone()))
-                .as_deref()
-                .and_then(|name| self.type_name_to_id.get(name).copied());
-            if let Some(tid) = parent_type_id {
-                // Use the typed IR variant — the encoder writes the
-                // canonical wire format.  Sibling to the call-form
-                // variant constructor path above; both sites prefer
-                // MakeVariantTyped when the parent sum-type id is
-                // known.
-                self.ctx.emit(Instruction::MakeVariantTyped {
-                    dst: result,
-                    type_id: tid.0,
-                    tag,
-                    field_count: fields.len() as u32,
-                });
-            } else {
-                self.ctx.emit(Instruction::MakeVariant {
-                    dst: result, tag, field_count: fields.len() as u32,
-                });
-            }
+            // Record variant: dispatch through the unified
+            // typed-or-legacy emit helper.  The `MakeVariantTyped`
+            // form encodes the concrete sum-type id in the heap
+            // header so the runtime can resolve the variant
+            // constructor name correctly when distinct sum types
+            // share variant tags (e.g. `Result.Err` and
+            // `ShellError.SpawnFailed` both tag=1).  Routes through
+            // the named-lookup helper since the parent name comes
+            // from the variant constructor's FunctionInfo.
+            self.emit_make_variant_for_function(
+                result,
+                tag,
+                fields.len() as u32,
+                &variant_name,
+                Some(&dot_name),
+            );
             // For variant records, disambiguation uses the variant's own payload
             // types; the per-field logic mirrors the plain-record path below.
             let variant_type_name = format!("{}", path);
@@ -11650,7 +11652,7 @@ impl VbcCodegen {
                 "Ok".as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
             });
 
-        self.ctx.emit(Instruction::MakeVariant { dst: result, tag: ok_tag, field_count: 1 });
+        self.emit_make_variant_for_function(result, ok_tag, 1, "Ok", None);
         self.ctx.emit(Instruction::SetVariantData {
             variant: result,
             field: 0,
@@ -11673,7 +11675,7 @@ impl VbcCodegen {
             .unwrap_or_else(|| {
                 "Err".as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
             });
-        self.ctx.emit(Instruction::MakeVariant { dst: result, tag: err_tag, field_count: 1 });
+        self.emit_make_variant_for_function(result, err_tag, 1, "Err", None);
         self.ctx.emit(Instruction::SetVariantData {
             variant: result,
             field: 0,
@@ -13928,12 +13930,10 @@ impl VbcCodegen {
             });
         self.ctx.free_temp(tag_reg);
 
-        // None case: return None (tag 0)
-        self.ctx.emit(Instruction::MakeVariant {
-            dst: dest,
-            tag: 0, // None tag
-            field_count: 0,
-        });
+        // None case: return None (tag 0).  Routed through the
+        // typed-or-legacy helper so when `Maybe` is registered, the
+        // emitted variant carries the concrete TypeId.
+        self.emit_make_variant(dest, 0, 0, Some("Maybe"));
         self.ctx
             .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
 
@@ -13968,12 +13968,10 @@ impl VbcCodegen {
         });
         self.ctx.free_temp(inner_reg);
 
-        // Wrap result in Some
-        self.ctx.emit(Instruction::MakeVariant {
-            dst: dest,
-            tag: 1, // Some tag
-            field_count: 1,
-        });
+        // Wrap result in Some.  Routed through the typed-or-legacy
+        // helper so when `Maybe` is registered, the emitted variant
+        // carries the concrete TypeId.
+        self.emit_make_variant(dest, 1, 1, Some("Maybe"));
         self.ctx.emit(Instruction::SetVariantData {
             variant: dest,
             field: 0,
@@ -15715,7 +15713,7 @@ impl VbcCodegen {
                 let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
                     .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
                     .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch"))?;
-                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: okt, field_count: 1 });
+                self.emit_make_variant_for_function(dest, okt, 1, "Ok", Some("Result::Ok"));
                 self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ir });
                 self.ctx.free_temp(ir);
                 self.ctx.emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
@@ -15725,7 +15723,7 @@ impl VbcCodegen {
                 let ert = self.ctx.lookup_function("Err").and_then(|i| i.variant_tag)
                     .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
                     .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch"))?;
-                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: ert, field_count: 1 });
+                self.emit_make_variant_for_function(dest, ert, 1, "Err", Some("Result::Err"));
                 self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ex });
                 self.ctx.free_temp(ex);
                 self.ctx.define_label(&el);
@@ -15749,7 +15747,7 @@ impl VbcCodegen {
                 let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
                     .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
                     .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
-                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: okt, field_count: 1 });
+                self.emit_make_variant_for_function(dest, okt, 1, "Ok", Some("Result::Ok"));
                 self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ir });
                 self.ctx.free_temp(ir);
                 self.ctx.emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
@@ -15759,7 +15757,7 @@ impl VbcCodegen {
                 let ert = self.ctx.lookup_function("Err").and_then(|i| i.variant_tag)
                     .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
                     .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
-                self.ctx.emit(Instruction::MakeVariant { dst: dest, tag: ert, field_count: 1 });
+                self.emit_make_variant_for_function(dest, ert, 1, "Err", Some("Result::Err"));
                 self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ex });
                 self.ctx.free_temp(ex);
                 self.ctx.define_label(&el);
@@ -22972,6 +22970,72 @@ impl FreeVarAnalyzer {
             }
             _ => {}
         }
+    }
+}
+
+/// Map a typed-reference's pointee name to the matching typed-deref
+/// `(FfiSubOpcode, size)` pair.  Returns `Some` when the pointee is a
+/// C primitive smaller than 8 bytes — signals that `*ptr` should emit
+/// a typed deref (`FfiSubOpcode::DerefRawSigned` / `DerefRaw`) rather
+/// than the generic Value-sized `Deref`.
+///
+/// `t` is the inner expression's static type as text, e.g.
+/// `"&mut Int32"`, `"&UInt8"`, `"&Bool"`, `"&unsafe Int8"`.
+///
+/// Closes the codegen tail of #26 — pre-fix `*__error()` (where
+/// `__error: extern fn() -> &mut Int32`) read 8 bytes via `Deref`,
+/// leaking 4 bytes of adjacent TLS bookkeeping into the high half of
+/// `errno()`.  Post-fix `compile_unary[UnOp::Deref]` consults this
+/// helper and emits `FfiExtended { DerefRawSigned, size=4 }` for any
+/// `&[mut] Int32` reference.
+///
+/// Pointees ≥ 8 bytes (`Int64`, `UInt64`, `Int`, `Float`, `Float64`)
+/// fall through to `None` — the generic 8-byte `Deref` is correct
+/// for them.  `Float32` is currently unhandled (would need a typed
+/// load-and-fpext path); falls through to None as well — if user
+/// code derefs an `&Float32`, the upper 4 bytes leak — but that is
+/// an extremely rare FFI shape (most C `float` returns come back via
+/// register, not pointer).
+fn typed_primitive_pointee_deref(
+    t: &str,
+) -> Option<(crate::instruction::FfiSubOpcode, u8)> {
+    use crate::instruction::FfiSubOpcode;
+    let t = t.trim();
+    // Strip the reference prefix.  The order matters: longer prefixes
+    // (e.g. `&unsafe mut`) must be tested before shorter ones
+    // (`&unsafe`, `&mut`, `&`).
+    let pointee = if let Some(rest) = t.strip_prefix("&unsafe mut ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&unsafe ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&checked mut ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&checked ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&mut ") {
+        rest
+    } else if let Some(rest) = t.strip_prefix("&") {
+        rest
+    } else {
+        return None;
+    };
+    let pointee = pointee.trim();
+    match pointee {
+        // Signed C primitives — sign-extend.
+        "Int8" | "i8" => Some((FfiSubOpcode::DerefRawSigned, 1)),
+        "Int16" | "i16" => Some((FfiSubOpcode::DerefRawSigned, 2)),
+        "Int32" | "i32" => Some((FfiSubOpcode::DerefRawSigned, 4)),
+        // Unsigned C primitives + bool/char — zero-extend.  `DerefRaw`'s
+        // existing default semantics match the unsigned-byte-array
+        // invariant (CRC32 / wire-format reads).
+        "UInt8" | "u8" | "Byte" => Some((FfiSubOpcode::DerefRaw, 1)),
+        "UInt16" | "u16" => Some((FfiSubOpcode::DerefRaw, 2)),
+        "UInt32" | "u32" => Some((FfiSubOpcode::DerefRaw, 4)),
+        "Bool" => Some((FfiSubOpcode::DerefRaw, 1)),
+        "Char" => Some((FfiSubOpcode::DerefRaw, 4)),
+        // 8-byte primitives — generic `Deref` is already correct.
+        // Float32 punted (would need typed load-and-fpext path).
+        _ => None,
     }
 }
 
