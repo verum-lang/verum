@@ -595,6 +595,38 @@ impl Session {
                 pr.generic_associated_types,
             );
         }
+
+        // Phase-not-realised tracing for inert proof-certificate
+        // emission knobs. `CompilerOptions.emit_proof_certificate`
+        // (default false), `proof_certificate_format` (Option<Text>),
+        // and `proof_certificate_path` (Option<PathBuf>) all land
+        // on the session via the `with_proof_certificate*` builders
+        // (options.rs:655-672) but no production code path consumes
+        // them. The verify_cmd path emits proofs via its own
+        // export logic (verify_cmd.rs:1757 reads
+        // `verification_json_path`), and the contract-verification
+        // phase doesn't consult these fields at all. Surface a
+        // warning when the user enables certificate emission so
+        // they see the gap rather than silently believing their
+        // `--emit-proof-certificate=lean` selection produced a
+        // .lean file.
+        if opts.emit_proof_certificate
+            || opts.proof_certificate_format.is_some()
+            || opts.proof_certificate_path.is_some()
+        {
+            tracing::warn!(
+                "CompilerOptions surface: emit_proof_certificate={}, \
+                 proof_certificate_format={:?}, proof_certificate_path={:?} — these \
+                 fields land on the session but no production code path consumes \
+                 them. Per-format certificate emission lives in \
+                 verum_smt::certificates::CertificateGenerator (callable from \
+                 embedders) but the standard `verum verify` CLI surface doesn't \
+                 yet route the session options into it. Forward-looking knobs.",
+                opts.emit_proof_certificate,
+                opts.proof_certificate_format.as_ref().map(|t| t.as_str()),
+                opts.proof_certificate_path.as_ref().map(|p| p.display().to_string()),
+            );
+        }
     }
 
     /// Access the shared SMT routing statistics handle.
