@@ -487,28 +487,23 @@ impl Session {
         //     `ProtocolChecker.instance_search_enabled` and gates
         //     the Stage-2 generic-candidate scan in `find_impl`
         //     at `protocol.rs:4356-4361`.
-        // Two remain inert (setter stores but no production
-        // consumer):
-        //   - `quotient`: HIT-based modular equivalence syntactic
-        //     forms parse and elaborate regardless.
-        //   - `universe_polymorphism`: typed-surface declarations
-        //     land on `TypeChecker.universe_poly_enabled` but no
-        //     production unifier pass gates on them.
+        // All 7 [types].* feature flags are now wired:
+        //   - `quotient` flows to `TypeChecker.quotient_enabled`
+        //     and is consulted at `infer.rs:48919` (gates the
+        //     `TypeDeclBody::Quotient` arm in
+        //     `register_type_declaration_body` — rejects the
+        //     declaration with a hard error citing the manifest
+        //     when disabled).
+        //   - `universe_polymorphism` flows to
+        //     `TypeChecker.universe_poly_enabled` and is
+        //     consulted at `infer.rs:22946` (gates the polymorphic
+        //     universe-level forms `Type(u)`, `Type(max(a,b))`,
+        //     `Type(succ u)` in `ast_to_type` — rejects with a
+        //     hard error when disabled; concrete `Type` /
+        //     `Type(N)` always allowed).
         //
-        // Surface a warning when either of those two is set to a
-        // non-default value.
-        let ty = &opts.language_features.types;
-        if !ty.quotient || ty.universe_polymorphism {
-            tracing::warn!(
-                "manifest [types] surface: quotient={}, universe_polymorphism={} \
-                 (these fields land on LanguageFeatures.types and validate() enforces \
-                 their coherence lattice, but no production type-check pass currently \
-                 gates on them — quotient / universe-polymorphism syntactic forms \
-                 parse and elaborate regardless of the flag)",
-                ty.quotient,
-                ty.universe_polymorphism,
-            );
-        }
+        // No runtime warn! needed — every value the user can set
+        // produces observable typecheck behaviour.
 
         // Phase-not-realised tracing for inert safety knobs.
         // The `[safety]` manifest section parses 6 fields. Five
