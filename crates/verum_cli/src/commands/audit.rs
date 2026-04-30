@@ -2604,6 +2604,295 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
     Ok(())
 }
 
+// =============================================================================
+// audit --apply-graph — task #150 / MSFS-L4.13
+// =============================================================================
+
+/// Legacy entry-point for `verum audit --apply-graph` (plain).
+pub fn audit_apply_graph() -> Result<()> {
+    audit_apply_graph_with_format(AuditFormat::Plain)
+}
+
+/// Entry-point for `verum audit --apply-graph [--format FORMAT]`.
+///
+/// Walks every theorem in the project and classifies its TRANSITIVE
+/// apply-chain leaves.  Each `apply <symbol>(args)` resolves through
+/// the workspace symbol table to its body; the recursion terminates
+/// at axiom leaves classified as `kernel_strict` / `framework_axiom` /
+/// `placeholder_axiom` / `unresolved`.
+///
+/// This is the load-bearing complement to `--bridge-discharge` (which
+/// only checks the immediate apply): `--apply-graph` follows the
+/// chain across `_full` forms and stdlib delegates, so a placeholder
+/// leak deep in the chain surfaces.
+///
+/// Exits non-zero when any theorem's composition has
+/// `placeholder_axiom > 0` or `unresolved > 0` — those theorems are
+/// not yet L4 load-bearing.
+pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::soundness::apply_graph::{
+        ApplyGraph, LeafKind, SymbolEntry, extract_apply_targets, walk_transitive,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Apply-graph transitive bridge-discharge audit");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    // Pass 1: build the workspace-wide symbol table.  Every theorem
+    // gets its proof-body's apply-targets pre-extracted; every axiom
+    // gets classified as kernel-bridge / framework / placeholder.
+    let mut graph = ApplyGraph::new();
+    // Track which theorems exist and their source path so the report
+    // can pinpoint the file location of any leaking chain.
+    let mut theorem_sources: std::collections::BTreeMap<String, std::path::PathBuf> =
+        std::collections::BTreeMap::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+        for item in &module.items {
+            match &item.kind {
+                verum_ast::decl::ItemKind::Theorem(d)
+                | verum_ast::decl::ItemKind::Lemma(d)
+                | verum_ast::decl::ItemKind::Corollary(d) => {
+                    let name = d.name.name.as_str().to_string();
+                    match &d.proof {
+                        verum_common::Maybe::Some(body) => {
+                            // Theorem with a proof body — the
+                            // apply-targets become the children in
+                            // the graph.
+                            let apply_targets = extract_apply_targets(body);
+                            graph.insert(
+                                name.clone(),
+                                SymbolEntry::Theorem { apply_targets },
+                            );
+                            theorem_sources.insert(name, abs_path.clone());
+                        }
+                        verum_common::Maybe::None => {
+                            // Theorem-shaped axiom — classify as a
+                            // leaf based on the @framework attribute
+                            // and the kernel_ prefix.
+                            let entry = classify_axiom_entry(
+                                &name,
+                                &d.attributes,
+                                &item.attributes,
+                            );
+                            graph.insert(name, entry);
+                        }
+                    }
+                }
+                verum_ast::decl::ItemKind::Axiom(a) => {
+                    let name = a.name.name.as_str().to_string();
+                    let entry = classify_axiom_entry(
+                        &name,
+                        &a.attributes,
+                        &item.attributes,
+                    );
+                    graph.insert(name, entry);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Pass 2: walk the transitive apply-graph for every theorem with
+    // a proof body and accumulate the per-theorem composition.
+    const MAX_DEPTH: usize = 16;
+    let mut rows: Vec<ApplyGraphRow> = Vec::new();
+    let mut leaking_theorems = 0usize;
+
+    for (theorem_name, source_path) in &theorem_sources {
+        let comp = walk_transitive(&graph, theorem_name, MAX_DEPTH);
+        let load_bearing = comp.is_l4_load_bearing();
+        if !load_bearing {
+            leaking_theorems += 1;
+        }
+        rows.push(ApplyGraphRow {
+            theorem: theorem_name.clone(),
+            source: source_path
+                .strip_prefix(&manifest_dir)
+                .unwrap_or(source_path)
+                .to_path_buf(),
+            kernel_strict: comp.kernel_strict,
+            framework_axiom: comp.framework_axiom,
+            placeholder_axiom: comp.placeholder_axiom,
+            unresolved: comp.unresolved,
+            load_bearing,
+            placeholder_leaves: comp
+                .leaves
+                .iter()
+                .filter(|h| {
+                    matches!(
+                        h.kind,
+                        LeafKind::PlaceholderAxiom | LeafKind::Unresolved
+                    )
+                })
+                .map(|h| ApplyGraphLeakHit {
+                    leaf: h.symbol.clone(),
+                    chain: h.chain.clone(),
+                    kind: h.kind.label().to_string(),
+                })
+                .collect(),
+        });
+    }
+    rows.sort_by(|a, b| a.theorem.cmp(&b.theorem));
+
+    let report_dir = manifest_dir
+        .join("target")
+        .join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let json_path = report_dir.join("apply-graph.json");
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-apply-graph",
+        "modules_scanned": parsed_files,
+        "modules_skipped": skipped_files,
+        "theorems_walked": rows.len(),
+        "leaking_theorems": leaking_theorems,
+        "max_depth": MAX_DEPTH,
+        "rows": rows,
+    });
+    let _ = std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&payload).unwrap(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            print_apply_graph_plain(&rows, leaking_theorems, parsed_files, skipped_files);
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+    }
+
+    if leaking_theorems > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "apply-graph: {} theorem(s) have non-L4 transitive apply-chains \
+             (placeholder_axiom or unresolved leaves) — chain leaks listed in \
+             {}",
+            leaking_theorems,
+            json_path.display(),
+        )));
+    }
+    Ok(())
+}
+
+/// Per-theorem row emitted into the `apply-graph.json` audit report.
+#[derive(Debug, serde::Serialize)]
+struct ApplyGraphRow {
+    theorem: String,
+    source: std::path::PathBuf,
+    kernel_strict: usize,
+    framework_axiom: usize,
+    placeholder_axiom: usize,
+    unresolved: usize,
+    load_bearing: bool,
+    /// Empty when `load_bearing == true`.  Otherwise lists every
+    /// leaf-class hit that breaks the L4 property, with the chain
+    /// of intermediate symbols leading to it.
+    placeholder_leaves: Vec<ApplyGraphLeakHit>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ApplyGraphLeakHit {
+    leaf: String,
+    chain: Vec<String>,
+    kind: String,
+}
+
+fn classify_axiom_entry(
+    name: &str,
+    decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
+) -> verum_kernel::soundness::apply_graph::SymbolEntry {
+    use verum_kernel::soundness::apply_graph::SymbolEntry;
+    if name.starts_with("kernel_") {
+        return SymbolEntry::KernelBridge;
+    }
+    let has_framework = decl_attrs.iter().any(|a| a.is_named("framework"))
+        || item_attrs.iter().any(|a| a.is_named("framework"));
+    if has_framework {
+        SymbolEntry::FrameworkAxiom
+    } else {
+        SymbolEntry::PlaceholderAxiom
+    }
+}
+
+fn print_apply_graph_plain(
+    rows: &[ApplyGraphRow],
+    leaking_theorems: usize,
+    parsed_files: usize,
+    skipped_files: usize,
+) {
+    println!();
+    println!("Apply-graph transitive discharge report");
+    println!("────────────────────────────────────────");
+    println!(
+        "  Parsed {} module(s) ({} skipped); walked {} theorem(s).",
+        parsed_files,
+        skipped_files,
+        rows.len(),
+    );
+    if rows.is_empty() {
+        println!("  (no theorem-shaped declarations with proof bodies discovered)");
+        return;
+    }
+    let total_kernel: usize = rows.iter().map(|r| r.kernel_strict).sum();
+    let total_framework: usize = rows.iter().map(|r| r.framework_axiom).sum();
+    let total_placeholder: usize = rows.iter().map(|r| r.placeholder_axiom).sum();
+    let total_unresolved: usize = rows.iter().map(|r| r.unresolved).sum();
+    println!();
+    println!(
+        "  Aggregate leaf composition: {} kernel_strict · {} framework_axiom · \
+         {} placeholder_axiom · {} unresolved",
+        total_kernel, total_framework, total_placeholder, total_unresolved,
+    );
+    if leaking_theorems == 0 {
+        println!();
+        println!("  ✓ all theorems are L4 load-bearing — every transitive leaf is");
+        println!("    kernel_strict or framework_axiom (no placeholders, no unresolveds).");
+        return;
+    }
+    println!();
+    println!(
+        "  ✗ {} theorem(s) have non-L4 transitive chains:",
+        leaking_theorems,
+    );
+    for row in rows.iter().filter(|r| !r.load_bearing) {
+        println!(
+            "    - {} (in {})",
+            row.theorem,
+            row.source.display(),
+        );
+        println!(
+            "        {} kernel_strict · {} framework · {} placeholder · {} unresolved",
+            row.kernel_strict,
+            row.framework_axiom,
+            row.placeholder_axiom,
+            row.unresolved,
+        );
+        for leak in &row.placeholder_leaves {
+            let chain_text = leak.chain.join(" → ");
+            println!(
+                "        leak ({}): {} via {}",
+                leak.kind, leak.leaf, chain_text,
+            );
+        }
+    }
+}
+
 /// Sanitise a Verum theorem name for use as a foreign-tool
 /// identifier.  Snake-case names map directly; non-ASCII characters
 /// or names colliding with reserved words gain a `verum_` prefix.

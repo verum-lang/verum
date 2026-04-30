@@ -176,6 +176,7 @@ pub mod literal_parsers;
 pub mod literal_registry;
 pub mod options;
 pub mod pipeline;
+pub mod target_spec; // Audit-E2: cross-compile-aware target spec for cfg evaluation
 // Centralised hardcoded-stdlib-name registry for the unifier.
 // Temporary scaffold pending #101 protocol-based discovery — keeping
 // the architectural violation in one identifiable file rather than
