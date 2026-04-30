@@ -1,0 +1,110 @@
+// =============================================================================
+// kernel_v0 — CoreTerm inductive (bootstrap meta-theory)
+// =============================================================================
+//
+// The 5-constructor minimal inductive that mirrors
+// `verum_kernel::proof_checker::Term` exactly.  This module is the
+// Verum-language anchor for the bootstrap chain: every claim the
+// minimal kernel makes is a claim about this CoreTerm inductive.
+//
+// **Faithfulness invariant** (cross-checked by future audit gate):
+//
+//   verum_kernel::proof_checker::Term variant set ≡ this module's
+//   CoreTerm variant set.  Drift is a CI failure.
+//
+//   Rust-side variants  →  this module's constructors:
+//     Term::Var(usize)            → Var(Int{>= 0})
+//     Term::Universe(u32)         → Universe(Int{>= 0})
+//     Term::Pi(Heap, Heap)        → Pi(Heap<CoreTerm>, Heap<CoreTerm>)
+//     Term::Lam(Heap, Heap)       → Lam(Heap<CoreTerm>, Heap<CoreTerm>)
+//     Term::App(Heap, Heap)       → App(Heap<CoreTerm>, Heap<CoreTerm>)
+//
+// **Why minimal**
+//
+// The full `core/verify/kernel_soundness/model.vr` mirrors the broader
+// 35-variant Rust kernel (refinement, cubical, modal, quotient, ...).
+// This module is DELIBERATELY smaller — exactly what the bootstrap-
+// verified kernel needs.  Phase 3 (#154) closes by regenerating
+// `proof_checker::Term` FROM this module, so this is the source of
+// truth post-bootstrap.
+//
+// **Trust delegation**
+//
+// Every theorem in core/verify/kernel_v0/ quantifies over CoreTerm.
+// A reviewer who reads this file (~50 LOC) understands the entire
+// term language the minimal kernel reasons about.  No hidden
+// dependencies, no forward references.
+// =============================================================================
+
+module core.verify.kernel_v0.core_term;
+
+mount core.prelude.{Heap, Int};
+
+/// **Minimal CoC term** — the bootstrap kernel's inductive type.
+///
+/// De Bruijn-indexed variables; universe levels stratify CoreTerm
+/// inside itself (Universe(n) inhabits Universe(n+1)); Π and λ carry
+/// explicit domain annotations so type-checking is bidirectional;
+/// App is the only elimination form for functions.
+///
+/// **Variants**
+///
+///   Var(i)        — variable at de Bruijn index i (0 = innermost binder)
+///   Universe(n)   — n-th universe; Universe(0) = Type, Universe(1) = Type1, ...
+///   Pi(A, B)      — dependent function type Π(_:A). B; B under one binder
+///   Lam(A, body)  — λ(_:A). body; body under one binder
+///   App(f, x)     — application; β-reduces to subst(body, 0, x) when f = Lam
+///
+/// **What this DOES NOT include**
+///
+///   - Sigma (dependent pair) — separate kernel extension
+///   - Refinement subtypes — separate extension layer
+///   - Cubical (Path, hcomp, transp) — separate extension layer
+///   - Quotient types, Inductive types, modal operators — separate
+///     extension layers
+///
+/// Each extension lands in its own kernel_vN/ directory with its own
+/// soundness lemmas relative to kernel_v0.  This compositional
+/// approach matches Verum's foundation-neutral philosophy: corpora
+/// pick the extensions they need, audit gates verify each layer
+/// independently.
+public type CoreTerm is
+    | Var { index: Int{>= 0} }
+    | Universe { level: Int{>= 0} }
+    | Pi {
+        domain: Heap<CoreTerm>,
+        body:   Heap<CoreTerm>,
+    }
+    | Lam {
+        domain: Heap<CoreTerm>,
+        body:   Heap<CoreTerm>,
+    }
+    | App {
+        function: Heap<CoreTerm>,
+        argument: Heap<CoreTerm>,
+    };
+
+/// **Constant** — the universe level Type (= Universe(0)).
+/// Convention: most "is a type" judgments in kernel_v0 ask whether
+/// the term inhabits Universe(0); higher levels are reserved for
+/// universe polymorphism in extension layers.
+public fn type_universe() -> CoreTerm {
+    return CoreTerm.Universe { level: 0 };
+}
+
+/// **Term-level invariants** — every CoreTerm value the bootstrap
+/// kernel reasons about must satisfy these by construction.  Phase 3
+/// regenerates the Rust-side checker from this module, so these
+/// invariants become the load-bearing well-formedness gate.
+///
+/// (1) Indices are bounded by the surrounding context's depth — the
+///     elaborator rejects free-variable terms by construction.
+/// (2) Universe levels are non-negative — the refinement type
+///     `Int{>= 0}` enforces it at construction.
+/// (3) Pi and Lam binder structure is correctly nested — the parser
+///     emits balanced bind/unbind so the body's de Bruijn frame is
+///     consistent with the surrounding context.
+///
+/// These invariants are NOT proved here — they are documented for
+/// completeness.  The soundness theorem composes per-rule lemmas
+/// that maintain them inductively.
