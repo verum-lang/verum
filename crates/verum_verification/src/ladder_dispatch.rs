@@ -1467,6 +1467,246 @@ pub fn verify_monotonicity<D: LadderDispatcher>(d: &D) -> Result<(), Text> {
     Ok(())
 }
 
+// =============================================================================
+// Runtime ν-monotonicity drive — task #139 / MSFS-L4.6
+// =============================================================================
+
+/// Diagnostic kind tag for a verdict, used inside [`StrategyStep`]
+/// and [`MonotonicityViolation`].  Owned-string-equivalent stable
+/// labels: `closed` / `open` / `dispatch_pending` / `timeout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VerdictKind {
+    /// `LadderVerdict::Closed` — discharged.
+    Closed,
+    /// `LadderVerdict::Open` — failed to close.
+    Open,
+    /// `LadderVerdict::DispatchPending` — backend not yet wired.
+    DispatchPending,
+    /// `LadderVerdict::Timeout` — strategy budget exceeded.
+    Timeout,
+}
+
+impl VerdictKind {
+    /// Stable text label — used in JSON output.
+    pub fn name(self) -> &'static str {
+        match self {
+            VerdictKind::Closed => "closed",
+            VerdictKind::Open => "open",
+            VerdictKind::DispatchPending => "dispatch_pending",
+            VerdictKind::Timeout => "timeout",
+        }
+    }
+}
+
+/// Per-strategy verdict in a backbone walk.  One row per ladder step
+/// from `Runtime` up to (and including) the obligation's declared
+/// strategy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyStep {
+    /// The strategy that was dispatched at this step.
+    pub strategy: LadderStrategy,
+    /// `true` iff the dispatch returned [`LadderVerdict::Closed`].
+    pub closed: bool,
+    /// Verdict variant kind.  Preserved verbatim so the audit-side
+    /// renderer doesn't need to reconstruct it from `closed` + reason.
+    pub verdict_kind: VerdictKind,
+    /// The verdict's reason text where the variant carries one;
+    /// empty `Text` when none applies (e.g., `Closed` carries a
+    /// witness, not a reason).
+    pub detail: Text,
+}
+
+impl StrategyStep {
+    /// Construct a `StrategyStep` from a verdict produced by
+    /// [`LadderDispatcher::dispatch`].
+    pub fn from_verdict(verdict: &LadderVerdict) -> Self {
+        let strategy = verdict.strategy();
+        let (closed, verdict_kind, detail) = match verdict {
+            LadderVerdict::Closed { witness, .. } => {
+                (true, VerdictKind::Closed, witness.clone())
+            }
+            LadderVerdict::Open { reason, .. } => {
+                (false, VerdictKind::Open, reason.clone())
+            }
+            LadderVerdict::DispatchPending { note, .. } => {
+                (false, VerdictKind::DispatchPending, note.clone())
+            }
+            LadderVerdict::Timeout { budget_ms, .. } => (
+                false,
+                VerdictKind::Timeout,
+                Text::from(format!("budget_ms={}", budget_ms)),
+            ),
+        };
+        Self {
+            strategy,
+            closed,
+            verdict_kind,
+            detail,
+        }
+    }
+}
+
+/// Result of walking the backbone for a single obligation.  Records
+/// the per-strategy verdict at every backbone slot from `Runtime`
+/// up to (and including) the obligation's `declared_strategy`.
+///
+/// **Invariant**: `steps[i].strategy` is the i-th backbone strategy
+/// (Runtime / Static / Fast / ComplexityTyped / Formal / Proof / …);
+/// `steps.len()` equals `backbone_index(declared_strategy) + 1`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LadderWalkReport {
+    /// The obligation's `item_name` (preserved for diagnostic / audit
+    /// rendering).
+    pub item_name: Text,
+    /// The strategy declared by the user's `@verify(<strategy>)`
+    /// annotation.  The walk runs from `Runtime` up to AND including
+    /// this strategy.
+    pub declared_strategy: LadderStrategy,
+    /// Per-step verdicts in monotone order.
+    pub steps: Vec<StrategyStep>,
+}
+
+impl LadderWalkReport {
+    /// Project the count of `closed`-verdict steps in this walk.
+    pub fn closed_count(&self) -> usize {
+        self.steps.iter().filter(|s| s.closed).count()
+    }
+
+    /// Project the count of non-closed steps (open + pending + timeout).
+    pub fn non_closed_count(&self) -> usize {
+        self.steps.len() - self.closed_count()
+    }
+}
+
+/// Walk the dispatcher's backbone for `obligation`, dispatching at
+/// every strategy from `Runtime` up to and including
+/// `obligation.declared_strategy`.  Returns a [`LadderWalkReport`]
+/// recording the per-strategy verdict.
+///
+/// `Synthesize`-declared obligations short-circuit to a single-step
+/// walk because `Synthesize` is orthogonal to the monotone backbone
+/// (it's not above any specific backbone strategy in the partial
+/// order).
+///
+/// **Performance**: dispatches the obligation at most 12 times (the
+/// backbone size).  In practice ≤ N times where N is the
+/// declared-strategy's backbone index.  Each dispatch is independent
+/// — no cumulative state, so the walk is safe to parallelise per
+/// obligation if needed.
+pub fn dispatch_ladder_walk<D: LadderDispatcher>(
+    dispatcher: &D,
+    obligation: &LadderObligation,
+) -> LadderWalkReport {
+    let item_name = obligation.item_name.clone();
+    let declared = obligation.declared_strategy;
+
+    if !declared.is_on_backbone() {
+        // Synthesize is orthogonal — just one dispatch at the
+        // declared strategy.  No monotonicity check applies.
+        let verdict = dispatcher.dispatch(obligation);
+        return LadderWalkReport {
+            item_name,
+            declared_strategy: declared,
+            steps: vec![StrategyStep::from_verdict(&verdict)],
+        };
+    }
+
+    let stop_at = backbone_index(declared)
+        .expect("declared is on backbone — checked above");
+    let mut steps: Vec<StrategyStep> = Vec::with_capacity(stop_at + 1);
+
+    for &strat in LadderStrategy::backbone()[..=stop_at].iter() {
+        // Build a copy of the obligation with the current backbone
+        // strategy as `declared_strategy`.  This is the canonical way
+        // to drive the dispatcher at a different strategy without
+        // assuming a setter on the obligation.
+        let mut at_strat = obligation.clone();
+        at_strat.declared_strategy = strat;
+        let verdict = dispatcher.dispatch(&at_strat);
+        steps.push(StrategyStep::from_verdict(&verdict));
+    }
+
+    LadderWalkReport {
+        item_name,
+        declared_strategy: declared,
+        steps,
+    }
+}
+
+/// A runtime ν-monotonicity violation in a single obligation's walk.
+///
+/// **Definition** (strict ν-monotonicity for runtime walks): for
+/// every backbone walk, if the dispatcher returns `Closed` at
+/// strategy `S_strict`, it MUST return `Closed` at every coarser
+/// backbone strategy `S_coarser ≤ S_strict`.  A violation is a pair
+/// `(S_coarser, S_strict)` where `S_coarser` is open / pending /
+/// timeout while `S_strict` is closed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonotonicityViolation {
+    /// The coarser strategy that failed (open / pending / timeout)
+    /// despite a stricter strategy succeeding.  This is the
+    /// architectural error.
+    pub coarser_failed: LadderStrategy,
+    /// The diagnostic kind of the coarser failure.
+    pub coarser_failure_kind: VerdictKind,
+    /// The stricter strategy that succeeded — the one whose success
+    /// the monotonicity invariant promises also implies success at
+    /// the coarser strategy.
+    pub stricter_succeeded: LadderStrategy,
+}
+
+/// Check the runtime ν-monotonicity invariant on a single
+/// [`LadderWalkReport`].  Returns the list of violations (empty when
+/// the invariant holds).
+///
+/// **Pure data check**: this is a structural inspection of the
+/// `steps` list — no dispatcher invocation.  Microsecond-scale cost.
+///
+/// The invariant is defensible:
+/// - `Runtime` is downward-closed by definition (always `Closed`).
+/// - Each next backbone slot strictly extends the previous's
+///   provable set (`Static` ⊋ `Runtime`, `Fast` ⊋ `Static`, …).
+/// - So `Closed` at strategy `s_n` implies `Closed` at every
+///   `s_m` with `m ≤ n`.
+///
+/// A violation indicates EITHER (a) a bug in the dispatcher's
+/// strategy-specific backend OR (b) a real architectural defect in
+/// the obligation's coarse-strategy adapter.  Both cases warrant
+/// CI failure.
+pub fn check_runtime_monotonicity(report: &LadderWalkReport) -> Vec<MonotonicityViolation> {
+    let mut violations = Vec::new();
+    // Walk the steps array; every step is at a backbone strategy.
+    // For each step `i` that's `Closed`, every step `j > i` that's
+    // also `Closed` is consistent.  But every step `j` BEFORE step
+    // `i` that's NON-closed AND step `i` is closed → violation.
+    //
+    // Equivalent shape (stable across step orderings): scan
+    // left-to-right; record each non-closed step; if a later step is
+    // Closed, every earlier non-closed step is a violation against
+    // it.  We only report the FIRST stricter-success per coarser-
+    // failure pair to keep the diagnostic noise bounded.
+    let mut earliest_failures: Vec<(LadderStrategy, VerdictKind)> = Vec::new();
+    for step in report.steps.iter() {
+        if step.closed {
+            for &(coarser, kind) in earliest_failures.iter() {
+                violations.push(MonotonicityViolation {
+                    coarser_failed: coarser,
+                    coarser_failure_kind: kind,
+                    stricter_succeeded: step.strategy,
+                });
+            }
+            // Once a stricter step succeeds, the coarser failures
+            // have been reported against it.  Clear the list so we
+            // don't re-report against subsequent stricter successes
+            // (they're transitively implied).
+            earliest_failures.clear();
+        } else {
+            earliest_failures.push((step.strategy, step.verdict_kind));
+        }
+    }
+    violations
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2438,5 +2678,289 @@ mod tests {
             ),
             "Synthesize is off-backbone and stays Pending"
         );
+    }
+
+    // =========================================================================
+    // Runtime ν-monotonicity drive (task #139 / MSFS-L4.6)
+    // =========================================================================
+
+    #[test]
+    fn ladder_walk_visits_every_backbone_step_up_to_declared() {
+        // For an obligation declared at `Formal`, the walk should
+        // visit Runtime → Static → Fast → ComplexityTyped → Formal
+        // (5 steps).
+        let d = DefaultLadderDispatcher::new();
+        let o = LadderObligation::text("test", LadderStrategy::Formal, "True");
+        let report = dispatch_ladder_walk(&d, &o);
+        assert_eq!(report.declared_strategy, LadderStrategy::Formal);
+        assert_eq!(report.steps.len(), 5);
+        let strategies: Vec<LadderStrategy> = report.steps.iter().map(|s| s.strategy).collect();
+        assert_eq!(
+            strategies,
+            vec![
+                LadderStrategy::Runtime,
+                LadderStrategy::Static,
+                LadderStrategy::Fast,
+                LadderStrategy::ComplexityTyped,
+                LadderStrategy::Formal,
+            ],
+        );
+    }
+
+    #[test]
+    fn ladder_walk_runtime_only_when_declared_runtime() {
+        // Single-step walk for Runtime-declared obligations.
+        let d = DefaultLadderDispatcher::new();
+        let o = LadderObligation::text("test", LadderStrategy::Runtime, "True");
+        let report = dispatch_ladder_walk(&d, &o);
+        assert_eq!(report.steps.len(), 1);
+        assert_eq!(report.steps[0].strategy, LadderStrategy::Runtime);
+    }
+
+    #[test]
+    fn ladder_walk_synthesize_short_circuits_to_one_step() {
+        // Synthesize is orthogonal — walk should not run the
+        // backbone, just dispatch once at Synthesize.
+        let d = DefaultLadderDispatcher::new();
+        let o = LadderObligation::text("test", LadderStrategy::Synthesize, "True");
+        let report = dispatch_ladder_walk(&d, &o);
+        assert_eq!(report.steps.len(), 1);
+        assert_eq!(report.steps[0].strategy, LadderStrategy::Synthesize);
+    }
+
+    #[test]
+    fn monotonicity_holds_when_all_steps_closed() {
+        // Default dispatcher closes every backbone step on a trivial
+        // tautology — no monotonicity violations expected.
+        let d = DefaultLadderDispatcher::new();
+        let o = LadderObligation::text("test", LadderStrategy::Coherent, "True");
+        let report = dispatch_ladder_walk(&d, &o);
+        let violations = check_runtime_monotonicity(&report);
+        assert!(
+            violations.is_empty(),
+            "all-closed walk should produce no violations; got: {:?}",
+            violations,
+        );
+    }
+
+    #[test]
+    fn monotonicity_violation_when_coarser_open_but_stricter_closed() {
+        // Synthesise a walk that's intentionally non-monotonic: Runtime
+        // = Closed, Static = Open, Fast = Closed.  This is a real
+        // architectural failure — Fast succeeded but Static (its
+        // weaker cousin) failed, which contradicts strict ν-monotonicity.
+        let report = LadderWalkReport {
+            item_name: Text::from("synth_test"),
+            declared_strategy: LadderStrategy::Fast,
+            steps: vec![
+                StrategyStep {
+                    strategy: LadderStrategy::Runtime,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::from("ok"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Static,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synthetic failure"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Fast,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::from("ok"),
+                },
+            ],
+        };
+        let violations = check_runtime_monotonicity(&report);
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected one violation; got {:?}",
+            violations,
+        );
+        assert_eq!(violations[0].coarser_failed, LadderStrategy::Static);
+        assert_eq!(violations[0].coarser_failure_kind, VerdictKind::Open);
+        assert_eq!(violations[0].stricter_succeeded, LadderStrategy::Fast);
+    }
+
+    #[test]
+    fn monotonicity_aggregates_multiple_coarser_failures() {
+        // Two failures upstream of a single success — both should
+        // be reported against the success.
+        let report = LadderWalkReport {
+            item_name: Text::from("multi_test"),
+            declared_strategy: LadderStrategy::Formal,
+            steps: vec![
+                StrategyStep {
+                    strategy: LadderStrategy::Runtime,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Static,
+                    closed: false,
+                    verdict_kind: VerdictKind::DispatchPending,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Fast,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::ComplexityTyped,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Formal,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::from("ok"),
+                },
+            ],
+        };
+        let violations = check_runtime_monotonicity(&report);
+        // 4 coarser failures + 1 stricter success = 4 violations
+        assert_eq!(violations.len(), 4);
+        // All 4 should reference Formal as the stricter_succeeded.
+        for v in &violations {
+            assert_eq!(v.stricter_succeeded, LadderStrategy::Formal);
+        }
+        // Coarser strategies in canonical backbone order.
+        let coarser: Vec<LadderStrategy> = violations.iter().map(|v| v.coarser_failed).collect();
+        assert_eq!(
+            coarser,
+            vec![
+                LadderStrategy::Runtime,
+                LadderStrategy::Static,
+                LadderStrategy::Fast,
+                LadderStrategy::ComplexityTyped,
+            ],
+        );
+    }
+
+    #[test]
+    fn monotonicity_no_violation_when_all_steps_open() {
+        // All strategies fail — no monotonicity violation (we don't
+        // require Closed).  The invariant is "Closed at strict ⇒
+        // Closed at coarser", not "anything must succeed".
+        let report = LadderWalkReport {
+            item_name: Text::from("all_open"),
+            declared_strategy: LadderStrategy::Fast,
+            steps: vec![
+                StrategyStep {
+                    strategy: LadderStrategy::Runtime,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Static,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Fast,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+            ],
+        };
+        let violations = check_runtime_monotonicity(&report);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn monotonicity_clears_failures_after_first_stricter_success() {
+        // Once a stricter strategy succeeds, the coarser failures are
+        // cleared — they're already accounted for against that
+        // success.  A LATER success doesn't double-report them.
+        let report = LadderWalkReport {
+            item_name: Text::from("tail_success"),
+            declared_strategy: LadderStrategy::Formal,
+            steps: vec![
+                StrategyStep {
+                    strategy: LadderStrategy::Runtime,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Static,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::from("ok"),
+                },
+                // Static succeeded; Runtime → 1 violation.  After
+                // this, the failures list is cleared.
+                StrategyStep {
+                    strategy: LadderStrategy::Fast,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::from("ok"),
+                },
+                // Fast also succeeds; nothing left to re-report.
+                StrategyStep {
+                    strategy: LadderStrategy::ComplexityTyped,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Formal,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::from("ok"),
+                },
+                // Formal succeeds; ComplexityTyped → 1 more violation.
+            ],
+        };
+        let violations = check_runtime_monotonicity(&report);
+        assert_eq!(violations.len(), 2);
+        // First violation: Runtime → Static.
+        assert_eq!(violations[0].coarser_failed, LadderStrategy::Runtime);
+        assert_eq!(violations[0].stricter_succeeded, LadderStrategy::Static);
+        // Second violation: ComplexityTyped → Formal.
+        assert_eq!(violations[1].coarser_failed, LadderStrategy::ComplexityTyped);
+        assert_eq!(violations[1].stricter_succeeded, LadderStrategy::Formal);
+    }
+
+    #[test]
+    fn closed_count_and_non_closed_count_partition_steps() {
+        let report = LadderWalkReport {
+            item_name: Text::from("counts"),
+            declared_strategy: LadderStrategy::Formal,
+            steps: vec![
+                StrategyStep {
+                    strategy: LadderStrategy::Runtime,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::default(),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Static,
+                    closed: false,
+                    verdict_kind: VerdictKind::Open,
+                    detail: Text::from("synth"),
+                },
+                StrategyStep {
+                    strategy: LadderStrategy::Fast,
+                    closed: true,
+                    verdict_kind: VerdictKind::Closed,
+                    detail: Text::default(),
+                },
+            ],
+        };
+        assert_eq!(report.closed_count(), 2);
+        assert_eq!(report.non_closed_count(), 1);
+        assert_eq!(report.closed_count() + report.non_closed_count(), report.steps.len());
     }
 }
