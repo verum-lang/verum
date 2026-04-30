@@ -483,6 +483,36 @@ pub struct ReplSession {
 impl ReplSession {
     /// Create a new REPL session.
     pub fn new(config: ReplConfig) -> Result<Self> {
+        // Phase-not-realised: `ReplConfig.jit_config` (default
+        // JitConfig::development at line 114) lands on the session
+        // but ReplSession::eval (line 524) is documented as a
+        // placeholder that "would integrate with the parser and
+        // codegen" — JitEngine is imported but never instantiated
+        // here, so settings like `optimization_level=3` or
+        // `enable_debug_info=true` set on `jit_config` have no
+        // observable effect. Surface a debug trace at session
+        // construction so embedders see that their JIT-level
+        // overrides are inert until the eval body is wired through
+        // the JitCompiler.
+        if config.jit_config.optimization_level != 0
+            || !config.jit_config.shared_library_paths.is_empty()
+            || !config.jit_config.enable_debug_info
+            || config.jit_config.object_dump_dir.is_some()
+        {
+            tracing::debug!(
+                "ReplSession::new: ReplConfig.jit_config diverges from \
+                 JitConfig::development() (opt_level={}, debug_info={}, \
+                 dump_dir={:?}, shared_libs={}) but ReplSession::eval is a \
+                 placeholder — no JitEngine is constructed in this module \
+                 yet. Settings here will only take effect once the eval body \
+                 is wired through JitCompiler. Forward-looking knob.",
+                config.jit_config.optimization_level,
+                config.jit_config.enable_debug_info,
+                config.jit_config.object_dump_dir,
+                config.jit_config.shared_library_paths.len(),
+            );
+        }
+
         let cache = if config.incremental {
             Some(IncrementalCache::new(CacheConfig::memory_only())?)
         } else {
