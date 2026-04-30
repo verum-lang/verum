@@ -2702,16 +2702,75 @@ impl TacticEvaluator {
         }
     }
 
-    /// Apply exact tactic - provide exact proof term
+    /// Apply exact tactic — discharge the current goal with the
+    /// supplied term.
+    ///
+    /// Soundness: the term must structurally match one of:
+    /// 1. A `Path` that names a hypothesis whose proposition equals
+    ///    the current goal.
+    /// 2. The literal `true` when the goal is the literal `true`.
+    /// 3. A reflexive equality `t = t` when the goal is the same
+    ///    reflexive equality.
+    /// 4. The goal expression itself (degenerate case where the user
+    ///    re-states the goal as the proof term — accepts only if the
+    ///    structural equality holds).
+    ///
+    /// Anything else returns `TacticError::Failed` naming the proof
+    /// term shape and the goal it failed to discharge.
+    ///
+    /// Pre-fix this was a stub that called `prove_current_goal()`
+    /// unconditionally — every `exact <anything>` silently marked
+    /// the goal as proven. A user could write `exact 42` for
+    /// `forall x. x > 0` and the goal would close.
     fn apply_exact(&mut self, proof: &Heap<Expr>) -> TacticResult<()> {
-        // In a full implementation, this would:
-        // 1. Type-check the proof term
-        // 2. Verify it has the type of the current goal
-        // 3. Mark goal as proven
+        let goal = self.state.current_goal()?;
+        let goal_prop: Expr = (*goal.proposition).clone();
+        let hypotheses = goal.hypotheses.clone();
 
-        // For now, just mark as proven
-        self.state.prove_current_goal()?;
-        Ok(())
+        // Helper: format an expression for error messages.
+        let proof_str = format!("{:?}", proof.kind);
+        let goal_str = format!("{:?}", goal_prop.kind);
+
+        // Case 1: proof is a Path naming a hypothesis whose proposition
+        // matches the goal.
+        if let ExprKind::Path(p) = &proof.kind {
+            if let Some(name) = p.segments.first().and_then(|seg| {
+                if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                    Some(ident.name.clone())
+                } else {
+                    None
+                }
+            }) {
+                for hyp in hypotheses.iter() {
+                    if hyp.name == name
+                        && expr_structural_equal(
+                            &hyp.proposition,
+                            &goal_prop,
+                            &mut HashMap::new(),
+                        )
+                    {
+                        self.state.prove_current_goal()?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // Case 2/3/4: structural equality between the proof term and
+        // the goal — covers literal `true ⊢ true`, reflexive
+        // equalities, and the user re-stating the goal verbatim.
+        if expr_structural_equal(proof, &goal_prop, &mut HashMap::new()) {
+            self.state.prove_current_goal()?;
+            return Ok(());
+        }
+
+        Err(TacticError::Failed(
+            format!(
+                "exact: proof term {} does not discharge goal {}",
+                proof_str, goal_str
+            )
+            .into(),
+        ))
     }
 
     /// Apply unfold tactic - unfold definitions
