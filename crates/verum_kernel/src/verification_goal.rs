@@ -459,6 +459,143 @@ fn translate_clauses<'a>(
 }
 
 // =============================================================================
+// Module-level verification surface
+// =============================================================================
+
+use verum_ast::decl::{Item, ItemKind};
+
+/// One row in the [`module_verification_surface`] report.  Pairs a
+/// successfully-translated [`VerificationGoal`] with the source-AST
+/// declaration name + source-kind tag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationSurfaceRow {
+    /// Diagnostic name of the declaration.
+    pub decl_name: String,
+    /// Source-kind tag (`"theorem"`, `"lemma"`, `"corollary"`,
+    /// `"fn_contract"`, `"refinement"`).
+    pub source_kind: String,
+    /// The translated goal.
+    pub goal: VerificationGoal,
+}
+
+/// Aggregate verification surface for a module.  This is what an
+/// audit gate emits when answering "what is Verum proving here?"
+/// across the entire program.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationSurface {
+    /// Successfully-translated obligations, one per source-AST
+    /// declaration.
+    pub rows: Vec<VerificationSurfaceRow>,
+    /// Per-decl translation failures — `(decl_name, error_message)`.
+    /// Reported separately so the audit gate can distinguish
+    /// "elaborator can't yet handle this shape" from "no obligation
+    /// to check".
+    pub translation_failures: Vec<(String, String)>,
+    /// Total declarations the walker visited (theorems / lemmas /
+    /// corollaries / fns with non-empty `requires` or `ensures`).
+    pub total_declarations: usize,
+}
+
+impl VerificationSurface {
+    /// Empty surface — initial accumulator state.
+    pub fn empty() -> Self {
+        Self {
+            rows: Vec::new(),
+            translation_failures: Vec::new(),
+            total_declarations: 0,
+        }
+    }
+
+    /// Count goals by source kind for the JSON dashboard.
+    pub fn count_by_kind(&self) -> BTreeMap<String, usize> {
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for row in &self.rows {
+            *counts.entry(row.source_kind.clone()).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Whether every visited declaration produced a goal.
+    pub fn is_complete(&self) -> bool {
+        self.translation_failures.is_empty()
+            && self.rows.len() == self.total_declarations
+    }
+}
+
+/// **Walk a Verum module's items and emit the unified verification
+/// surface** — one [`VerificationGoal`] per theorem / lemma /
+/// corollary / fn-with-contract.
+///
+/// Refinement-type obligations are NOT collected here because they
+/// arise at type-application sites (let bindings, parameter
+/// applications), not at declaration sites; collecting them
+/// requires a type-checking pass over the module body, which is
+/// future integration work with the type checker.
+///
+/// The walker is intentionally pure — no I/O, no audit-gate
+/// rendering.  Callers wanting a CLI report wrap the output in
+/// JSON or pretty-printed form.  The walker establishes the
+/// contract: every declaration in `items` whose surface generates
+/// an obligation contributes one row to the surface.
+pub fn module_verification_surface(
+    items: &[Item],
+    ctx: &ElabContext,
+) -> VerificationSurface {
+    let mut surface = VerificationSurface::empty();
+    for item in items {
+        let (source, decl_name, kind_tag): (ObligationSource<'_>, String, &'static str) =
+            match &item.kind {
+                ItemKind::Theorem(t) => (
+                    ObligationSource::Theorem {
+                        theorem: t,
+                        kind: TheoremKind::Theorem,
+                    },
+                    t.name.name.to_string(),
+                    "theorem",
+                ),
+                ItemKind::Lemma(t) => (
+                    ObligationSource::Theorem {
+                        theorem: t,
+                        kind: TheoremKind::Lemma,
+                    },
+                    t.name.name.to_string(),
+                    "lemma",
+                ),
+                ItemKind::Corollary(t) => (
+                    ObligationSource::Theorem {
+                        theorem: t,
+                        kind: TheoremKind::Corollary,
+                    },
+                    t.name.name.to_string(),
+                    "corollary",
+                ),
+                ItemKind::Function(f)
+                    if !f.requires.is_empty() || !f.ensures.is_empty() =>
+                {
+                    (
+                        ObligationSource::FnContract(f),
+                        f.name.name.to_string(),
+                        "fn_contract",
+                    )
+                }
+                _ => continue,
+            };
+        surface.total_declarations += 1;
+        match from_obligation_source(source, ctx) {
+            Ok(goal) => surface.rows.push(VerificationSurfaceRow {
+                decl_name,
+                source_kind: kind_tag.to_string(),
+                goal,
+            }),
+            Err(e) => surface
+                .translation_failures
+                .push((decl_name, format!("{}", e))),
+        }
+    }
+    surface
+}
+
+// =============================================================================
 // Tests — contract pins for the verification-goal surface
 // =============================================================================
 
@@ -813,4 +950,83 @@ mod tests {
     // unit tests above pin the converter's algorithm via the
     // smaller TheoremDecl + Refinement entry points which share the
     // same translate_clauses + proposition_to_term helpers.
+
+    // ----- module_verification_surface walker -----
+
+    use verum_ast::decl::Item;
+
+    fn make_theorem_item(name: &str) -> Item {
+        let span = Span::dummy();
+        let theorem = TheoremDecl::new(
+            Ident { name: name.into(), span },
+            bool_true_expr(),
+            span,
+        );
+        Item::new(ItemKind::Theorem(theorem), span)
+    }
+
+    #[test]
+    fn module_verification_surface_collects_theorems() {
+        let items = vec![
+            make_theorem_item("t1"),
+            make_theorem_item("t2"),
+            make_theorem_item("t3"),
+        ];
+        let ctx = ElabContext::new();
+        let surface = module_verification_surface(&items, &ctx);
+        assert_eq!(surface.total_declarations, 3);
+        assert_eq!(surface.rows.len(), 3);
+        assert!(surface.translation_failures.is_empty());
+        assert!(surface.is_complete());
+        for (i, expected) in ["t1", "t2", "t3"].iter().enumerate() {
+            assert_eq!(surface.rows[i].decl_name, *expected);
+            assert_eq!(surface.rows[i].source_kind, "theorem");
+        }
+    }
+
+    #[test]
+    fn module_verification_surface_count_by_kind_groups_correctly() {
+        let span = Span::dummy();
+        let make_lemma = |name: &str| {
+            let theorem = TheoremDecl::new(
+                Ident { name: name.into(), span },
+                bool_true_expr(),
+                span,
+            );
+            Item::new(ItemKind::Lemma(theorem), span)
+        };
+        let items = vec![
+            make_theorem_item("t1"),
+            make_lemma("l1"),
+            make_lemma("l2"),
+            make_theorem_item("t2"),
+        ];
+        let ctx = ElabContext::new();
+        let surface = module_verification_surface(&items, &ctx);
+        let counts = surface.count_by_kind();
+        assert_eq!(counts.get("theorem"), Some(&2));
+        assert_eq!(counts.get("lemma"), Some(&2));
+        assert_eq!(counts.get("corollary"), None);
+    }
+
+    #[test]
+    fn module_verification_surface_empty_module() {
+        let items: Vec<Item> = vec![];
+        let ctx = ElabContext::new();
+        let surface = module_verification_surface(&items, &ctx);
+        assert_eq!(surface.total_declarations, 0);
+        assert!(surface.rows.is_empty());
+        assert!(surface.is_complete());
+    }
+
+    #[test]
+    fn verification_surface_serde_round_trip() {
+        let items = vec![make_theorem_item("trivial")];
+        let ctx = ElabContext::new();
+        let surface = module_verification_surface(&items, &ctx);
+        let json = serde_json::to_string(&surface).unwrap();
+        let restored: VerificationSurface = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.rows.len(), surface.rows.len());
+        assert_eq!(restored.total_declarations, surface.total_declarations);
+    }
 }
