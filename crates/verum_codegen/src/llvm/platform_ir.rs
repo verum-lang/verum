@@ -21,6 +21,38 @@ use verum_llvm::{AddressSpace, IntPredicate};
 use verum_llvm::attributes::AttributeLoc;
 use super::error::{BuildExt, OptionExt};
 
+/// Manifest-driven runtime configuration values that flow from
+/// `LanguageFeatures.runtime` through `LoweringConfig` into
+/// LLVM-IR globals.  Each field corresponds to a `[runtime].*`
+/// manifest knob whose runtime-side consumer (the stdlib's
+/// `AsyncRuntimeConfig::default()` etc.) reads it via a
+/// `verum_get_runtime_*` getter function.
+///
+/// Default 0 for numeric fields is the documented "auto / use
+/// platform default" value — keeps the historical behaviour
+/// when the manifest is untouched.  Non-zero overrides cascade
+/// into every spawned runtime object (worker pool, task stacks)
+/// at construction time.
+///
+/// **Architectural prerequisite (#261)**: this struct + the
+/// globals + getters it emits are the reusable bridge for any
+/// future manifest-driven runtime wire (GC thresholds, async
+/// backpressure, panic-at-runtime details).  Adding a new
+/// runtime knob is one field here + one global + one getter +
+/// one stdlib intrinsic call site.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuntimeBridgeValues {
+    /// `[runtime].async_worker_threads` — when > 0, overrides
+    /// `num_cpus::get()` at `AsyncRuntime::with_config`.  0 keeps
+    /// auto-detection.
+    pub async_worker_threads: u32,
+    /// `[runtime].task_stack_size` — when > 0, overrides the
+    /// platform-default thread stack at `thread::Builder::new()
+    /// .stack_size(...)` for spawned tasks.  0 keeps platform
+    /// default (typically 8 MiB on Unix, 1 MiB on Windows).
+    pub task_stack_size: u64,
+}
+
 /// Emit platform-native runtime functions as LLVM IR.
 pub struct PlatformIR<'ctx> {
     context: &'ctx Context,
@@ -30,6 +62,12 @@ pub struct PlatformIR<'ctx> {
     /// `LoweringConfig.panic_strategy`, ultimately sourced from
     /// `[runtime].panic` in Verum.toml.
     panic_strategy: super::vbc_lowering::PanicStrategy,
+    /// Manifest-driven runtime bridge values.  Each field is
+    /// emitted as a const-initialized LLVM global plus a
+    /// `verum_get_runtime_*` getter function.  Stdlib reads the
+    /// values via the getters (or via the equivalent VBC intrinsic
+    /// at Tier-0).  Threaded from `LoweringConfig.runtime_bridge`.
+    runtime_bridge: RuntimeBridgeValues,
 }
 
 impl<'ctx> PlatformIR<'ctx> {
@@ -41,6 +79,7 @@ impl<'ctx> PlatformIR<'ctx> {
         Self {
             context,
             panic_strategy: super::vbc_lowering::PanicStrategy::default(),
+            runtime_bridge: RuntimeBridgeValues::default(),
         }
     }
 
@@ -55,7 +94,19 @@ impl<'ctx> PlatformIR<'ctx> {
         Self {
             context,
             panic_strategy,
+            runtime_bridge: RuntimeBridgeValues::default(),
         }
+    }
+
+    /// Builder method to install the manifest-driven runtime
+    /// bridge values.  Threaded from `LoweringConfig.runtime_bridge`
+    /// at the codegen entry point in `pipeline/native_codegen.rs`.
+    /// Architectural prerequisite #261 — the reusable bridge for
+    /// every `[runtime].*` manifest knob with a runtime-side
+    /// consumer.
+    pub fn with_runtime_bridge(mut self, bridge: RuntimeBridgeValues) -> Self {
+        self.runtime_bridge = bridge;
+        self
     }
 
     /// Emit all platform runtime functions into the module.
@@ -72,6 +123,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // Runtime globals and initialization
         self.emit_runtime_globals(module)?;
+        self.emit_runtime_bridge_getters(module)?;
         self.emit_store_args(module)?;
         self.emit_get_argc(module)?;
         self.emit_get_argv(module)?;
@@ -1009,13 +1061,16 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    /// Emit global variables for argc/argv storage and stack trace.
+    /// Emit global variables for argc/argv storage + the
+    /// manifest-driven runtime bridge (#261 prerequisite).
     pub fn emit_runtime_globals(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i32_type = ctx.i32_type();
+        let i64_type = ctx.i64_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
 
-        // Global argc/argv storage
+        // Global argc/argv storage — populated at process start by
+        // `verum_store_args(argc, argv)`.
         if module.get_global("__verum_argc").is_none() {
             let g = module.add_global(i32_type, None, "__verum_argc");
             g.set_initializer(&i32_type.const_zero());
@@ -1025,6 +1080,105 @@ impl<'ctx> PlatformIR<'ctx> {
             let g = module.add_global(ptr_type, None, "__verum_argv");
             g.set_initializer(&ptr_type.const_null());
             g.set_linkage(verum_llvm::module::Linkage::Internal);
+        }
+
+        // Manifest-driven runtime bridge globals (#261).
+        //
+        // Each global is const-initialised at codegen time from
+        // the `runtime_bridge` field threaded through
+        // `LoweringConfig`.  Stdlib code reads them via the
+        // `verum_get_runtime_*` getter functions emitted by
+        // `emit_runtime_bridge_getters` below.  Globals carry
+        // `Internal` linkage so LTO can constant-fold the
+        // getter loads through the entire program.
+        //
+        // i64 is the documented runtime-bridge wire type — wide
+        // enough to carry u32 thread counts, u64 byte sizes, and
+        // any future fixed-point or bitfield knob without growing
+        // the wire format per addition.
+        if module.get_global("__verum_runtime_async_worker_threads").is_none() {
+            let g = module.add_global(
+                i64_type,
+                None,
+                "__verum_runtime_async_worker_threads",
+            );
+            g.set_initializer(&i64_type.const_int(
+                self.runtime_bridge.async_worker_threads as u64,
+                false,
+            ));
+            g.set_linkage(verum_llvm::module::Linkage::Internal);
+        }
+        if module.get_global("__verum_runtime_task_stack_size").is_none() {
+            let g = module.add_global(
+                i64_type,
+                None,
+                "__verum_runtime_task_stack_size",
+            );
+            g.set_initializer(&i64_type.const_int(
+                self.runtime_bridge.task_stack_size,
+                false,
+            ));
+            g.set_linkage(verum_llvm::module::Linkage::Internal);
+        }
+        Ok(())
+    }
+
+    /// Emit the manifest-driven runtime-bridge getter functions
+    /// (#261). One getter per global, each loading the i64 value.
+    /// Marked `Internal` linkage + the load is from a
+    /// const-initialised global, so LTO constant-folds reads at
+    /// every call site after global-DCE — zero runtime overhead vs
+    /// hardcoded values.
+    ///
+    /// Adding a new manifest-driven runtime knob: emit the global
+    /// in `emit_runtime_globals` + add a getter call here.  The
+    /// stdlib accesses the getter via @intrinsic registration in
+    /// `crates/verum_vbc/src/intrinsics/registry.rs` (separate
+    /// step, but the LLVM-side surface is uniform).
+    pub fn emit_runtime_bridge_getters(
+        &self,
+        module: &Module<'ctx>,
+    ) -> super::error::Result<()> {
+        let ctx = self.context;
+        let i64_type = ctx.i64_type();
+        let fn_type = i64_type.fn_type(&[], false);
+
+        for (fn_name, global_name) in &[
+            (
+                "verum_get_runtime_async_worker_threads",
+                "__verum_runtime_async_worker_threads",
+            ),
+            (
+                "verum_get_runtime_task_stack_size",
+                "__verum_runtime_task_stack_size",
+            ),
+        ] {
+            let func = module.get_function(fn_name).unwrap_or_else(|| {
+                module.add_function(fn_name, fn_type, None)
+            });
+            // Skip if the body has already been emitted (re-entrancy
+            // safety — `emit_platform_functions` may run more than
+            // once across linked modules).
+            if func.count_basic_blocks() > 0 {
+                continue;
+            }
+            let builder = ctx.create_builder();
+            let entry = ctx.append_basic_block(func, "entry");
+            builder.position_at_end(entry);
+
+            if let Some(global) = module.get_global(global_name) {
+                let val = builder
+                    .build_load(i64_type, global.as_pointer_value(), "rt_val")
+                    .or_llvm_err()?;
+                builder.build_return(Some(&val)).or_llvm_err()?;
+            } else {
+                // Defensive: the global wasn't emitted — return 0
+                // so the stdlib fallback path (auto-detect via
+                // num_cpus, platform default, etc.) takes over.
+                builder
+                    .build_return(Some(&i64_type.const_zero()))
+                    .or_llvm_err()?;
+            }
         }
         Ok(())
     }

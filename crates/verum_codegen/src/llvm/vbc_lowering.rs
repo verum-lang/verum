@@ -182,6 +182,17 @@ pub struct LoweringConfig {
     /// documented manifest default + LLVM's own default at
     /// `-O2+`).
     pub vectorize: bool,
+    /// Manifest-driven runtime-bridge values that flow through to
+    /// `__verum_runtime_*` LLVM globals + getter functions
+    /// (architectural prerequisite #261).  Each non-zero field
+    /// overrides the corresponding stdlib runtime-side default at
+    /// `AsyncRuntime::with_config` / `thread::Builder::new()
+    /// .stack_size(...)`.
+    ///
+    /// Default all-zero — the stdlib falls through to its
+    /// historical defaults (`num_cpus::get()`, platform stack
+    /// size).  Threaded from `pipeline/native_codegen.rs`.
+    pub runtime_bridge: super::platform_ir::RuntimeBridgeValues,
 }
 
 impl Default for LoweringConfig {
@@ -199,6 +210,7 @@ impl Default for LoweringConfig {
             panic_strategy: PanicStrategy::default(),
             tail_call_optimization: true,
             vectorize: true,
+            runtime_bridge: super::platform_ir::RuntimeBridgeValues::default(),
         }
     }
 }
@@ -285,6 +297,20 @@ impl LoweringConfig {
     /// attributes.
     pub fn with_vectorize(mut self, enabled: bool) -> Self {
         self.vectorize = enabled;
+        self
+    }
+
+    /// Install manifest-driven runtime-bridge values
+    /// (architectural prerequisite #261).  Threaded from
+    /// `pipeline/native_codegen.rs::language_features.runtime`.
+    /// Each non-zero field flows into a `__verum_runtime_*` LLVM
+    /// global at codegen time and reaches stdlib code through
+    /// the `verum_get_runtime_*` getter functions.
+    pub fn with_runtime_bridge(
+        mut self,
+        bridge: super::platform_ir::RuntimeBridgeValues,
+    ) -> Self {
+        self.runtime_bridge = bridge;
         self
     }
 
@@ -995,7 +1021,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let platform = super::platform_ir::PlatformIR::with_panic_strategy(
                 self.context,
                 self.config.panic_strategy,
-            );
+            )
+            .with_runtime_bridge(self.config.runtime_bridge);
             platform.emit_platform_functions(&self.module)?;
 
             // Emit tensor runtime functions as LLVM IR.
