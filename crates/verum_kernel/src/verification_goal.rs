@@ -47,6 +47,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::proof_checker::Term;
 use crate::tactic_elaborator::{
     expr_to_term, proposition_to_term, ElabContext, ElabError,
@@ -64,7 +66,7 @@ use crate::tactic_elaborator::{
 ///
 /// **Kernel-Term reading**: as a closed Pi-chain
 /// `Pi(H_1, Pi(H_2, ..., Pi(H_n, C)))` (see [`VerificationGoal::to_term`]).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VerificationGoal {
     /// Translated `requires` clauses (or refinement-base preconditions).
     /// Logically conjoined as the antecedent.
@@ -83,7 +85,7 @@ pub struct VerificationGoal {
 /// is reviewing the proof corpus; one that sees only `FnContract` is
 /// reviewing implementation contracts; one that sees mixes can
 /// answer "what's the trust extension across the entire program?"
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GoalSource {
     /// `theorem name(...) ensures Q { proof { ... } }`.
     Theorem {
@@ -252,7 +254,7 @@ pub fn from_theorem_decl(
 
 /// Discriminator for `from_theorem_decl` — picks which
 /// [`GoalSource`] variant to attach.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TheoremKind {
     /// `theorem` declaration.
     Theorem,
@@ -584,6 +586,40 @@ mod tests {
         match translate_clauses(clauses.iter(), &ctx) {
             Err(ElabError::UndeclaredApplyTarget(name)) => assert_eq!(name, "undeclared"),
             other => panic!("expected UndeclaredApplyTarget, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn verification_goal_serde_round_trip() {
+        // The unified type is consumable by JSON pipelines (audit
+        // gates, CLI exporters, foreign-tool inspectors).
+        let original = VerificationGoal::new(
+            vec![Term::Universe(0), Term::Universe(1)],
+            Term::Var(0),
+            GoalSource::TacticSubgoal {
+                parent: "parent_thm".into(),
+                depth: 2,
+            },
+        );
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: VerificationGoal = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn goal_source_round_trips_for_every_variant() {
+        let cases = vec![
+            GoalSource::Theorem { name: "t".into() },
+            GoalSource::Lemma { name: "l".into() },
+            GoalSource::Corollary { name: "c".into() },
+            GoalSource::FnContract { fn_name: "f".into() },
+            GoalSource::TacticSubgoal { parent: "p".into(), depth: 5 },
+            GoalSource::Refinement { ty_name: "r".into() },
+        ];
+        for src in cases {
+            let json = serde_json::to_string(&src).unwrap();
+            let restored: GoalSource = serde_json::from_str(&json).unwrap();
+            assert_eq!(src, restored);
         }
     }
 
