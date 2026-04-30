@@ -198,6 +198,22 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     options.incremental = profile.incremental && !using_release;
     options.verbose = if timings { 2 } else { 0 };
 
+    // Honour the user-supplied `--jobs N` (or the default
+    // num_cpus::get()) by pinning rayon's global thread pool to
+    // that count. Without this call, `options.num_threads` was
+    // displayed by the CLI ("Jobs: 4") but rayon's parallel work
+    // — module loading (verum_modules::parallel) and contract
+    // verification — used rayon's default pool size regardless.
+    // `verum fmt` and `verum test` already do this initialization
+    // (main.rs:2648-2653, commands/test.rs:296). Use a discarded
+    // Result because `build_global()` errors only if the pool was
+    // already initialized in this process — that's fine, the
+    // first init wins and subsequent CLI subcommands within the
+    // same process keep that count.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(options.num_threads)
+        .build_global();
+
     // Surface inert Profile fields. The current build path
     // consumes `verification`, `opt_level`, `incremental`, `lto`
     // (via linker_config) — but not `tier` (CompilationTier
