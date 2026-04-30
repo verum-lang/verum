@@ -1,0 +1,28 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, git, dsl
+// @description: Real-world shell script — print short git status summary.
+//
+// Exercises:
+//   * `sh#"..."` literal → ShellCommand
+//   * .pipe_to() composition
+//   * .run_check().await with `?` propagation
+//   * ShellResult ergonomic destructuring
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult, ShellError};
+
+/// Compose: `git status --porcelain | wc -l` → number of changed files.
+async fn count_changes() -> Result<ShellResult, ShellError> {
+    sh#"git status --porcelain"
+        .pipe_to(sh#"wc -l")
+        .run_check()
+        .await
+}
+
+async fn main() -> Int {
+    match count_changes().await {
+        Ok(_r)  => 0,
+        Err(_e) => 1,
+    }
+}

@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, backup, interpolation
+// @description: Real-world shell script — interpolated backup invocation.
+//
+// Exercises:
+//   * `${expr}` interpolation in sh#"..." with auto-escape
+//   * .redirect_stdout(path) for capturing logs
+//   * Sequential await of multiple commands
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.text.text.{Text};
+
+async fn backup_dir(src: &Text, dst: &Text, log_path: Text)
+    -> Result<ShellResult, ShellError>
+{
+    // The `${src}` and `${dst}` interpolations are auto-escaped at
+    // macro-expansion time, so even paths with spaces / quotes are
+    // rendered as a single safe shell token each.
+    let cmd: ShellCommand = sh#"rsync -av --delete ${src} ${dst}";
+    cmd.redirect_stdout(log_path).run_check().await
+}
+
+async fn main() -> Int {
+    let src: Text = "/home/user/data".into();
+    let dst: Text = "/backup/data".into();
+    let log: Text = "/var/log/backup.log".into();
+    match backup_dir(&src, &dst, log).await {
+        Ok(_)  => 0,
+        Err(_) => 2,
+    }
+}

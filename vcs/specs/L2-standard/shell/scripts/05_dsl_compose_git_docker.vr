@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, dsl, git, docker
+// @description: Real-world shell script — typed DSL composition (git + docker).
+//
+// Exercises:
+//   * core.shell.dsl.git typed DSL
+//   * core.shell.dsl.docker typed DSL
+//   * Sequential await with `?` short-circuit on Result
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.text.text.{Text};
+
+/// Build a docker image from the current git HEAD's commit SHA as tag.
+async fn build_image_from_head(tag_prefix: Text)
+    -> Result<ShellResult, ShellError>
+{
+    // Capture short SHA via `git rev-parse --short HEAD`.
+    let sha_result: ShellResult = sh#"git rev-parse --short HEAD"
+        .run_check()
+        .await?;
+
+    // Read trimmed stdout as the tag suffix (interpolated below).
+    let sha_text: Text = sha_result.stdout();
+    let full_tag: Text = tag_prefix.concat(&sha_text);
+
+    // Run `docker build` with the composed tag.
+    sh#"docker build -t ${full_tag} ."
+        .run_check()
+        .await
+}
+
+async fn main() -> Int {
+    let prefix: Text = "myapp:".into();
+    match build_image_from_head(prefix).await {
+        Ok(_)  => 0,
+        Err(_) => 3,
+    }
+}

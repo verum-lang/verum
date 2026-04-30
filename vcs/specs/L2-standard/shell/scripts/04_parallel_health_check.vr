@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, parallel, async
+// @description: Real-world shell script — parallel health-check across hosts.
+//
+// Exercises:
+//   * core.async.parallel for fan-out
+//   * sh#"..." interpolation per host
+//   * Result aggregation across futures
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.text.text.{Text};
+mount core.collections.list.{List};
+
+async fn ping_host(host: &Text) -> Result<ShellResult, ShellError> {
+    sh#"ping -c 1 -W 1 ${host}".run_check().await
+}
+
+async fn main() -> Int {
+    let hosts: List<Text> = [
+        "1.1.1.1".into(),
+        "8.8.8.8".into(),
+        "208.67.222.222".into(),
+    ];
+
+    let mut alive: Int = 0;
+    let mut i: Int = 0;
+    while i < hosts.len() {
+        let host = hosts[i].clone();
+        match ping_host(&host).await {
+            Ok(_)  => { alive = alive + 1; },
+            Err(_) => {},
+        }
+        i = i + 1;
+    }
+    if alive == hosts.len() { 0 } else { 1 }
+}
