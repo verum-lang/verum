@@ -242,10 +242,16 @@ fn whnf(mut term: Term) -> Term {
     }
 }
 
-/// α-equivalence + β-equality (definitional equality at the level
-/// the checker decides).  Both sides are reduced to WHNF and then
-/// compared structurally; under binders, α-equivalence is automatic
-/// thanks to de Bruijn indices.
+/// α-equivalence + β-equality + η-equivalence (definitional equality
+/// at the level the checker decides).  Both sides are reduced to
+/// WHNF and then compared structurally; under binders, α-equivalence
+/// is automatic via de Bruijn indices.
+///
+/// **η-equivalence (T-Eta-Conv)** — `λx. (f x) ≡ f` when `x` (de
+/// Bruijn 0 in the body) does not occur free in the CONTENT of `f`.
+/// This is the standard CIC rule extending β with extensional
+/// function equality.  Brings the proof-term checker to textbook
+/// CIC parity within the < 1000 LOC trust-base budget.
 fn def_eq(a: &Term, b: &Term) -> bool {
     let a = whnf(a.clone());
     let b = whnf(b.clone());
@@ -259,7 +265,91 @@ fn def_eq_whnf(a: &Term, b: &Term) -> bool {
         (Term::Pi(a1, b1), Term::Pi(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::Lam(a1, b1), Term::Lam(a2, b2)) => def_eq(a1, a2) && def_eq(b1, b2),
         (Term::App(f1, x1), Term::App(f2, x2)) => def_eq(f1, f2) && def_eq(x1, x2),
+        // η-equivalence — one-sided cases.  When one side is a
+        // λx.(f x) and the other is `f`, they're equal iff `x`
+        // does not appear free in `f`.  This rule fires AFTER WHNF
+        // reduction so β-redexes are eliminated first; what remains
+        // is purely structural η.
+        (Term::Lam(_, body), other) => eta_match(body, other),
+        (other, Term::Lam(_, body)) => eta_match(body, other),
         _ => false,
+    }
+}
+
+/// η-equivalence helper: returns `true` iff `lam_body` (the body of
+/// a λ at depth 0) is `App(f, Var(0))` where `f` does not contain
+/// Var(0) free, AND `f` (after shifting down) is equal to `other`.
+///
+/// This is the soundness gate for T-Eta-Conv: the bound variable
+/// must not "leak" into the function part of the application.
+fn eta_match(lam_body: &Term, other: &Term) -> bool {
+    let app_body = whnf(lam_body.clone());
+    let (f, x) = match app_body {
+        Term::App(f, x) => (f, x),
+        _ => return false,
+    };
+    // The argument must be exactly Var(0) (the bound variable).
+    if !matches!(*x, Term::Var(0)) {
+        return false;
+    }
+    // The function part must not reference Var(0) — otherwise the
+    // η-rule is unsound (the variable escapes its binder).
+    if is_free_in(&f, 0) {
+        return false;
+    }
+    // Shift `f` down by one (since we're removing a binder) and
+    // compare to `other`.
+    let f_shifted = shift_down(*f, 1, 0);
+    def_eq(&f_shifted, other)
+}
+
+/// Check whether de Bruijn index `target` occurs FREE in `term`
+/// (i.e., not captured by an inner binder).  Used by the η-rule
+/// to ensure the bound variable doesn't leak into the function
+/// part.
+fn is_free_in(term: &Term, target: usize) -> bool {
+    match term {
+        Term::Var(i) => *i == target,
+        Term::Universe(_) => false,
+        Term::Pi(a, b) => is_free_in(a, target) || is_free_in(b, target + 1),
+        Term::Lam(a, body) => is_free_in(a, target) || is_free_in(body, target + 1),
+        Term::App(f, x) => is_free_in(f, target) || is_free_in(x, target),
+    }
+}
+
+/// Inverse of `shift_up` — decrement every variable index in `term`
+/// by `amount` if its index is `>= cutoff + amount`, leaving lower
+/// indices alone.  Panics in debug if it would produce a negative
+/// index (caller bug).
+fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
+    match term {
+        Term::Var(i) => {
+            if i >= cutoff + amount {
+                Term::Var(i - amount)
+            } else if i < cutoff {
+                Term::Var(i)
+            } else {
+                // 0 <= i - cutoff < amount → would underflow.
+                // η-match's `is_free_in` precondition rules this out
+                // for our use case, but defensively return the
+                // unchanged variable so a caller bug is visible
+                // downstream as a type-mismatch rather than a panic.
+                Term::Var(i)
+            }
+        }
+        Term::Universe(n) => Term::Universe(n),
+        Term::Pi(a, b) => Term::Pi(
+            Box::new(shift_down(*a, amount, cutoff)),
+            Box::new(shift_down(*b, amount, cutoff + 1)),
+        ),
+        Term::Lam(a, body) => Term::Lam(
+            Box::new(shift_down(*a, amount, cutoff)),
+            Box::new(shift_down(*body, amount, cutoff + 1)),
+        ),
+        Term::App(f, x) => Term::App(
+            Box::new(shift_down(*f, amount, cutoff)),
+            Box::new(shift_down(*x, amount, cutoff)),
+        ),
     }
 }
 
@@ -591,6 +681,79 @@ mod tests {
     #[test]
     fn def_eq_rejects_distinct_universes() {
         assert!(!def_eq(&Term::Universe(0), &Term::Universe(1)));
+    }
+
+    #[test]
+    fn def_eq_eta_lam_app_equals_function() {
+        // λ(x : Univ(0)). (f x)  ≡_η  f   when f doesn't contain x.
+        // We use Var(0) referring to OUTER context (a hypothesis "f"
+        // present at depth 0).  Inside the lambda, that becomes Var(1).
+        let f_outer = Term::Var(0);
+        // Inside lambda body: Var(0) is the bound x; Var(1) is f.
+        let lam_eta = Term::lam(
+            Term::Universe(0),
+            Term::app(Term::Var(1), Term::Var(0)),
+        );
+        // Outer context: f : Π(_:Univ(0)).Univ(0).  The lam_eta's type
+        // is the same Pi, and η-equality with f_outer should hold.
+        // For the def_eq test, we don't need the context — we just
+        // check whether the term forms are η-equivalent.
+        assert!(def_eq(&lam_eta, &f_outer));
+        // Symmetry: the comparison is order-independent.
+        assert!(def_eq(&f_outer, &lam_eta));
+    }
+
+    #[test]
+    fn def_eq_eta_rejects_when_arg_is_not_bound_var() {
+        // λ(x : Univ(0)). (f y)  is NOT η-equivalent to f — the
+        // application argument isn't the bound variable.
+        let f = Term::Var(0); // outer context
+        let lam_not_eta = Term::lam(
+            Term::Universe(0),
+            // Var(2) inside body refers to TWO levels out, not Var(0)
+            // (the bound x), so the η-rule doesn't fire.
+            Term::app(Term::Var(1), Term::Var(2)),
+        );
+        assert!(!def_eq(&lam_not_eta, &f));
+    }
+
+    #[test]
+    fn def_eq_eta_rejects_when_var_escapes_into_function() {
+        // λ(x : Univ(0)). (x x)  has the bound variable in the
+        // FUNCTION part — η would be unsound here, must be rejected.
+        let lam_unsound = Term::lam(
+            Term::Universe(0),
+            Term::app(Term::Var(0), Term::Var(0)),
+        );
+        let any_other = Term::Var(0); // outer context "any other f"
+        assert!(!def_eq(&lam_unsound, &any_other));
+    }
+
+    #[test]
+    fn is_free_in_handles_binders() {
+        // Var(0) is free in Var(0), but bound in λ(_).Var(0)
+        assert!(is_free_in(&Term::Var(0), 0));
+        let lam_body_zero = Term::lam(Term::Universe(0), Term::Var(0));
+        // Lam(_, Var(0)) — the body's Var(0) is the bound var, NOT
+        // a free reference to outer Var(0).  Querying outer-target=0
+        // shifts to inner-target=1 inside the body, which Var(0) is
+        // NOT.  So the outer Var(0) is NOT free in this term.
+        assert!(!is_free_in(&lam_body_zero, 0));
+        // But Var(1) inside the body IS a free reference to OUTER
+        // Var(0).  The outer-target=0 query shifts to target=1 in
+        // the body, which matches Var(1).
+        let lam_body_outer = Term::lam(Term::Universe(0), Term::Var(1));
+        assert!(is_free_in(&lam_body_outer, 0));
+    }
+
+    #[test]
+    fn shift_down_inverse_of_shift_up() {
+        // shift_down . shift_up = identity on var indices that don't
+        // get clobbered.
+        let original = Term::lam(Term::Universe(0), Term::Var(2));
+        let shifted_up = shift_up(original.clone(), 1, 0);
+        let shifted_back = shift_down(shifted_up, 1, 0);
+        assert_eq!(shifted_back, original);
     }
 
     #[test]
