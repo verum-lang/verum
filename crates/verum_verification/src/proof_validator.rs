@@ -6678,21 +6678,35 @@ impl ProofValidator {
         _explanation: &Text,
         expected: &Expr,
     ) -> ValidationResult<()> {
-        // QuickExplain produces an unsat core - the conjunction of
-        // the unsat core should be inconsistent
-        // For validation, we check that expected represents the core
-
-        // Build conjunction of unsat core
-        if unsat_core.is_empty() {
-            let false_expr = self.make_false();
-            if !self.expr_eq(&false_expr, expected) {
-                return Err(ValidationError::ValidationFailed {
-                    message: "quick_explain with empty core should prove False".into(),
-                });
-            }
+        // QuickExplain's semantics: the conjunction of `unsat_core`
+        // is unsatisfiable, hence the rule concludes `False`. This
+        // gate enforces the conclusion shape uniformly for empty
+        // AND non-empty cores.
+        //
+        // Pre-fix only the empty-core branch checked
+        // `expected == False`. The non-empty branch fell through to
+        // an unconditional `Ok(())`, so a user could supply
+        // `QuickExplain { unsat_core: [P, Q], expected: SOMETHING_ELSE }`
+        // and silently pass — even though the rule must conclude
+        // False, not arbitrary propositions.
+        //
+        // Full unsat-core soundness (re-checking the conjunction
+        // with SMT to confirm it really is unsat) is tracked
+        // separately.
+        let false_expr = self.make_false();
+        if !self.expr_eq(&false_expr, expected) {
+            let core_size = unsat_core.len();
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "quick_explain: rule concludes `False` (the conjunction of \
+                     the {}-element unsat core is unsatisfiable), not {}",
+                    core_size,
+                    self.expr_to_text(expected)
+                )
+                .into(),
+            });
         }
 
-        // Accept the unsat core as valid (full validation would re-check with SMT)
         Ok(())
     }
 
@@ -9723,20 +9737,57 @@ mod tests {
     fn test_validate_quick_explain() {
         let mut validator = ProofValidator::new();
 
-        let formula = Expr::new(
+        // The unsat core's conjunction is unsatisfiable → conclusion is False.
+        let core_member = Expr::new(
             ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
             Span::dummy(),
         );
+        let false_expr = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(false), Span::dummy())),
+            Span::dummy(),
+        );
 
-        let unsat_core = List::from(vec![formula.clone()]);
+        let unsat_core = List::from(vec![core_member]);
         let proof = ProofTerm::QuickExplain {
             unsat_core,
             explanation: "Unsatisfiable due to contradiction".into(),
         };
 
-        // QuickExplain is a special case - accept any expected for non-empty core
-        let result = validator.validate(&proof, &formula);
-        assert!(result.is_ok(), "QuickExplain should validate correctly");
+        // The rule concludes False — for non-empty cores too.
+        let result = validator.validate(&proof, &false_expr);
+        assert!(
+            result.is_ok(),
+            "QuickExplain with non-empty core should validate against `false` conclusion: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_validate_quick_explain_rejects_non_false_expected() {
+        // Soundness regression for #42: pre-fix the non-empty
+        // core branch silently accepted any expected. Post-fix
+        // the rule concludes `False` regardless of core size, so
+        // claiming `true` (or any non-False expression) for
+        // expected must reject.
+        let mut validator = ProofValidator::new();
+        let core_member = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let bool_true = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let unsat_core = List::from(vec![core_member]);
+        let proof = ProofTerm::QuickExplain {
+            unsat_core,
+            explanation: "core element".into(),
+        };
+        let result = validator.validate(&proof, &bool_true);
+        assert!(
+            result.is_err(),
+            "QuickExplain must reject `true` as conclusion — rule concludes `False`"
+        );
     }
 
     #[test]
