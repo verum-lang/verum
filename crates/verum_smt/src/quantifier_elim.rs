@@ -1003,6 +1003,29 @@ impl QuantifierEliminator {
     /// regardless of the configured level, so the field was
     /// inert.
     pub fn with_config(config: QEConfig) -> Self {
+        // Phase-not-realised: `QEConfig.max_iterations` (default 10)
+        // is documented as the iteration cap for the QE strategy,
+        // but every dispatch path in `eliminate_existential`
+        // (qe_lite / qe_model_project / qe_skolem / qe_sat /
+        // qe_full) is single-pass — they each apply a Z3 tactic
+        // once and return. There is no Rust-level fixpoint loop
+        // that would consult this cap. The Z3 tactic chain
+        // internally bounds its own iteration via `timeout`
+        // (already wired through `fresh_solver`). Surface a
+        // debug trace when the embedder configures a non-default
+        // value so the gap is visible: setting
+        // `max_iterations = 5` does NOT currently restrict the
+        // Z3 tactic to 5 internal iterations.
+        if config.max_iterations != 10 {
+            tracing::debug!(
+                "QEConfig.max_iterations={} is set but the QE dispatch is \
+                 single-pass — every method (qe_lite/model_project/skolem/sat/\
+                 full) applies its Z3 tactic once. This field would only take \
+                 effect if a Rust-level fixpoint loop is added around the \
+                 method dispatch (forward-looking).",
+                config.max_iterations
+            );
+        }
         let qe_tactic = Tactic::new("qe");
         let qe_lite_tactic = Tactic::new("qe-light");
         let simplify_tactic = Self::build_simplify_tactic(config.simplify_level);
