@@ -89,6 +89,15 @@ use crate::hash::compute_item_hashes_from_module;
 use crate::incremental_compiler::IncrementalCompiler;
 use crate::staged_pipeline::{StagedPipeline, StagedConfig};
 
+// Phase-specific submodule extractions (#106 — pipeline.rs split).
+// Each submodule is a sibling file under `pipeline/` declaring an
+// additional `impl<'s> CompilationPipeline<'s>` block (or a set of
+// pure free helpers).  Sibling-file submodules can access this
+// crate's `pub(crate)` surface via `super::*`, so private fields
+// of `CompilationPipeline` remain genuinely private — only methods
+// move out of this file, not access boundaries.
+mod bounds_stats;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // GLOBAL STDLIB MODULE CACHE
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8156,148 +8165,9 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
-    /// Run bounds elimination analysis at AST level (statistics gathering)
-    ///
-    /// This AST-level analysis collects statistics about array index accesses.
-    /// The actual bounds check elimination happens at MIR level in
-    /// `verification_phase.rs` which has access to full CFG and dataflow analysis.
-    ///
-    /// This pass is retained for early statistics and potential future
-    /// AST-level optimizations.
-    ///
-    /// AST-level bounds statistics; actual elimination happens at MIR level via
-    /// escape analysis and CBGR check elimination in verification_phase.rs.
-    fn run_bounds_elimination_analysis(&self, module: &Module) -> Result<()> {
-        debug!("Running AST-level bounds statistics collection");
-        let start = Instant::now();
-
-        let mut total_checks = 0usize;
-        let mut eliminated = 0usize;
-
-        for item in module.items.iter() {
-            if let ItemKind::Function(func) = &item.kind {
-                // Skip meta functions
-                if func.is_meta {
-                    continue;
-                }
-
-                // Gather statistics about index accesses in AST
-                // Note: Actual elimination happens in verification_phase.rs (MIR level)
-                let func_stats = self.analyze_function_bounds_checks(func);
-                total_checks += func_stats.0;
-                eliminated += func_stats.1;
-            }
-        }
-
-        let elapsed = start.elapsed();
-
-        if total_checks > 0 {
-            debug!(
-                "Bounds elimination: {} / {} checks eliminated ({:.1}%) in {:.2}ms",
-                eliminated,
-                total_checks,
-                (eliminated as f64 / total_checks as f64) * 100.0,
-                elapsed.as_millis()
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Count index accesses in a function for statistics
-    ///
-    /// Returns (total_index_accesses, 0)
-    /// Note: Actual bounds check elimination happens at MIR level in
-    /// `verification_phase.rs` which uses real CFG analysis with
-    /// BoundsCheckEliminator and SMT-based proofs.
-    fn analyze_function_bounds_checks(
-        &self,
-        func: &verum_ast::decl::FunctionDecl,
-    ) -> (usize, usize) {
-        use verum_ast::decl::FunctionBody;
-
-        // Count array index accesses in the function body for statistics
-        let mut total = 0;
-        let eliminated = 0; // AST-level cannot eliminate; MIR-level does
-
-        if let Some(ref body) = func.body {
-            // Count Index expressions for statistics gathering
-            let index_count = match body {
-                FunctionBody::Block(block) => Self::count_index_accesses(block),
-                FunctionBody::Expr(expr) => Self::count_index_in_expr(expr),
-            };
-            total = index_count;
-        }
-
-        (total, eliminated)
-    }
-
-    /// Count index access expressions in a statement block
-    fn count_index_accesses(block: &verum_ast::expr::Block) -> usize {
-        use verum_ast::stmt::StmtKind;
-
-        let mut count = 0;
-
-        for stmt in &block.stmts {
-            match &stmt.kind {
-                StmtKind::Expr { expr, .. } => {
-                    count += Self::count_index_in_expr(expr);
-                }
-                StmtKind::Let { value, .. } => {
-                    if let Some(init_expr) = value {
-                        count += Self::count_index_in_expr(init_expr);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(tail) = &block.expr {
-            count += Self::count_index_in_expr(tail);
-        }
-
-        count
-    }
-
-    /// Recursively count index expressions
-    fn count_index_in_expr(expr: &verum_ast::Expr) -> usize {
-        use verum_ast::expr::ExprKind;
-
-        let mut count = 0;
-
-        match &expr.kind {
-            ExprKind::Index { expr: inner, index } => {
-                count += 1;
-                count += Self::count_index_in_expr(inner);
-                count += Self::count_index_in_expr(index);
-            }
-            ExprKind::Binary { left, right, .. } => {
-                count += Self::count_index_in_expr(left);
-                count += Self::count_index_in_expr(right);
-            }
-            ExprKind::Unary { expr: inner, .. } => {
-                count += Self::count_index_in_expr(inner);
-            }
-            ExprKind::Block(block) => {
-                count += Self::count_index_accesses(block);
-            }
-            ExprKind::If { then_branch, else_branch, .. } => {
-                // Note: condition is IfCondition, not Expr, so we skip it for counting
-                count += Self::count_index_accesses(then_branch);
-                if let Some(else_expr) = else_branch {
-                    count += Self::count_index_in_expr(else_expr);
-                }
-            }
-            ExprKind::Call { args, .. } => {
-                for arg in args {
-                    count += Self::count_index_in_expr(arg);
-                }
-            }
-            _ => {}
-        }
-
-        count
-    }
+    // run_bounds_elimination_analysis + analyze_function_bounds_checks
+    // + count_index_accesses + count_index_in_expr extracted to
+    // crate::pipeline::bounds_stats (#106 — pipeline.rs split).
 
     /// Verify refinement types for a function using SMT
     ///
