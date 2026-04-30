@@ -216,11 +216,48 @@ impl MacroExpansionPhase {
     }
 
     pub fn with_quote_syntax_enabled(mut self, enabled: bool) -> Self {
+        // Phase-not-realised tracing: `quote_syntax_enabled`
+        // (sourced from `[meta] quote_syntax`) is intended to gate
+        // `quote { ... }` expansion at the security/sandbox layer
+        // — when `false`, the expander should reject quote-form
+        // expressions before they reach the macro evaluator. The
+        // current expansion path does NOT consult this flag at any
+        // decision point — it only stores the value. Apply the
+        // gate when set to non-default (false) so embedders see
+        // the gap rather than silently believing their `[meta]
+        // quote_syntax = false` setting was honoured.
+        if !enabled {
+            tracing::debug!(
+                "MacroExpansionPhase::with_quote_syntax_enabled(false) — \
+                 quote_syntax_enabled is stored on the phase but the expansion \
+                 path does not yet gate `quote {{ ... }}` rejection on it; the \
+                 manifest setting `[meta] quote_syntax = false` is observed but \
+                 not enforced (forward-looking sandbox gate)"
+            );
+        }
         self.quote_syntax_enabled = enabled;
         self
     }
 
     pub fn with_reflection_enabled(mut self, enabled: bool) -> Self {
+        // Phase-not-realised tracing: `reflection_enabled`
+        // (sourced from `[meta] reflection`) is intended to gate
+        // reflection-API access (TypeInfo, AstAccess, CompileDiag)
+        // at the meta-builtin dispatch layer — when `false`, the
+        // builtin registry should reject reflection-tagged builtins
+        // before evaluator dispatch. The current
+        // `MacroExpansionPhase` does NOT consult this flag at any
+        // decision point — it only stores the value. Apply the
+        // same recipe-#8 surface as `with_quote_syntax_enabled`.
+        if !enabled {
+            tracing::debug!(
+                "MacroExpansionPhase::with_reflection_enabled(false) — \
+                 reflection_enabled is stored on the phase but no decision \
+                 point gates reflection-API access on it; the manifest setting \
+                 `[meta] reflection = false` is observed but not enforced \
+                 (forward-looking sandbox gate)"
+            );
+        }
         self.reflection_enabled = enabled;
         self
     }
