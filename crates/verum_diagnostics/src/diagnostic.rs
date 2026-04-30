@@ -140,6 +140,21 @@ pub struct Diagnostic {
     doc_url: Option<Text>,
     /// Suggested actions that can be auto-applied
     suggested_fixes: List<SuggestedFix>,
+    /// Synthetic-expansion provenance chain (#284-Renderer, task #287).
+    ///
+    /// When the diagnostic's primary span lands in synthetic source
+    /// (macro / @derive / monomorphization / @delegate output), the
+    /// builder calls `with_expansion_chain` to attach the human-
+    /// readable labels of every expansion layer traversed by
+    /// `Span::resolve_to_user_source`.  The renderer surfaces this
+    /// chain after the location header so users see "in @derive
+    /// expansion → in macro expansion" instead of an opaque
+    /// `<synthetic>:1:1` location.
+    ///
+    /// Empty for diagnostics whose span is already user-source —
+    /// the most common case at the steady state.
+    #[serde(default, skip_serializing_if = "List::is_empty")]
+    expansion_chain: List<Text>,
 }
 
 /// A fix that can be automatically applied
@@ -229,6 +244,15 @@ impl Diagnostic {
     /// Get all child diagnostics
     pub fn children(&self) -> &[Diagnostic] {
         &self.children
+    }
+
+    /// Get the synthetic-expansion provenance chain (#287).  Each
+    /// entry is a human-readable label like `"@derive expansion"`
+    /// or `"macro expansion"`, ordered leaf-to-root (deepest
+    /// synthetic first, ending at the user-visible call site).
+    /// Empty when the primary span is already user-source.
+    pub fn expansion_chain(&self) -> &[Text] {
+        &self.expansion_chain
     }
 
     /// Check if this is an error
@@ -412,6 +436,7 @@ pub struct DiagnosticBuilder {
     related_files: List<Text>,
     doc_url: Option<Text>,
     suggested_fixes: List<SuggestedFix>,
+    expansion_chain: List<Text>,
 }
 
 impl DiagnosticBuilder {
@@ -450,6 +475,7 @@ impl DiagnosticBuilder {
             related_files: List::new(),
             doc_url: None,
             suggested_fixes: List::new(),
+            expansion_chain: List::new(),
         }
     }
 
@@ -549,6 +575,26 @@ impl DiagnosticBuilder {
         self
     }
 
+    /// Attach a synthetic-expansion provenance chain (#287).
+    /// Callers walk `Span::resolve_to_user_source(|fid|
+    /// session.synthetic_origin(fid))` and pass the chain's
+    /// `SyntheticKind::label()` outputs here so the renderer can
+    /// surface "in @derive expansion → in macro expansion" labels
+    /// after the location header.
+    ///
+    /// Empty chain (the default) is the user-source case — no
+    /// rendering overhead, behaviour bit-identical to pre-#287.
+    pub fn expansion_chain<I, S>(mut self, chain: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Text>,
+    {
+        for label in chain {
+            self.expansion_chain.push(label.into());
+        }
+        self
+    }
+
     /// Build the diagnostic
     pub fn build(self) -> Diagnostic {
         Diagnostic {
@@ -565,6 +611,7 @@ impl DiagnosticBuilder {
             related_files: self.related_files,
             doc_url: self.doc_url,
             suggested_fixes: self.suggested_fixes,
+            expansion_chain: self.expansion_chain,
         }
     }
 }
@@ -806,5 +853,99 @@ impl DiagnosticCollector {
                 }
             })
         });
+    }
+}
+
+#[cfg(test)]
+mod expansion_chain_tests {
+    use super::*;
+
+    #[test]
+    fn default_diagnostic_has_empty_expansion_chain() {
+        // Pin: pre-#287 builders produce diagnostics with empty
+        // expansion_chain — bit-identical to legacy behaviour.
+        let diag = DiagnosticBuilder::error()
+            .message("test error")
+            .build();
+        assert!(diag.expansion_chain().is_empty(),
+            "no-chain default must produce empty expansion_chain");
+    }
+
+    #[test]
+    fn with_expansion_chain_preserves_order() {
+        // Pin: chain order is leaf-to-root (deepest synthetic
+        // first), preserved verbatim from input.  Renderer joins
+        // with " → " so order matters.
+        let chain = vec!["@derive expansion", "macro expansion"];
+        let diag = DiagnosticBuilder::error()
+            .message("test error")
+            .expansion_chain(chain)
+            .build();
+        let stored = diag.expansion_chain();
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored[0].as_str(), "@derive expansion");
+        assert_eq!(stored[1].as_str(), "macro expansion");
+    }
+
+    #[test]
+    fn empty_chain_is_no_op() {
+        // Pin: passing an empty iterator leaves the chain empty —
+        // no false-positive expansion-chain lines from accidental
+        // empty calls.
+        let diag = DiagnosticBuilder::error()
+            .message("test")
+            .expansion_chain(Vec::<&str>::new())
+            .build();
+        assert!(diag.expansion_chain().is_empty());
+    }
+
+    #[test]
+    fn chain_accepts_text_and_static_str() {
+        // Pin: the IntoIterator<Item: Into<Text>> bound accepts
+        // both &'static str and Text — call sites can use either.
+        let static_strs = vec!["macro expansion"];
+        let text_strs = vec![Text::from("@derive expansion")];
+
+        let diag1 = DiagnosticBuilder::error()
+            .message("a")
+            .expansion_chain(static_strs)
+            .build();
+        let diag2 = DiagnosticBuilder::error()
+            .message("b")
+            .expansion_chain(text_strs)
+            .build();
+
+        assert_eq!(diag1.expansion_chain().len(), 1);
+        assert_eq!(diag2.expansion_chain().len(), 1);
+    }
+
+    #[test]
+    fn chain_round_trips_through_serde() {
+        // Pin: serde round-trips preserve the expansion_chain.
+        // Skipped at empty (skip_serializing_if) so user-source
+        // diagnostics stay bit-identical to pre-#287 in JSON.
+        let diag = DiagnosticBuilder::error()
+            .message("test")
+            .expansion_chain(vec!["macro expansion", "@derive expansion"])
+            .build();
+        let json = serde_json::to_string(&diag).expect("serialize");
+        assert!(json.contains("expansion_chain"),
+            "non-empty chain must serialize");
+        let restored: Diagnostic = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.expansion_chain().len(), 2);
+        assert_eq!(restored.expansion_chain()[0].as_str(), "macro expansion");
+    }
+
+    #[test]
+    fn empty_chain_omitted_from_serde() {
+        // Pin: empty chain skipped from JSON output (skip_
+        // serializing_if). User-source diagnostics produce
+        // identical JSON to pre-#287 builds.
+        let diag = DiagnosticBuilder::error()
+            .message("test")
+            .build();
+        let json = serde_json::to_string(&diag).expect("serialize");
+        assert!(!json.contains("expansion_chain"),
+            "empty chain must be skipped from JSON");
     }
 }
