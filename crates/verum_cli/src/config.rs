@@ -1620,6 +1620,32 @@ impl Manifest {
                 self.pgo.profile_path.as_ref().map(|t| t.as_str()),
             );
         }
+        // Same recipe as [optimization]/[lto]/[pgo] above: the
+        // cross-compile section validates and lands on the
+        // manifest, but the active cross-compile path today goes
+        // through `[llvm].target_triple` (consumed by the LLVM
+        // backend at codegen) and the `--target` CLI flag — the
+        // dedicated `[cross_compile]` section has no production
+        // reader threading `target` / `sysroot` / `linker` into
+        // the toolchain invocation. Surface non-default settings
+        // so an embedder shipping `[cross_compile] target = …`
+        // sees that the value is observed-but-unused rather than
+        // silently no-op'd.
+        if self.cross_compile.target.is_some()
+            || self.cross_compile.sysroot.is_some()
+            || self.cross_compile.linker.is_some()
+        {
+            tracing::warn!(
+                "manifest [cross_compile] section observed (target={:?}, sysroot={:?}, \
+                 linker={:?}) — these fields are forward-looking; the active cross-compile \
+                 path today goes through [llvm].target_triple (LLVM backend) and the \
+                 --target CLI flag; sysroot / linker are not yet wired into the toolchain \
+                 invocation",
+                self.cross_compile.target.as_ref().map(|t| t.as_str()),
+                self.cross_compile.sysroot.as_ref().map(|t| t.as_str()),
+                self.cross_compile.linker.as_ref().map(|t| t.as_str()),
+            );
+        }
 
         // Surface inert `[verify.modules.<path>]` per-module
         // overrides. The `with_profile()` builder at line 452
@@ -1642,6 +1668,45 @@ impl Manifest {
                  not yet honour them. Profile overrides via [verify.profiles.<name>] ARE \
                  wired and reach the verification path",
                 self.verify.modules.len(),
+            );
+        }
+
+        // Surface inert top-level `[build]` section. The CLI parses
+        // `manifest.build: BuildConfig` (target / opt_level /
+        // incremental / lto / codegen_units / panic) at line ~148,
+        // but no consumer reads any of these fields. The active
+        // controls today are:
+        //   - target → `[llvm].target_triple` + CLI `--target`
+        //   - opt_level → `[profile.<dev|release>].optimization`
+        //   - lto → `[linker].lto = "thin" | "full"`
+        //   (handled by linker_config::LinkerSection)
+        // The remaining fields (incremental, codegen_units, panic)
+        // are forward-looking — not yet threaded into the toolchain
+        // invocation.
+        //
+        // Emit a debug-level trace when any field is set to a
+        // non-default value so embedders writing `[build] lto = true`
+        // or `[build] codegen_units = 16` see the section was
+        // observed-but-unused rather than silently no-op'd.
+        let build_has_overrides = self.build.target.as_str() != "native"
+            || self.build.opt_level != 2
+            || self.build.incremental
+            || self.build.lto
+            || self.build.codegen_units.is_some()
+            || !matches!(self.build.panic, PanicStrategy::Unwind);
+        if build_has_overrides {
+            tracing::debug!(
+                "manifest [build] section observed (target={:?}, opt_level={}, \
+                 incremental={}, lto={}, codegen_units={:?}) — these fields are \
+                 forward-looking; the active controls are [llvm].target_triple + \
+                 --target, [profile.<dev|release>].optimization, [linker].lto. The \
+                 remaining fields (incremental, codegen_units, panic) are not yet \
+                 wired into the toolchain invocation",
+                self.build.target.as_str(),
+                self.build.opt_level,
+                self.build.incremental,
+                self.build.lto,
+                self.build.codegen_units,
             );
         }
 
