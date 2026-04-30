@@ -48,7 +48,7 @@ mount core.math.kan_extension.{
     compute_pointwise_lan, compute_pointwise_ran, compute_obstruction,
 };
 mount core.math.hott.{Path, Equiv, refl, transport};
-mount core.math.giry.{Giry, LlmOracle, sample_above};
+mount core.math.giry.{Giry, LlmOracle, sample_above, ContextEmbedding, FunctorProposal};
 
 // =============================================================================
 // §1. Theory Registration and Yoneda Embedding
@@ -238,8 +238,26 @@ public fn translate(
 
 /// Translate between theories with LLM-assisted partial mapping.
 ///
-/// When no explicit partial_map is provided, use the LLM oracle to
-/// propose claim correspondences based on semantic similarity.
+/// When no explicit partial_map is provided, this uses the LLM
+/// oracle to propose claim correspondences based on semantic
+/// similarity.  For each source claim the oracle is queried with a
+/// context embedding derived from the claim's content; the
+/// highest-probability proposal that exceeds `confidence` is taken
+/// as the target claim, looked up by name in
+/// `target.theory.statements`.
+///
+/// Pre-fix this used the placeholder `i % target.claim_count`
+/// (modular index map) which ignored the oracle entirely — every
+/// caller paid the oracle-construction cost but received a
+/// deterministic structural map, not a semantic one.  The new
+/// dispatch routes through `sample_above` + a name→index lookup
+/// against the target theory's claim list, so the oracle's
+/// proposal distribution is actually consulted.
+///
+/// When a source claim's oracle proposal does not match any target
+/// claim id (out-of-vocab) the pair is skipped — the partial map
+/// only contains entries the oracle is confident about, which is
+/// the documented "best-effort partial functor" semantic.
 public fn translate_with_oracle<C, D: InfinityCategory>(
     source: &LoadedTheory,
     target: &LoadedTheory,
@@ -247,21 +265,88 @@ public fn translate_with_oracle<C, D: InfinityCategory>(
     confidence: Float{> 0.0 && <= 1.0},
 ) -> TranslationResult {
     // Use oracle to generate candidate mappings
-    let mut partial_map = List.new();
+    let mut partial_map: List<(Int, Int)> = List.new();
 
-    // For each source claim, ask the oracle for the best target match
+    // Walk every source claim, query the oracle, and resolve the
+    // proposal name to a target claim index.  Source claims with no
+    // confident oracle match are skipped — the partial map carries
+    // only oracle-validated pairs.
     let mut i = 0;
     while i < source.claim_count {
-        // The oracle returns a distribution over target claims
-        // We take the highest-confidence match above threshold
-        let best_match = i % target.claim_count;  // simplified: modular mapping
-        if confidence > 0.5 {
-            partial_map.push((i, best_match));
+        let ctx = source_claim_context(source, i);
+        match sample_above(oracle, &ctx, confidence) {
+            Some(proposal_name) => {
+                match find_claim_index(target, &proposal_name) {
+                    Some(j) => {
+                        partial_map.push((i, j));
+                    },
+                    None => {
+                        // Out-of-vocab: oracle proposed a functor
+                        // name that doesn't correspond to any
+                        // target claim id.  Skip — partial_map
+                        // stays a partial functor rather than
+                        // forcing a structural fallback.
+                    },
+                }
+            },
+            None => {
+                // No proposal cleared the confidence threshold.
+                // Skip this source claim (Lan/Ran will handle the
+                // missing entry as an obstruction).
+            },
         }
         i += 1;
     }
 
     translate(source, target, &partial_map)
+}
+
+/// Build a `ContextEmbedding` for the i-th source claim, suitable
+/// to be passed to `LlmOracle.query`.  The runtime LLM intrinsic
+/// (`@intrinsic("llm.query_log_probs")`) consumes the embedding
+/// vector; this stub-side helper synthesises a minimal,
+/// deterministic embedding from the claim's id (one float per
+/// byte, normalised to [0, 1]).  When a real embedding backend is
+/// wired in it will replace this helper without changing the call
+/// site — the contract is just "produce a `ContextEmbedding` whose
+/// content depends on the source claim".
+fn source_claim_context(source: &LoadedTheory, claim_idx: Int) -> ContextEmbedding {
+    let claim_id = match source.theory.statements.get(claim_idx) {
+        Some(id) => id,
+        None => Text.from(""),
+    };
+    let mut values: List<Float> = List.new();
+    let n = claim_id.len();
+    let mut k = 0;
+    while k < n {
+        match claim_id.byte_at(k) {
+            Some(b) => values.push((b as Float) / 255.0),
+            None => {},
+        }
+        k += 1;
+    }
+    if values.len() == 0 {
+        values.push(0.0);
+    }
+    let dim = values.len();
+    ContextEmbedding {
+        values: values,
+        dimension: dim,
+    }
+}
+
+/// Find the index of a claim id within `target.theory.statements`.
+/// Returns `None` when the name is not present (out-of-vocab from
+/// the oracle's point of view).
+fn find_claim_index(target: &LoadedTheory, name: &Text) -> Maybe<Int> {
+    let mut idx = 0;
+    for stmt in target.theory.statements.iter() {
+        if stmt == name {
+            return Some(idx);
+        }
+        idx += 1;
+    }
+    None
 }
 
 // =============================================================================
