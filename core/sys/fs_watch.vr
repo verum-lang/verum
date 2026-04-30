@@ -10,8 +10,10 @@
 //
 //   * macOS — kqueue / EVFILT_VNODE
 //   * Linux — inotify (raw inotify_init1 + inotify_add_watch syscalls)
-//   * Windows — ReadDirectoryChangesW (TODO; current Windows path falls
-//     back to the polling implementation in `core.shell.watch`)
+//   * Windows — ReadDirectoryChangesW (overlapped + WaitForMultipleObjects;
+//     parses FILE_NOTIFY_INFORMATION records out of a per-watch 4 KiB
+//     buffer; subtree watching enabled, full filter mask covering
+//     name/dir/write/attribute/size/creation changes)
 //
 // Sub-millisecond latency, kernel-driven; no polling overhead. Each
 // `FsEvent` carries the affected path plus the kind of change (created,
@@ -611,18 +613,46 @@ fn read_u32_le(buf: &List<Byte>, off: Int) -> Int {
 
 @cfg(target_os = "windows")
 fn decode_utf16_le(buf: &List<Byte>, off: Int, byte_len: Int) -> Text {
-    // Best-effort UTF-16LE → UTF-8 transcode.  Replaces unpaired surrogates
-    // with U+FFFD.  Works for ASCII paths byte-for-byte.
+    // Full UTF-16LE → Text transcoder.  Handles BMP (one 16-bit
+    // unit) and supplementary planes (a high-surrogate D800..DBFF
+    // followed by a low-surrogate DC00..DFFF that combine into a
+    // 21-bit code point).  Lone / mismatched surrogates fall through
+    // as U+FFFD per Unicode §3.9 substitution.  Works for any
+    // legal Windows filename.
     let mut out = Text.with_capacity((byte_len / 2) as usize);
     let mut i: Int = 0;
     while i < byte_len {
+        if i + 1 >= byte_len { break; }
         let lo = buf[(off + i)     as usize] as Int;
         let hi = buf[(off + i + 1) as usize] as Int;
-        let cp = (hi << 8) | lo;
-        // Naive — emit BMP only; surrogates render as replacement.
-        if cp < 0x80 { out.push(cp as Char); }
-        else         { out.push('?'); }   // future: full UTF-16 decode
-        i = i + 2;
+        let cu = (hi << 8) | lo;          // first code unit
+        if cu >= 0xD800 && cu <= 0xDBFF {
+            // High surrogate — pair with the next low surrogate.
+            if i + 3 >= byte_len {
+                out.push('\u{FFFD}');
+                break;
+            }
+            let lo2 = buf[(off + i + 2) as usize] as Int;
+            let hi2 = buf[(off + i + 3) as usize] as Int;
+            let cu2 = (hi2 << 8) | lo2;
+            if cu2 >= 0xDC00 && cu2 <= 0xDFFF {
+                let cp = 0x10000 + ((cu - 0xD800) << 10) + (cu2 - 0xDC00);
+                out.push(cp as Char);
+                i = i + 4;
+            } else {
+                // High surrogate without matching low — substitute.
+                out.push('\u{FFFD}');
+                i = i + 2;
+            }
+        } else if cu >= 0xDC00 && cu <= 0xDFFF {
+            // Lone low surrogate — substitute.
+            out.push('\u{FFFD}');
+            i = i + 2;
+        } else {
+            // BMP character — direct emit.
+            out.push(cu as Char);
+            i = i + 2;
+        }
     }
     out
 }

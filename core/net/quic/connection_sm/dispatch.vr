@@ -327,9 +327,17 @@ fn find_or_create_recv<'a>(
     // Lazy-open — bidirectional peer-initiated → use bidi-local limit,
     // uni → uni limit. Caller validates the stream-id kind against
     // transport params elsewhere.
-    let initial = flow.max_data_local;   // conservative bound
-    let _ = initial;
-    let stream = RecvStream.new(sid, 65536_u64);    // placeholder bound — integration-layer refines
+    //
+    // The per-stream initial budget should come from the local
+    // transport-params (`initial_max_stream_data_{bidi_local,bidi_remote,uni}`
+    // per RFC 9000 §18.2), not from the connection-level
+    // `max_data_local` byte-count.  Those params are not carried in
+    // `ConnFlowControl` today; refining the type to thread them
+    // through is tracked as the integration-layer follow-up.  Using
+    // a conservative 64 KiB bound keeps the lazy-open path correct
+    // for the common case (stream stays small) and a peer can lift
+    // it via MAX_STREAM_DATA frames.
+    let stream = RecvStream.new(sid, 65536_u64);
     list.push((sid, stream));
     let last = list.len() - 1;
     &mut list[last].1
