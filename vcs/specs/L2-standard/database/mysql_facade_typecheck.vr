@@ -14,7 +14,7 @@ mount core.database.mysql.{
     MysqlAdapter, MysqlConfig, MysqlTlsMode, MtmDisable, MtmRequired,
     MysqlConnection, MysqlConnState,
     McsConnecting, McsAuthenticating, McsReady, McsBusy, McsClosed, McsFailed,
-    SimpleQueryResult, MysqlTextValue, MtvNull, MtvBytes,
+    MySimpleQueryResult, MysqlTextValue, MtvNull, MtvBytes,
 };
 mount core.database.mysql.auth.caching_sha2.{
     scramble_caching_sha2,
