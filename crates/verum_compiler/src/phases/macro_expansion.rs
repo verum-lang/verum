@@ -228,25 +228,25 @@ impl MacroExpansionPhase {
     }
 
     pub fn with_reflection_enabled(mut self, enabled: bool) -> Self {
-        // Phase-not-realised tracing: `reflection_enabled`
-        // (sourced from `[meta] reflection`) is intended to gate
-        // reflection-API access (TypeInfo, AstAccess, CompileDiag)
-        // at the meta-builtin dispatch layer — when `false`, the
-        // builtin registry should reject reflection-tagged builtins
-        // before evaluator dispatch. The current
-        // `MacroExpansionPhase` does NOT consult this flag at any
-        // decision point — it only stores the value. Apply the
-        // same recipe-#8 surface as `with_quote_syntax_enabled`.
-        if !enabled {
-            tracing::debug!(
-                "MacroExpansionPhase::with_reflection_enabled(false) — \
-                 reflection_enabled is stored on the phase but no decision \
-                 point gates reflection-API access on it; the manifest setting \
-                 `[meta] reflection = false` is observed but not enforced \
-                 (forward-looking sandbox gate)"
-            );
-        }
+        // `reflection_enabled` (sourced from `[meta] reflection`) is
+        // the language-level sandbox gate for reflection-tagged
+        // contexts (`MetaTypes` for type introspection, `CompileDiag`
+        // for compile-time diagnostics — see
+        // `RequiredContext::is_reflection()` for the canonical set).
+        //
+        // When `false`, the embedded `MetaContext.reflection_disabled`
+        // flag is set: `MetaContext::get_builtin` then rejects any
+        // reflection-tagged builtin call regardless of the function's
+        // `using [...]` declaration. The capability is OVERRIDDEN by
+        // the global gate — a sandbox seal cannot be circumvented by
+        // individual function declarations.
+        //
+        // Symmetric with `with_quote_syntax_enabled` (the AST-level
+        // gate for `quote { ... }` syntax) — both flags translate
+        // their `false` value into hard rejection of the gated
+        // language feature at the appropriate layer.
         self.reflection_enabled = enabled;
+        self.meta_context.reflection_disabled = !enabled;
         self
     }
 

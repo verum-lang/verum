@@ -149,6 +149,22 @@ impl RequiredContext {
     pub fn requires_declaration(&self) -> bool {
         !matches!(self, RequiredContext::None)
     }
+
+    /// Whether this context belongs to the reflection surface gated
+    /// by `[meta] reflection = false`. The reflection surface
+    /// covers compile-time type introspection (`MetaTypes`) and
+    /// compile-time diagnostic emission (`CompileDiag`) — the two
+    /// capability tiers a sandbox would forbid when sealing the
+    /// language against reflective code generation.
+    ///
+    /// `MetaRuntime` (target_os, env vars), `BuildAssets`
+    /// (file embedding), `SourceMap` (generated-code traceability),
+    /// `ProjectInfo` / `MetaBench` / `StageInfo` are NOT classified
+    /// as reflection — they're orthogonal capabilities that survive
+    /// when reflection is disabled.
+    pub fn is_reflection(&self) -> bool {
+        matches!(self, RequiredContext::MetaTypes | RequiredContext::CompileDiag)
+    }
 }
 
 impl fmt::Display for RequiredContext {
