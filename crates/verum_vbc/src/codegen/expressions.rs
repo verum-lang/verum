@@ -4432,8 +4432,45 @@ impl VbcCodegen {
         tag: u32,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        self.compile_variant_constructor_with_tag_named(None, tag, args)
+    }
+
+    /// Sibling of `compile_variant_constructor_with_tag` that
+    /// additionally takes the variant's simple name so the typed-
+    /// emission path can resolve the parent type's TypeId via
+    /// `lookup_function(name).parent_type_name → type_name_to_id`.
+    /// Migrating callers from the bare `_with_tag` form to this
+    /// one is a strict improvement: the resulting bytecode is the
+    /// typed `MakeVariantTyped` (Phase 3a) when the parent type is
+    /// known and falls back to legacy `MakeVariant` otherwise.
+    fn compile_variant_constructor_with_tag_named(
+        &mut self,
+        variant_name: Option<&str>,
+        tag: u32,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+        let parent_type_id = variant_name.and_then(|n| {
+            self.ctx
+                .lookup_function(n)
+                .and_then(|info| info.parent_type_name.clone())
+                .as_deref()
+                .and_then(|tname| self.type_name_to_id.get(tname).copied())
+        });
+        if let Some(tid) = parent_type_id {
+            self.ctx.emit(Instruction::MakeVariantTyped {
+                dst: result,
+                type_id: tid.0,
+                tag,
+                field_count: args.len() as u32,
+            });
+        } else {
+            self.ctx.emit(Instruction::MakeVariant {
+                dst: result,
+                tag,
+                field_count: args.len() as u32,
+            });
+        }
         if !args.is_empty() {
             let data_val = self
                 .compile_expr(&args[0])?
@@ -4521,8 +4558,34 @@ impl VbcCodegen {
 
         let result = self.ctx.alloc_temp();
 
-        // Emit MakeVariant with the tag
-        self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+        // Prefer typed MakeVariantTyped (Phase 3a) when the parent
+        // sum-type id is resolvable.  The disambiguation logic
+        // above has already picked the right variant; we re-derive
+        // the parent_type_name through the same FunctionInfo
+        // lookup and turn it into a TypeId via
+        // `type_name_to_id`.  Falls back to legacy `MakeVariant`
+        // when the parent type isn't registered (cross-cog forward
+        // refs, mid-pass-1 lookups, etc.).
+        let parent_type_id = self
+            .ctx
+            .lookup_function(name)
+            .and_then(|info| info.parent_type_name.clone())
+            .as_deref()
+            .and_then(|tname| self.type_name_to_id.get(tname).copied());
+        if let Some(tid) = parent_type_id {
+            self.ctx.emit(Instruction::MakeVariantTyped {
+                dst: result,
+                type_id: tid.0,
+                tag,
+                field_count: args.len() as u32,
+            });
+        } else {
+            self.ctx.emit(Instruction::MakeVariant {
+                dst: result,
+                tag,
+                field_count: args.len() as u32,
+            });
+        }
 
         // If there are arguments, set the variant data
         if !args.is_empty() {
@@ -6462,7 +6525,31 @@ impl VbcCodegen {
         // SIGBUS during pattern matching.
         if let Some(tag) = func_info.variant_tag {
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: args.len() as u32 });
+            // Phase 3a — emit typed MakeVariantTyped when the
+            // parent sum-type id is resolvable through the
+            // FunctionInfo's `parent_type_name`.  `func_info` is
+            // the variant's own constructor info, so its
+            // parent_type_name IS the sum type.  Falls back to
+            // legacy `MakeVariant` when type_name_to_id has no
+            // entry (cross-cog forward ref, mid-pass-1 lookup).
+            let parent_type_id = func_info
+                .parent_type_name
+                .as_deref()
+                .and_then(|tname| self.type_name_to_id.get(tname).copied());
+            if let Some(tid) = parent_type_id {
+                self.ctx.emit(Instruction::MakeVariantTyped {
+                    dst: result,
+                    type_id: tid.0,
+                    tag,
+                    field_count: args.len() as u32,
+                });
+            } else {
+                self.ctx.emit(Instruction::MakeVariant {
+                    dst: result,
+                    tag,
+                    field_count: args.len() as u32,
+                });
+            }
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self
                     .compile_expr(arg)?
