@@ -5436,7 +5436,26 @@ impl<'ctx> RuntimeLowering<'ctx> {
             }
         }
 
-        // verum_sys_gettid() -> i64 (on macOS: same as getpid)
+        // verum_sys_gettid() -> i64
+        //
+        // Real per-thread identifier — NOT process pid.  Pre-fix this
+        // helper called `getpid()` "as a safe default", which made
+        // `core/sys/common.vr::get_thread_id()` return the same value
+        // for every thread in the process (parity-with-process bug,
+        // not parity-with-thread).  The interpreter side
+        // (`crates/verum_vbc/.../ffi_extended.rs::SysGettid`) uses
+        // `pthread_threadid_np` on macOS and the std::thread::id
+        // hash on other Unix; this AOT helper now mirrors that
+        // semantics so interpreter and AOT report the same tid for
+        // the same OS thread.
+        //
+        // Platforms:
+        //   * macOS: `pthread_threadid_np(0, &mut tid)` — Apple's
+        //     stable API; `0` selects the calling thread.
+        //   * Linux: `gettid()` — direct syscall wrapper in glibc/musl.
+        //   * Other Unix: fall back to `getpid()` as the historical
+        //     placeholder (parity with the interpreter's
+        //     `non-macos non-windows` arm at ffi_extended.rs:1738).
         {
             let fn_type = i64_type.fn_type(&[], false);
             let func = module.get_function("verum_sys_gettid")
@@ -5445,11 +5464,89 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
                 builder.position_at_end(entry);
-                // On all platforms, just call getpid as a safe default
-                let pid = builder.build_call(getpid_fn, &[], "tid")
-                    .or_llvm_err()?.try_as_basic_value().basic().or_internal("call returned void")?.into_int_value();
-                let result = builder.build_int_s_extend(pid, i64_type, "ext").or_llvm_err()?;
-                builder.build_return(Some(&result)).or_llvm_err()?;
+
+                #[cfg(target_os = "macos")]
+                {
+                    // Declare `int pthread_threadid_np(pthread_t, uint64_t *)`.
+                    // First arg `pthread_t` is a pointer-sized opaque
+                    // value; `0` (NULL) means "the calling thread".
+                    let pthread_threadid_np = module
+                        .get_function("pthread_threadid_np")
+                        .unwrap_or_else(|| {
+                            let ft = i32_type.fn_type(
+                                &[ptr_type.into(), ptr_type.into()],
+                                false,
+                            );
+                            module.add_function("pthread_threadid_np", ft, None)
+                        });
+                    // Stack-allocate the u64 output slot.
+                    let tid_slot = builder
+                        .build_alloca(i64_type, "tid_slot")
+                        .or_llvm_err()?;
+                    builder
+                        .build_store(tid_slot, i64_type.const_zero())
+                        .or_llvm_err()?;
+                    // Pass `NULL` (i.e. self) as the first argument.
+                    let null_pthread = ptr_type.const_null();
+                    builder
+                        .build_call(
+                            pthread_threadid_np,
+                            &[null_pthread.into(), tid_slot.into()],
+                            "",
+                        )
+                        .or_llvm_err()?;
+                    let tid = builder
+                        .build_load(i64_type, tid_slot, "tid")
+                        .or_llvm_err()?
+                        .into_int_value();
+                    builder.build_return(Some(&tid)).or_llvm_err()?;
+                }
+
+                #[cfg(target_os = "linux")]
+                {
+                    // Linux libc exposes `pid_t gettid(void)` (glibc ≥ 2.30).
+                    // Older glibc users would need `syscall(SYS_gettid)`,
+                    // but we link against modern glibc / musl in the
+                    // AOT runtime — the helper is added on demand if
+                    // not already declared.
+                    let _ = ptr_type; // silence unused warning on linux path
+                    let gettid_fn = module
+                        .get_function("gettid")
+                        .unwrap_or_else(|| {
+                            let ft = i32_type.fn_type(&[], false);
+                            module.add_function("gettid", ft, None)
+                        });
+                    let raw = builder
+                        .build_call(gettid_fn, &[], "tid")
+                        .or_llvm_err()?
+                        .try_as_basic_value()
+                        .basic()
+                        .or_internal("gettid returned void")?
+                        .into_int_value();
+                    let result = builder
+                        .build_int_s_extend(raw, i64_type, "ext")
+                        .or_llvm_err()?;
+                    builder.build_return(Some(&result)).or_llvm_err()?;
+                }
+
+                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+                {
+                    // Fallback to getpid() for unsupported platforms —
+                    // matches the interpreter's non-macos non-windows
+                    // arm semantics.
+                    let _ = ptr_type;
+                    let pid = builder
+                        .build_call(getpid_fn, &[], "tid")
+                        .or_llvm_err()?
+                        .try_as_basic_value()
+                        .basic()
+                        .or_internal("call returned void")?
+                        .into_int_value();
+                    let result = builder
+                        .build_int_s_extend(pid, i64_type, "ext")
+                        .or_llvm_err()?;
+                    builder.build_return(Some(&result)).or_llvm_err()?;
+                }
             }
         }
 
