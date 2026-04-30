@@ -592,9 +592,8 @@ impl Session {
             );
         }
 
-        // Phase-not-realised tracing for inert protocol-resolution
-        // knobs. The `[protocols]` manifest section parses 5 fields.
-        // Four are wired:
+        // The `[protocols]` manifest section parses 5 fields. ALL
+        // FIVE are wired:
         //   - `resolution_strategy` flows through
         //     `CommonPipelineConfig.protocol_resolution_strategy` →
         //     `SemanticAnalysisPhase::with_protocol_resolution_
@@ -615,24 +614,14 @@ impl Session {
         //     `register_protocol_decl_item`, which rejects HKT
         //     generic params on protocol declarations when the
         //     manifest sets it false (the default).  Closes #264.
-        // One remains inert:
-        //   - `generic_associated_types`: typed-surface
-        //     precondition for GATs (associated types with their
-        //     own type parameters); actual gating in the
-        //     unifier / type-checker is not yet realised.
+        //   - `generic_associated_types` flows the same path →
+        //     `TypeChecker.set_generic_associated_types_enabled` →
+        //     `register_protocol_decl_item`, which rejects
+        //     `type Item<T>` inside a protocol body when the
+        //     manifest sets it false (the default).  Closes #265.
         //
-        // Surface a warning when this still-inert flag is set.
-        let pr = &opts.language_features.protocols;
-        if pr.generic_associated_types {
-            tracing::warn!(
-                "manifest [protocols] surface: generic_associated_types={} (this field \
-                 lands on LanguageFeatures.protocols and is validated for legal values, \
-                 but no production gate consults it — GAT preconditions are \
-                 typed-surface declarations whose actual gating in the unifier / \
-                 type-checker is not yet wired)",
-                pr.generic_associated_types,
-            );
-        }
+        // No runtime warn! needed — every value the user can set
+        // produces observable typecheck behaviour.
 
         // Phase-not-realised tracing for inert proof-certificate
         // emission knobs. `CompilerOptions.emit_proof_certificate`

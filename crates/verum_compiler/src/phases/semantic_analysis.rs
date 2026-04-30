@@ -60,6 +60,12 @@ pub struct SemanticAnalysisPhase {
     /// registration time.  Routed to TypeChecker.higher_kinded_
     /// protocols_enabled at the start of `execute()`.
     protocol_higher_kinded_protocols: bool,
+    /// `[protocols].generic_associated_types` — when false (the
+    /// manifest default), a protocol declaring a generic
+    /// associated type (`type Item<T>`) is rejected at
+    /// registration time.  Routed to TypeChecker.generic_
+    /// associated_types_enabled at the start of `execute()`.
+    protocol_generic_associated_types: bool,
 }
 
 impl SemanticAnalysisPhase {
@@ -83,6 +89,7 @@ impl SemanticAnalysisPhase {
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
             protocol_higher_kinded_protocols: false,
+            protocol_generic_associated_types: false,
         }
     }
 
@@ -106,6 +113,7 @@ impl SemanticAnalysisPhase {
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
             protocol_higher_kinded_protocols: false,
+            protocol_generic_associated_types: false,
         }
     }
 
@@ -146,6 +154,16 @@ impl SemanticAnalysisPhase {
     /// session.rs:590.
     pub fn with_protocol_higher_kinded_protocols(mut self, enabled: bool) -> Self {
         self.protocol_higher_kinded_protocols = enabled;
+        self
+    }
+
+    /// Apply `[protocols].generic_associated_types` from manifest.
+    /// Threaded through to `TypeChecker.generic_associated_types_
+    /// enabled` at `phase_checker.set_generic_associated_types_
+    /// enabled(...)`. Closes the inert-defense pattern at
+    /// session.rs (#265).
+    pub fn with_protocol_generic_associated_types(mut self, enabled: bool) -> Self {
+        self.protocol_generic_associated_types = enabled;
         self
     }
 
@@ -344,6 +362,9 @@ impl CompilationPhase for SemanticAnalysisPhase {
         );
         phase_checker.set_higher_kinded_protocols_enabled(
             self.protocol_higher_kinded_protocols,
+        );
+        phase_checker.set_generic_associated_types_enabled(
+            self.protocol_generic_associated_types,
         );
 
         // If contracts are available, enable contract-aware type checking
