@@ -361,6 +361,43 @@ impl Session {
         //    abort() (core dump), "unwind" uses _exit(1) (clean exit).
         //    The value is read by LLVM codegen from the session's
         //    language_features when emitting panic blocks.
+
+        // Phase-not-realised tracing for inert codegen knobs.
+        // The `[codegen]` manifest section parses three fields
+        // — `tail_call_optimization`, `vectorize`,
+        // `monomorphization_cache` — and `inline_depth`. They
+        // land on `LanguageFeatures.codegen` but the actual
+        // codegen path doesn't gate on any of them: TCO is
+        // driven by LLVM's `-O` level and `noinline` attrs;
+        // loop vectorization is controlled by LLVM's loop-
+        // vectorize pass (driven by opt_level + per-loop
+        // attribute hints, not the global feature flag); the
+        // VBC mono phase has no caching toggle; the LLVM
+        // inliner consults its own threshold heuristic, not
+        // `inline_depth`.
+        //
+        // Surface a warning when any of these is set to a
+        // non-default value so a `[codegen] vectorize = false`
+        // setting in verum.toml doesn't silently produce
+        // identically-vectorised output. Default-valued
+        // configs stay quiet.
+        let cg = &opts.language_features.codegen;
+        if !cg.tail_call_optimization
+            || !cg.vectorize
+            || !cg.monomorphization_cache
+            || cg.inline_depth != 3
+        {
+            tracing::warn!(
+                "manifest [codegen] surface: tail_call_optimization={}, vectorize={}, \
+                 monomorphization_cache={}, inline_depth={} (these fields land on \
+                 LanguageFeatures.codegen but no production codegen path consults \
+                 them — LLVM's own pass pipeline is driven by opt_level)",
+                cg.tail_call_optimization,
+                cg.vectorize,
+                cg.monomorphization_cache,
+                cg.inline_depth,
+            );
+        }
     }
 
     /// Access the shared SMT routing statistics handle.
