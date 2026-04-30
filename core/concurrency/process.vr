@@ -37,6 +37,7 @@ module core.concurrency.process;
 
 mount core.*;
 mount core.collections.set.{Set};
+mount core.collections.map.{Map};
 
 // =============================================================================
 // 1. The process algebra
@@ -207,6 +208,171 @@ public fn substitute(p: Process, from: Text, to: Text) -> Process {
 }
 
 // =============================================================================
+// 4. α-equivalence (proper notion of process equality)
+// =============================================================================
+//
+// `Eq` (below) is structural / syntactic — `(νx) P` and `(νy) P[x:=y]`
+// compare unequal even though they denote the same process. The
+// canonical π-calculus equivalence is α-equivalence: two processes
+// are equal iff they differ only in the choice of bound names.
+//
+// ## Algorithm
+//
+// De Bruijn levels by parallel walk: as the walker descends into
+// `Restrict { name, body }` or `Recv { binder, cont }`, the binder
+// in `p` and the binder in `q` are bound to the SAME fresh
+// integer level (the current depth). Free names compare by
+// identity (textual equality); bound names compare by their
+// recorded depth. The two environments stay in step at every
+// binder, so syntactically-different bound names that occupy
+// the same de Bruijn position compare equal.
+//
+// ## Properties
+//
+//   * Reflexive:  `alpha_eq(p, p)`               for every `p`.
+//   * Symmetric:  `alpha_eq(p, q) ↔ alpha_eq(q, p)`.
+//   * Transitive: `alpha_eq(p, q) ∧ alpha_eq(q, r) → alpha_eq(p, r)`.
+//   * Substitutive: `alpha_eq(p, substitute(p, b, fresh))` whenever
+//     `b` is a binder in `p` and `fresh` is fresh for `p`.
+//
+// All four follow from the parallel-walk structure: every binder
+// in either side gets the same depth, and every leaf compares the
+// same depth-or-textual rule on both sides.
+//
+// ## Complexity
+//
+// O(min(|p|, |q|)) walks with O(d) per-binder cost where `d` is
+// nesting depth — env extension is a `Map<Text, Int>` insert. No
+// allocation beyond the per-binder cloning of the immutable env
+// snapshots passed down to subterms.
+
+/// Alpha-equivalence on π-calculus processes.
+///
+/// Returns `true` iff `p` and `q` denote the same process up to
+/// renaming of bound names. Use this in preference to `==` when
+/// comparing processes that may have been α-renamed by
+/// `substitute`'s capture-avoiding logic, or when comparing
+/// theorems / lemmas that quantify over processes.
+///
+/// # Examples
+///
+/// ```verum
+/// // Different binder names, same denotation.
+/// let p = proc_restrict("x", proc_send("x", "msg", proc_zero()));
+/// let q = proc_restrict("y", proc_send("y", "msg", proc_zero()));
+/// assert(alpha_eq(&p, &q));
+/// assert(p != q); // structural Eq disagrees, as documented.
+///
+/// // Free names must still match textually.
+/// let r = proc_send("free_chan", "msg", proc_zero());
+/// let s = proc_send("other_chan", "msg", proc_zero());
+/// assert(!alpha_eq(&r, &s));
+/// ```
+public fn alpha_eq(p: &Process, q: &Process) -> Bool {
+    let env_p: Map<Text, Int> = Map.new();
+    let env_q: Map<Text, Int> = Map.new();
+    alpha_eq_inner(p, q, &env_p, &env_q, 0)
+}
+
+/// Internal walker — see the section header for the algorithm.
+///
+/// `env_p[name] = level` means `name` is bound in `p` at the given
+/// de Bruijn level. Same for `env_q`. Levels are only meaningful
+/// across MATCHING positions in the two terms — the parallel walk
+/// invariant guarantees that any binder we reach in one side
+/// corresponds to the binder at the same depth in the other.
+fn alpha_eq_inner(
+    p: &Process,
+    q: &Process,
+    env_p: &Map<Text, Int>,
+    env_q: &Map<Text, Int>,
+    depth: Int,
+) -> Bool {
+    match (p, q) {
+        (Process.Zero, Process.Zero) => true,
+        (Process.Par { left: la, right: ra },
+         Process.Par { left: lb, right: rb }) => {
+            alpha_eq_inner(la, lb, env_p, env_q, depth)
+                && alpha_eq_inner(ra, rb, env_p, env_q, depth)
+        },
+        (Process.Restrict { name: na, body: ba },
+         Process.Restrict { name: nb, body: bb }) => {
+            // Bind both binders to the SAME level so leaf
+            // references resolve identically inside the bodies.
+            let mut new_env_p: Map<Text, Int> = clone_env(env_p);
+            let mut new_env_q: Map<Text, Int> = clone_env(env_q);
+            let _ = new_env_p.insert(na.clone(), depth);
+            let _ = new_env_q.insert(nb.clone(), depth);
+            alpha_eq_inner(ba, bb, &new_env_p, &new_env_q, depth + 1)
+        },
+        (Process.Send { channel: ca, message: ma, cont: ka },
+         Process.Send { channel: cb, message: mb, cont: kb }) => {
+            name_eq_under_env(ca, cb, env_p, env_q)
+                && name_eq_under_env(ma, mb, env_p, env_q)
+                && alpha_eq_inner(ka, kb, env_p, env_q, depth)
+        },
+        (Process.Recv { channel: ca, binder: bna, cont: ka },
+         Process.Recv { channel: cb, binder: bnb, cont: kb }) => {
+            // Channel resolves under the OUTER env; the binder
+            // only enters scope inside the continuation.
+            if !name_eq_under_env(ca, cb, env_p, env_q) {
+                return false;
+            }
+            let mut new_env_p: Map<Text, Int> = clone_env(env_p);
+            let mut new_env_q: Map<Text, Int> = clone_env(env_q);
+            let _ = new_env_p.insert(bna.clone(), depth);
+            let _ = new_env_q.insert(bnb.clone(), depth);
+            alpha_eq_inner(ka, kb, &new_env_p, &new_env_q, depth + 1)
+        },
+        (Process.Replicate { inner: ia },
+         Process.Replicate { inner: ib }) => {
+            alpha_eq_inner(ia, ib, env_p, env_q, depth)
+        },
+        // Variant mismatch — different process shapes can't be
+        // α-equivalent regardless of binders.
+        _ => false,
+    }
+}
+
+/// Compare two leaf names under the parallel walk's binding
+/// environments.
+///
+///   * Both bound at same level → equal (the binders introduced
+///     them at the same parallel depth).
+///   * Both free (not in env)   → must match textually (free
+///     names are a global namespace shared across both sides).
+///   * One bound, one free      → unequal (different binding
+///     status).
+fn name_eq_under_env(
+    a: &Text,
+    b: &Text,
+    env_a: &Map<Text, Int>,
+    env_b: &Map<Text, Int>,
+) -> Bool {
+    match (env_a.get_optional(a.clone()), env_b.get_optional(b.clone())) {
+        (Some(la), Some(lb)) => la == lb,
+        (None, None)         => a == b,
+        _                    => false,
+    }
+}
+
+/// Snapshot the binding environment for descent into a binder's
+/// scope. The snapshot allows the parent's env to remain
+/// unchanged when the recursion returns — siblings don't share
+/// the binder's scope.
+fn clone_env(env: &Map<Text, Int>) -> Map<Text, Int> {
+    let mut out: Map<Text, Int> = Map.new();
+    let mut iter = env.iter();
+    loop {
+        match iter.next() {
+            Some((k, v)) => { let _ = out.insert(k.clone(), *v); },
+            None         => break,
+        }
+    }
+    out
+}
+
+// =============================================================================
 // 5. Foundation Protocol Impls — Display + Debug + Eq for Process
 // =============================================================================
 
@@ -214,9 +380,9 @@ implement Eq for Process {
     /// Structural (syntactic) equality on π-calculus processes.
     /// Note: this is *not* α-equivalence — `(νx) P` and `(νy) P[x:=y]`
     /// compare unequal under this Eq even though they denote the
-    /// same process.  Use `alpha_eq` (when added) for α-equivalence;
-    /// callers that need α-canonical form should normalise via
-    /// `substitute` first.
+    /// same process.  Use `alpha_eq` (section 4 above) for the
+    /// proper π-calculus equivalence; callers that need α-canonical
+    /// form should normalise via `substitute` first.
     fn eq(&self, other: &Process) -> Bool {
         match (self, other) {
             (Process.Zero, Process.Zero) => true,
