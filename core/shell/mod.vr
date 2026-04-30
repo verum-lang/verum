@@ -38,6 +38,15 @@ public module result;
 public module context;
 public module permissions;
 public module exec;
+// `ShellCommand` — typed surface of `sh#"..."` tagged literals.
+// Pre-fix the type was phantom (the inferencer mapped `sh` →
+// `ShellCommand` but no module declared the type), so methods
+// like `cmd.run()` couldn't be called even though the literal
+// type-checked. Wired as a peer of `exec` so the literal-and-
+// runtime split is explicit: `command.vr` owns the value-level
+// type + value-level methods; `exec.vr` owns the async runtime
+// dispatchers (`sh`, `sh_check`, `sh_with_cancel`, `run`).
+public module command;
 public module executor;
 public module jobs;
 public module stream;

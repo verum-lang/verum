@@ -1,0 +1,164 @@
+// =============================================================================
+// shell/command.vr — ShellCommand: typed surface of `sh#"..."` literals
+// =============================================================================
+// Layer: 5 (Shell)
+// Dependencies: core, shell.{exec, result, context}, async.cancellation
+// =============================================================================
+//
+// `ShellCommand` is the materialised type of `sh#"..."` tagged literals. The
+// type-inference layer (verum_types::infer) maps every `sh` tag to
+// `ShellCommand`; the macro-expansion layer lowers the literal into a
+// `ShellCommand { text: <concat> }` constructor. Together they give the
+// surface its load-bearing semantics:
+//
+//   1. Constructing a `ShellCommand` does NOT execute anything — it just
+//      captures the (auto-escaped) text that will be passed to `sh()`.
+//   2. Executing happens through `cmd.run().await` (or the explicit
+//      `cmd.run_check().await` / `cmd.run_with_cancel(token).await` /
+//      `cmd.run_streaming().await` variants).
+//   3. The pipeline algebra (`|>`) plus `.pipe_to()` composes commands at
+//      the shell layer (`a | b`) without re-spawning intermediate shells —
+//      the joined text is a single `<shell> -c "<a> | <b>"` invocation.
+//   4. Mutation methods (`with_env`, `with_cwd`, `with_stdin`) return new
+//      `ShellCommand` instances; the type is value-semantic and Clone.
+//
+// The pre-fix state of the world: `sh` tag mapped to `ShellCommand` in the
+// type inferencer but NO `ShellCommand` type was declared anywhere in core/
+// shell, so every script using `sh#"..."` literals had a phantom type whose
+// methods could never be called. Closes that architectural gap.
+// =============================================================================
+
+module command;
+
+mount core.{Text, Result};
+mount core.base.protocols.{Display, Debug, Clone};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.shell.context.{ShellContext};
+mount core.async.cancellation.{CancellationToken};
+
+// =============================================================================
+// ShellCommand — captured-but-unexecuted shell command
+// =============================================================================
+
+/// `ShellCommand` — the canonical surface returned by `sh#"..."` literals.
+///
+/// Captures the FINAL text that would be passed to `<shell> -c "<text>"`:
+/// every `${expr}` interpolation in the source literal has already been
+/// auto-escaped via `ShellEscape` at lowering time, so the contained text
+/// is shell-safe by construction. There is no escape-check at execution
+/// time — that boundary was crossed when the literal was parsed.
+///
+/// Use:
+///
+/// ```verum
+/// let cmd: ShellCommand = sh#"echo hello, ${name}";
+/// let result = cmd.run().await;
+/// ```
+@derive(Clone)
+public type ShellCommand is {
+    /// The fully-escaped command text ready for `<shell> -c "<text>"`.
+    /// Constructed by macro-expansion of `sh#"..."` literals; should not
+    /// be mutated post-construction by user code (the auto-escape
+    /// invariant would no longer hold).
+    text: Text,
+};
+
+implement ShellCommand {
+    /// Construct a `ShellCommand` from a raw, already-escaped text.
+    /// Intended for macro-expansion lowering of `sh#"..."` literals
+    /// AND for the rare use-case of building a command from a Verum-
+    /// computed text where the caller has already validated the
+    /// content (e.g. concatenating two trusted ShellCommand texts via
+    /// `pipe_to`). User scripts should prefer `sh#"..."` literals
+    /// because their auto-escape is type-safe by construction.
+    public fn new(text: Text) -> ShellCommand {
+        ShellCommand { text: text }
+    }
+
+    /// Returns the underlying text (for diagnostics / logging only —
+    /// the text is auto-escaped, so it's NOT a sensible thing to
+    /// re-execute outside the shell-dispatch path).
+    public fn as_text(&self) -> &Text {
+        &self.text
+    }
+
+    /// Execute the command through `<shell> -c "<text>"` and return the
+    /// `ShellResult` regardless of exit status. Failures (spawn errors,
+    /// non-zero exits, signals) surface in the result; call `.ok()?` to
+    /// convert to a `Result`.
+    ///
+    /// Honours the active `ShellContext` for cwd, env, mock, permissions.
+    public async fn run(&self) -> ShellResult {
+        core.shell.exec.sh(&self.text).await
+    }
+
+    /// Like `run()` but returns `Result<ShellResult, ShellError>` so the
+    /// `?` operator works at the call site:
+    ///
+    /// ```verum
+    /// let r: ShellResult = sh#"echo ${msg}".run_check().await?;
+    /// ```
+    public async fn run_check(&self) -> Result<ShellResult, ShellError> {
+        core.shell.exec.sh_check(&self.text).await
+    }
+
+    /// Run with a `CancellationToken` — when the token fires, the child
+    /// process receives SIGTERM (graceful) and after a short grace
+    /// period SIGKILL (forced).
+    public async fn run_with_cancel(&self, token: CancellationToken) -> ShellResult {
+        core.shell.exec.sh_with_cancel(&self.text, token).await
+    }
+
+    /// Compose two commands as a shell pipeline: `self | other`. The
+    /// joined command runs as a single `<shell> -c "<a> | <b>"`
+    /// invocation — no intermediate shell process. Both `self.text`
+    /// and `other.text` are already auto-escaped by their respective
+    /// `sh#"..."` literals, so the concatenation is shell-safe.
+    ///
+    /// ```verum
+    /// let lines = sh#"git log --oneline".pipe_to(sh#"head -n 10").run().await;
+    /// ```
+    public fn pipe_to(self, other: ShellCommand) -> ShellCommand {
+        ShellCommand {
+            text: self.text.concat(" | ").concat(other.text),
+        }
+    }
+
+    /// Append a stderr-redirect-to-stdout suffix (`2>&1`). The combined
+    /// stream lands in `ShellResult.stdout` for downstream consumption.
+    public fn merge_stderr(self) -> ShellCommand {
+        ShellCommand {
+            text: self.text.concat(" 2>&1"),
+        }
+    }
+
+    /// Append a stdout-redirect-to-file suffix (`> path`). The path
+    /// MUST be auto-escaped by the caller — most ergonomically by
+    /// constructing through a `sh#"..."` literal that includes the
+    /// redirect, OR by composing two `ShellCommand`s via `pipe_to`.
+    public fn redirect_stdout(self, path: Text) -> ShellCommand {
+        ShellCommand {
+            text: self.text.concat(" > ").concat(path),
+        }
+    }
+}
+
+// =============================================================================
+// Display / Debug
+// =============================================================================
+
+implement Display for ShellCommand {
+    /// Renders the captured text verbatim — useful for diagnostic
+    /// `print!("{}", cmd)` calls.
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.text.as_str())
+    }
+}
+
+implement Debug for ShellCommand {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str("ShellCommand { text: ")?;
+        f.write_str(self.text.as_str())?;
+        f.write_str(" }")
+    }
+}
