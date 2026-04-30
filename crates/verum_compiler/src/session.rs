@@ -774,8 +774,16 @@ impl Session {
             TargetConfig::host()
         };
 
-        // Apply debug_assertions based on optimization level
-        config.debug_assertions = options.optimization_level == 0;
+        // Apply debug_assertions: prefer the manifest-side override
+        // when callers supply one (carries `[profile.<name>].
+        // debug_assertions` from Verum.toml). Falls back to the
+        // auto-derive `optimization_level == 0` rule when the
+        // override is absent.  Closes the inert-defense pattern at
+        // commands/build.rs:217-248 where the manifest value was
+        // tracing-only.
+        config.debug_assertions = options
+            .debug_assertions_override
+            .unwrap_or(options.optimization_level == 0);
 
         // Apply test mode
         config.test = options.test_mode;
@@ -1513,5 +1521,74 @@ impl SessionStats {
             "Session: {} files, {} modules, {} errors, {} warnings",
             self.num_files, self.num_modules, self.num_errors, self.num_warnings
         ).into()
+    }
+}
+
+#[cfg(test)]
+mod debug_assertions_override_tests {
+    use super::*;
+
+    #[test]
+    fn debug_assertions_override_false_wins_over_optlevel_zero() {
+        // Pin: when the manifest sets `[profile.dev].
+        // debug_assertions = false` (turn the flag OFF despite
+        // opt-level=0), the override flows through
+        // CompilerOptions.debug_assertions_override to
+        // TargetConfig.debug_assertions. Pre-fix the auto-derive
+        // `optimization_level == 0` rule was authoritative — every
+        // `@cfg(debug_assertions)` evaluated as if the manifest
+        // value didn't exist.
+        let mut opts = CompilerOptions::default();
+        opts.optimization_level = 0;
+        opts.debug_assertions_override = Some(false);
+        let session = Session::new(opts);
+        assert!(
+            !session.cfg_evaluator().config().debug_assertions,
+            "debug_assertions_override = Some(false) must win over \
+             auto-derive (optimization_level == 0 → true)"
+        );
+    }
+
+    #[test]
+    fn debug_assertions_override_true_wins_over_optlevel_three() {
+        // Pin: the inverse — `[profile.release].debug_assertions =
+        // true` (turn the flag ON despite opt-level=3) reaches
+        // TargetConfig.
+        let mut opts = CompilerOptions::default();
+        opts.optimization_level = 3;
+        opts.debug_assertions_override = Some(true);
+        let session = Session::new(opts);
+        assert!(
+            session.cfg_evaluator().config().debug_assertions,
+            "debug_assertions_override = Some(true) must win over \
+             auto-derive (optimization_level == 3 → false)"
+        );
+    }
+
+    #[test]
+    fn debug_assertions_falls_back_to_autoderive_when_no_override() {
+        // Pin: when the manifest doesn't set the field
+        // (debug_assertions_override = None), the auto-derive
+        // rule applies — opt-level=0 → debug_assertions=true,
+        // opt-level=3 → debug_assertions=false. Callers who
+        // don't explicitly configure the field get the unchanged
+        // historical behaviour.
+        let mut opts = CompilerOptions::default();
+        opts.optimization_level = 0;
+        opts.debug_assertions_override = None;
+        let session = Session::new(opts);
+        assert!(
+            session.cfg_evaluator().config().debug_assertions,
+            "no override + opt-level=0 must auto-derive to true"
+        );
+
+        let mut opts = CompilerOptions::default();
+        opts.optimization_level = 3;
+        opts.debug_assertions_override = None;
+        let session = Session::new(opts);
+        assert!(
+            !session.cfg_evaluator().config().debug_assertions,
+            "no override + opt-level=3 must auto-derive to false"
+        );
     }
 }

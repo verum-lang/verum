@@ -214,33 +214,44 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
         .num_threads(options.num_threads)
         .build_global();
 
-    // Surface inert Profile fields. The current build path
-    // consumes `verification`, `opt_level`, `incremental`, `lto`
-    // (via linker_config) — but not `tier` (CompilationTier
-    // selection beyond the `--release` flag), `debug_assertions`
-    // (runtime debug_assertions! macro gate), `overflow_checks`
-    // (panic-on-arithmetic-overflow gate), `codegen_units`
-    // (parallel-compilation unit count), or `cbgr_checks`
-    // (`All` / `Optimized` / `Proven` per-reference gate).
+    // Wire `Profile.debug_assertions` into `CompilerOptions.
+    // debug_assertions_override` so the manifest's
+    // `[profile.<name>].debug_assertions` reaches the cfg evaluator
+    // and gates `@cfg(debug_assertions)` accurately. Pre-fix this
+    // field was tracing-only — embedders writing
+    // `[profile.dev].debug_assertions = false` (turn the flag OFF
+    // despite opt-level=0) saw zero observable effect at the
+    // `@cfg(debug_assertions)` gate.  Set the override only when
+    // the manifest value differs from the auto-derive
+    // (`optimization_level == 0`) so callers who don't explicitly
+    // configure the field get the unchanged auto-detect behaviour.
+    let auto_debug_assertions = options.optimization_level == 0;
+    if profile.debug_assertions != auto_debug_assertions {
+        options.debug_assertions_override = Some(profile.debug_assertions);
+    }
+
+    // Surface still-inert Profile fields. The current build path
+    // does not consume `tier` (CompilationTier selection beyond the
+    // `--release` flag), `overflow_checks` (panic-on-arithmetic-
+    // overflow gate — needs MIR/VBC codegen integration),
+    // `codegen_units` (parallel-compilation unit count — needs LLVM
+    // backend wiring), or `cbgr_checks` (`All` / `Optimized` /
+    // `Proven` per-reference gate — needs CBGR pipeline plumbing).
     //
-    // Embedders writing `[profile.dev].overflow_checks = true`
-    // or `[profile.release].cbgr_checks = "Proven"` saw zero
-    // observable effect. Surface the values via tracing::debug!,
-    // gated on any non-default value, so the request is audible
-    // at the build entry until the pipeline integration lands.
+    // `debug_assertions` IS now wired above; the remaining fields
+    // are surfaced via tracing::debug! when set to non-default
+    // values so the request is audible at the build entry until
+    // the pipeline integration lands.
     let prof_default = crate::config::Profile::default();
     if profile.tier != prof_default.tier
-        || profile.debug_assertions != prof_default.debug_assertions
         || profile.overflow_checks != prof_default.overflow_checks
         || profile.codegen_units != prof_default.codegen_units
         || profile.cbgr_checks != prof_default.cbgr_checks
     {
         tracing::debug!(
             "build: profile fields not yet wired into NewCompilerOptions: \
-             tier={:?}, debug_assertions={}, overflow_checks={}, \
-             codegen_units={:?}, cbgr_checks={:?}",
+             tier={:?}, overflow_checks={}, codegen_units={:?}, cbgr_checks={:?}",
             profile.tier,
-            profile.debug_assertions,
             profile.overflow_checks,
             profile.codegen_units,
             profile.cbgr_checks,
