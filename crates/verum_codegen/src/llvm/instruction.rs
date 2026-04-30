@@ -16771,6 +16771,18 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(FfiSubOpcode::DerefRawSigned) => {
+            // The AOT `DerefRaw` lowering above already emits a
+            // `build_int_s_extend` for sub-i64 reads, so the AOT
+            // semantics match `DerefRawSigned`'s contract (the
+            // interpreter is the one that historically chose
+            // zero-extension as `DerefRaw`'s default — see comment
+            // there).  Reuse the same path: parse the same
+            // `(dst, ptr, size)` operand layout and recurse into the
+            // existing handler.
+            return lower_ffi_extended(ctx, FfiSubOpcode::DerefRaw as u8, operands);
+        }
+
         Some(FfiSubOpcode::DerefMutRaw) => {
             // Format: ptr:reg, value:reg, size:u8
             if operands.len() < 3 {

@@ -1015,15 +1015,36 @@ public const VM_FLAGS_RANDOM_ADDR: Int = 0x0008;
 
 /// Get the last error number.
 ///
-/// `__error()` is now declared as returning `&mut Int32` (the precise C
-/// type `int *`), so the deref reads exactly the four bytes libc owns.
-/// The historical mask-and-sign-extend workaround for the i64-deref-of-
-/// `int*` bug (#108) is folded into the FFI declaration itself.
+/// `__error()` returns `int *` (pointer to TLS errno slot).  Verum-side
+/// declared as `&mut Int32` to match the C type precisely.
+///
+/// The deref `*__error()` is the load-bearing read.  VBC's `Deref`
+/// instruction currently reads `sizeof(Value)=8` bytes regardless of
+/// the pointee type, so the 4-byte i32 errno slot leaks 4 bytes of
+/// adjacent TLS bookkeeping into the upper half (live evidence at
+/// `errno = 0x7E04ED1B 3000002F` — low 32 = real errno, high 32 =
+/// constant TLS leak).  Tracked under task #26 (typed deref opcodes:
+/// `DerefI8`/`DerefI16`/`DerefI32`/…).  Until that architectural fix
+/// lands, mask the leaked high bytes here.
+///
+/// errno values are always non-negative on POSIX (1..255 in practice),
+/// so a 32-bit zero-extending mask is the correct projection.  When
+/// the typed-deref work lands the mask becomes redundant — the
+/// `&mut Int32` reference will read exactly four bytes by design.
 public fn errno() -> Int {
-    unsafe { *__error() as Int }
+    unsafe {
+        // BUG-#26 workaround: mask the upper 32 bits leaked by the
+        // Value-sized Deref read.  errno is always non-negative, so
+        // zero-extension via the mask is the correct semantics.
+        (*__error() as Int) & 0xFFFFFFFF
+    }
 }
 
-/// Set the error number
+/// Set the error number.
+///
+/// Writes the i32 errno slot via `*__error() = err as Int32`.  The
+/// `DerefMut` write side is not affected by the read-side
+/// 8-vs-4-byte bug — `Int32` truncation happens before the write.
 public fn set_errno(err: Int) {
     unsafe { *__error() = err as Int32; }
 }
