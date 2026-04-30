@@ -1,0 +1,30 @@
+// =============================================================================
+// core/concurrency/mod.vr — Stdlib surface for typed concurrency models
+// =============================================================================
+// Layer: Standard Library / Concurrency
+// =============================================================================
+//
+// Higher-level concurrency primitives that go beyond the plain
+// `core.async` / `core.sync` layer — these are TYPED concurrency
+// models where the type system enforces the protocol shape:
+//
+//   * `process.vr` — Process-calculus-style concurrent primitives.
+//     Aligns with the Hoare-CSP / π-calculus tradition: processes
+//     interact through typed channels, with the type system
+//     tracking the protocol grammar.
+//
+//   * `session.vr` — Session-typed channel protocols (Honda-
+//     Vasconcelos-Kubo 1998). Linearly-tracked channels carrying
+//     a type-level session-protocol grammar (`Send<T>; Recv<U>;
+//     End`). Misuse (skipping a step, double-receive) is a
+//     type-error rather than a runtime deadlock.
+//
+// Distinct from `core.async` (Future/Task/Channel without
+// type-level protocols) and `core.sync` (Mutex/RwLock/atomics —
+// shared-memory concurrency primitives).
+// =============================================================================
+
+module core.concurrency;
+
+public module process;
+public module session;

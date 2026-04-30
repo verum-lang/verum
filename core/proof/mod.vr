@@ -1,0 +1,36 @@
+// =============================================================================
+// core/proof/mod.vr — Stdlib surface for the verification kernel
+// =============================================================================
+// Layer: Standard Library / Proof
+// =============================================================================
+//
+// User-facing entry point for compile-time + runtime proof tooling.
+// The compiler owns the SMT/kernel pipeline; this module exposes
+// ergonomic Verum-level handles so user code can:
+//
+//   * Reference older snapshot state in postconditions via `old(...)`
+//     (`contracts_old.vr` — surface for `verum_types.contracts_old`).
+//   * Bundle Necula-style proof certificates with bytecode
+//     (`pcc.vr` — Proof-Carrying Code over a content-addressed
+//     `Map<GoalHash, ProofCertificate>`).
+//   * Reflect a function as an SMT-LIB axiom for use in proof tactics
+//     (`reflection.vr` — `reflected_fn` with sort-safety + injection-
+//     prevention guards).
+//   * Tactic library composition (`tactics/` — combinators, default
+//     tactics, custom-tactic registration).
+//   * Kernel-bridge primitives that translate between AST proof terms
+//     and the internal kernel's term language (`kernel_bridge.vr`).
+//
+// All modules in this surface are re-export-only at the umbrella
+// level: a downstream consumer can pick which sub-surface to import,
+// matching the rest of the stdlib's "explicit dependencies, no
+// magic prelude" rule.
+// =============================================================================
+
+module core.proof;
+
+public module contracts_old;
+public module kernel_bridge;
+public module pcc;
+public module reflection;
+public module tactics;

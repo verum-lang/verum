@@ -305,6 +305,46 @@ public module mesh;
 // re-export common Actic helpers in a follow-up.
 public module action;
 
+// =============================================================================
+// Layer A: Verification + Logic Foundations (Depends on: math, base, smt)
+// =============================================================================
+//
+// Eight modules that sit alongside `core.action` as the
+// verification + logic foundation layer. Pre-fix every one of these
+// was unrooted in `core/mod.vr` despite shipping production code
+// + downstream consumers — discovered via a side-by-side compare
+// of the directory listing against the registered-modules grep.
+// Each gets a real module declaration here AND (for the six that
+// previously lacked one) a freshly-authored `mod.vr` re-exporting
+// the children with a doc-header tying the module into the
+// architectural layering.
+//
+//   * `core.proof`        — verification kernel surface
+//                           (contracts_old, kernel_bridge, pcc,
+//                           reflection, tactics)
+//   * `core.types`        — research-grade type machinery
+//                           (poly_kinds, qtt, two_level)
+//   * `core.verify`       — first-class verification API
+//                           (level, attempt, certificate, coherence)
+//   * `core.logic`        — non-classical logic kernels
+//                           (kripke, linear)
+//   * `core.concurrency`  — typed concurrency models
+//                           (process, session)
+//   * `core.eval`         — evaluation strategies
+//                           (cbpv)
+//   * `core.control`      — control-flow primitives
+//                           (continuation)
+//   * `core.database`     — Spindle DB client framework
+//                           (common, sqlite, postgres, mysql)
+public module proof;
+public module types;
+public module verify;
+public module logic;
+public module concurrency;
+public module eval;
+public module control;
+public module database;
+
 // Theory interoperation: a computational ∞-topos of formally
 // represented theories. Theory loading (Yoneda), translation
 // (Kan extensions), coherence (descent), auditing, and a

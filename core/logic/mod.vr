@@ -1,0 +1,30 @@
+// =============================================================================
+// core/logic/mod.vr — Stdlib surface for non-classical logic kernels
+// =============================================================================
+// Layer: Standard Library / Logic
+// =============================================================================
+//
+// Non-classical logic kernels for verification + reasoning over
+// modal / linear / temporal / sub-structural propositions:
+//
+//   * `kripke.vr` — Kripke semantics for modal logic. World-relation
+//     models for ◻/◇ modalities, used by the temporal-logic
+//     verification path (LTL/CTL backends in
+//     `verum_smt::temporal_logic`) and by the epistemic-logic
+//     library in `core.math.epistemic`.
+//
+//   * `linear.vr` — Linear logic primitives (Girard 1987): linear
+//     implication ⊸, additive ⊕/&, multiplicative ⊗/⅋, exponentials
+//     !/?. The backbone for resource-aware reasoning + the
+//     Ludics-design surface in `core.action.ludics`.
+//
+// Both modules expose the abstract syntax + decision procedures;
+// the SMT-side encodings live in `verum_smt`. Verum programs
+// import these to define propositions over the logic, then use
+// `@verify(...)` to discharge them through the matching backend.
+// =============================================================================
+
+module core.logic;
+
+public module kripke;
+public module linear;
