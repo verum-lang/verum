@@ -11925,27 +11925,60 @@ impl<'s> CompilationPipeline<'s> {
 
         let mut codegen = VbcCodegen::with_config(config);
 
-        // Run CBGR tier analysis: escape analysis → tier determination → RefChecked/RefUnsafe emission.
-        // Promotes non-escaping references from Tier 0 (~15ns) to Tier 1 (0ns).
+        // Run CBGR tier analysis: escape analysis → tier determination
+        // → RefChecked/RefUnsafe emission.  Promotes non-escaping refs
+        // from Tier 0 (~15ns) to Tier 1 (0ns).
+        //
+        // #118 — correctness fix + parallelisation.
+        //
+        // Pre-fix the merge loop iterated `0..func_tc.decision_count()`
+        // and constructed `ExprId(i)` for `i in 0..N`, but
+        // `from_analysis_result` populates decisions with span-encoded
+        // `ExprId(start<<32|end)` keys.  The `get_tier(ExprId(i))`
+        // lookup always missed and the merge silently inserted only
+        // `default_tier` (Tier0).  CBGR tier promotion was therefore
+        // NEVER applied to user code — every reference got Tier 0
+        // CBGR overhead at runtime, defeating the language's headline
+        // memory-safety/perf trade-off.  Now we use the canonical
+        // `iter_decisions()` API so real ExprId-keyed promotions reach
+        // codegen.  Per-function analyses also fan out via rayon —
+        // each `TierAnalyzer` is independent, results merge into the
+        // module-level `TierContext` under a single Mutex held only
+        // for the per-function append (microsecond-scale).
         let tier_start = std::time::Instant::now();
         let tier_context = {
             use crate::phases::cfg_constructor::CfgConstructor;
             use verum_cbgr::tier_analysis::TierAnalyzer;
             let module_cfg = CfgConstructor::from_module(module);
-            let mut tc = TierContext::new();
-            for (_func_id, func_cfg) in module_cfg.functions.iter() {
+            let parallel_tier =
+                std::env::var("VERUM_NO_PARALLEL_TIER").is_err();
+
+            let aggregate = std::sync::Mutex::new(TierContext::new());
+            let analyse_one = |func_cfg: &crate::phases::cfg_constructor::FunctionCfg| {
                 let analyzer = TierAnalyzer::with_config(
                     func_cfg.cfg.clone(),
                     verum_cbgr::tier_analysis::TierAnalysisConfig::minimal(),
                 );
                 let analysis_result = analyzer.analyze();
                 let func_tc = TierContext::from_analysis_result(&analysis_result);
-                for expr_id_idx in 0..func_tc.decision_count() {
-                    let expr_id = verum_vbc::codegen::context::ExprId(expr_id_idx as u64);
-                    let tier = func_tc.get_tier(expr_id);
-                    tc.set_tier(expr_id, tier);
+                let mut g = aggregate.lock().unwrap();
+                g.merge_from(&func_tc);
+            };
+
+            if parallel_tier && module_cfg.functions.len() > 1 {
+                use rayon::prelude::*;
+                let cfgs: Vec<_> = module_cfg
+                    .functions
+                    .values()
+                    .collect();
+                cfgs.par_iter().for_each(|func_cfg| analyse_one(func_cfg));
+            } else {
+                for (_func_id, func_cfg) in module_cfg.functions.iter() {
+                    analyse_one(func_cfg);
                 }
             }
+
+            let mut tc = aggregate.into_inner().unwrap();
             tc.enabled = true;
             tc
         };
