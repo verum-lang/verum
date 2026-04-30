@@ -379,11 +379,90 @@ impl SecurityScanner {
         &self.audit_log
     }
 
-    /// Save audit log to file
+    /// Save audit log to file (JSON pretty-printed). Atomic via
+    /// write-to-tmp + rename so a partial write never corrupts the
+    /// on-disk audit history.
     pub fn save_audit_log(&self, path: &Path) -> Result<()> {
         let content = serde_json::to_string_pretty(&self.audit_log)?;
-        std::fs::write(path, content)?;
+        // Atomic write: write to a sibling tmp file then rename
+        // into place. Both failure modes (mid-write crash, full
+        // disk during rename) leave the existing file unchanged.
+        let tmp_path = path.with_extension("audit-tmp");
+        std::fs::write(&tmp_path, content).map_err(|e| {
+            CliError::Custom(format!(
+                "failed to write audit log tmp file at {}: {}",
+                tmp_path.display(),
+                e
+            ))
+        })?;
+        std::fs::rename(&tmp_path, path).map_err(|e| {
+            // Clean up the orphan tmp on rename failure so a
+            // future invocation doesn't leak it.
+            let _ = std::fs::remove_file(&tmp_path);
+            CliError::Custom(format!(
+                "failed to atomically replace audit log {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
         Ok(())
+    }
+
+    /// Load audit log from file (JSON). Missing file is silently
+    /// treated as an empty log — first-run bootstrap is the same
+    /// shape as a freshly-deleted file. Corrupt JSON returns an
+    /// error so the caller can decide whether to abort or rebuild.
+    pub fn load_audit_log(&mut self, path: &Path) -> Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            CliError::Custom(format!(
+                "failed to read audit log at {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+        let entries: Vec<AuditEntry> = serde_json::from_str(&content).map_err(|e| {
+            CliError::Custom(format!(
+                "audit log at {} is not valid JSON: {}",
+                path.display(),
+                e
+            ))
+        })?;
+        self.audit_log = entries.into();
+        Ok(())
+    }
+
+    /// Drop audit entries older than `retention_days` from now (UTC).
+    /// `0` is a sentinel meaning "never evict" — preserves entries
+    /// indefinitely. Returns the number of entries evicted.
+    ///
+    /// Called by `CogManager::new` after `load_audit_log` so the
+    /// in-memory log starts within the retention window even if
+    /// the on-disk file accumulated stale entries between runs.
+    pub fn evict_older_than(&mut self, retention_days: u32) -> usize {
+        if retention_days == 0 {
+            return 0;
+        }
+        let now = chrono::Utc::now().timestamp();
+        // Retention is in days — 86400 seconds per day. We use i64
+        // throughout to match `AuditEntry.timestamp` and avoid
+        // signed/unsigned coercion at the boundary.
+        let cutoff = now.saturating_sub(retention_days as i64 * 86_400);
+        let before = self.audit_log.iter().count();
+        // Rebuild the audit_log by retaining entries newer than the
+        // cutoff. `verum_common::List` doesn't have a `retain` so
+        // we filter into a fresh List.
+        let kept: List<AuditEntry> = self
+            .audit_log
+            .iter()
+            .filter(|e| e.timestamp >= cutoff)
+            .cloned()
+            .collect();
+        let evicted = before.saturating_sub(kept.iter().count());
+        self.audit_log = kept;
+        evicted
     }
 
     /// Generate security report
@@ -513,6 +592,98 @@ impl<'de> serde::Deserialize<'de> for VulnerabilityDatabase {
             vulnerabilities: helper.vulnerabilities,
             last_updated: helper.last_updated,
         })
+    }
+}
+
+#[cfg(test)]
+mod audit_persistence_tests {
+    //! Pin tests for the audit-log persistence wiring (close #235).
+    //! Pre-fix audit entries lived in-memory only; these tests pin
+    //! the load/save/evict cycle that closes the gap.
+    use super::*;
+
+    fn entry_at(ts: i64, action: AuditAction) -> AuditEntry {
+        AuditEntry {
+            timestamp: ts,
+            action,
+            package: None,
+            version: None,
+            user: None,
+            details: Text::from(""),
+        }
+    }
+
+    #[test]
+    fn save_then_load_round_trips_entries() {
+        // Use a unique tmp path inside the system tmp dir.
+        let path = std::env::temp_dir().join(format!(
+            "verum-audit-roundtrip-{}.json",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+
+        let mut s = SecurityScanner::new();
+        s.audit_log.push(entry_at(100, AuditAction::Install));
+        s.audit_log.push(entry_at(200, AuditAction::Update));
+        s.save_audit_log(&path).expect("save");
+        assert!(path.exists(), "save_audit_log must produce the file");
+
+        let mut s2 = SecurityScanner::new();
+        assert_eq!(s2.audit_log.iter().count(), 0, "fresh scanner is empty");
+        s2.load_audit_log(&path).expect("load");
+        assert_eq!(s2.audit_log.iter().count(), 2, "round-trip preserves count");
+
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_missing_file_yields_empty_log_no_error() {
+        let path = std::env::temp_dir().join(format!(
+            "verum-audit-does-not-exist-{}.json",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut s = SecurityScanner::new();
+        s.load_audit_log(&path).expect("missing file = empty log");
+        assert_eq!(
+            s.audit_log.iter().count(),
+            0,
+            "missing file must leave the log empty"
+        );
+    }
+
+    #[test]
+    fn evict_zero_retention_means_never_evict() {
+        let mut s = SecurityScanner::new();
+        s.audit_log.push(entry_at(0, AuditAction::Install));
+        let evicted = s.evict_older_than(0);
+        assert_eq!(evicted, 0, "retention_days=0 is the never-evict sentinel");
+        assert_eq!(s.audit_log.iter().count(), 1);
+    }
+
+    #[test]
+    fn evict_drops_old_entries_keeps_recent() {
+        let mut s = SecurityScanner::new();
+        let now = chrono::Utc::now().timestamp();
+        // Old entry: 100 days ago — outside any reasonable window.
+        s.audit_log.push(entry_at(now - 100 * 86_400, AuditAction::Install));
+        // Recent entry: 1 day ago — within a 30-day window.
+        s.audit_log.push(entry_at(now - 86_400, AuditAction::Update));
+        let evicted = s.evict_older_than(30);
+        assert_eq!(evicted, 1, "exactly one entry past the 30-day window");
+        assert_eq!(s.audit_log.iter().count(), 1, "recent entry retained");
+    }
+
+    #[test]
+    fn save_to_invalid_path_yields_error() {
+        let s = SecurityScanner::new();
+        // Pick a path inside a non-existent directory — both the
+        // tmp file write and the rename will fail. The atomic-
+        // write helper must surface the error rather than silently
+        // succeeding with no file produced.
+        let bad = std::path::PathBuf::from("/nonexistent-dir-xyz/verum-audit.json");
+        let result = s.save_audit_log(&bad);
+        assert!(result.is_err(), "save into non-existent dir must error");
     }
 }
 
