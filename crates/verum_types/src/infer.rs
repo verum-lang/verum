@@ -34513,32 +34513,25 @@ impl TypeChecker {
                     Type::unit()
                 };
 
-                // Wrap return type in Result<T, E> for `throws(E)` functions,
-                // then Future<T> for async. This is the cross-module
-                // function-signature extraction path — invoked when a
-                // user module imports a function from another inline
-                // module. Without the throws wrap here, callers see the
-                // raw body type (not `Result<T, E>`) and `.map_err` / `?`
-                // fail at the call site.
-                let return_type_with_throws = if let Maybe::Some(ref tc) = func.throws_clause {
-                    if !tc.error_types.is_empty() {
-                        let error_ty = tc.error_types.iter().next()
-                            .and_then(|t| self.ast_to_type(t).ok())
-                            .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
-                        Type::result(return_type, error_ty)
-                    } else {
-                        return_type
-                    }
-                } else {
-                    return_type
-                };
-                let final_return_type = if func.is_async {
-                    Type::Future {
-                        output: Box::new(return_type_with_throws),
-                    }
-                } else {
-                    return_type_with_throws
-                };
+                // Wrap return type via the unified helper so this
+                // cross-module function-signature extraction path
+                // produces the SAME shape as `infer_function_type`
+                // (line 8295) and `register_function_signature`
+                // (line 53011): throws → generator → async, in that
+                // order.  Pre-fix this path manually applied throws +
+                // async but DROPPED the generator wrap, so a mounted
+                // `async fn* foo() -> Y` registered as `Future<Y>`
+                // instead of `Future<Generator<Y, Unit>>`.  Manifested
+                // at every cross-module `for await x in foo()` call
+                // site as "for await requires AsyncIterator … got
+                // Future<Y>" (SHELL-5a, closes the gap left by the
+                // partial fix in commit e09e6d5a).
+                let final_return_type = self.wrap_return_type_for_sig_full(
+                    return_type,
+                    &func.throws_clause,
+                    func.is_async,
+                    func.is_generator,
+                );
 
                 return Some((Type::Function {
                     params: param_types,
