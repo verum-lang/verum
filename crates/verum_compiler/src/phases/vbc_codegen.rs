@@ -208,15 +208,19 @@ impl VbcCodegenPhase {
 
             // Merge results into tier context using span-based ExprId mapping
             // TierContext::from_analysis_result handles RefId→ExprId conversion
-            // via the span mappings preserved in analysis_result
+            // via the span mappings preserved in analysis_result.
             let func_tier_context = TierContext::from_analysis_result(&analysis_result);
 
-            // Merge function-level decisions into module-level context
-            for expr_id in 0..func_tier_context.decision_count() {
-                let expr_id = verum_vbc::codegen::context::ExprId(expr_id as u64);
-                let tier = func_tier_context.get_tier(expr_id);
-                tier_context.set_tier(expr_id, tier);
-            }
+            // Merge function-level decisions into module-level context.
+            //
+            // #118 — `func_tier_context.decisions` is keyed by
+            // span-encoded ExprIds `(start<<32)|end`, NOT 0..N.
+            // The pre-#118 `0..decision_count()` loop constructed
+            // `ExprId(i)` and looked up Tier1 decisions that were
+            // never stored at those keys, silently dropping every
+            // promotion. The canonical merge uses `merge_from`,
+            // exposing the actual span-encoded keys directly.
+            tier_context.merge_from(&func_tier_context);
         }
 
         // Enable tier context with collected decisions
