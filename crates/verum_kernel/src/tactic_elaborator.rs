@@ -44,19 +44,49 @@
 //!   - [`ElabError`] — structured error type for unsupported tactic
 //!     forms, undeclared lemmas, unsupported expression shapes.
 //!
-//! # What this module does NOT provide (yet)
+//! # Current coverage (Phase-1 through Phase-6)
 //!
-//! Phase-1 deliberately handles *only* the simplest tactic shape:
+//! **Tactics handled** (produce kernel-readable Terms):
 //!
-//!   - Single-line `apply <lemma>(<args>);` bodies.
-//!   - `Reflexivity` (refl) for definitional-equality goals.
-//!   - `Exact <expr>` for direct term-witness proofs.
+//!   - `Apply { lemma, args }` — `apply <lemma>(<args>);`.  The
+//!     primary shape — covers every kernel_v0/lemmas/ stub and
+//!     every `@delegate` theorem.
+//!   - `Reflexivity` — `refl` for definitional-equality goals
+//!     (Phase-1 produces innermost-binder reference; Phase-7 wires
+//!     proper `DefinitionalEquality` witness).
+//!   - `Exact(expr)` — direct term-witness proofs.
 //!
-//! Phase-2 (#153) will add: `Seq` of multiple steps, `Intro`
-//! (introduces a binder + recurses), `Rewrite` (uses Beta/Eta
-//! conversion), induction principles.  Phase-3 (#162) ports SMT/Ring/
-//! Omega tactic certificates through `proof_replay` to produce
-//! kernel-readable terms.
+//! **Proof body forms handled**:
+//!
+//!   - `ProofBody::Tactic(<supported tactic>)` — delegates above.
+//!   - `ProofBody::Term(expr)` — direct Curry-Howard term.
+//!
+//! **Proposition shapes translated**:
+//!
+//!   - `Literal(Bool::*)` → `Universe(0)` (trivially-inhabited).
+//!   - `Path(name)`, `Field(...)`, `Call(...)` → axiom resolution.
+//!   - `Binary { op, .. }` (12 ops) → connective App-chain via
+//!     opaque axiom (Phase-5).
+//!   - `Unary { op: Not, .. }` → `Not` connective App.
+//!
+//! **Theorem-level integration** (Phase-6 / #167):
+//!
+//!   - `elaborate_theorem` builds a `VerificationGoal` and uses
+//!     `goal.to_term()` as the certificate's claimed type.  The
+//!     verification surface is unified across theorems / lemmas /
+//!     corollaries / (future) fn-contracts and refinements.
+//!
+//! # Backlog (deferred)
+//!
+//!   - Phase-7 (#153 follow-up): `Seq` of multiple tactic steps via
+//!     let-bindings; `Intro`, `Rewrite` (Beta/Eta), `Induction`.
+//!   - Phase-7+: full Leibniz / Church / Pi primitive encodings of
+//!     connectives so the kernel UNDERSTANDS them, not just APPLIES
+//!     them.
+//!   - Phase-8 (#162): SMT / Ring / Omega tactic certificate replay
+//!     through `proof_replay` → kernel `Term`.
+//!   - Quantifiers (forall / exists), pattern matches in
+//!     propositions, complex tactic composers (`AllGoals`, `Focus`).
 //!
 //! # Usage pattern
 //!
