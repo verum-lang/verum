@@ -2252,6 +2252,14 @@ pub enum TacticBody {
 ///     show R by apply lemma[h1, h2]
 /// }
 /// ```
+///
+/// # Discriminator
+///
+/// Use [`ProofBody::kind`] when you only need to know which mode
+/// (Term/Tactic/Structured/ByMethod) without unpacking the payload —
+/// audit-gate JSON, diagnostic rendering, hash-based deduplication.
+/// Direct pattern-match on `ProofBody::*` remains the right call when
+/// you need the inner payload to walk it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ProofBody {
     /// Explicit proof term (Curry-Howard style)
@@ -2265,6 +2273,80 @@ pub enum ProofBody {
 
     /// Proof by specific method (induction, cases, etc.)
     ByMethod(ProofMethod),
+}
+
+/// Payload-free discriminator for [`ProofBody`].  Lets consumers
+/// classify proof bodies by mode without pattern-matching on the
+/// payload variants.  Stable JSON tags (`"term"` / `"tactic"` /
+/// `"structured"` / `"by_method"`) make this safe for audit-gate
+/// emission and round-trip via serde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProofBodyKind {
+    /// `ProofBody::Term`.
+    Term,
+    /// `ProofBody::Tactic`.
+    Tactic,
+    /// `ProofBody::Structured`.
+    Structured,
+    /// `ProofBody::ByMethod`.
+    ByMethod,
+}
+
+impl ProofBodyKind {
+    /// Stable string tag — used by audit gates and JSON exporters.
+    pub fn tag(self) -> &'static str {
+        match self {
+            ProofBodyKind::Term => "term",
+            ProofBodyKind::Tactic => "tactic",
+            ProofBodyKind::Structured => "structured",
+            ProofBodyKind::ByMethod => "by_method",
+        }
+    }
+}
+
+impl ProofBody {
+    /// Project the discriminator without unpacking the payload.
+    /// Constant-time; used by audit gates, diagnostic renderers,
+    /// and JSON exporters that only need the mode tag.
+    pub fn kind(&self) -> ProofBodyKind {
+        match self {
+            ProofBody::Term(_) => ProofBodyKind::Term,
+            ProofBody::Tactic(_) => ProofBodyKind::Tactic,
+            ProofBody::Structured(_) => ProofBodyKind::Structured,
+            ProofBody::ByMethod(_) => ProofBodyKind::ByMethod,
+        }
+    }
+
+    /// Whether this is a `Term` body (direct Curry-Howard term).
+    pub fn is_term(&self) -> bool {
+        matches!(self, ProofBody::Term(_))
+    }
+
+    /// Whether this is a `Tactic` body (declarative tactic chain).
+    pub fn is_tactic(&self) -> bool {
+        matches!(self, ProofBody::Tactic(_))
+    }
+
+    /// Whether this is a `Structured` body (multi-step structured proof).
+    pub fn is_structured(&self) -> bool {
+        matches!(self, ProofBody::Structured(_))
+    }
+
+    /// Whether this is a `ByMethod` body (induction / cases / contradiction).
+    pub fn is_by_method(&self) -> bool {
+        matches!(self, ProofBody::ByMethod(_))
+    }
+
+    /// Whether this proof is **constructive** in the Curry-Howard sense
+    /// — i.e., directly produces a term.  Currently `Term` is
+    /// constructive; the others may or may not be depending on the
+    /// tactic / method used.  This conservative test returns `true`
+    /// only when the elaborator can guarantee a term is produced
+    /// without further reduction.
+    pub fn is_directly_constructive(&self) -> bool {
+        self.is_term()
+    }
 }
 
 /// A structured proof with intermediate steps.
@@ -3062,5 +3144,99 @@ impl PatternDecl {
 impl Spanned for PatternDecl {
     fn span(&self) -> Span {
         self.span
+    }
+}
+
+
+#[cfg(test)]
+mod proof_body_kind_tests {
+    use super::*;
+    use verum_common::Span;
+
+    fn span() -> Span {
+        Span::dummy()
+    }
+
+    fn term_body() -> ProofBody {
+        ProofBody::Term(Heap::new(crate::expr::Expr::new(
+            crate::expr::ExprKind::Literal(crate::Literal::bool(true, span())),
+            span(),
+        )))
+    }
+
+    fn tactic_body() -> ProofBody {
+        ProofBody::Tactic(TacticExpr::Trivial)
+    }
+
+    fn structured_body() -> ProofBody {
+        ProofBody::Structured(ProofStructure {
+            steps: List::new(),
+            conclusion: Maybe::None,
+            span: span(),
+        })
+    }
+
+    fn by_method_body() -> ProofBody {
+        ProofBody::ByMethod(ProofMethod::Induction {
+            on: Maybe::None,
+            cases: List::new(),
+        })
+    }
+
+    #[test]
+    fn kind_returns_correct_discriminator_per_variant() {
+        assert_eq!(term_body().kind(), ProofBodyKind::Term);
+        assert_eq!(tactic_body().kind(), ProofBodyKind::Tactic);
+        assert_eq!(structured_body().kind(), ProofBodyKind::Structured);
+        assert_eq!(by_method_body().kind(), ProofBodyKind::ByMethod);
+    }
+
+    #[test]
+    fn is_predicates_match_kind() {
+        assert!(term_body().is_term());
+        assert!(!term_body().is_tactic());
+        assert!(tactic_body().is_tactic());
+        assert!(!tactic_body().is_term());
+        assert!(structured_body().is_structured());
+        assert!(by_method_body().is_by_method());
+    }
+
+    #[test]
+    fn is_directly_constructive_only_for_term() {
+        assert!(term_body().is_directly_constructive());
+        assert!(!tactic_body().is_directly_constructive());
+        assert!(!structured_body().is_directly_constructive());
+        assert!(!by_method_body().is_directly_constructive());
+    }
+
+    #[test]
+    fn proof_body_kind_tag_is_stable_for_serde() {
+        assert_eq!(ProofBodyKind::Term.tag(), "term");
+        assert_eq!(ProofBodyKind::Tactic.tag(), "tactic");
+        assert_eq!(ProofBodyKind::Structured.tag(), "structured");
+        assert_eq!(ProofBodyKind::ByMethod.tag(), "by_method");
+    }
+
+    #[test]
+    fn proof_body_kind_serde_round_trip_uses_snake_case() {
+        let kind = ProofBodyKind::ByMethod;
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(json, "\"by_method\"");
+        let restored: ProofBodyKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, kind);
+    }
+
+    #[test]
+    fn all_four_kinds_have_distinct_tags() {
+        let tags: std::collections::BTreeSet<_> = [
+            ProofBodyKind::Term,
+            ProofBodyKind::Tactic,
+            ProofBodyKind::Structured,
+            ProofBodyKind::ByMethod,
+        ]
+        .iter()
+        .map(|k| k.tag())
+        .collect();
+        assert_eq!(tags.len(), 4);
     }
 }
