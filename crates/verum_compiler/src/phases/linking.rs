@@ -1394,6 +1394,21 @@ impl FinalLinker {
 
         let mut cmd = Command::new("cc");
 
+        // Honour `LinkingConfig.use_llvm_linker` in the
+        // executable / static-archive linking path. Pre-fix the
+        // field was only consulted by `system_link_dynamic` (the
+        // shared-library path at line ~963), so a manifest setting
+        // like `[linker] use_lld = true` had no effect on
+        // executables — `system_link_direct` always invoked
+        // whatever linker `cc` defaults to. Pass `-fuse-ld=lld`
+        // when the flag is set; the cc driver forwards it to the
+        // underlying linker selection. Fail-soft: if lld isn't
+        // installed, cc will error out with its own diagnostic
+        // and the user sees the gap directly.
+        if self.config.use_llvm_linker {
+            cmd.arg("-fuse-ld=lld");
+        }
+
         // V-LLSI: Apply no-libc flags first (must come before object files)
         if let Some(ref no_libc) = self.config.no_libc_config {
             for flag in &no_libc.flags {
