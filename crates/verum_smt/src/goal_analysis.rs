@@ -54,6 +54,33 @@ impl GoalAnalyzer {
 
     /// Create a new goal analyzer with custom thresholds
     pub fn with_thresholds(thresholds: ComplexityThresholds) -> Self {
+        // Phase-not-realised: `ComplexityThresholds.complex_depth`
+        // is documented as the boundary above which "Complex
+        // formulas (depth 6+): purify-arith or split-clause"
+        // tactics are selected, but the actual dispatch in
+        // `select_adaptive_tactic` (lines 198-206) only branches on
+        // `simple_depth` and `medium_depth` — anything past
+        // `medium_depth` falls into the same arithmetic-or-not split
+        // regardless of how high the depth goes. There is no
+        // separate branch keyed on `complex_depth`.
+        //
+        // Surface a debug trace when the embedder configures a
+        // non-default value so the gap is visible: setting
+        // `complex_depth = 10` does NOT introduce a fourth
+        // dispatch tier. Forward-looking knob.
+        let default_thresholds = ComplexityThresholds::default();
+        if thresholds.complex_depth != default_thresholds.complex_depth {
+            tracing::debug!(
+                "GoalAnalyzer::with_thresholds: complex_depth={} differs from \
+                 default={} but the dispatch in select_adaptive_tactic only \
+                 branches on simple_depth and medium_depth — anything past \
+                 medium_depth uses the same arithmetic-or-not split regardless \
+                 of complex_depth. Forward-looking knob until a fourth tactic \
+                 tier is added.",
+                thresholds.complex_depth,
+                default_thresholds.complex_depth,
+            );
+        }
         Self {
             stats: AnalysisStats::default(),
             thresholds,
