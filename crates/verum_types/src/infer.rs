@@ -407,6 +407,16 @@ pub struct TypeChecker {
     /// `LanguageFeatures::validate` at language_features.rs:412).
     /// Closes the inert-defense pattern at session.rs:590.
     higher_kinded_protocols_enabled: bool,
+    /// Whether protocols may declare generic associated types
+    /// (GATs, e.g. `type Item<T>` inside a protocol body).
+    /// Controlled by `[protocols].generic_associated_types` in
+    /// Verum.toml. Default `false` — must be explicitly enabled
+    /// in the manifest.  Pre-condition: `[protocols].
+    /// associated_types` must also be true (enforced at manifest
+    /// validation time, see `LanguageFeatures::validate` at
+    /// language_features.rs:419).
+    /// Closes the inert-defense pattern at session.rs (#265).
+    generic_associated_types_enabled: bool,
     /// Name resolver for cross-module resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Name resolution across modules
     pub(crate) module_resolver: NameResolver,
@@ -1040,6 +1050,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
+            generic_associated_types_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -1226,6 +1237,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
+            generic_associated_types_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -1854,6 +1866,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
+            generic_associated_types_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: registry,
             current_module_path: verum_common::Text::from("cog"),
@@ -1971,6 +1984,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
+            generic_associated_types_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -2089,6 +2103,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
+            generic_associated_types_enabled: false,
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -6552,6 +6567,22 @@ impl TypeChecker {
     #[inline]
     pub fn higher_kinded_protocols_enabled(&self) -> bool {
         self.higher_kinded_protocols_enabled
+    }
+
+    /// Apply `[protocols].generic_associated_types` to the type
+    /// checker. When false (the default), associated-type
+    /// declarations inside a protocol that include type
+    /// parameters (`type Item<T>` — a GAT) are rejected at
+    /// registration time with `TypeError::Other` citing the
+    /// manifest field.
+    pub fn set_generic_associated_types_enabled(&mut self, enabled: bool) {
+        self.generic_associated_types_enabled = enabled;
+    }
+
+    /// Read-only accessor — exposed for diagnostics + tests.
+    #[inline]
+    pub fn generic_associated_types_enabled(&self) -> bool {
+        self.generic_associated_types_enabled
     }
 
     pub fn set_universe_poly_enabled(&mut self, enabled: bool) {
@@ -51471,6 +51502,37 @@ impl TypeChecker {
             }
         }
 
+        // Manifest-driven gate for Generic Associated Types (GATs).
+        // When `[protocols].generic_associated_types = false` (the
+        // default) a protocol body that contains an associated-type
+        // declaration with non-empty `type_params` (e.g.
+        // `type Item<T>` inside `protocol Stream { ... }`) is
+        // rejected with a manifest-citing diagnostic. Closes #265.
+        //
+        // Manifest validation also enforces that this flag can only
+        // be true when `[protocols].associated_types = true`.
+        // Regular zero-parameter associated types
+        // (`type Output;`) are unaffected by this gate.
+        if !self.generic_associated_types_enabled {
+            for item in proto_decl.items.iter() {
+                if let verum_ast::decl::ProtocolItemKind::Type { name, type_params, .. } = &item.kind {
+                    if !type_params.is_empty() {
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "[protocols].generic_associated_types = false rejects \
+                             generic associated type `{}<...>` ({} type parameter{}) \
+                             on protocol `{}`. Set [protocols].generic_associated_types \
+                             = true in Verum.toml to enable GAT declarations (also \
+                             requires [protocols].associated_types = true).",
+                            name.name.as_str(),
+                            type_params.len(),
+                            if type_params.len() == 1 { "" } else { "s" },
+                            type_name.as_str(),
+                        ))));
+                    }
+                }
+            }
+        }
+
         // Register type name
         self.ctx.define_type(type_name.clone(), Type::Named {
             path: verum_ast::ty::Path::single(proto_decl.name.clone()),
@@ -57046,6 +57108,189 @@ mod mount_cycle_tests {
         assert!(
             result.is_ok(),
             "regular type-param protocol must register even with hkt disabled; got {:?}",
+            result
+        );
+    }
+
+    // ============================================================
+    // [protocols].generic_associated_types wire-up pins (task #265).
+    // ============================================================
+
+    #[test]
+    fn gat_default_is_disabled() {
+        let checker = TypeChecker::new();
+        assert!(!checker.generic_associated_types_enabled(),
+            "default must be false");
+    }
+
+    #[test]
+    fn gat_setter_round_trips() {
+        let mut checker = TypeChecker::new();
+        checker.set_generic_associated_types_enabled(true);
+        assert!(checker.generic_associated_types_enabled());
+        checker.set_generic_associated_types_enabled(false);
+        assert!(!checker.generic_associated_types_enabled());
+    }
+
+    #[test]
+    fn gat_disabled_rejects_generic_associated_type() {
+        // Pin: when [protocols].generic_associated_types is false,
+        // a protocol body containing a `type Item<T>` declaration
+        // (non-empty type_params on the associated type) is rejected
+        // at registration time with TypeError::Other citing the
+        // manifest field.
+        use verum_ast::ty::{GenericParam, GenericParamKind, Ident};
+        use verum_ast::decl::{ProtocolDecl, ProtocolItem, ProtocolItemKind, Visibility};
+        use verum_common::Maybe as VMaybe;
+
+        let mut checker = TypeChecker::new();
+        // Default false — gate active.
+        assert!(!checker.generic_associated_types_enabled());
+
+        let gat_item = ProtocolItem {
+            kind: ProtocolItemKind::Type {
+                name: Ident::new("Item", Span::default()),
+                type_params: verum_common::List::from(vec![GenericParam {
+                    kind: GenericParamKind::Type {
+                        name: Ident::new("T", Span::default()),
+                        bounds: verum_common::List::new(),
+                        default: VMaybe::None,
+                    },
+                    is_implicit: false,
+                    span: Span::default(),
+                }]),
+                bounds: verum_common::List::new(),
+                where_clause: VMaybe::None,
+                default_type: VMaybe::None,
+            },
+            span: Span::default(),
+        };
+
+        let proto_decl = ProtocolDecl {
+            visibility: Visibility::Internal,
+            name: Ident::new("Stream", Span::default()),
+            generics: verum_common::List::new(),
+            bounds: verum_common::List::new(),
+            items: verum_common::List::from(vec![gat_item]),
+            generic_where_clause: VMaybe::None,
+            meta_where_clause: VMaybe::None,
+            span: Span::default(),
+            is_context: false,
+        };
+
+        let result = checker.register_protocol_decl_item(&proto_decl);
+        match result {
+            Err(TypeError::Other(msg)) => {
+                assert!(
+                    msg.as_str().contains("generic_associated_types"),
+                    "rejection must cite the manifest field; got: {}",
+                    msg
+                );
+                assert!(
+                    msg.as_str().contains("Stream"),
+                    "rejection must name the protocol; got: {}",
+                    msg
+                );
+                assert!(
+                    msg.as_str().contains("Item"),
+                    "rejection must name the GAT; got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected TypeError::Other, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn gat_enabled_accepts_generic_associated_type() {
+        // Pin: with [protocols].generic_associated_types = true,
+        // GAT-bearing protocol declarations register successfully.
+        use verum_ast::ty::{GenericParam, GenericParamKind, Ident};
+        use verum_ast::decl::{ProtocolDecl, ProtocolItem, ProtocolItemKind, Visibility};
+        use verum_common::Maybe as VMaybe;
+
+        let mut checker = TypeChecker::new();
+        checker.set_generic_associated_types_enabled(true);
+
+        let gat_item = ProtocolItem {
+            kind: ProtocolItemKind::Type {
+                name: Ident::new("Item", Span::default()),
+                type_params: verum_common::List::from(vec![GenericParam {
+                    kind: GenericParamKind::Type {
+                        name: Ident::new("T", Span::default()),
+                        bounds: verum_common::List::new(),
+                        default: VMaybe::None,
+                    },
+                    is_implicit: false,
+                    span: Span::default(),
+                }]),
+                bounds: verum_common::List::new(),
+                where_clause: VMaybe::None,
+                default_type: VMaybe::None,
+            },
+            span: Span::default(),
+        };
+
+        let proto_decl = ProtocolDecl {
+            visibility: Visibility::Internal,
+            name: Ident::new("Stream", Span::default()),
+            generics: verum_common::List::new(),
+            bounds: verum_common::List::new(),
+            items: verum_common::List::from(vec![gat_item]),
+            generic_where_clause: VMaybe::None,
+            meta_where_clause: VMaybe::None,
+            span: Span::default(),
+            is_context: false,
+        };
+
+        let result = checker.register_protocol_decl_item(&proto_decl);
+        assert!(
+            result.is_ok(),
+            "with GAT enabled, registration must succeed; got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn gat_disabled_accepts_regular_associated_type() {
+        // Pin: the gate ONLY rejects associated types with non-empty
+        // type_params.  Regular `type Output;` (zero type_params)
+        // registers fine even with the GAT flag off.
+        use verum_ast::ty::Ident;
+        use verum_ast::decl::{ProtocolDecl, ProtocolItem, ProtocolItemKind, Visibility};
+        use verum_common::Maybe as VMaybe;
+
+        let mut checker = TypeChecker::new();
+        // Default false.
+        assert!(!checker.generic_associated_types_enabled());
+
+        let regular_item = ProtocolItem {
+            kind: ProtocolItemKind::Type {
+                name: Ident::new("Output", Span::default()),
+                type_params: verum_common::List::new(),
+                bounds: verum_common::List::new(),
+                where_clause: VMaybe::None,
+                default_type: VMaybe::None,
+            },
+            span: Span::default(),
+        };
+
+        let proto_decl = ProtocolDecl {
+            visibility: Visibility::Internal,
+            name: Ident::new("Iterator", Span::default()),
+            generics: verum_common::List::new(),
+            bounds: verum_common::List::new(),
+            items: verum_common::List::from(vec![regular_item]),
+            generic_where_clause: VMaybe::None,
+            meta_where_clause: VMaybe::None,
+            span: Span::default(),
+            is_context: false,
+        };
+
+        let result = checker.register_protocol_decl_item(&proto_decl);
+        assert!(
+            result.is_ok(),
+            "regular zero-param associated type must register even with GAT disabled; got {:?}",
             result
         );
     }

@@ -255,6 +255,11 @@ pub struct CommonPipelineConfig {
     /// (`protocol Functor<F<_>>`) are rejected. Forwarded via
     /// `with_protocol_higher_kinded_protocols`.
     pub protocol_higher_kinded_protocols: bool,
+    /// `[protocols].generic_associated_types` — when false (the
+    /// default), GAT-bearing protocol declarations (`type
+    /// Item<T>` inside a protocol body) are rejected.  Forwarded
+    /// via `with_protocol_generic_associated_types`.
+    pub protocol_generic_associated_types: bool,
     /// Optional shared routing-stats collector. When present, the
     /// contract-verification phase installs it on the underlying
     /// `SmtContext` so every Z3 check records telemetry — making
@@ -291,6 +296,7 @@ impl Default for CommonPipelineConfig {
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
             protocol_higher_kinded_protocols: false,
+            protocol_generic_associated_types: false,
             routing_stats: None,
         }
     }
@@ -325,6 +331,7 @@ impl CommonPipelineConfig {
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
             protocol_higher_kinded_protocols: false,
+            protocol_generic_associated_types: false,
             routing_stats: None,
         }
     }
@@ -357,6 +364,7 @@ impl CommonPipelineConfig {
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
             protocol_higher_kinded_protocols: false,
+            protocol_generic_associated_types: false,
             routing_stats: None,
         }
     }
@@ -899,6 +907,7 @@ pub fn run_common_pipeline(
             .with_protocol_blanket_impls(config.protocol_blanket_impls)
             .with_protocol_coherence_mode(config.protocol_coherence_mode.clone())
             .with_protocol_higher_kinded_protocols(config.protocol_higher_kinded_protocols)
+            .with_protocol_generic_associated_types(config.protocol_generic_associated_types)
     } else {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_cubical_enabled(config.cubical_enabled)
@@ -913,6 +922,7 @@ pub fn run_common_pipeline(
             .with_protocol_blanket_impls(config.protocol_blanket_impls)
             .with_protocol_coherence_mode(config.protocol_coherence_mode.clone())
             .with_protocol_higher_kinded_protocols(config.protocol_higher_kinded_protocols)
+            .with_protocol_generic_associated_types(config.protocol_generic_associated_types)
     };
     let semantic_input = PhaseInput {
         data: current_data,

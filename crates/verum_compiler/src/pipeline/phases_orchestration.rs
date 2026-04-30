@@ -187,6 +187,16 @@ impl<'s> CompilationPipeline<'s> {
             self.session.language_features().protocols.higher_kinded_protocols,
         );
 
+        // Apply `[protocols].generic_associated_types` from manifest.
+        // Closes #265.  Default false: a protocol declaring an
+        // associated type with non-empty type_params (`type Item<T>`)
+        // is rejected at registration time.  Manifest validation
+        // enforces that this flag can be true only when
+        // [protocols].associated_types is also true.
+        checker.set_generic_associated_types_enabled(
+            self.session.language_features().protocols.generic_associated_types,
+        );
+
         // Post-cycle-break (2026-04-24): `RefinementChecker` no longer
         // auto-constructs a Z3 backend. Install the concrete bridge from
         // `verum_smt` so refinement subsumption keeps working.
