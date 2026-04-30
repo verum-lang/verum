@@ -1752,13 +1752,38 @@ pub fn lower_instruction<'ctx>(
         // contract: typed-variant emission costs the same as the
         // legacy form in release.
         //
-        // Debug builds: a future follow-up will emit a call to
-        // `verum_runtime_variant_layout_check(type_id, tag,
-        // field_count)` before the alloc, which traps via
-        // `verum_panic` on mismatch.  Until that runtime helper
-        // lands, the interpreter's Phase-3b validator covers the
-        // same gap on the Tier-0 path.
-        Instruction::MakeVariantTyped { dst, type_id: _, tag, field_count } => {
+        // Debug + release builds (#272): validate the (type_id, tag,
+        // field_count) tuple at codegen time via
+        // `verum_vbc::validate::validate_variant_layout`.
+        //
+        // Validating at codegen (rather than runtime) is correct
+        // architecturally: every operand of MakeVariantTyped is a
+        // compile-time constant, so the check is doable without
+        // runtime reflection.  Tier 0 (interpreter) validates at
+        // dispatch time in `validate_make_variant_typed`; Tier 1
+        // (AOT) validates here so layout-mismatched bytecode is
+        // caught at the same point in both tiers.
+        //
+        // Builtin-range type ids (`is_builtin()`) bypass the check
+        // — they're scalar primitives that don't carry a `variants`
+        // list.  Mismatched tuples for user types fail loud with
+        // a hard codegen error rather than emitting bug IR.
+        Instruction::MakeVariantTyped { dst, type_id, tag, field_count } => {
+            if let Some(vbc_mod) = ctx.vbc_module() {
+                if let Err(layout_err) = verum_vbc::validate::validate_variant_layout(
+                    vbc_mod,
+                    verum_vbc::TypeId(*type_id),
+                    *tag,
+                    *field_count,
+                ) {
+                    return Err(LlvmLoweringError::UnsupportedInstruction(
+                        verum_common::Text::from(format!(
+                            "MakeVariantTyped layout validation failed: {}",
+                            layout_err,
+                        )),
+                    ));
+                }
+            }
             let runtime = RuntimeLowering::new(ctx.llvm_context());
             let variant_ptr = runtime.lower_make_variant(
                 ctx.builder(),
