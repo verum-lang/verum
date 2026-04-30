@@ -16,7 +16,6 @@ mount core.database.sqlite.native.l1_pager.{
     Pager, PageFrame, pager_open_memory, pager_read, pager_write,
 };
 mount collections.List;
-mount base.{Result, Ok, Err};
 
 fn main() {
     print("step 1: pager_open_memory");
