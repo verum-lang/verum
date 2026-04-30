@@ -861,6 +861,80 @@ impl Session {
         Ok(file_id)
     }
 
+    /// Load a SYNTHETIC source string produced by macro / derive /
+    /// monomorphization / @delegate expansion (#274 + #284).
+    ///
+    /// The resulting `SourceFile` carries a `SyntheticOrigin`
+    /// back-pointer at the user-source span that triggered the
+    /// expansion.  Diagnostics emitted against spans inside this
+    /// file are resolved to user-visible locations via
+    /// `Span::resolve_to_user_source(|fid| self.synthetic_origin(fid))`.
+    ///
+    /// `name`: human-readable label for the synthetic file (e.g.
+    ///   `"<derive:Eq for User>"`, `"<macro:assert_eq>"`,
+    ///   `"<mono:List<Int>>"`). Surfaces in diagnostic output when
+    ///   the user span is unavailable.
+    /// `parent_file`: FileId of the file the expansion was triggered
+    ///   from. May itself be synthetic — chains are walked
+    ///   transitively by `resolve_to_user_source`.
+    /// `call_site_span`: the user-source span in `parent_file` that
+    ///   triggered this expansion (the @derive attribute span, the
+    ///   macro callsite, the generic call that monomorphized…).
+    /// `kind`: classification of the expansion for renderer labels.
+    pub fn load_synthetic_source(
+        &self,
+        name: impl Into<String>,
+        source_code: &str,
+        parent_file: FileId,
+        call_site_span: verum_common::span::Span,
+        kind: verum_common::span::SyntheticKind,
+    ) -> Result<FileId> {
+        let file_id = self.allocate_file_id();
+        let origin = verum_common::span::SyntheticOrigin {
+            parent_file,
+            call_site_span,
+            kind,
+        };
+        let name_str = name.into();
+        let source_file = SourceFile::synthetic(
+            file_id,
+            name_str.clone(),
+            source_code.to_string(),
+            origin,
+        );
+
+        // Register with global registry too — diagnostic renderers
+        // that walk through verum_common::global_get_filename see
+        // the synthetic name.  The provenance chain lives on the
+        // session-side SourceFile (queried via
+        // `synthetic_origin(file_id)`), since the global registry
+        // doesn't carry SyntheticOrigin payload.
+        verum_common::register_source_file(file_id, &name_str, source_code);
+
+        self.source_files
+            .write()
+            .insert(file_id, Shared::new(source_file));
+
+        Ok(file_id)
+    }
+
+    /// Look up the `SyntheticOrigin` for a FileId, if any.
+    ///
+    /// Used by `Span::resolve_to_user_source(|fid| session.
+    /// synthetic_origin(fid))` to walk the chain from a synthetic
+    /// span back to its user-source ancestor.  Returns `None` for
+    /// user-loaded files and unknown IDs — the resolver treats
+    /// `None` as "this is the user span; stop walking".
+    pub fn synthetic_origin(
+        &self,
+        file_id: FileId,
+    ) -> Option<verum_common::span::SyntheticOrigin> {
+        self.source_files
+            .read()
+            .get(&file_id)
+            .and_then(|sf| sf.synthetic_origin)
+    }
+
     /// Get source file by ID
     pub fn get_source(&self, file_id: FileId) -> Option<Shared<SourceFile>> {
         self.source_files.read().get(&file_id).cloned()
@@ -1702,5 +1776,129 @@ mod continue_on_error_tests {
             "three Err results must accumulate as ≥3 diagnostics; got {}",
             session.error_count()
         );
+    }
+}
+
+#[cfg(test)]
+mod synthetic_source_tests {
+    use super::*;
+    use verum_common::span::{Span, SyntheticKind};
+
+    #[test]
+    fn load_synthetic_source_records_origin() {
+        // Pin: load_synthetic_source registers a SourceFile whose
+        // synthetic_origin field carries the parent FileId, the
+        // call-site span, and the SyntheticKind.  The session-side
+        // synthetic_origin(file_id) helper retrieves it.
+        let session = Session::new(CompilerOptions::default());
+
+        // First load a user-source file to get a real parent FileId.
+        let parent_id = session
+            .load_source_string("fn main() {}", "/tmp/main.vr".into())
+            .unwrap();
+        let call_site = Span::new(0, 12, parent_id);
+
+        let synth_id = session.load_synthetic_source(
+            "<derive:Eq for User>",
+            "fn eq(...) { ... }",
+            parent_id,
+            call_site,
+            SyntheticKind::DeriveExpansion,
+        ).unwrap();
+
+        let origin = session.synthetic_origin(synth_id)
+            .expect("synthetic origin must be present");
+        assert_eq!(origin.parent_file, parent_id);
+        assert_eq!(origin.call_site_span, call_site);
+        assert_eq!(origin.kind, SyntheticKind::DeriveExpansion);
+    }
+
+    #[test]
+    fn user_source_files_have_no_synthetic_origin() {
+        // Pin: load_source_string creates user-source files with
+        // synthetic_origin = None.  This is the resolve_to_user_
+        // source termination signal.
+        let session = Session::new(CompilerOptions::default());
+        let user_id = session
+            .load_source_string("fn main() {}", "/tmp/main.vr".into())
+            .unwrap();
+        assert!(session.synthetic_origin(user_id).is_none());
+    }
+
+    #[test]
+    fn unknown_file_id_returns_none() {
+        // Pin: defence — looking up an unregistered FileId returns
+        // None.  The resolver treats None as "stop walking" so
+        // gracefully terminates on out-of-band IDs.
+        let session = Session::new(CompilerOptions::default());
+        let bogus = FileId::new(99_999);
+        assert!(session.synthetic_origin(bogus).is_none());
+    }
+
+    #[test]
+    fn resolve_to_user_source_walks_session_origin_chain() {
+        // Pin: end-to-end integration of the source-map plumbing —
+        // a synthetic-FileId span resolves through the session's
+        // origin lookup back to the user-source span.  This is the
+        // load-bearing path that diagnostic renderers will adopt.
+        let session = Session::new(CompilerOptions::default());
+
+        // User → macro → derive: two-layer synthetic chain.
+        let user_id = session
+            .load_source_string("fn main() {}", "/tmp/main.vr".into())
+            .unwrap();
+        let user_span = Span::new(100, 150, user_id);
+
+        let macro_id = session.load_synthetic_source(
+            "<macro:my_macro>",
+            "expanded body",
+            user_id,
+            user_span,
+            SyntheticKind::MacroExpansion,
+        ).unwrap();
+        let macro_span = Span::new(0, 20, macro_id);
+
+        let derive_id = session.load_synthetic_source(
+            "<derive:inside_macro>",
+            "fn eq() {}",
+            macro_id,
+            macro_span,
+            SyntheticKind::DeriveExpansion,
+        ).unwrap();
+
+        // Span inside the deepest synthetic file:
+        let leaf = Span::new(0, 10, derive_id);
+        let resolved = leaf.resolve_to_user_source(
+            |fid| session.synthetic_origin(fid),
+        );
+
+        assert_eq!(resolved.user_span, user_span,
+            "resolve must walk both layers back to user source");
+        assert_eq!(
+            resolved.expansion_chain,
+            vec![SyntheticKind::DeriveExpansion, SyntheticKind::MacroExpansion],
+            "chain must be ordered leaf-to-root"
+        );
+    }
+
+    #[test]
+    fn synthetic_file_id_is_distinct_from_parent() {
+        // Pin: the allocator gives each synthetic file a fresh ID
+        // disjoint from its parent.  Sharing the FileId would defeat
+        // the parent-chain walk (resolve would loop or short-circuit
+        // immediately).
+        let session = Session::new(CompilerOptions::default());
+        let parent_id = session
+            .load_source_string("fn main() {}", "/tmp/main.vr".into())
+            .unwrap();
+        let synth_id = session.load_synthetic_source(
+            "<synthetic>",
+            "// synthesized",
+            parent_id,
+            Span::new(0, 0, parent_id),
+            SyntheticKind::Other,
+        ).unwrap();
+        assert_ne!(synth_id, parent_id,
+            "synthetic FileId must be distinct from parent");
     }
 }
