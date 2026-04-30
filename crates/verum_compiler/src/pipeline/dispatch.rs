@@ -24,6 +24,8 @@ use tracing::{debug, info};
 use verum_common::{List, Text};
 use verum_vbc::interpreter::Interpreter as VbcInterpreter;
 
+use crate::options::VerifyMode;
+
 use super::{CompilationPipeline, RunResult};
 
 impl<'s> CompilationPipeline<'s> {
