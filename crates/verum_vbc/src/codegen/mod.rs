@@ -3211,7 +3211,25 @@ impl VbcCodegen {
     /// happened to register, which is the existing well-known
     /// alias semantic).
     fn push_type_dedupe(&mut self, ty: crate::types::TypeDescriptor) {
-        if self.types.iter().any(|t| t.id == ty.id) {
+        // If a descriptor with this id already exists AND it carries
+        // populated structural data (variants OR fields), skip the
+        // re-push — the first wins.  But if the existing entry is
+        // an empty PLACEHOLDER (no variants and no fields, typically
+        // produced by the speculative `alloc_user_type_id` path or
+        // by a partial cross-module registration), REPLACE it with
+        // the new fully-populated descriptor.  Otherwise the
+        // placeholder pins the id and downstream consumers
+        // (`format_variant_for_print_depth`, `validate_make_variant_typed`)
+        // see no variants — every typed variant rendered as a
+        // generic record fallback `{tag, payload...}` instead of
+        // the proper `Constructor(payload...)` form.
+        if let Some(idx) = self.types.iter().position(|t| t.id == ty.id) {
+            let existing = &self.types[idx];
+            let existing_empty = existing.variants.is_empty() && existing.fields.is_empty();
+            let new_richer = !ty.variants.is_empty() || !ty.fields.is_empty();
+            if existing_empty && new_richer {
+                self.types[idx] = ty;
+            }
             return;
         }
         self.types.push(ty);
@@ -6896,11 +6914,27 @@ impl VbcCodegen {
                             0,
                             smallvec::SmallVec::new(),
                         ),
-                        verum_common::Maybe::Some(VariantData::Tuple(types)) => (
-                            crate::types::VariantKind::Tuple,
-                            types.len() as u8,
-                            smallvec::SmallVec::new(),
-                        ),
+                        verum_common::Maybe::Some(VariantData::Tuple(types)) => {
+                            // Empty-payload tuple variants — `loop_path()`
+                            // — are syntactically `Tuple(0 args)` but
+                            // semantically Unit.  The layout validator
+                            // rejects `Tuple` + `arity=0` ("should be
+                            // Unit instead"); coerce here so the
+                            // descriptor is well-formed.
+                            if types.is_empty() {
+                                (
+                                    crate::types::VariantKind::Unit,
+                                    0,
+                                    smallvec::SmallVec::new(),
+                                )
+                            } else {
+                                (
+                                    crate::types::VariantKind::Tuple,
+                                    types.len() as u8,
+                                    smallvec::SmallVec::new(),
+                                )
+                            }
+                        }
                         verum_common::Maybe::Some(VariantData::Record(fields)) => {
                             // Record-variant payload count lives in
                             // `fields`, NOT in `arity` — the layout

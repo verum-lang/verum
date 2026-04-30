@@ -239,8 +239,26 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
                 return format_set_for_print_depth(state, base_ptr, depth + 1);
             }
 
-            // Variant: type_id >= 0x8000
-            if header.type_id.0 >= 0x8000 {
+            // Variant detection — TWO paths:
+            //   (1) Legacy synthetic-id form (`MakeVariant`): id is in
+            //       the `0x8000+tag` sentinel range.
+            //   (2) Typed form (`MakeVariantTyped`): id is the
+            //       concrete sum-type id, which lives in the user-id
+            //       range (≥ 0x100 per `alloc_user_type_id`'s skip
+            //       set, < 0x8000).  We recognise these by consulting
+            //       the module's type table for a `TypeKind::Sum`
+            //       descriptor with this id.
+            //
+            // Both paths route to `format_variant_for_print_depth`,
+            // which uses the value's own header type_id to do the
+            // type-scoped variant-name lookup before falling back to
+            // the global sum-type scan.
+            if header.type_id.0 >= 0x8000
+                || state.module.types.iter().any(|td| {
+                    td.id == header.type_id
+                        && matches!(td.kind, crate::types::TypeKind::Sum)
+                })
+            {
                 return format_variant_for_print_depth(state, base_ptr, depth + 1);
             }
 
