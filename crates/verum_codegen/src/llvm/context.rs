@@ -436,6 +436,19 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Shared via `Arc` so every lowered function in the module sees
     /// the same policy without any cloning of the underlying tables.
     permission_policy: Option<Arc<super::permissions::AotPermissionPolicy>>,
+
+    /// Manifest-driven `[runtime].futures` gate (#262-AOT, task #281).
+    /// When `false`, the `Instruction::Spawn` arm rejects at codegen
+    /// time with a manifest-citing diagnostic — the Tier 1 (AOT)
+    /// counterpart of the Tier 0 dispatch rejection at
+    /// `verum_vbc/src/interpreter/dispatch_table/handlers/
+    /// async_nursery.rs::handle_spawn`.  Default `true`.
+    futures_enabled: bool,
+
+    /// Manifest-driven `[runtime].nurseries` gate (#262-AOT, task #281).
+    /// When `false`, the `Instruction::NurseryInit` arm rejects at
+    /// codegen time with a manifest-citing diagnostic.  Default `true`.
+    nurseries_enabled: bool,
 }
 
 /// Information about a reference stored in a register.
@@ -647,6 +660,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
             permission_policy: None,
+            futures_enabled: true,
+            nurseries_enabled: true,
         }
     }
 
@@ -752,6 +767,8 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
             permission_policy: None,
+            futures_enabled: true,
+            nurseries_enabled: true,
         }
     }
 
@@ -830,6 +847,33 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// frontmatter ∪ CLI flags.
     pub fn permission_policy(&self) -> Option<&super::permissions::AotPermissionPolicy> {
         self.permission_policy.as_deref()
+    }
+
+    /// Install `[runtime].futures` (#262-AOT, task #281).  When false,
+    /// `Instruction::Spawn` arm of the lowering rejects at codegen
+    /// time.  Threaded by the lowering driver before instruction
+    /// emission.  Default true (no gate).
+    pub fn set_futures_enabled(&mut self, enabled: bool) {
+        self.futures_enabled = enabled;
+    }
+
+    /// Read accessor — `Instruction::Spawn` lowering consults this.
+    #[inline]
+    pub fn futures_enabled(&self) -> bool {
+        self.futures_enabled
+    }
+
+    /// Install `[runtime].nurseries` (#262-AOT, task #281).  When false,
+    /// `Instruction::NurseryInit` arm rejects at codegen time.
+    /// Default true.
+    pub fn set_nurseries_enabled(&mut self, enabled: bool) {
+        self.nurseries_enabled = enabled;
+    }
+
+    /// Read accessor — `Instruction::NurseryInit` lowering consults this.
+    #[inline]
+    pub fn nurseries_enabled(&self) -> bool {
+        self.nurseries_enabled
     }
 
     /// Get the LLVM function.

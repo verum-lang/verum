@@ -212,6 +212,17 @@ pub struct LoweringConfig {
     /// pre-wire output.  Closes the inert-defense pattern at
     /// session.rs:448.
     pub inline_depth: u32,
+    /// Manifest-driven `[runtime].futures` (#262-AOT, task #281).
+    /// Default `true`. When `false`, the lowering rejects every
+    /// `Instruction::Spawn` at codegen time with a manifest-citing
+    /// diagnostic — Tier 1 mirror of the Tier 0 dispatch rejection.
+    pub futures_enabled: bool,
+    /// Manifest-driven `[runtime].nurseries` (#262-AOT, task #281).
+    /// Default `true`. When `false`, the lowering rejects every
+    /// `Instruction::NurseryInit` at codegen time. Once
+    /// construction is rejected, every downstream nursery operation
+    /// becomes unreachable since they all consume a nursery handle.
+    pub nurseries_enabled: bool,
 }
 
 impl Default for LoweringConfig {
@@ -231,6 +242,8 @@ impl Default for LoweringConfig {
             vectorize: true,
             runtime_bridge: super::platform_ir::RuntimeBridgeValues::default(),
             inline_depth: 3,
+            futures_enabled: true,
+            nurseries_enabled: true,
         }
     }
 }
@@ -343,6 +356,22 @@ impl LoweringConfig {
     /// pre-wire output.
     pub fn with_inline_depth(mut self, depth: u32) -> Self {
         self.inline_depth = depth;
+        self
+    }
+
+    /// Install manifest-driven `[runtime].futures` (#262-AOT, task #281).
+    /// When false, every `Instruction::Spawn` is rejected at codegen
+    /// time. Threaded from `pipeline/native_codegen.rs`.
+    pub fn with_futures_enabled(mut self, enabled: bool) -> Self {
+        self.futures_enabled = enabled;
+        self
+    }
+
+    /// Install manifest-driven `[runtime].nurseries` (#262-AOT, task #281).
+    /// When false, every `Instruction::NurseryInit` is rejected at
+    /// codegen time. Threaded from `pipeline/native_codegen.rs`.
+    pub fn with_nurseries_enabled(mut self, enabled: bool) -> Self {
+        self.nurseries_enabled = enabled;
         self
     }
 
@@ -1938,6 +1967,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         if let Some(ref policy) = self.permission_policy_arc {
             ctx.set_permission_policy(Some(policy.clone()));
         }
+
+        // Thread the manifest-driven async-feature gates (#262-AOT,
+        // task #281). When `[runtime].futures = false` the
+        // `Instruction::Spawn` arm rejects at codegen time;
+        // `[runtime].nurseries = false` rejects `NurseryInit`.
+        // Defaults `true` (no gate) preserve existing behaviour.
+        ctx.set_futures_enabled(self.config.futures_enabled);
+        ctx.set_nurseries_enabled(self.config.nurseries_enabled);
 
         // Attach DWARF debug info (DISubprogram) to the function if debug mode is on.
         // This enables breakpoints, step-through, and variable inspection in LLDB/GDB.
@@ -3825,5 +3862,68 @@ mod tests {
         let huge = u32::MAX;
         let result = huge.saturating_mul(scale);
         assert_eq!(result, u32::MAX, "saturating_mul must clamp at u32::MAX");
+    }
+
+    // ============================================================
+    // [runtime].futures + .nurseries AOT gate pins (#262-AOT, #281).
+    // ============================================================
+
+    #[test]
+    fn futures_enabled_default_is_true() {
+        // Pin: documented Verum.toml default — async fn / spawn(...)
+        // works out of the box.  Default builds emit Spawn IR
+        // unconditionally, matching pre-wire behaviour.
+        let config = LoweringConfig::default();
+        assert!(config.futures_enabled, "default must be true");
+        let new_named = LoweringConfig::new("test_module");
+        assert!(new_named.futures_enabled);
+    }
+
+    #[test]
+    fn nurseries_enabled_default_is_true() {
+        // Pin: documented Verum.toml default — nursery {} blocks
+        // work out of the box.
+        let config = LoweringConfig::default();
+        assert!(config.nurseries_enabled, "default must be true");
+        let new_named = LoweringConfig::new("test_module");
+        assert!(new_named.nurseries_enabled);
+    }
+
+    #[test]
+    fn with_futures_enabled_round_trips() {
+        // Pin: builder accepts both polarities; setter is idempotent.
+        let config = LoweringConfig::new("t").with_futures_enabled(false);
+        assert!(!config.futures_enabled);
+        let config = config.with_futures_enabled(true);
+        assert!(config.futures_enabled);
+        let config = config.with_futures_enabled(false);
+        assert!(!config.futures_enabled);
+    }
+
+    #[test]
+    fn with_nurseries_enabled_round_trips() {
+        // Pin: same idempotency for nurseries setter.
+        let config = LoweringConfig::new("t").with_nurseries_enabled(false);
+        assert!(!config.nurseries_enabled);
+        let config = config.with_nurseries_enabled(true);
+        assert!(config.nurseries_enabled);
+    }
+
+    #[test]
+    fn futures_and_nurseries_independent_axes() {
+        // Pin: the two flags are independent — setting one does not
+        // affect the other.  A user could plausibly disable
+        // nurseries but keep raw spawn() (uncommon but legal).
+        let config = LoweringConfig::new("t")
+            .with_futures_enabled(true)
+            .with_nurseries_enabled(false);
+        assert!(config.futures_enabled);
+        assert!(!config.nurseries_enabled);
+
+        let config = LoweringConfig::new("t")
+            .with_futures_enabled(false)
+            .with_nurseries_enabled(true);
+        assert!(!config.futures_enabled);
+        assert!(config.nurseries_enabled);
     }
 }

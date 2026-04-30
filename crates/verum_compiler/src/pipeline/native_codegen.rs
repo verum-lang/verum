@@ -265,7 +265,9 @@ impl<'s> CompilationPipeline<'s> {
             .with_tail_call_optimization(tail_call_optimization)
             .with_vectorize(vectorize)
             .with_runtime_bridge(runtime_bridge)
-            .with_inline_depth(inline_depth);
+            .with_inline_depth(inline_depth)
+            .with_futures_enabled(rt.futures)
+            .with_nurseries_enabled(rt.nurseries);
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
             &llvm_ctx,
