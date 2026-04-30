@@ -302,7 +302,7 @@ impl MacroExpansionPhase {
                     ))
                     .span(super::ast_span_to_diagnostic_span(span, None))
                     .help(Text::from(
-                        "set `quote_syntax = true` under `[meta]` in verum.toml, \
+                        "set `quote_syntax = true` under `[meta]` in Verum.toml, \
                          or remove `-Z meta.quote_syntax=false`",
                     ))
                     .build();
@@ -388,7 +388,7 @@ impl MacroExpansionPhase {
                     ))
                     .span(super::ast_span_to_diagnostic_span(func.span, None))
                     .help(
-                        "set `compile_time_functions = true` under `[meta]` in verum.toml, \
+                        "set `compile_time_functions = true` under `[meta]` in Verum.toml, \
                          or remove `-Z meta.compile_time_functions=false`",
                     )
                     .build(),
@@ -405,7 +405,7 @@ impl MacroExpansionPhase {
                     ))
                     .span(super::ast_span_to_diagnostic_span(func.span, None))
                     .help(format!(
-                        "increase `max_stage_level` to at least {} under `[meta]` in verum.toml",
+                        "increase `max_stage_level` to at least {} under `[meta]` in Verum.toml",
                         func.stage_level
                     ))
                     .build(),
@@ -1559,7 +1559,7 @@ impl MacroExpansionPhase {
                     ))
                     .span(super::ast_span_to_diagnostic_span(item.span, None))
                     .help(
-                        "set `derive = true` under `[meta]` in verum.toml, \
+                        "set `derive = true` under `[meta]` in Verum.toml, \
                          or remove `-Z meta.derive=false` from the command line",
                     )
                     .build(),
