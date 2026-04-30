@@ -1342,7 +1342,17 @@ public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTi
 /// Spawn a blocking operation on a dedicated thread pool.
 ///
 /// Use this for CPU-intensive || blocking I/O operations that would
-/// otherwise block the async runtime.
+/// otherwise block the async runtime. Routes through
+/// `core.async.task::spawn_blocking` which submits to
+/// `core.runtime.pool::ThreadPool` (distinct from the async
+/// executor's worker pool) and returns a `JoinHandle` whose
+/// underlying `BlockingFuture` polls a completion flag — async
+/// workers stay free between polls.
+///
+/// Pre-fix this was the same `spawn(lazy(f))` placeholder as
+/// `task.vr::spawn_blocking` (closed in commit 14ba223f); both
+/// modules now share the same load-bearing implementation
+/// rather than maintaining parallel stubs.
 ///
 /// # Example
 /// ```verum
@@ -1351,7 +1361,11 @@ public fn timeout_ms_raw<F: Future>(future: F, timeout_ms: UInt64) -> ExecutorTi
 /// }).await;
 /// ```
 public fn spawn_blocking<T: Send, F: fn() -> T + Send>(f: F) -> JoinHandle<T> {
-    spawn(lazy(f))
+    // Delegate to the canonical implementation in task.vr —
+    // single source of truth for the pool-routed BlockingFuture
+    // pattern. Both spawn_blocking exports (this one and
+    // task.vr::spawn_blocking) resolve to identical behaviour.
+    core.async.task.spawn_blocking(f)
 }
 
 // =============================================================================
