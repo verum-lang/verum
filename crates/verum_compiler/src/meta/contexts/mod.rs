@@ -33,5 +33,5 @@ pub mod type_introspection;
 pub use build_config::BuildConfiguration;
 pub use diagnostics::DiagnosticsCollector;
 pub use execution_state::ExecutionState;
-pub use security::SecurityContext;
+pub use security::{ResourceLimits, SecurityContext};
 pub use type_introspection::TypeIntrospection;
