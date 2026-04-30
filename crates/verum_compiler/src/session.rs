@@ -573,7 +573,7 @@ impl Session {
 
         // Phase-not-realised tracing for inert protocol-resolution
         // knobs. The `[protocols]` manifest section parses 5 fields.
-        // Two are wired (commits 70bdc1e1 + e84bd548):
+        // Three are wired:
         //   - `resolution_strategy` flows through
         //     `CommonPipelineConfig.protocol_resolution_strategy` →
         //     `SemanticAnalysisPhase::with_protocol_resolution_
@@ -583,30 +583,29 @@ impl Session {
         //     dispatch (most_specific / first_declared / error).
         //   - `blanket_impls` flows the same path and gates the
         //     candidate-collection filter on `Type::Var(_)`.
-        // Three remain inert:
-        //   - `coherence` (default "strict"): orphan-rule + overlap
-        //     checks always run regardless of value; no production
-        //     code path branches on this string.
+        //   - `coherence` flows through pipeline.rs::phase_type_check
+        //     → `TypeChecker.set_protocol_coherence_mode` →
+        //     `ProtocolChecker.coherence_mode`, gating
+        //     `register_impl`'s orphan-rule + overlap checks
+        //     (strict = error, lenient = warning, unchecked = skip).
+        //     Lenient violations drain at end of phase as
+        //     Warning-severity diagnostics.
+        // Two remain inert:
         //   - `higher_kinded_protocols` / `generic_associated_types`:
         //     typed-surface preconditions whose actual gating in
         //     the unifier / type-checker is not yet realised.
         //
-        // Surface a warning when any of the still-inert three is
+        // Surface a warning when either still-inert flag is
         // set to a non-default value.
         let pr = &opts.language_features.protocols;
-        if pr.coherence.as_str() != "strict"
-            || pr.higher_kinded_protocols
-            || pr.generic_associated_types
-        {
+        if pr.higher_kinded_protocols || pr.generic_associated_types {
             tracing::warn!(
-                "manifest [protocols] surface: coherence={:?}, \
-                 higher_kinded_protocols={}, generic_associated_types={} \
-                 (these fields land on LanguageFeatures.protocols and are validated for \
-                 legal values, but no production gate consults them — coherence checks \
-                 always enforce strict orphan rules; higher-kinded/GAT preconditions are \
+                "manifest [protocols] surface: higher_kinded_protocols={}, \
+                 generic_associated_types={} (these fields land on \
+                 LanguageFeatures.protocols and are validated for legal values, but no \
+                 production gate consults them — higher-kinded/GAT preconditions are \
                  typed-surface declarations whose actual gating in the unifier / \
                  type-checker is not yet wired)",
-                pr.coherence,
                 pr.higher_kinded_protocols,
                 pr.generic_associated_types,
             );

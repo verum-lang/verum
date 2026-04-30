@@ -50,6 +50,10 @@ pub struct SemanticAnalysisPhase {
     /// excludes type-variable for_types (blanket impls) from
     /// candidate sets.
     protocol_blanket_impls: bool,
+    /// `[protocols].coherence` — strict (default) | lenient |
+    /// unchecked.  Routed to ProtocolChecker.coherence_mode at
+    /// the start of `execute()`.
+    protocol_coherence_mode: verum_common::Text,
 }
 
 impl SemanticAnalysisPhase {
@@ -71,6 +75,7 @@ impl SemanticAnalysisPhase {
             coherence_check_depth: 16,
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
+            protocol_coherence_mode: verum_common::Text::from("strict"),
         }
     }
 
@@ -92,6 +97,7 @@ impl SemanticAnalysisPhase {
             coherence_check_depth: 16,
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
+            protocol_coherence_mode: verum_common::Text::from("strict"),
         }
     }
 
@@ -110,6 +116,18 @@ impl SemanticAnalysisPhase {
     /// Apply `[protocols].blanket_impls` from manifest.
     pub fn with_protocol_blanket_impls(mut self, allowed: bool) -> Self {
         self.protocol_blanket_impls = allowed;
+        self
+    }
+
+    /// Apply `[protocols].coherence` from manifest. Threaded through
+    /// to `ProtocolChecker.coherence_mode` at
+    /// `phase_checker.set_protocol_coherence_mode(...)`. Closes the
+    /// inert-defense pattern around the field.
+    pub fn with_protocol_coherence_mode(
+        mut self,
+        mode: impl Into<verum_common::Text>,
+    ) -> Self {
+        self.protocol_coherence_mode = mode.into();
         self
     }
 
@@ -301,6 +319,11 @@ impl CompilationPhase for SemanticAnalysisPhase {
             self.protocol_resolution_strategy.clone(),
         );
         phase_checker.set_protocol_blanket_impls(self.protocol_blanket_impls);
+        phase_checker.set_protocol_coherence_mode(
+            verum_types::protocol::CoherenceMode::from_manifest_str(
+                self.protocol_coherence_mode.as_str(),
+            ),
+        );
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions

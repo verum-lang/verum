@@ -245,6 +245,11 @@ pub struct CommonPipelineConfig {
     /// (`impl<T> Protocol for T`) are excluded from the
     /// candidate set.  Forwarded via `with_protocol_blanket_impls`.
     pub protocol_blanket_impls: bool,
+    /// `[protocols].coherence` — selects how strictly orphan-rule
+    /// + overlap checks gate `register_impl`:
+    /// `"strict"` (default), `"lenient"`, or `"unchecked"`.
+    /// Forwarded via `with_protocol_coherence_mode`.
+    pub protocol_coherence_mode: verum_common::Text,
     /// Optional shared routing-stats collector. When present, the
     /// contract-verification phase installs it on the underlying
     /// `SmtContext` so every Z3 check records telemetry — making
@@ -279,6 +284,7 @@ impl Default for CommonPipelineConfig {
             coherence_check_depth: 16,
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
+            protocol_coherence_mode: verum_common::Text::from("strict"),
             routing_stats: None,
         }
     }
@@ -311,6 +317,7 @@ impl CommonPipelineConfig {
             coherence_check_depth: 16,
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
+            protocol_coherence_mode: verum_common::Text::from("strict"),
             routing_stats: None,
         }
     }
@@ -341,6 +348,7 @@ impl CommonPipelineConfig {
             coherence_check_depth: 16,
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
+            protocol_coherence_mode: verum_common::Text::from("strict"),
             routing_stats: None,
         }
     }
@@ -881,6 +889,7 @@ pub fn run_common_pipeline(
             .with_coherence_check_depth(config.coherence_check_depth)
             .with_protocol_resolution_strategy(config.protocol_resolution_strategy.clone())
             .with_protocol_blanket_impls(config.protocol_blanket_impls)
+            .with_protocol_coherence_mode(config.protocol_coherence_mode.clone())
     } else {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_cubical_enabled(config.cubical_enabled)
@@ -893,6 +902,7 @@ pub fn run_common_pipeline(
             .with_coherence_check_depth(config.coherence_check_depth)
             .with_protocol_resolution_strategy(config.protocol_resolution_strategy.clone())
             .with_protocol_blanket_impls(config.protocol_blanket_impls)
+            .with_protocol_coherence_mode(config.protocol_coherence_mode.clone())
     };
     let semantic_input = PhaseInput {
         data: current_data,

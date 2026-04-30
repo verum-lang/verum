@@ -1531,6 +1531,69 @@ pub struct ProtocolChecker {
     /// Default true (current behaviour — the resolver runs the
     /// full multi-stage candidate scan).
     instance_search_enabled: bool,
+
+    /// `[protocols].coherence` — selects how strictly the
+    /// orphan-rule and overlap checks gate `register_impl`.
+    ///
+    ///   * `Strict` (default) — orphan-rule violation and
+    ///     overlapping impls are hard errors; `register_impl`
+    ///     returns `Err(CoherenceError)` and the impl is dropped.
+    ///   * `Lenient` — violations downgrade to warnings collected
+    ///     in `coherence_warnings`; the impl is still inserted so
+    ///     downstream resolution can proceed.  Useful for
+    ///     plugin-style projects where the orphan rule is too
+    ///     strict and the user accepts the consequences.
+    ///   * `Off` — both checks are skipped entirely; no warnings.
+    ///     Used by tests, REPL, and codebases that have already
+    ///     audited their coherence by hand.
+    ///
+    /// Threaded from manifest via `set_coherence_mode`.
+    coherence_mode: CoherenceMode,
+
+    /// Coherence violations downgraded to warnings under
+    /// `CoherenceMode::Lenient`. Drained at the end of semantic
+    /// analysis via `drain_coherence_warnings` and surfaced as
+    /// diagnostics of severity Warning.
+    coherence_warnings: Vec<CoherenceError>,
+}
+
+/// Manifest-driven gate for orphan-rule + overlap checks in
+/// `ProtocolChecker::register_impl`. Mirrors the
+/// `[protocols].coherence` manifest field's three legal values
+/// `"strict" | "lenient" | "unchecked"` (see
+/// `crates/verum_compiler/src/language_features.rs:430`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoherenceMode {
+    /// Orphan-rule violation + overlap = hard error (current
+    /// behaviour, default).
+    #[default]
+    Strict,
+    /// Violations become warnings; impl is still registered.
+    Lenient,
+    /// Skip both checks entirely.
+    Off,
+}
+
+impl CoherenceMode {
+    /// Parse from manifest string. Unknown values fall back to
+    /// `Strict` with a warning so a typo doesn't silently switch
+    /// coherence semantics. Mirrors `set_resolution_strategy`.
+    pub fn from_manifest_str(s: &str) -> Self {
+        match s {
+            "strict" => CoherenceMode::Strict,
+            "lenient" => CoherenceMode::Lenient,
+            "unchecked" | "off" => CoherenceMode::Off,
+            other => {
+                tracing::warn!(
+                    "[protocols].coherence: unknown value {:?} \
+                     (expected \"strict\" | \"lenient\" | \
+                     \"unchecked\"); defaulting to strict",
+                    other
+                );
+                CoherenceMode::Strict
+            }
+        }
+    }
 }
 
 impl ProtocolChecker {
@@ -1553,6 +1616,8 @@ impl ProtocolChecker {
             resolution_strategy: Text::from("most_specific"),
             blanket_impls: true,
             instance_search_enabled: true,
+            coherence_mode: CoherenceMode::Strict,
+            coherence_warnings: Vec::new(),
         };
 
         // Register standard protocols
@@ -1586,6 +1651,8 @@ impl ProtocolChecker {
             resolution_strategy: Text::from("most_specific"),
             blanket_impls: true,
             instance_search_enabled: true,
+            coherence_mode: CoherenceMode::Strict,
+            coherence_warnings: Vec::new(),
         }
     }
 
@@ -1644,6 +1711,28 @@ impl ProtocolChecker {
     #[inline]
     pub fn blanket_impls_allowed(&self) -> bool {
         self.blanket_impls
+    }
+
+    /// Apply the manifest-side `[protocols].coherence`. Closes the
+    /// inert-defense pattern around the field at session.rs:587 —
+    /// pre-fix `register_impl` always rejected orphan/overlap
+    /// regardless of manifest.
+    pub fn set_coherence_mode(&mut self, mode: CoherenceMode) {
+        self.coherence_mode = mode;
+    }
+
+    /// Read-only accessor — exposed for diagnostics + tests.
+    #[inline]
+    pub fn coherence_mode(&self) -> CoherenceMode {
+        self.coherence_mode
+    }
+
+    /// Drain coherence violations downgraded to warnings under
+    /// `CoherenceMode::Lenient`. Empties the internal buffer; the
+    /// pipeline calls this at the end of semantic analysis and
+    /// surfaces each as a Warning-severity diagnostic.
+    pub fn drain_coherence_warnings(&mut self) -> Vec<CoherenceError> {
+        std::mem::take(&mut self.coherence_warnings)
     }
 
     /// Public accessor for the per-instance checker id. Used by the
@@ -4168,17 +4257,43 @@ impl ProtocolChecker {
         self.protocols.get(&Text::from(protocol_name))
     }
 
-    /// Register an implementation with coherence checking
-    /// Returns an error if the implementation violates orphan rule.
-    /// Overlapping implementations are silently skipped (the first registration wins).
-    /// This handles stdlib re-exports where the same impl appears in multiple modules.
+    /// Register an implementation with coherence checking.
+    ///
+    /// Behaviour is gated by `self.coherence_mode`
+    /// (`[protocols].coherence` manifest field):
+    ///
+    ///   * `Strict` (default): orphan-rule violation and overlap
+    ///     are hard errors — `register_impl` returns
+    ///     `Err(CoherenceError)` and the impl is dropped.
+    ///   * `Lenient`: violations are recorded in
+    ///     `coherence_warnings` (drained later as diagnostics)
+    ///     and the impl is still inserted so downstream
+    ///     resolution can proceed.
+    ///   * `Off`: both checks are skipped entirely.
     pub fn register_impl(&mut self, impl_: ProtocolImpl) -> Result<(), CoherenceError> {
-        // Check orphan rule (hard error)
-        self.check_orphan_rule(&impl_)?;
-
-        // Check for overlaps — return error if overlapping impl exists
-        for existing_impl in self.impls.iter() {
-            self.check_overlap(&impl_, existing_impl)?
+        match self.coherence_mode {
+            CoherenceMode::Strict => {
+                // Current behaviour — both checks are hard errors.
+                self.check_orphan_rule(&impl_)?;
+                for existing_impl in self.impls.iter() {
+                    self.check_overlap(&impl_, existing_impl)?
+                }
+            }
+            CoherenceMode::Lenient => {
+                if let Err(e) = self.check_orphan_rule(&impl_) {
+                    self.coherence_warnings.push(e);
+                }
+                let mut overlap_warnings = Vec::new();
+                for existing_impl in self.impls.iter() {
+                    if let Err(e) = self.check_overlap(&impl_, existing_impl) {
+                        overlap_warnings.push(e);
+                    }
+                }
+                self.coherence_warnings.extend(overlap_warnings);
+            }
+            CoherenceMode::Off => {
+                // No checks at all.
+            }
         }
 
         // Build index key using stable type representation
@@ -14101,5 +14216,268 @@ mod tests {
                 "instance_search=false must NOT block exact-match resolution"
             ),
         }
+    }
+
+    // ============================================================
+    // [protocols].coherence wire-up pins (task #263).
+    //
+    // The following tests verify that `CoherenceMode` (Strict /
+    // Lenient / Off) reaches `register_impl` and gates the
+    // orphan-rule + overlap checks as documented.
+    // ============================================================
+
+    /// Helper: build a foreign protocol + foreign type ProtocolImpl
+    /// guaranteed to violate the orphan rule against
+    /// `current_crate = "user_cog"`.
+    fn make_orphan_impl(checker: &mut ProtocolChecker) -> ProtocolImpl {
+        // Register a protocol declared in a foreign cog.
+        let proto_name = "OrphanRuleProto";
+        let proto = Protocol {
+            name: proto_name.into(),
+            kind: ProtocolKind::Constraint,
+            type_params: List::new(),
+            super_protocols: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization_info: Maybe::None,
+            defining_crate: Maybe::Some("foreign_cog".into()),
+            span: Span::default(),
+        };
+        checker.register_protocol(proto).unwrap();
+
+        // Register the type as defined in another foreign cog.
+        checker.register_type_crate(
+            "ForeignType".into(),
+            "another_foreign_cog".into(),
+        );
+
+        ProtocolImpl {
+            protocol: Path::single(Ident::new(proto_name, Span::default())),
+            protocol_args: List::new(),
+            for_type: Type::Named {
+                path: Path::single(Ident::new("ForeignType", Span::default())),
+                args: List::new(),
+            },
+            where_clauses: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("user_cog".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        }
+    }
+
+    #[test]
+    fn coherence_mode_default_is_strict() {
+        // Pin: a freshly-constructed ProtocolChecker reports Strict
+        // — matches the documented Verum.toml default.
+        assert_eq!(
+            ProtocolChecker::new().coherence_mode(),
+            CoherenceMode::Strict
+        );
+        assert_eq!(
+            ProtocolChecker::new_empty().coherence_mode(),
+            CoherenceMode::Strict
+        );
+    }
+
+    #[test]
+    fn coherence_mode_setter_round_trips() {
+        // Pin: setter accepts all three documented values; setter
+        // is idempotent.
+        let mut checker = ProtocolChecker::new();
+        checker.set_coherence_mode(CoherenceMode::Lenient);
+        assert_eq!(checker.coherence_mode(), CoherenceMode::Lenient);
+        checker.set_coherence_mode(CoherenceMode::Off);
+        assert_eq!(checker.coherence_mode(), CoherenceMode::Off);
+        checker.set_coherence_mode(CoherenceMode::Strict);
+        assert_eq!(checker.coherence_mode(), CoherenceMode::Strict);
+    }
+
+    #[test]
+    fn coherence_mode_from_manifest_str_normalises_aliases() {
+        // Pin: manifest values "strict" / "lenient" / "unchecked"
+        // map to the three enum variants. "off" is also accepted as
+        // a synonym for "unchecked". Unknown strings fall back to
+        // Strict.
+        assert_eq!(
+            CoherenceMode::from_manifest_str("strict"),
+            CoherenceMode::Strict
+        );
+        assert_eq!(
+            CoherenceMode::from_manifest_str("lenient"),
+            CoherenceMode::Lenient
+        );
+        assert_eq!(
+            CoherenceMode::from_manifest_str("unchecked"),
+            CoherenceMode::Off
+        );
+        assert_eq!(
+            CoherenceMode::from_manifest_str("off"),
+            CoherenceMode::Off
+        );
+        // Unknown → Strict (with warn! side-effect).
+        assert_eq!(
+            CoherenceMode::from_manifest_str("nonsense"),
+            CoherenceMode::Strict
+        );
+    }
+
+    #[test]
+    fn coherence_strict_rejects_orphan_impl() {
+        // Pin: under Strict (default) a foreign-protocol +
+        // foreign-type impl returns OrphanRuleViolation and the
+        // impl is NOT inserted.
+        let mut checker = ProtocolChecker::new_empty();
+        checker.set_current_crate("user_cog".into());
+
+        let bad = make_orphan_impl(&mut checker);
+        let result = checker.register_impl(bad);
+        assert!(
+            matches!(
+                result,
+                Err(CoherenceError::OrphanRuleViolation { .. })
+            ),
+            "Strict mode must reject orphan impls; got {:?}",
+            result
+        );
+        // No warnings drained — error path bails before the
+        // warning buffer.
+        assert!(
+            checker.drain_coherence_warnings().is_empty(),
+            "Strict mode never populates coherence_warnings"
+        );
+    }
+
+    #[test]
+    fn coherence_lenient_accepts_orphan_with_warning() {
+        // Pin: under Lenient an orphan impl returns Ok(()), the
+        // impl is inserted, and the violation lands in
+        // coherence_warnings as an OrphanRuleViolation.
+        let mut checker = ProtocolChecker::new_empty();
+        checker.set_current_crate("user_cog".into());
+        checker.set_coherence_mode(CoherenceMode::Lenient);
+
+        let bad = make_orphan_impl(&mut checker);
+        let result = checker.register_impl(bad);
+        assert!(
+            result.is_ok(),
+            "Lenient mode must accept orphan impl; got {:?}",
+            result
+        );
+
+        let warnings = checker.drain_coherence_warnings();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Lenient mode must record exactly one OrphanRuleViolation"
+        );
+        assert!(
+            matches!(warnings[0], CoherenceError::OrphanRuleViolation { .. }),
+            "warning must be OrphanRuleViolation; got {:?}",
+            warnings[0]
+        );
+        // Drain is destructive — second drain returns empty.
+        assert!(checker.drain_coherence_warnings().is_empty());
+    }
+
+    #[test]
+    fn coherence_off_silently_accepts_orphan() {
+        // Pin: under Off both checks are skipped entirely —
+        // orphan impls register successfully with no warnings.
+        let mut checker = ProtocolChecker::new_empty();
+        checker.set_current_crate("user_cog".into());
+        checker.set_coherence_mode(CoherenceMode::Off);
+
+        let bad = make_orphan_impl(&mut checker);
+        assert!(checker.register_impl(bad).is_ok());
+        assert!(
+            checker.drain_coherence_warnings().is_empty(),
+            "Off mode never warns"
+        );
+    }
+
+    #[test]
+    fn coherence_strict_rejects_overlap() {
+        // Pin: under Strict, registering two impls of the same
+        // protocol on the same concrete type returns
+        // OverlappingImplementations on the second registration.
+        let mut checker = ProtocolChecker::new_empty();
+        let proto_path =
+            Path::single(Ident::new("OverlapProto_Strict", Span::default()));
+
+        let first = ProtocolImpl {
+            protocol: proto_path.clone(),
+            protocol_args: List::new(),
+            for_type: Type::Int,
+            where_clauses: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        };
+        let second = first.clone();
+        checker.register_impl(first).unwrap();
+        let result = checker.register_impl(second);
+        assert!(
+            matches!(
+                result,
+                Err(CoherenceError::OverlappingImplementations { .. })
+            ),
+            "Strict mode must reject overlap; got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn coherence_lenient_accepts_overlap_with_warning() {
+        // Pin: under Lenient, overlap returns Ok(()), the second
+        // impl is appended to `impls`, and the violation lands in
+        // coherence_warnings.
+        let mut checker = ProtocolChecker::new_empty();
+        checker.set_coherence_mode(CoherenceMode::Lenient);
+        let proto_path =
+            Path::single(Ident::new("OverlapProto_Lenient", Span::default()));
+
+        let first = ProtocolImpl {
+            protocol: proto_path.clone(),
+            protocol_args: List::new(),
+            for_type: Type::Int,
+            where_clauses: List::new(),
+            methods: Map::new(),
+            associated_types: Map::new(),
+            associated_consts: Map::new(),
+            specialization: Maybe::None,
+            impl_crate: Maybe::Some("test".into()),
+            span: Span::default(),
+            type_param_fn_bounds: Map::new(),
+        };
+        let second = first.clone();
+        checker.register_impl(first).unwrap();
+        let result = checker.register_impl(second);
+        assert!(
+            result.is_ok(),
+            "Lenient mode must accept overlap; got {:?}",
+            result
+        );
+
+        let warnings = checker.drain_coherence_warnings();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Lenient mode must record exactly one OverlappingImplementations"
+        );
+        assert!(
+            matches!(
+                warnings[0],
+                CoherenceError::OverlappingImplementations { .. }
+            )
+        );
     }
 }
