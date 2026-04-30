@@ -567,7 +567,7 @@ impl Session {
 
         // Phase-not-realised tracing for inert protocol-resolution
         // knobs. The `[protocols]` manifest section parses 5 fields.
-        // Three are wired:
+        // Four are wired:
         //   - `resolution_strategy` flows through
         //     `CommonPipelineConfig.protocol_resolution_strategy` →
         //     `SemanticAnalysisPhase::with_protocol_resolution_
@@ -582,25 +582,27 @@ impl Session {
         //     `ProtocolChecker.coherence_mode`, gating
         //     `register_impl`'s orphan-rule + overlap checks
         //     (strict = error, lenient = warning, unchecked = skip).
-        //     Lenient violations drain at end of phase as
-        //     Warning-severity diagnostics.
-        // Two remain inert:
-        //   - `higher_kinded_protocols` / `generic_associated_types`:
-        //     typed-surface preconditions whose actual gating in
-        //     the unifier / type-checker is not yet realised.
+        //   - `higher_kinded_protocols` flows through
+        //     `pipeline/phases_orchestration.rs` →
+        //     `TypeChecker.set_higher_kinded_protocols_enabled` →
+        //     `register_protocol_decl_item`, which rejects HKT
+        //     generic params on protocol declarations when the
+        //     manifest sets it false (the default).  Closes #264.
+        // One remains inert:
+        //   - `generic_associated_types`: typed-surface
+        //     precondition for GATs (associated types with their
+        //     own type parameters); actual gating in the
+        //     unifier / type-checker is not yet realised.
         //
-        // Surface a warning when either still-inert flag is
-        // set to a non-default value.
+        // Surface a warning when this still-inert flag is set.
         let pr = &opts.language_features.protocols;
-        if pr.higher_kinded_protocols || pr.generic_associated_types {
+        if pr.generic_associated_types {
             tracing::warn!(
-                "manifest [protocols] surface: higher_kinded_protocols={}, \
-                 generic_associated_types={} (these fields land on \
-                 LanguageFeatures.protocols and are validated for legal values, but no \
-                 production gate consults them — higher-kinded/GAT preconditions are \
+                "manifest [protocols] surface: generic_associated_types={} (this field \
+                 lands on LanguageFeatures.protocols and is validated for legal values, \
+                 but no production gate consults it — GAT preconditions are \
                  typed-surface declarations whose actual gating in the unifier / \
                  type-checker is not yet wired)",
-                pr.higher_kinded_protocols,
                 pr.generic_associated_types,
             );
         }

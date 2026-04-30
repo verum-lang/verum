@@ -54,6 +54,12 @@ pub struct SemanticAnalysisPhase {
     /// unchecked.  Routed to ProtocolChecker.coherence_mode at
     /// the start of `execute()`.
     protocol_coherence_mode: verum_common::Text,
+    /// `[protocols].higher_kinded_protocols` — when false (the
+    /// manifest default), a protocol declaring an HKT generic
+    /// parameter (e.g. `protocol Functor<F<_>>`) is rejected at
+    /// registration time.  Routed to TypeChecker.higher_kinded_
+    /// protocols_enabled at the start of `execute()`.
+    protocol_higher_kinded_protocols: bool,
 }
 
 impl SemanticAnalysisPhase {
@@ -76,6 +82,7 @@ impl SemanticAnalysisPhase {
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
+            protocol_higher_kinded_protocols: false,
         }
     }
 
@@ -98,6 +105,7 @@ impl SemanticAnalysisPhase {
             protocol_resolution_strategy: verum_common::Text::from("most_specific"),
             protocol_blanket_impls: true,
             protocol_coherence_mode: verum_common::Text::from("strict"),
+            protocol_higher_kinded_protocols: false,
         }
     }
 
@@ -128,6 +136,16 @@ impl SemanticAnalysisPhase {
         mode: impl Into<verum_common::Text>,
     ) -> Self {
         self.protocol_coherence_mode = mode.into();
+        self
+    }
+
+    /// Apply `[protocols].higher_kinded_protocols` from manifest.
+    /// Threaded through to `TypeChecker.higher_kinded_protocols_
+    /// enabled` at `phase_checker.set_higher_kinded_protocols_
+    /// enabled(...)`. Closes the inert-defense pattern at
+    /// session.rs:590.
+    pub fn with_protocol_higher_kinded_protocols(mut self, enabled: bool) -> Self {
+        self.protocol_higher_kinded_protocols = enabled;
         self
     }
 
@@ -323,6 +341,9 @@ impl CompilationPhase for SemanticAnalysisPhase {
             verum_types::protocol::CoherenceMode::from_manifest_str(
                 self.protocol_coherence_mode.as_str(),
             ),
+        );
+        phase_checker.set_higher_kinded_protocols_enabled(
+            self.protocol_higher_kinded_protocols,
         );
 
         // If contracts are available, enable contract-aware type checking

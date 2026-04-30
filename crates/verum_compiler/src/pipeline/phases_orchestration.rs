@@ -176,6 +176,17 @@ impl<'s> CompilationPipeline<'s> {
             );
         }
 
+        // Apply `[protocols].higher_kinded_protocols` from manifest.
+        // Closes the inert-defense pattern at session.rs:590.
+        // Default false: a protocol declaring an HKT generic
+        // parameter (e.g. `protocol Functor<F<_>>`) is rejected at
+        // registration time. Manifest validation enforces that
+        // this flag can be true only when [types].higher_kinded
+        // is also true.
+        checker.set_higher_kinded_protocols_enabled(
+            self.session.language_features().protocols.higher_kinded_protocols,
+        );
+
         // Post-cycle-break (2026-04-24): `RefinementChecker` no longer
         // auto-constructs a Z3 backend. Install the concrete bridge from
         // `verum_smt` so refinement subsumption keeps working.
