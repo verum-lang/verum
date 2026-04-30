@@ -227,7 +227,9 @@ impl<'a> Validator<'a> {
 
         match type_ref {
             TypeRef::Concrete(id) => {
-                if !id.is_builtin() && self.module.get_type(*id).is_none() {
+                if !id.is_builtin() && !id.is_semantic_type()
+                    && self.module.get_type(*id).is_none()
+                {
                     self.errors.push(VbcError::InvalidTypeId(id.0));
                 }
             }
@@ -235,7 +237,9 @@ impl<'a> Validator<'a> {
                 // Generic type params are validated in context
             }
             TypeRef::Instantiated { base, args } => {
-                if !base.is_builtin() && self.module.get_type(*base).is_none() {
+                if !base.is_builtin() && !base.is_semantic_type()
+                    && self.module.get_type(*base).is_none()
+                {
                     self.errors.push(VbcError::InvalidTypeId(base.0));
                 }
                 for arg in args {
@@ -293,11 +297,17 @@ impl<'a> Validator<'a> {
             self.errors.push(VbcError::InvalidStringId(desc.name.0));
         }
 
-        // Validate parent type reference
+        // Validate parent type reference. Built-in primitives (<16) and
+        // well-known semantic types (LIST/MAP/MAYBE/RESULT/etc., 512-1023)
+        // have implicit interpreter-known layouts and are not required
+        // to live in the per-module TypeDescriptor table — only user-
+        // defined types must be in the table.
         if let Some(parent) = desc.parent_type
-            && !parent.is_builtin() && self.module.get_type(parent).is_none() {
-                self.errors.push(VbcError::InvalidTypeId(parent.0));
-            }
+            && !parent.is_builtin() && !parent.is_semantic_type()
+            && self.module.get_type(parent).is_none()
+        {
+            self.errors.push(VbcError::InvalidTypeId(parent.0));
+        }
 
         // Validate bytecode bounds
         let bytecode_end = desc.bytecode_offset as usize + desc.bytecode_length as usize;
@@ -699,14 +709,18 @@ impl<'a> Validator<'a> {
             // -----------------------------------------------------------
             Instruction::New { dst, type_id, field_count: _ } => {
                 let tid = TypeId(*type_id);
-                if !tid.is_builtin() && self.module.get_type(tid).is_none() {
+                if !tid.is_builtin() && !tid.is_semantic_type()
+                    && self.module.get_type(tid).is_none()
+                {
                     self.errors.push(VbcError::InvalidTypeId(*type_id));
                 }
                 self.check_reg(*dst, max_reg, &func_name);
             }
             Instruction::NewG { dst, type_id, type_args } => {
                 let tid = TypeId(*type_id);
-                if !tid.is_builtin() && self.module.get_type(tid).is_none() {
+                if !tid.is_builtin() && !tid.is_semantic_type()
+                    && self.module.get_type(tid).is_none()
+                {
                     self.errors.push(VbcError::InvalidTypeId(*type_id));
                 }
                 self.check_reg(*dst, max_reg, &func_name);
