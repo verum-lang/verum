@@ -31901,29 +31901,18 @@ impl TypeChecker {
                     Type::unit()
                 };
 
-                // Wrap return type in Result<T, E> for `throws(E)` methods,
-                // then Future<T> for `async`. Protocol method signatures
-                // must apply the same return-type transformations as
-                // free functions — external callers see the wrapped type.
-                let return_type_with_throws = if let Maybe::Some(ref tc) = method.throws_clause {
-                    if !tc.error_types.is_empty() {
-                        let error_ty = tc.error_types.iter().next()
-                            .map(|t| self.ast_to_type_lenient(t))
-                            .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
-                        Type::result(return_type, error_ty)
-                    } else {
-                        return_type
-                    }
-                } else {
-                    return_type
-                };
-                let final_return_type = if method.is_async {
-                    Type::Future {
-                        output: Box::new(return_type_with_throws),
-                    }
-                } else {
-                    return_type_with_throws
-                };
+                // Throws → generator → async wrap via the unified
+                // helper so protocol method signatures (`async fn* m()
+                // -> Y throws E`) match the shape every other path
+                // produces — external callers see
+                // `Future<Generator<Result<Y, E>, Unit>>` rather than
+                // a degraded form.  SHELL-5a coherence sweep.
+                let final_return_type = self.wrap_return_type_for_sig_full(
+                    return_type,
+                    &method.throws_clause,
+                    method.is_async,
+                    method.is_generator,
+                );
 
                 // Build function type for this method
                 let method_type = Type::Function {
@@ -32205,31 +32194,19 @@ impl TypeChecker {
                 Type::unit()
             };
 
-            // Wrap return type in Result<T, E> for `throws(E)` methods,
-            // then Future<T> for `async`. Method signatures visible to
-            // callers must apply the same return-type transformations as
-            // free functions — otherwise `obj.method()` on a throws method
-            // is typed as the raw T, breaking `.map_err` / `?` at the
-            // call site.
-            let return_type_with_throws = if let Maybe::Some(ref tc) = method.throws_clause {
-                if !tc.error_types.is_empty() {
-                    let error_ty = tc.error_types.iter().next()
-                        .map(|t| self.ast_to_type_lenient(t))
-                        .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
-                    Type::result(return_type, error_ty)
-                } else {
-                    return_type
-                }
-            } else {
-                return_type
-            };
-            let final_return_type = if method.is_async {
-                Type::Future {
-                    output: Box::new(return_type_with_throws),
-                }
-            } else {
-                return_type_with_throws
-            };
+            // Throws → generator → async wrap via the unified helper
+            // so method signatures visible to callers match the shape
+            // every other path produces.  Pre-fix this branch handled
+            // throws + async but DROPPED the generator wrap, so an
+            // `async fn* m() -> Y` registered as `Future<Y>` instead
+            // of `Future<Generator<Y, Unit>>` and `for await x in
+            // obj.m()` failed at the call site with "got Future<Y>".
+            let final_return_type = self.wrap_return_type_for_sig_full(
+                return_type,
+                &method.throws_clause,
+                method.is_async,
+                method.is_generator,
+            );
 
             // Build function type for this method
             let method_type = Type::Function {

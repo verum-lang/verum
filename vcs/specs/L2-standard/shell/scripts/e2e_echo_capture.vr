@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: shell, scripts, e2e, runtime, capture
+// @timeout: 10000
+// @expected-stdout: hello-from-shell
+// @expected-exit: 0
+// @description: End-to-end shell-scripting integration — parse → typecheck
+// → VBC bytecode → interpreter → spawn `echo` → capture stdout → assert.
+// Closes SHELL-9: previously the shell-scripts subdirectory was
+// typecheck-only; this is the FIRST script that actually runs through the
+// interpreter and verifies the runtime contract end-to-end.
+//
+// Uses only POSIX `echo`, available on every supported runtime target
+// (macOS, Linux, BSD).  No external tooling dependency, no network, no
+// filesystem mutation — safe for CI everywhere.
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult, ShellError};
+
+async fn capture() -> Result<Text, ShellError> {
+    let r = sh#"echo hello-from-shell".run_check().await?;
+    Ok(r.text())
+}
+
+async fn main() {
+    match capture().await {
+        Ok(s)  => print(&s),
+        Err(_) => print(&"<spawn-failed>"),
+    }
+}

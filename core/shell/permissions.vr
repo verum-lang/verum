@@ -23,7 +23,7 @@ module permissions;
 
 mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.glob.{GlobPattern, compile as glob_compile};
-mount core.intrinsics.bitwise.{bitand, bitor, shl};
+mount core.intrinsics.bitwise.{bitand, bitor, shl, shr};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{current_dir as fs_current_dir};
 mount core.shell.context.{PermissionSet};
@@ -122,18 +122,34 @@ fn path_matches(pattern: &Text, path: &Text) -> Bool {
 }
 
 fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
-    // pattern forms:
-    //   "example.com"        — exact host, any port
-    //   "example.com:443"    — exact host + port
-    //   "*.example.com"      — suffix wildcard
-    //   "10.0.0.0/8"         — CIDR (any port)
-    //   "10.0.0.0/8:443"     — CIDR + port
+    // pattern forms (in dispatch order):
+    //   "[2001:db8::1]:443"    — bracketed IPv6 + port (RFC 3986 §3.2.2)
+    //   "[2001:db8::]/32:443"  — bracketed IPv6 CIDR + port
+    //   "[2001:db8::1]"        — bracketed IPv6 (no port)
+    //   "2001:db8::/32"        — IPv6 CIDR (no port)
+    //   "10.0.0.0/8"           — IPv4 CIDR (any port)
+    //   "10.0.0.0/8:443"       — IPv4 CIDR + port
+    //   "2001:db8::1"          — bare IPv6 literal, exact (no port)
+    //   "example.com"          — exact host, any port
+    //   "example.com:443"      — exact host + port
+    //   "*.example.com"        — suffix wildcard
     //
-    // CIDR is checked first so the literal-host parse can't interpret
-    // the prefix ("/8") as part of the hostname. For non-CIDR patterns
-    // the legacy parse-on-first-colon path runs unchanged.
+    // The bracketed form must be checked FIRST since `[…]:port` would
+    // otherwise be misparsed by the colon-splitter; CIDR is checked
+    // BEFORE the colon-splitter so `/N` isn't read as part of host.
+    // Bare IPv6 literals are detected by `is_v6_literal` (multiple
+    // colons or `::`) so a single `:` still reads as `host:port`.
+    if pattern.starts_with("[") {
+        return bracketed_v6_matches(pattern, host, port);
+    }
     if let Some(slash_idx) = pattern.find('/') {
         return cidr_host_matches(pattern, slash_idx, host, port);
+    }
+    if is_v6_literal(pattern) {
+        return match (parse_ipv6(pattern), parse_ipv6(host)) {
+            (Some(p), Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            _                  => false,
+        };
     }
     let (pat_host, pat_port): (Text, Int) = match pattern.find(':') {
         Some(idx) => {
@@ -158,10 +174,10 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
 
 // Match "<addr>/<prefix>[:port]" against (host, port).
 // `slash_idx` is the byte offset of the '/' in `pattern`.  The address
-// portion before the slash MUST be a dotted-decimal IPv4; the host
-// argument MUST also parse as IPv4 — otherwise the rule does not match
-// (a hostname like "example.com" never matches an IP-arithmetic CIDR
-// rule, and vice versa).  Prefix length must be in 0..=32.
+// family is detected from `addr_text`: a colon-bearing addr is IPv6
+// (prefix 0..=128), otherwise IPv4 (prefix 0..=32).  Both addr and
+// host must parse as the SAME family — a hostname never matches a
+// CIDR rule, and an IPv4 host never matches an IPv6 CIDR rule.
 fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> Bool {
     let addr_text: Text = pattern.slice(0, slash_idx).into();
     let rest:      Text = pattern.slice(slash_idx + 1, pattern.len()).into();
@@ -179,17 +195,258 @@ fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> 
         Ok(n)  => n,
         Err(_) => return false,
     };
-    if prefix < 0 || prefix > 32 { return false; }
-    let pat_addr  = match parse_ipv4(&addr_text) { Some(a) => a, None => return false };
-    let host_addr = match parse_ipv4(host)       { Some(a) => a, None => return false };
-    // mask = top `prefix` bits of a 32-bit word.  prefix == 0 → mask = 0
-    // (matches everything); prefix == 32 → mask = 0xFFFFFFFF (exact).
-    let mask: Int = if prefix == 0 {
-        0
+    if is_v6_literal(&addr_text) {
+        if prefix < 0 || prefix > 128 { return false; }
+        let pat_addr  = match parse_ipv6(&addr_text) { Some(a) => a, None => return false };
+        let host_addr = match parse_ipv6(host)       { Some(a) => a, None => return false };
+        cidr_v6_match(&pat_addr, &host_addr, prefix)
     } else {
-        bitand(shl(0xFFFFFFFF, 32 - prefix), 0xFFFFFFFF)
+        if prefix < 0 || prefix > 32 { return false; }
+        let pat_addr  = match parse_ipv4(&addr_text) { Some(a) => a, None => return false };
+        let host_addr = match parse_ipv4(host)       { Some(a) => a, None => return false };
+        // mask = top `prefix` bits of a 32-bit word.  prefix == 0 → mask = 0
+        // (matches everything); prefix == 32 → mask = 0xFFFFFFFF (exact).
+        let mask: Int = if prefix == 0 {
+            0
+        } else {
+            bitand(shl(0xFFFFFFFF, 32 - prefix), 0xFFFFFFFF)
+        };
+        bitand(pat_addr, mask) == bitand(host_addr, mask)
+    }
+}
+
+// Bracketed IPv6 form (RFC 3986 §3.2.2).  Three accepted shapes:
+//   "[v6]"                  — exact match, any port
+//   "[v6]:port"             — exact match, specific port
+//   "[v6]/prefix[:port]"    — CIDR + optional port
+fn bracketed_v6_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
+    let close = match pattern.find(']') { Some(i) => i, None => return false };
+    if close < 1 { return false; }
+    let addr_text: Text = pattern.slice(1, close).into();
+    let after:     Text = pattern.slice(close + 1, pattern.len()).into();
+    if after.is_empty() {
+        return match (parse_ipv6(&addr_text), parse_ipv6(host)) {
+            (Some(p), Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            _                  => false,
+        };
+    }
+    if after.starts_with("/") {
+        // CIDR + optional :port  →  reuse the unified cidr path by
+        // re-stitching "addr/rest" so cidr_host_matches sees a
+        // canonical pattern.  rest is `after[1..]` (without the slash).
+        let rest: Text = after.slice(1, after.len()).into();
+        // Build "addr/rest" and dispatch.
+        let combined: Text = addr_text.concat("/").concat(&rest);
+        return cidr_host_matches(&combined, addr_text.len(), host, port);
+    }
+    if after.starts_with(":") {
+        let p_str: Text = after.slice(1, after.len()).into();
+        let pat_port: Int = p_str.parse_int().unwrap_or(0);
+        if pat_port != 0 && port != 0 && pat_port != port { return false; }
+        return match (parse_ipv6(&addr_text), parse_ipv6(host)) {
+            (Some(p), Some(h)) => p.hi == h.hi && p.lo == h.lo,
+            _                  => false,
+        };
+    }
+    false
+}
+
+// 128-bit IPv6 address stored as two 64-bit halves.  Verum's `Int` is
+// signed 64-bit, so the low 64 bits of each half carry one half of
+// the address; bitwise comparisons and masks treat them as unsigned
+// (sign-extension does not affect bitand/bitor/shl/shr identity).
+type Ipv6Addr is { hi: Int, lo: Int };
+
+// Heuristic: a textual IPv6 literal contains either `::` (the
+// zero-run shorthand) or two-or-more `:` separators.  Single-colon
+// strings are read as `host:port`, hostnames have no colons.
+fn is_v6_literal(text: &Text) -> Bool {
+    if text.find("::").is_some() { return true; }
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    let len = text.len();
+    while i < len {
+        if text.byte_at(i) == (':' as Byte) { n = n + 1; }
+        i = i + 1;
+    }
+    n >= 2
+}
+
+// Match `pat` against `host` under a `prefix`-bit IPv6 CIDR mask.
+// `prefix` MUST be in 0..=128 (caller pre-validates).
+fn cidr_v6_match(pat: &Ipv6Addr, host: &Ipv6Addr, prefix: Int) -> Bool {
+    let (hi_bits, lo_bits): (Int, Int) = if prefix <= 64 {
+        (prefix, 0)
+    } else {
+        (64, prefix - 64)
     };
-    bitand(pat_addr, mask) == bitand(host_addr, mask)
+    let hi_mask = mask_top_bits_u64(hi_bits);
+    let lo_mask = mask_top_bits_u64(lo_bits);
+    bitand(pat.hi, hi_mask) == bitand(host.hi, hi_mask)
+        && bitand(pat.lo, lo_mask) == bitand(host.lo, lo_mask)
+}
+
+// 64-bit mask covering the top `bits` bits.  `bits == 0 → 0`,
+// `bits == 64 → -1` (all-ones in two's complement), else
+// `(-1) << (64 - bits)` — left-shifting -1 produces a top-aligned
+// run of ones with the correct width regardless of sign because
+// shl is bitwise.
+fn mask_top_bits_u64(bits: Int) -> Int {
+    if bits <= 0 { 0 }
+    else if bits >= 64 { -1 }
+    else { shl(-1, 64 - bits) }
+}
+
+// Parse RFC 4291 IPv6 textual form.  Supports:
+//   * Full form:        2001:0db8:85a3:0000:0000:8a2e:0370:7334
+//   * Compressed form:  2001:db8::8a2e:370:7334
+//   * Loopback:         ::1
+//   * Unspecified:      ::
+//   * IPv4-mapped tail: ::ffff:192.168.1.1  (last 32 bits = IPv4)
+//
+// Returns None on any malformed input: unrecognised characters,
+// >4 hex chars per group, multiple `::` zones, total != 8 groups,
+// or invalid IPv4 tail.
+fn parse_ipv6(text: &Text) -> Maybe<Ipv6Addr> {
+    if text.is_empty() { return None; }
+
+    // Reject inputs with more than one `::` zone — `split(":")` can't
+    // distinguish "a:::b" (illegal) from "a::b" (legal) on its own
+    // because both produce ≥3 consecutive empties.  RFC 4291 §2.2
+    // permits exactly one `::`, anywhere.
+    if let Some(first) = text.find("::") {
+        let after: Text = text.slice(first + 2, text.len()).into();
+        if after.find("::").is_some() { return None; }
+    }
+
+    let mut groups: List<Text> = text.split(":");
+    if groups.len() < 3 || groups.len() > 9 { return None; }
+
+    // IPv4-mapped tail: if the LAST group contains '.', parse it as
+    // IPv4 and replace it in-place with TWO equivalent hex groups.
+    let last_idx = groups.len() - 1;
+    if groups[last_idx].find(".").is_some() {
+        let v4 = match parse_ipv4(&groups[last_idx]) { Some(a) => a, None => return None };
+        let high: Int = bitand(shr(v4, 16), 0xFFFF);
+        let low:  Int = bitand(v4, 0xFFFF);
+        let mut rebuilt: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < last_idx {
+            rebuilt.push(groups[i].clone());
+            i = i + 1;
+        }
+        rebuilt.push(int_to_hex_text(high));
+        rebuilt.push(int_to_hex_text(low));
+        groups = rebuilt;
+    }
+
+    // Locate the empty-group span (the `::` zone).  Empty groups can
+    // appear at most ONE contiguous run, but the leading/trailing `::`
+    // produces TWO adjacent empties (e.g. `::1` -> ["", "", "1"]).
+    let n = groups.len();
+    let mut first_empty: Maybe<Int> = None;
+    let mut last_empty:  Maybe<Int> = None;
+    let mut empty_count: Int = 0;
+    let mut idx: Int = 0;
+    while idx < n {
+        if groups[idx].is_empty() {
+            if first_empty.is_none() { first_empty = Some(idx); }
+            last_empty = Some(idx);
+            empty_count = empty_count + 1;
+        } else if last_empty.is_some() {
+            // Non-empty AFTER the empty-zone closes — verify no further
+            // empties follow (would indicate two separate `::`).
+            let mut k: Int = idx + 1;
+            while k < n {
+                if groups[k].is_empty() { return None; }
+                k = k + 1;
+            }
+            break;
+        }
+        idx = idx + 1;
+    }
+
+    let mut final_groups: List<Int> = List.new();
+    if empty_count == 0 {
+        if n != 8 { return None; }
+        for g in groups.iter() {
+            match parse_hex_group(g) {
+                Some(v) => final_groups.push(v),
+                None    => return None,
+            }
+        }
+    } else {
+        // `::` zone present.  zeros_to_fill = 8 - non-empty groups.
+        let real_groups = n - empty_count;
+        let zeros_to_fill = 8 - real_groups;
+        if zeros_to_fill < 1 || zeros_to_fill > 8 { return None; }
+        let pre_end    = first_empty.unwrap_or(0);
+        let post_start = last_empty.unwrap_or(0) + 1;
+        let mut i: Int = 0;
+        while i < pre_end {
+            match parse_hex_group(&groups[i]) {
+                Some(v) => final_groups.push(v),
+                None    => return None,
+            }
+            i = i + 1;
+        }
+        let mut z: Int = 0;
+        while z < zeros_to_fill {
+            final_groups.push(0);
+            z = z + 1;
+        }
+        let mut j: Int = post_start;
+        while j < n {
+            match parse_hex_group(&groups[j]) {
+                Some(v) => final_groups.push(v),
+                None    => return None,
+            }
+            j = j + 1;
+        }
+    }
+
+    if final_groups.len() != 8 { return None; }
+
+    let hi: Int = bitor(
+        bitor(shl(final_groups[0], 48), shl(final_groups[1], 32)),
+        bitor(shl(final_groups[2], 16), final_groups[3]),
+    );
+    let lo: Int = bitor(
+        bitor(shl(final_groups[4], 48), shl(final_groups[5], 32)),
+        bitor(shl(final_groups[6], 16), final_groups[7]),
+    );
+    Some(Ipv6Addr { hi: hi, lo: lo })
+}
+
+fn parse_hex_group(text: &Text) -> Maybe<Int> {
+    if text.is_empty() || text.len() > 4 { return None; }
+    match text.parse_int_radix(16) {
+        Ok(n) if n >= 0 && n <= 0xFFFF => Some(n),
+        _                              => None,
+    }
+}
+
+// Lowercase-hex-encode a 0..=0xFFFF value (no leading zeros, no
+// "0x" prefix).  Used internally to splice an IPv4-mapped tail back
+// into a pure-hex IPv6 textual form before re-tokenisation.
+fn int_to_hex_text(n: Int) -> Text {
+    if n == 0 { return "0".into(); }
+    let digits = "0123456789abcdef";
+    let mut bytes: List<Byte> = List.new();
+    let mut v = n;
+    while v > 0 {
+        let nibble = bitand(v, 0xF);
+        bytes.push(digits.byte_at(nibble));
+        v = shr(v, 4);
+    }
+    // bytes is little-end; reverse for printable form.
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = bytes.len() - 1;
+    while i >= 0 {
+        out.push(bytes[i]);
+        i = i - 1;
+    }
+    Text.from_utf8_lossy(&out)
 }
 
 // Parse a dotted-decimal IPv4 address into its 32-bit big-endian
