@@ -2962,34 +2962,59 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Found {} .vr file(s)", project_files.len());
 
-        // Load and parse all modules using ModuleLoader
-        let mut sources = Map::new();
+        // Load and parse all modules using ModuleLoader.
+        //
+        // File I/O is naturally parallel: each `read_to_string` is an
+        // independent syscall, and OS schedulers exploit kernel-level
+        // parallelism (epoll, io_uring) to overlap multiple reads
+        // even on a single CPU. rayon's `par_iter` work-stealing
+        // composes with the OS's read-ahead so wall-clock scales with
+        // the slower of (cores, disk-throughput).
+        //
+        // Opt-out via `VERUM_NO_PARALLEL_READ=1` for diagnostic
+        // ordering reproducibility in CI / regression triage.
+        let parallel_read = std::env::var("VERUM_NO_PARALLEL_READ").is_err();
+        let root_path = self.module_loader.root_path().to_path_buf();
 
-        for file_path in project_files {
+        let to_module_entry = |file_path: &PathBuf| -> Result<(Text, Text)> {
             debug!("Loading module: {}", file_path.display());
-
-            // Read source file
-            let source_text = std::fs::read_to_string(&file_path)
+            let source_text = std::fs::read_to_string(file_path)
                 .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
 
-            // Convert file path to module path for proper import resolution
             let mut module_path_str = file_path
-                .strip_prefix(self.module_loader.root_path())
-                .unwrap_or(&file_path)
+                .strip_prefix(&root_path)
+                .unwrap_or(file_path)
                 .with_extension("")
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, ".");
 
-            // Handle "mod" files - they represent their parent directory
+            // Handle "mod" files — they represent their parent directory.
             // e.g., "domain.mod" -> "domain", "services.mod" -> "services"
             if module_path_str.ends_with(".mod") {
                 module_path_str = module_path_str.trim_end_matches(".mod").to_string();
             } else if module_path_str == "mod" {
-                // Root mod.vr -> empty string (root module)
                 module_path_str = String::new();
             }
 
-            sources.insert(Text::from(module_path_str), Text::from(source_text));
+            Ok((Text::from(module_path_str), Text::from(source_text)))
+        };
+
+        let entries: Vec<(Text, Text)> = if parallel_read && project_files.len() > 1 {
+            use rayon::prelude::*;
+            project_files
+                .par_iter()
+                .map(to_module_entry)
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            project_files
+                .iter()
+                .map(to_module_entry)
+                .collect::<Result<Vec<_>>>()?
+        };
+
+        let mut sources = Map::new();
+        for (k, v) in entries {
+            sources.insert(k, v);
         }
 
         // Run multi-pass compilation on all discovered modules
