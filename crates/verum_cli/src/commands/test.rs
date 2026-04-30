@@ -45,7 +45,7 @@ use verum_compiler::options::{CompilerOptions, OutputFormat, VerifyMode};
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 // --------------------------------------------------------------------
 // Public options & entry

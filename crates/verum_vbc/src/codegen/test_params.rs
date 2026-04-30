@@ -2,7 +2,7 @@
 
 use ::verum_ast::pattern::{Pattern, PatternKind};
 use ::verum_ast::decl::{FunctionParam, FunctionParamKind};
-use ::verum_parser::Parser;
+use ::verum_fast_parser::Parser;
 use crate::codegen::{VbcCodegen, CodegenConfig};
 
 fn extract_pattern_name(pattern: &Pattern) -> Option<String> {

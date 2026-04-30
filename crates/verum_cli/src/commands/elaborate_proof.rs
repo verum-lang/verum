@@ -183,7 +183,7 @@ fn walk_and_elaborate(
     // verum_parser re-exports FastParser at the crate root; verum_cli
     // depends on verum_parser via [dependencies] but only on
     // verum_fast_parser via [dev-dependencies], so use the re-export.
-    use verum_parser::FastParser;
+    use verum_fast_parser::FastParser;
 
     let source = std::fs::read_to_string(source_path).map_err(|e| {
         CliError::custom(format!("read {}: {}", source_path.display(), e))

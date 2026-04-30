@@ -21,7 +21,7 @@ use crate::ui;
 use std::sync::Arc;
 use verum_ast::FileId;
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 

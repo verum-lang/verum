@@ -18,7 +18,7 @@ use verum_ast::{FileId, Module as AstModule};
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
 use verum_common::{List, Map, Maybe, Shared, Text};
 use verum_lexer::Lexer;
-use verum_parser::VerumParser;
+use verum_fast_parser::VerumParser;
 
 /// MOD-MED-1 — header-validation diagnostic.
 ///

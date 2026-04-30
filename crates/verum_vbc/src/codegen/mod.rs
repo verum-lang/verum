@@ -3882,7 +3882,7 @@ impl VbcCodegen {
         for file_path in to_parse {
             #[cfg(feature = "codegen")]
             if let Ok(source) = std::fs::read_to_string(&file_path) {
-                let mut parser = verum_parser::Parser::new(&source);
+                let mut parser = verum_fast_parser::Parser::new(&source);
                 if let Ok(imported_module) = parser.parse_module() {
                     // Recursively resolve mounts from this imported file first
                     self.resolve_mounts_recursive(
@@ -6850,6 +6850,90 @@ impl VbcCodegen {
                     }
                     // If already in collision set, don't register simple name
                 }
+
+                // VBC-3 fundamental fix: register a TypeDescriptor for
+                // the sum type itself so MakeVariantTyped can carry
+                // its concrete TypeId in the heap header (and the
+                // runtime variant-name lookup at
+                // `format_variant_for_print_depth` can resolve the
+                // constructor name in O(N_variants_of_type) instead
+                // of falling back to a global scan that loses
+                // disambiguation across sum types sharing variant
+                // tags — e.g. `Result.Err` vs `ShellError.SpawnFailed`
+                // both tag=1).  Pre-fix the variant-arm registered
+                // each variant as a constructor function but NEVER
+                // pushed a descriptor for the parent type — codegen's
+                // type-typed emit helper would resolve the name to a
+                // TypeId via `type_name_to_id` but the runtime
+                // validator would reject it as `unknown type_id`
+                // because no descriptor matched, demoting every
+                // variant emission back to the legacy form.  Now the
+                // descriptor IS pushed with kind=Sum + a complete
+                // variant table, so the typed path stays load-bearing.
+                let type_id = if let Some(&existing) = self.type_name_to_id.get(&type_name) {
+                    existing
+                } else {
+                    let tid = self.alloc_user_type_id();
+                    self.type_name_to_id.insert(type_name.clone(), tid);
+                    tid
+                };
+                let mut sum_desc = TypeDescriptor {
+                    id: type_id,
+                    name: StringId(self.ctx.intern_string_raw(&type_name)),
+                    kind: crate::types::TypeKind::Sum,
+                    ..Default::default()
+                };
+                for (variant_index, variant) in variants.iter().enumerate() {
+                    let variant_name = variant.name.name.to_string();
+                    let variant_name_id = StringId(self.ctx.intern_string_raw(&variant_name));
+                    let (kind, arity, fields_desc): (
+                        crate::types::VariantKind,
+                        u8,
+                        smallvec::SmallVec<[crate::types::FieldDescriptor; 4]>,
+                    ) = match &variant.data {
+                        verum_common::Maybe::None => (
+                            crate::types::VariantKind::Unit,
+                            0,
+                            smallvec::SmallVec::new(),
+                        ),
+                        verum_common::Maybe::Some(VariantData::Tuple(types)) => (
+                            crate::types::VariantKind::Tuple,
+                            types.len() as u8,
+                            smallvec::SmallVec::new(),
+                        ),
+                        verum_common::Maybe::Some(VariantData::Record(fields)) => {
+                            // Record-variant payload count lives in
+                            // `fields`, NOT in `arity` — the layout
+                            // validator (`type-layout invariant`)
+                            // rejects the over-specified case
+                            // ("variant is Record but also reports
+                            // arity=N").  Keep arity=0 here so the
+                            // descriptor is internally consistent.
+                            let fds: smallvec::SmallVec<[crate::types::FieldDescriptor; 4]> = fields
+                                .iter()
+                                .map(|f| crate::types::FieldDescriptor {
+                                    name: StringId(self.ctx.intern_string_raw(f.name.name.as_str())),
+                                    type_ref: self.ast_type_to_type_ref(&f.ty),
+                                    ..Default::default()
+                                })
+                                .collect();
+                            (crate::types::VariantKind::Record, 0u8, fds)
+                        }
+                    };
+                    sum_desc.variants.push(crate::types::VariantDescriptor {
+                        name: variant_name_id,
+                        tag: variant_index as u32,
+                        payload: None,
+                        kind,
+                        arity,
+                        fields: fields_desc,
+                    });
+                }
+                tracing::debug!(
+                    "[variant] pushing Sum TypeDescriptor for {} (id={}, variants={})",
+                    type_name, type_id.0, sum_desc.variants.len(),
+                );
+                self.push_type_dedupe(sum_desc);
             }
 
             // Record types: register the type name as a constructor

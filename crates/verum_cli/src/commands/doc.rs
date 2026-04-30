@@ -169,7 +169,7 @@ fn extract_functions_from_ast(
 ) -> Result<List<FunctionDoc>> {
     use verum_ast::{FileId, ItemKind, Visibility, decl::FunctionParamKind};
     use verum_lexer::Lexer;
-    use verum_parser::VerumParser;
+    use verum_fast_parser::VerumParser;
 
     let file_id = FileId::new(0);
     let lexer = Lexer::new(content, file_id);

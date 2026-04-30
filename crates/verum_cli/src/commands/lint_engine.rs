@@ -3313,7 +3313,7 @@ mod tests {
 
     fn parse_module(source: &str) -> verum_ast::Module {
         use verum_lexer::Lexer;
-        use verum_parser::VerumParser;
+        use verum_fast_parser::VerumParser;
         let fid = verum_ast::FileId::new(0);
         let lexer = Lexer::new(source, fid);
         let parser = VerumParser::new();
