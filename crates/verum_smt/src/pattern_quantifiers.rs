@@ -467,6 +467,35 @@ pub struct PatternGenerator {
 impl PatternGenerator {
     /// Create a new pattern generator
     pub fn new(config: PatternConfig) -> Self {
+        // Phase-not-realised tracing for two inert PatternConfig
+        // fields: `quantifier_id_prefix` (default "verum_q") and
+        // `skolem_id_prefix` (default "verum_sk"). Both are
+        // documented as identifier prefixes for Z3's
+        // `quantifier_const` API, threaded through the helper
+        // `create_weighted_quantifier` (line 3707) — but no
+        // PatternGenerator method calls that helper, and no
+        // production code path consumes the prefix fields. Z3
+        // generates anonymous quantifier IDs by default, so the
+        // operator-facing knob has no effect today.
+        //
+        // Surface a debug trace when either prefix is set to a
+        // non-default value so embedders writing
+        // `[smt.patterns] quantifier_id_prefix = "myproject_q"`
+        // see the value was observed but not threaded through.
+        if config.quantifier_id_prefix.as_str() != "verum_q"
+            || config.skolem_id_prefix.as_str() != "verum_sk"
+        {
+            tracing::debug!(
+                "PatternConfig surface: quantifier_id_prefix={:?}, skolem_id_prefix={:?} \
+                 — these prefix fields land on the config but the production \
+                 PatternGenerator does not call `create_weighted_quantifier` (the only \
+                 site that would consume them). Z3 currently generates anonymous \
+                 quantifier IDs. Forward-looking knobs for a future named-quantifier \
+                 telemetry surface.",
+                config.quantifier_id_prefix.as_str(),
+                config.skolem_id_prefix.as_str(),
+            );
+        }
         Self {
             config,
             stats: PatternStats::default(),
