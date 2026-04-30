@@ -141,6 +141,13 @@ pub mod metal_ir;
 // the Tier-1 path by baking the resolved policy into the binary.
 pub mod permissions;
 
+// TARGET-triple inspection helpers.  Every codegen decision that
+// depends on the *target* OS / architecture (syscall numbers,
+// sockaddr layout, socket-option constants, errno function names,
+// …) routes through these helpers — using `#[cfg(target_os)]` HOST
+// gates miscompiles cross builds.
+pub mod target_triple;
+
 // Re-export main types
 pub use error::{LlvmLoweringError, Result, BuildExt, OptionExt};
 pub use types::{RefTier, TypeLowering, THIN_REF_SIZE, FAT_REF_SIZE};

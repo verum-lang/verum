@@ -33,6 +33,7 @@ use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Fun
 use verum_llvm::AddressSpace;
 
 use super::error::{BuildExt, LlvmLoweringError, OptionExt, Result};
+use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux};
 
 /// Default initial capacity for lists.
 pub const DEFAULT_LIST_CAPACITY: u64 = 16;
@@ -3905,10 +3906,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // Issue clock_gettime via the platform-appropriate path.
         // Cross-compilation-correct: dispatch on the LLVM module's
         // *target* triple, not the compile host's `target_os` cfg.
-        if Self::target_is_linux(module) {
+        if target_is_linux(module) {
             // Direct syscall — libc-free.  CLOCK_MONOTONIC = 1 on Linux.
             // Syscall numbers are arch-specific.
-            let sys_num: u64 = if Self::target_is_aarch64(module) {
+            let sys_num: u64 = if target_is_aarch64(module) {
                 113 // SYS_clock_gettime aarch64
             } else {
                 228 // SYS_clock_gettime x86_64
@@ -3923,7 +3924,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         } else {
             let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
             // CLOCK_MONOTONIC: macOS=6 (libSystem), other-Unix=1.
-            let clock_id: u64 = if Self::target_is_darwin(module) { 6 } else { 1 };
+            let clock_id: u64 = if target_is_darwin(module) { 6 } else { 1 };
             let clock_id_val = i32_type.const_int(clock_id, false);
             self.build_libc_call_void(
                 &builder,
@@ -3970,8 +3971,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // monotonic_nanos but with CLOCK_REALTIME=0 instead of 1.
         // Cross-compilation-correct: TARGET-triple dispatch via
         // `Self::target_is_linux`, never host `#[cfg]`.
-        if Self::target_is_linux(module) {
-            let sys_num: u64 = if Self::target_is_aarch64(module) {
+        if target_is_linux(module) {
+            let sys_num: u64 = if target_is_aarch64(module) {
                 113 // SYS_clock_gettime aarch64
             } else {
                 228 // SYS_clock_gettime x86_64
@@ -4054,8 +4055,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         //     of `verum_time_sleep_nanos` don't promise full duration
         //     under signals.
         //   * macOS / other Unix: libSystem nanosleep (acceptable).
-        if Self::target_is_linux(module) {
-            let sys_num: u64 = if Self::target_is_aarch64(module) {
+        if target_is_linux(module) {
+            let sys_num: u64 = if target_is_aarch64(module) {
                 101 // SYS_nanosleep aarch64
             } else {
                 35 // SYS_nanosleep x86_64
@@ -4430,39 +4431,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// Returns true when the LLVM module's TARGET triple denotes Linux.
-    ///
-    /// Used by every per-platform AOT helper to select between the
-    /// direct-syscall path (Linux) and libSystem / kernel32 paths
-    /// (macOS, Windows).  Inspecting `module.get_triple()` is the only
-    /// cross-compilation-correct dispatch — `#[cfg(target_os = "...")]`
-    /// would silently bind to the *compile host* and miscompile every
-    /// cross build (e.g. `cargo run` on macOS targeting Linux/aarch64
-    /// would emit libSystem clock_gettime against a Linux binary).
-    fn target_is_linux(module: &Module<'ctx>) -> bool {
-        let triple = module.get_triple();
-        triple.as_str().to_string_lossy().contains("linux")
-    }
-
-    /// Returns true when the LLVM module's TARGET triple denotes macOS
-    /// / Darwin (iOS, tvOS, watchOS variants all match — they share
-    /// the libSystem ABI).
-    fn target_is_darwin(module: &Module<'ctx>) -> bool {
-        let t = module.get_triple();
-        let s = t.as_str().to_string_lossy().to_string();
-        s.contains("darwin") || s.contains("apple")
-    }
-
-    /// Returns true when the LLVM module's TARGET triple denotes
-    /// aarch64 / arm64.  Used at syscall-number selection time —
-    /// SYS_clock_gettime, SYS_getpid, SYS_nanosleep all have different
-    /// numbers on x86_64 vs arm64 Linux.
-    fn target_is_aarch64(module: &Module<'ctx>) -> bool {
-        let t = module.get_triple();
-        let s = t.as_str().to_string_lossy().to_string();
-        s.contains("aarch64") || s.contains("arm64")
-    }
-
     /// **Linux direct syscall** — libc-free emission of the kernel
     /// trap instruction (per user's 2026-05-01 directive: "for AOT we
     /// don't use libc on any platform; on Linux use direct syscalls").
@@ -4702,7 +4670,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 // ABI-divergent between Darwin and Linux — emitting
                 // host's table into a cross-target binary silently
                 // produces O_TRUNC where O_APPEND was intended.
-                let (write_flags, append_flags, rdwr_flags) = if Self::target_is_darwin(module) {
+                let (write_flags, append_flags, rdwr_flags) = if target_is_darwin(module) {
                     (0x601i32, 0x209i32, 0x202i32)
                 } else {
                     (0x241i32, 0x441i32, 0x42i32)
@@ -5672,8 +5640,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 builder.position_at_end(entry);
 
                 // Cross-compilation-correct: TARGET-triple dispatch.
-                if Self::target_is_linux(module) {
-                    let sys_num: u64 = if Self::target_is_aarch64(module) {
+                if target_is_linux(module) {
+                    let sys_num: u64 = if target_is_aarch64(module) {
                         172 // SYS_getpid aarch64
                     } else {
                         39 // SYS_getpid x86_64
@@ -5722,7 +5690,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 // module's TARGET triple.  Three platform arms share
                 // the same compiled function — selection happens at
                 // codegen-time, not host compile-time.
-                if Self::target_is_darwin(module) {
+                if target_is_darwin(module) {
                     // Declare `int pthread_threadid_np(pthread_t, uint64_t *)`.
                     // First arg `pthread_t` is a pointer-sized opaque
                     // value; `0` (NULL) means "the calling thread".
@@ -5756,7 +5724,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         .or_llvm_err()?
                         .into_int_value();
                     builder.build_return(Some(&tid)).or_llvm_err()?;
-                } else if Self::target_is_linux(module) {
+                } else if target_is_linux(module) {
                     // **Direct syscall — libc-free** (per user 2026-05-01
                     // directive: "for AOT we don't use libc on any
                     // platform").  Pre-fix this path called `gettid`
@@ -5767,7 +5735,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                     // (cross-compilation-safe).
                     //
                     // SYS_gettid: x86_64=186, aarch64=178.
-                    let sys_num: u64 = if Self::target_is_aarch64(module) {
+                    let sys_num: u64 = if target_is_aarch64(module) {
                         178
                     } else {
                         186
@@ -6539,7 +6507,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             alloca.into(), i32_type.const_zero().into(), i64_type.const_int(16, false).into(),
         ], "").or_llvm_err()?;
         // sin_family = AF_INET — TARGET-dependent layout.
-        if Self::target_is_darwin(module) {
+        if target_is_darwin(module) {
             // Darwin: byte 0 = sin_len=16, byte 1 = sin_family=2
             // SAFETY: GEP at offset 0 within a struct of known layout; the offset is within the allocation
             let p0 = unsafe { builder.build_gep(i8_type, alloca, &[i32_type.const_int(0, false)], "sl").or_llvm_err()? };
@@ -6777,7 +6745,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // target triple, never the compile host.  Pre-fix a Linux
         // target binary built on macOS would emit Darwin's 0xFFFF /
         // 4 into setsockopt, which Linux rejects with ENOPROTOOPT.
-        let (sol_socket, so_reuseaddr): (u64, u64) = if Self::target_is_darwin(module) {
+        let (sol_socket, so_reuseaddr): (u64, u64) = if target_is_darwin(module) {
             (0xffff, 4)
         } else {
             (1, 2)
@@ -6785,7 +6753,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // ai_addr offset within struct addrinfo (differs macOS vs Linux).
         // Same TARGET-triple discipline.
-        let addrinfo_ai_addr_off: u64 = if Self::target_is_darwin(module) {
+        let addrinfo_ai_addr_off: u64 = if target_is_darwin(module) {
             32
         } else {
             24
@@ -7002,7 +6970,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 // SO_REUSEPORT is TARGET-dependent: Darwin = 0x0200 (512),
                 // Linux = 15.  Cross-compilation-correct dispatch on the
                 // module's target triple.
-                let so_reuseport: u64 = if Self::target_is_darwin(module) {
+                let so_reuseport: u64 = if target_is_darwin(module) {
                     0x0200
                 } else {
                     15
@@ -7482,7 +7450,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 // sockaddr_in family field — Darwin: sin_len byte +
                 // sin_family byte; Linux: sin_family i16.  TARGET-triple
                 // dispatch keeps cross builds correct.
-                if Self::target_is_darwin(module) {
+                if target_is_darwin(module) {
                     // SAFETY: GEP at offset 0 within a struct of known layout; the offset is within the allocation
                     let p0 = unsafe { b.build_gep(i8_type, sa, &[i32_type.const_int(0, false)], "sl").or_llvm_err()? };
                     b.build_store(p0, i8_type.const_int(16, false)).or_llvm_err()?;

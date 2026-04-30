@@ -20,6 +20,7 @@ use verum_llvm::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, Fun
 use verum_llvm::{AddressSpace, IntPredicate};
 use verum_llvm::attributes::AttributeLoc;
 use super::error::{BuildExt, OptionExt};
+use super::target_triple::{target_is_aarch64, target_is_darwin, target_is_linux, target_is_windows};
 
 /// Manifest-driven runtime configuration values that flow from
 /// `LanguageFeatures.runtime` through `LoweringConfig` into
@@ -3918,9 +3919,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context; let i64_type = ctx.i64_type();
         let func = self.get_or_declare_fn(module, "verum_socket_set_nonblocking", i64_type.fn_type(&[i64_type.into()], false));
         if func.count_basic_blocks() > 0 { return Ok(()); }
-        #[cfg(target_os = "macos")] let o_nonblock: u64 = 0x0004;
-        #[cfg(target_os = "linux")] let o_nonblock: u64 = 0x800;
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))] let o_nonblock: u64 = 0x0004;
+        // O_NONBLOCK: Darwin/BSD=0x0004, Linux=0x800.  TARGET-triple dispatch.
+        let o_nonblock: u64 = if target_is_linux(module) { 0x800 } else { 0x0004 };
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry"); let getfl_ok = ctx.append_basic_block(func, "getfl_ok"); let ret_fail = ctx.append_basic_block(func, "ret_fail");
         builder.position_at_end(entry);
@@ -3940,9 +3940,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context; let i64_type = ctx.i64_type();
         let func = self.get_or_declare_fn(module, "verum_socket_set_blocking", i64_type.fn_type(&[i64_type.into()], false));
         if func.count_basic_blocks() > 0 { return Ok(()); }
-        #[cfg(target_os = "macos")] let o_nonblock: u64 = 0x0004;
-        #[cfg(target_os = "linux")] let o_nonblock: u64 = 0x800;
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))] let o_nonblock: u64 = 0x0004;
+        // O_NONBLOCK (cleared here): Darwin/BSD=0x0004, Linux=0x800.
+        let o_nonblock: u64 = if target_is_linux(module) { 0x800 } else { 0x0004 };
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry"); let getfl_ok = ctx.append_basic_block(func, "getfl_ok"); let ret_fail = ctx.append_basic_block(func, "ret_fail");
         builder.position_at_end(entry);
@@ -3969,14 +3968,41 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.build_return(Some(&r)).or_llvm_err()?;
         Ok(())
     }
-    fn emit_socket_set_reuseaddr(&self, module: &Module<'ctx>) -> super::error::Result<()> { #[cfg(target_os = "macos")] let (s, o) = (0xFFFFu64, 0x0004u64); #[cfg(target_os = "linux")] let (s, o) = (1u64, 2u64); #[cfg(not(any(target_os = "macos", target_os = "linux")))] let (s, o) = (0xFFFFu64, 0x0004u64); self.emit_setsockopt_bool_helper(module, "verum_socket_set_reuseaddr", s, o)?; Ok(()) }
+    fn emit_socket_set_reuseaddr(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        // SOL_SOCKET / SO_REUSEADDR — TARGET-dependent.
+        // Darwin: SOL_SOCKET=0xFFFF, SO_REUSEADDR=0x0004
+        // Linux:  SOL_SOCKET=1,      SO_REUSEADDR=2
+        // Other (BSD-derived): use Darwin layout as best-fit fallback.
+        let (s, o) = if target_is_linux(module) {
+            (1u64, 2u64)
+        } else {
+            (0xFFFFu64, 0x0004u64)
+        };
+        self.emit_setsockopt_bool_helper(module, "verum_socket_set_reuseaddr", s, o)?;
+        Ok(())
+    }
     fn emit_socket_set_nodelay(&self, module: &Module<'ctx>) -> super::error::Result<()> { self.emit_setsockopt_bool_helper(module, "verum_socket_set_nodelay", 6, 1)?; Ok(()) }
-    fn emit_socket_set_keepalive(&self, module: &Module<'ctx>) -> super::error::Result<()> { #[cfg(target_os = "macos")] let (s, o) = (0xFFFFu64, 0x0008u64); #[cfg(target_os = "linux")] let (s, o) = (1u64, 9u64); #[cfg(not(any(target_os = "macos", target_os = "linux")))] let (s, o) = (0xFFFFu64, 0x0008u64); self.emit_setsockopt_bool_helper(module, "verum_socket_set_keepalive", s, o)?; Ok(()) }
+    fn emit_socket_set_keepalive(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        // SO_KEEPALIVE: Darwin=0x0008, Linux=9.
+        let (s, o) = if target_is_linux(module) {
+            (1u64, 9u64)
+        } else {
+            (0xFFFFu64, 0x0008u64)
+        };
+        self.emit_setsockopt_bool_helper(module, "verum_socket_set_keepalive", s, o)?;
+        Ok(())
+    }
     fn emit_socket_get_error(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context; let i64_type = ctx.i64_type(); let i32_type = ctx.i32_type();
         let func = self.get_or_declare_fn(module, "verum_socket_get_error", i64_type.fn_type(&[i64_type.into()], false));
         if func.count_basic_blocks() > 0 { return Ok(()); }
-        #[cfg(target_os = "macos")] let (sol, soe) = (0xFFFFu64, 0x1007u64); #[cfg(target_os = "linux")] let (sol, soe) = (1u64, 4u64); #[cfg(not(any(target_os = "macos", target_os = "linux")))] let (sol, soe) = (0xFFFFu64, 0x1007u64);
+        // SO_ERROR: Darwin SOL_SOCKET=0xFFFF / SO_ERROR=0x1007;
+        // Linux SOL_SOCKET=1 / SO_ERROR=4.  TARGET-triple dispatch.
+        let (sol, soe) = if target_is_linux(module) {
+            (1u64, 4u64)
+        } else {
+            (0xFFFFu64, 0x1007u64)
+        };
         let builder = ctx.create_builder(); let entry = ctx.append_basic_block(func, "entry"); let gso_ok = ctx.append_basic_block(func, "gso_ok"); let ret_fail = ctx.append_basic_block(func, "ret_fail");
         builder.position_at_end(entry); let fd = func.get_first_param().or_internal("missing first param")?.into_int_value();
         let va = builder.build_alloca(i32_type, "val").or_llvm_err()?; let la = builder.build_alloca(i32_type, "len").or_llvm_err()?;
@@ -3992,7 +4018,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let ctx = self.context; let i64_type = ctx.i64_type(); let i32_type = ctx.i32_type(); let ptr_type = ctx.ptr_type(AddressSpace::default());
         let func = self.get_or_declare_fn(module, "verum_socket_connect_nonblocking", i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false));
         if func.count_basic_blocks() > 0 { return Ok(()); }
-        #[cfg(target_os = "macos")] let einprogress: u64 = 36; #[cfg(target_os = "linux")] let einprogress: u64 = 115; #[cfg(not(any(target_os = "macos", target_os = "linux")))] let einprogress: u64 = 36;
+        // EINPROGRESS: Darwin=36, Linux=115.
+        let einprogress: u64 = if target_is_linux(module) { 115 } else { 36 };
         let builder = ctx.create_builder(); let entry = ctx.append_basic_block(func, "entry"); let check_errno = ctx.append_basic_block(func, "check_errno"); let ret_ok = ctx.append_basic_block(func, "ret_ok"); let ret_inp = ctx.append_basic_block(func, "ret_inprogress"); let ret_fail = ctx.append_basic_block(func, "ret_fail");
         builder.position_at_end(entry); let fd = func.get_nth_param(0).or_internal("missing param 0")?.into_int_value(); let addr = func.get_nth_param(1).or_internal("missing param 1")?.into_pointer_value(); let alen = func.get_nth_param(2).or_internal("missing param 2")?.into_int_value();
         let cr = builder.build_call(module.get_function("connect").or_missing_fn("connect")?, &[fd.into(), addr.into(), alen.into()], "cr").or_llvm_err()?.try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
@@ -4000,7 +4027,8 @@ impl<'ctx> PlatformIR<'ctx> {
         builder.build_conditional_branch(cok, ret_ok, check_errno).or_llvm_err()?;
         builder.position_at_end(ret_ok); builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
         builder.position_at_end(check_errno);
-        #[cfg(target_os = "macos")] let efn = "__error"; #[cfg(target_os = "linux")] let efn = "__errno_location"; #[cfg(not(any(target_os = "macos", target_os = "linux")))] let efn = "__error";
+        // errno address-fn: Darwin/BSD `__error`, Linux/glibc `__errno_location`.
+        let efn = if target_is_linux(module) { "__errno_location" } else { "__error" };
         let errno_fn = self.get_or_declare_fn(module, efn, ptr_type.fn_type(&[], false));
         let ep = builder.build_call(errno_fn, &[], "ep").or_llvm_err()?.try_as_basic_value().basic().or_internal("expected basic value")?.into_pointer_value();
         let ev = builder.build_load(i32_type, ep, "ev").or_llvm_err()?.into_int_value(); let ev64 = builder.build_int_z_extend(ev, i64_type, "ev64").or_llvm_err()?;
