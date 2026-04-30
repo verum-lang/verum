@@ -5933,8 +5933,37 @@ impl ProofValidator {
         Ok(())
     }
 
-    /// Check if two expressions are related by argument commutativity
+    /// Check if two expressions are related by argument commutativity.
+    ///
+    /// Pre-fix this returned true whenever two expressions shared the
+    /// SAME `BinOp` and had swapped operands — without checking that
+    /// the operator is actually commutative. Result: `5 - 3 = 3 - 5`
+    /// (subtraction is not commutative, the equation is FALSE) was
+    /// accepted as a "commutativity" claim. Same gap for `Div`,
+    /// `Imply`, `Lt`/`Le`/`Gt`/`Ge`, `Concat`, `Shl`/`Shr`, `In`.
+    /// The `Call` arm trusted any 2-arg function as commutative.
+    ///
+    /// Post-fix: only mathematically commutative operators flow
+    /// through. For Call, no special-cased trust — a future extension
+    /// can register specific commutative functions, but the default
+    /// is reject.
     fn is_commutative_pair(&self, left: &Expr, right: &Expr) -> bool {
+        // Whitelist of operators where `a OP b == b OP a` is universal.
+        fn is_commutative_op(op: BinOp) -> bool {
+            matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Mul
+                    | BinOp::And
+                    | BinOp::Or
+                    | BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+            )
+        }
+
         match (&left.kind, &right.kind) {
             (
                 ExprKind::Binary {
@@ -5948,17 +5977,15 @@ impl ProofValidator {
                     right: r2,
                 },
             ) => {
-                // Same operation, swapped arguments
-                op1 == op2 && self.expr_eq(l1, r2) && self.expr_eq(r1, l2)
+                op1 == op2
+                    && is_commutative_op(*op1)
+                    && self.expr_eq(l1, r2)
+                    && self.expr_eq(r1, l2)
             }
-            (ExprKind::Call { func: f1, args: a1, .. }, ExprKind::Call { func: f2, args: a2, .. }) => {
-                // Same function, args are a permutation
-                self.expr_eq(f1, f2)
-                    && a1.len() == 2
-                    && a2.len() == 2
-                    && self.expr_eq(&a1[0], &a2[1])
-                    && self.expr_eq(&a1[1], &a2[0])
-            }
+            // Call arm intentionally returns false: arbitrary user
+            // functions are not assumed commutative. A registered
+            // commutative-function whitelist is a future extension —
+            // for now the soundness gate is conservative-by-default.
             _ => false,
         }
     }
