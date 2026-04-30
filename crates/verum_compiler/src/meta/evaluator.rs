@@ -847,6 +847,46 @@ impl MetaContext {
 
     /// Evaluate a meta expression
     pub fn eval_meta_expr(&mut self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
+        // Deadline check — closes #241. `MetaContext.timeout_ms`
+        // (default 30_000ms, settable via `SecurityContext::set_timeout_ms`)
+        // becomes load-bearing here. The deadline is established
+        // lazily on the first eval_meta_expr call where
+        // `current_deadline` is `None` and `timeout_ms` is non-zero;
+        // subsequent recursive calls share the same deadline so the
+        // budget is per-top-level-evaluation, not per-call.
+        // `timeout_ms = 0` is a sentinel meaning "never time out"
+        // (preserves the legacy unbounded behaviour for embedders
+        // that don't opt in).
+        if self.timeout_ms > 0 {
+            if self.current_deadline.is_none() {
+                self.current_deadline = Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_millis(self.timeout_ms),
+                );
+            }
+            // Periodic check at every dispatch — meta evaluation
+            // is structurally recursive, so checking on entry hits
+            // every loop iteration, every binding install, every
+            // builtin dispatch. The cost is ~1 Instant::now()
+            // syscall per dispatch — bounded by the hardware
+            // monotonic-clock read latency (~tens of ns on modern
+            // CPUs; comparable to a hashmap lookup).
+            if let Some(deadline) = self.current_deadline {
+                let now = std::time::Instant::now();
+                if now > deadline {
+                    let elapsed_ms = now
+                        .saturating_duration_since(
+                            deadline - std::time::Duration::from_millis(self.timeout_ms),
+                        )
+                        .as_millis() as u64;
+                    return Err(MetaError::TimeoutExceeded {
+                        elapsed_ms,
+                        limit_ms: self.timeout_ms,
+                    });
+                }
+            }
+        }
+
         match expr {
             MetaExpr::Literal(val) => Ok(val.clone()),
 
@@ -4629,6 +4669,49 @@ mod iteration_limit_tests {
             }
             other => panic!("expected IterationLimitExceeded, got {:?}", other),
         }
+    }
+
+    /// Pin: timeout_ms = 0 is the never-time-out sentinel.
+    /// Closes #241 happy-path: legacy embedders that don't set a
+    /// timeout must continue to run unbounded.
+    #[test]
+    fn timeout_ms_zero_is_never_timeout_sentinel() {
+        let mut ctx = MetaContext::new();
+        ctx.timeout_ms = 0;
+        // Trivial expression — should evaluate without setting
+        // current_deadline (the timeout_ms > 0 gate skips both
+        // the deadline init and the deadline check).
+        let expr = MetaExpr::Literal(ConstValue::Int(42));
+        let result = ctx.eval_meta_expr(&expr);
+        assert!(result.is_ok(), "timeout_ms=0 must not trigger any check");
+        assert!(
+            ctx.current_deadline.is_none(),
+            "timeout_ms=0 must NOT initialise a deadline"
+        );
+    }
+
+    /// Pin: timeout_ms > 0 sets current_deadline lazily on first
+    /// eval_meta_expr call. Subsequent calls share the same
+    /// deadline so the budget is per-top-level-evaluation.
+    #[test]
+    fn timeout_ms_positive_initialises_current_deadline_lazily() {
+        let mut ctx = MetaContext::new();
+        ctx.timeout_ms = 5_000; // 5 second budget
+        assert!(ctx.current_deadline.is_none(), "deadline starts None");
+        let expr = MetaExpr::Literal(ConstValue::Int(0));
+        let _ = ctx.eval_meta_expr(&expr).expect("eval");
+        assert!(
+            ctx.current_deadline.is_some(),
+            "timeout_ms > 0 must initialise the deadline on first call"
+        );
+        // Second call must NOT re-initialise (preserving the
+        // per-top-level-evaluation budget semantic).
+        let first_deadline = ctx.current_deadline;
+        let _ = ctx.eval_meta_expr(&expr).expect("eval2");
+        assert_eq!(
+            ctx.current_deadline, first_deadline,
+            "deadline must be stable across calls within the same evaluation"
+        );
     }
 }
 
