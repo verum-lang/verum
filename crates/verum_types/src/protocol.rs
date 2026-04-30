@@ -34,9 +34,11 @@ use crate::ty::{Type, TypeVar};
 thread_local! {
     static IMPL_CHECK_DEPTH: RefCell<usize> = const { RefCell::new(0) };
     static SUBST_TYPE_PARAMS_DEPTH: RefCell<usize> = const { RefCell::new(0) };
-    // Cache for implements_optimistic to avoid redundant recursive checks
-    // Key: (type_key, protocol_key), Value: result
-    static IMPL_OPTIMISTIC_CACHE: RefCell<std::collections::HashMap<(Text, Text), bool>> = RefCell::new(std::collections::HashMap::new());
+    // Cache for implements_optimistic to avoid redundant recursive checks.
+    // Key: (checker_id, type_key, protocol_key) — see Audit-A2 in
+    // ProtocolChecker.checker_id for why the checker_id dimension is
+    // required for cross-checker coherence on a long-lived thread.
+    static IMPL_OPTIMISTIC_CACHE: RefCell<std::collections::HashMap<(u64, Text, Text), bool>> = RefCell::new(std::collections::HashMap::new());
     // Stack of (type_key, protocol_key) pairs currently being checked
     // Used for cycle detection in implements_optimistic
     static IMPL_CHECKING_STACK: RefCell<Vec<(Text, Text)>> = const { RefCell::new(Vec::new()) };
@@ -44,6 +46,15 @@ thread_local! {
     // Tracks (type_key, assoc_name) pairs being resolved to detect infinite loops
     // caused by blanket impls forwarding associated types (e.g., FutureExt.Output = F.Output)
     static ASSOC_TYPE_RESOLUTION_STACK: RefCell<Vec<(Text, Text)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Process-global counter handing out unique `ProtocolChecker.checker_id`
+/// values. AtomicU64 wraps after 2^64 — for any realistic process
+/// lifetime this is unbounded.
+static NEXT_CHECKER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn allocate_checker_id() -> u64 {
+    NEXT_CHECKER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Type alias for type variable substitutions
@@ -1460,6 +1471,24 @@ pub struct ProtocolChecker {
     /// Cache for method resolution: (type_key, protocol_key, method_name) -> MethodResolution
     /// Avoids repeated find_impl + method lookup for the same type/protocol/method triple
     method_resolution_cache: Map<(Text, Text, Text), MethodResolution>,
+
+    /// Audit-A2 coherence: per-checker identity used to scope the
+    /// thread-local `IMPL_OPTIMISTIC_CACHE`.
+    ///
+    /// Without this scoping, two different `ProtocolChecker` instances
+    /// running on the same OS thread (e.g. successive compilations in
+    /// a long-lived process such as `vtest`, the LSP server, or a
+    /// REPL) shared the same thread-local cache of `(type_key,
+    /// protocol_key) -> bool` results. Checker A could populate
+    /// "`Foo: MyProtocol == true`" via its impl set; checker B —
+    /// without that impl registered — would then read the stale
+    /// `true` and skip its own impl-set probe. Adding a checker_id
+    /// dimension to the cache key isolates each checker's view.
+    ///
+    /// IDs are issued from a process-global atomic counter; collisions
+    /// are impossible within the lifetime of a process and across
+    /// processes the cache is fresh anyway (thread-local).
+    checker_id: u64,
 }
 
 impl ProtocolChecker {
@@ -1478,6 +1507,7 @@ impl ProtocolChecker {
             method_registry: Map::new(),
             variant_type_names: Map::new(),
             method_resolution_cache: Map::new(),
+            checker_id: allocate_checker_id(),
         };
 
         // Register standard protocols
@@ -1507,8 +1537,14 @@ impl ProtocolChecker {
             method_registry: Map::new(),
             variant_type_names: Map::new(),
             method_resolution_cache: Map::new(),
+            checker_id: allocate_checker_id(),
         }
     }
+
+    /// Public accessor for the per-instance checker id. Used by the
+    /// type-checker glue to scope thread-local caches to this checker.
+    #[inline]
+    pub fn id(&self) -> u64 { self.checker_id }
 
     /// Clear implementation check cache
     ///
@@ -5003,8 +5039,15 @@ impl ProtocolChecker {
         let type_key = self.make_type_key(ty);
         let protocol_key = self.make_protocol_key(protocol);
 
-        // Check thread-local cache first to avoid redundant recursive checks
-        let cache_key = (type_key.clone(), protocol_key.clone());
+        // Check thread-local cache first to avoid redundant recursive checks.
+        // Audit-A2: cache key now includes `self.checker_id` so a long-lived
+        // thread can't leak `(type_key, protocol_key)` results from a prior
+        // checker into this one — the two checkers may have completely
+        // different impl sets.
+        let cache_key = (self.checker_id, type_key.clone(), protocol_key.clone());
+        // Stack uses the checkerless key — recursion guarding is per-thread,
+        // not per-checker. (Pre-A2 behaviour preserved.)
+        let stack_key = (type_key.clone(), protocol_key.clone());
         let cached = IMPL_OPTIMISTIC_CACHE.with(|c| {
             c.borrow().get(&cache_key).copied()
         });
@@ -5015,7 +5058,7 @@ impl ProtocolChecker {
         // Check for cycles: if we're already checking this (type, protocol) pair,
         // return false to break the cycle
         let is_cycle = IMPL_CHECKING_STACK.with(|s| {
-            s.borrow().contains(&cache_key)
+            s.borrow().contains(&stack_key)
         });
         if is_cycle {
             return false;
@@ -5023,7 +5066,7 @@ impl ProtocolChecker {
 
         // Push onto checking stack
         IMPL_CHECKING_STACK.with(|s| {
-            s.borrow_mut().push(cache_key.clone());
+            s.borrow_mut().push(stack_key.clone());
         });
 
         // RAII guard for checking stack
@@ -5040,7 +5083,7 @@ impl ProtocolChecker {
                 });
             }
         }
-        let _stack_guard = StackGuard { key: cache_key.clone() };
+        let _stack_guard = StackGuard { key: stack_key.clone() };
 
         // Stage 1: Try exact match first (most common case, O(1))
         if self.impl_index.get(&(type_key, protocol_key.clone())).is_some() {
