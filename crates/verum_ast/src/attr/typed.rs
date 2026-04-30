@@ -6795,3 +6795,324 @@ impl std::fmt::Display for QuantityAttr {
     }
 }
 
+
+// =============================================================================
+// DocAttr — first-class documentation attribute (#176)
+// =============================================================================
+
+/// **Documentation attribute** — `@doc("...")` carrying structured
+/// Markdown body + parsed cross-references.
+///
+/// Verum's documentation infrastructure has historically lived in
+/// the `verum doc` CLI command, which parses `///` and `//!` comments
+/// from source at HTML-generation time.  Promoting documentation to
+/// a first-class typed attribute unlocks:
+///
+///   - **AST-level access**: doc generators read structured data
+///     instead of re-parsing source.
+///   - **Cross-reference resolution at compile time**: every `[Foo]`
+///     link is checked against the symbol table; broken refs are
+///     diagnostics, not silent HTML failures.
+///   - **LSP rich hover**: IDEs show parsed Markdown with resolved
+///     types instead of raw comment text.
+///   - **Doc-tests**: code blocks marked `@verum` extract as runnable
+///     test fixtures via the `verum test --doc` audit gate.
+///   - **Translatable docs**: `@doc(en, "...")` / `@doc(ru, "...")`
+///     carries language-tagged variants; doc generators select per
+///     user locale.
+///
+/// # Examples
+///
+/// ```verum
+/// @doc("Returns the factorial of `n`.")
+/// fn factorial(n: Int{>= 0}) -> Int { ... }
+///
+/// @doc(
+///     "Verifies the substitution lemma.\n\
+///      \n\
+///      See [`subst_preserves_typing`] for the formal statement.\n\
+///      \n\
+///      ```verum\n\
+///      apply subst_preserves_typing(ctx, term, replacement);\n\
+///      ```"
+/// )
+/// theorem subst_lemma_corollary() ensures true { ... }
+///
+/// // Language-tagged form (future):
+/// @doc(en, "English summary")
+/// @doc(ru, "Русское описание")
+/// fn translated() { ... }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocAttr {
+    /// Raw Markdown body of the documentation.  Pre-cross-reference
+    /// resolution; structured rendering happens at doc-generation
+    /// or LSP-hover time.
+    pub markdown: Text,
+    /// Optional language tag for translated docs.  `None` for the
+    /// canonical (English) form.
+    pub language: Maybe<Text>,
+    /// Source span of the `@doc(...)` attribute.
+    pub span: Span,
+}
+
+impl DocAttr {
+    /// Construct a new untagged DocAttr.
+    pub fn new(markdown: impl Into<Text>, span: Span) -> Self {
+        Self {
+            markdown: markdown.into(),
+            language: Maybe::None,
+            span,
+        }
+    }
+
+    /// Construct a new language-tagged DocAttr.
+    pub fn with_language(
+        language: impl Into<Text>,
+        markdown: impl Into<Text>,
+        span: Span,
+    ) -> Self {
+        Self {
+            markdown: markdown.into(),
+            language: Maybe::Some(language.into()),
+            span,
+        }
+    }
+
+    /// Whether this DocAttr is the canonical (untagged) form.
+    pub fn is_canonical(&self) -> bool {
+        matches!(self.language, Maybe::None)
+    }
+
+    /// Language tag, or "en" as the canonical default.
+    pub fn language_or_default(&self) -> &str {
+        match &self.language {
+            Maybe::Some(lang) => lang.as_str(),
+            Maybe::None => "en",
+        }
+    }
+
+    /// Try to construct from a generic `@doc(...)` attribute.
+    ///
+    /// Accepted shapes:
+    ///   - `@doc("text")` — canonical form, no language tag.
+    ///   - `@doc(lang, "text")` — language-tagged.
+    ///
+    /// Returns `Maybe::None` for non-doc attributes or malformed
+    /// shapes (the caller's diagnostic pass surfaces malformed
+    /// attributes separately).
+    pub fn try_from_attr(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("doc") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => return Maybe::None,
+        };
+        use crate::expr::ExprKind;
+        use crate::literal::{LiteralKind, StringLit};
+        // Extract a string literal from an Expr.
+        fn string_literal(expr: &crate::expr::Expr) -> Option<Text> {
+            if let ExprKind::Literal(lit) = &expr.kind {
+                if let LiteralKind::Text(s) = &lit.kind {
+                    return Some(match s {
+                        StringLit::Regular(t) | StringLit::MultiLine(t) => t.clone(),
+                    });
+                }
+            }
+            None
+        }
+        // Extract an identifier or single-segment path name.
+        fn ident_name(expr: &crate::expr::Expr) -> Option<Text> {
+            if let ExprKind::Path(p) = &expr.kind {
+                if p.segments.len() == 1 {
+                    if let crate::ty::PathSegment::Name(id) = &p.segments[0] {
+                        return Some(id.name.clone());
+                    }
+                }
+            }
+            None
+        }
+        let arg_vec: Vec<_> = args.iter().collect();
+        match arg_vec.len() {
+            1 => {
+                // @doc("text")
+                let markdown = match string_literal(arg_vec[0]) {
+                    Some(s) => s,
+                    None => return Maybe::None,
+                };
+                Maybe::Some(Self::new(markdown, attr.span))
+            }
+            2 => {
+                // @doc(lang, "text")
+                let lang = match ident_name(arg_vec[0]).or_else(|| string_literal(arg_vec[0])) {
+                    Some(l) => l,
+                    None => return Maybe::None,
+                };
+                let markdown = match string_literal(arg_vec[1]) {
+                    Some(s) => s,
+                    None => return Maybe::None,
+                };
+                Maybe::Some(Self::with_language(lang, markdown, attr.span))
+            }
+            _ => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for DocAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for DocAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Truncate long bodies for compact diagnostic display.
+        let body = self.markdown.as_str();
+        let preview = if body.len() <= 60 {
+            body.to_string()
+        } else {
+            format!("{}...", &body[..57])
+        };
+        match &self.language {
+            Maybe::Some(lang) => write!(f, "@doc({}, {:?})", lang.as_str(), preview),
+            Maybe::None => write!(f, "@doc({:?})", preview),
+        }
+    }
+}
+
+#[cfg(test)]
+mod doc_attr_tests {
+    use super::*;
+    use crate::expr::{Expr, ExprKind};
+    use crate::literal::{Literal, LiteralKind, StringLit};
+    use crate::ty::{Ident, Path, PathSegment};
+
+    fn span() -> Span {
+        Span::dummy()
+    }
+
+    fn string_lit_expr(s: &str) -> Expr {
+        Expr::new(
+            ExprKind::Literal(Literal::string(Text::from(s), span())),
+            span(),
+        )
+    }
+
+    fn ident_expr(name: &str) -> Expr {
+        let mut list = List::new();
+        list.push(PathSegment::Name(Ident {
+            name: name.into(),
+            span: span(),
+        }));
+        let path = Path::new(list, span());
+        Expr::new(ExprKind::Path(path), span())
+    }
+
+    fn make_attr(args: List<Expr>) -> Attribute {
+        Attribute::new("doc".into(), Maybe::Some(args), span())
+    }
+
+    #[test]
+    fn doc_attr_one_arg_form() {
+        let mut args = List::new();
+        args.push(string_lit_expr("Hello world"));
+        let attr = make_attr(args);
+        let doc = DocAttr::try_from_attr(&attr).expect("should parse");
+        assert_eq!(doc.markdown.as_str(), "Hello world");
+        assert!(doc.is_canonical());
+        assert_eq!(doc.language_or_default(), "en");
+    }
+
+    #[test]
+    fn doc_attr_two_arg_form_with_language() {
+        let mut args = List::new();
+        args.push(ident_expr("ru"));
+        args.push(string_lit_expr("Привет мир"));
+        let attr = make_attr(args);
+        let doc = DocAttr::try_from_attr(&attr).expect("should parse");
+        assert_eq!(doc.markdown.as_str(), "Привет мир");
+        assert_eq!(doc.language_or_default(), "ru");
+        assert!(!doc.is_canonical());
+    }
+
+    #[test]
+    fn doc_attr_rejects_non_doc_attribute() {
+        let attr = Attribute::new("inline".into(), Maybe::None, span());
+        assert!(matches!(DocAttr::try_from_attr(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn doc_attr_rejects_zero_args() {
+        let attr = Attribute::new("doc".into(), Maybe::Some(List::new()), span());
+        assert!(matches!(DocAttr::try_from_attr(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn doc_attr_rejects_three_args() {
+        let mut args = List::new();
+        args.push(ident_expr("en"));
+        args.push(string_lit_expr("hello"));
+        args.push(string_lit_expr("extra"));
+        let attr = make_attr(args);
+        assert!(matches!(DocAttr::try_from_attr(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn doc_attr_rejects_non_string_arg() {
+        let mut args = List::new();
+        args.push(Expr::new(
+            ExprKind::Literal(Literal::bool(true, span())),
+            span(),
+        ));
+        let attr = make_attr(args);
+        assert!(matches!(DocAttr::try_from_attr(&attr), Maybe::None));
+    }
+
+    #[test]
+    fn doc_attr_serde_round_trip() {
+        let doc = DocAttr::with_language("ru", "Текст", span());
+        let json = serde_json::to_string(&doc).unwrap();
+        let restored: DocAttr = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.markdown, doc.markdown);
+        assert_eq!(restored.language, doc.language);
+    }
+
+    #[test]
+    fn doc_attr_display_truncates_long_body() {
+        let long = "a".repeat(200);
+        let doc = DocAttr::new(long.as_str(), span());
+        let s = format!("{}", doc);
+        assert!(s.contains("..."), "long body should be truncated: {}", s);
+        assert!(s.len() < 100);
+    }
+
+    #[test]
+    fn doc_attr_display_preserves_short_body() {
+        let doc = DocAttr::new("short", span());
+        let s = format!("{}", doc);
+        assert!(s.contains("short"));
+        assert!(!s.contains("..."));
+    }
+
+    #[test]
+    fn doc_attr_with_language_display() {
+        let doc = DocAttr::with_language("ja", "こんにちは", span());
+        let s = format!("{}", doc);
+        assert!(s.contains("ja"));
+        assert!(s.contains("こんにちは"));
+    }
+
+    #[test]
+    fn language_or_default_returns_en_for_canonical() {
+        let doc = DocAttr::new("text", span());
+        assert_eq!(doc.language_or_default(), "en");
+    }
+
+    #[test]
+    fn language_or_default_returns_explicit_lang() {
+        let doc = DocAttr::with_language("zh", "text", span());
+        assert_eq!(doc.language_or_default(), "zh");
+    }
+}
