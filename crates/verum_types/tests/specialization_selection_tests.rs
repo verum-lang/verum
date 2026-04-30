@@ -134,10 +134,10 @@ fn test_select_most_specific() {
     // Test that specialized impl is selected for Int
     // Protocol checker provides the implementation candidates
     assert!(lattice.is_more_specific(1, 0));
-    assert!(
-        impls.len() >= 0,
-        "Protocol checker should track registered implementations"
-    );
+    // `Vec::len()` is `usize` so the `>= 0` shape clippy 1.80+ flags is
+    // tautological. Replace with the actual property the test cares
+    // about: the registry is reachable (no panic on `len()`).
+    let _ = impls.len();
 
     // Verify the int type would match the specialized implementation
     assert!(matches!(int_type, Type::Named { .. }));

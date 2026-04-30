@@ -101,6 +101,17 @@
 #![allow(clippy::new_ret_no_self)]
 // `into_*` methods sometimes take &self for convenience
 #![allow(clippy::wrong_self_convention)]
+// `attr/typed.rs` parses dozens of attribute kinds with the same
+// `match attr.args { Some(args) => ..., None => Maybe::None }` shape.
+// Replacing with `?` / `.map(...)` would fragment the deliberately
+// uniform code template that exists for grep-ability.
+#![allow(clippy::question_mark)]
+#![allow(clippy::manual_map)]
+// Long architectural rustdoc blocks span many bullets; clippy 1.80+
+// list-continuation indentation has no rendering difference at the
+// resolutions our docs are consumed at.
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::doc_overindented_list_items)]
 
 // Import v6.0-BALANCED semantic types from verum_common
 use verum_common::List;

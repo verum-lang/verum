@@ -48,6 +48,12 @@
 // worse than `let mut x = X::default(); x.field = v;` in builder-
 // style test code where `default()` has observable side effects.
 #![allow(clippy::field_reassign_with_default)]
+// Long architectural rustdoc blocks (opcode tables, codegen lowering
+// tables) span dozens of bullets; clippy 1.80+ flags continuation
+// indentation that has no rendering difference at the resolutions
+// our docs are consumed at.
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::doc_overindented_list_items)]
 
 pub mod archive;
 pub mod dtype;

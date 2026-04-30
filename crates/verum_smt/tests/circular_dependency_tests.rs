@@ -192,10 +192,11 @@ fn test_mutual_recursion_detection() {
     let cycles = backend.detect_circular_dependencies(&type_a);
 
     // Without actually defining B as containing A, we won't detect the cycle
-    // This test demonstrates the API usage
+    // This test demonstrates the API usage and the no-cycle outcome.
     assert!(
-        cycles.len() >= 0,
-        "Cycle detection should complete without error"
+        cycles.is_empty(),
+        "no cycle expected when B is undefined: {:?}",
+        cycles
     );
 }
 
@@ -210,10 +211,14 @@ fn test_three_way_circular_dependency() {
 
     let cycles = backend.detect_circular_dependencies(&type_a);
 
-    // This demonstrates the graph can handle multi-node paths
+    // This demonstrates the graph can handle multi-node paths.
+    // No cycle is expected here because B and C are referenced as
+    // raw type names without bodies — the resolver has nothing to
+    // close the loop with.
     assert!(
-        cycles.len() >= 0,
-        "Three-way dependency check should complete"
+        cycles.is_empty(),
+        "no cycle expected with shape-only B/C references: {:?}",
+        cycles
     );
 }
 

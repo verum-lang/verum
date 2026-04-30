@@ -298,6 +298,14 @@ approx_constant = "allow"
 # for builder-style code, especially when default() has side effects
 # (logging, counter increments). ~23 sites across verum_vbc tests.
 field_reassign_with_default = "allow"
+# Clippy 1.80+ flags rustdoc list-continuation indentation that renders
+# fine in practice. We have ~40 sites — mostly architectural prose
+# inside long mod-level rustdoc blocks and grammar-test coverage tables
+# — where the "fix" is a cosmetic blank-line nudge with no rendering
+# difference at the resolutions our docs are actually consumed at.
+# Re-enable case-by-case when we adopt a proper rustdoc style guide.
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
 
 # Custom profile for benchmarking
 [profile.bench]

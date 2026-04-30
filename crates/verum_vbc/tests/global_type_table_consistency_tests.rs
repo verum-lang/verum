@@ -192,7 +192,14 @@ fn global_type_table_baseline_for_result() {
             format_report_failure("base/result.vr (regressed)", &report),
         );
     }
-    if count < RESULT_ISSUE_BASELINE {
+    // Ratchet: when the baseline drops to 0 (no known issues left)
+    // the `count < baseline` arm is statically unreachable, but we
+    // keep the diagnostic intentionally — it springs back into life
+    // as soon as somebody raises the baseline above zero and a fresh
+    // improvement should be pinned again.
+    #[allow(clippy::absurd_extreme_comparisons)]
+    let improved = RESULT_ISSUE_BASELINE > 0 && count < RESULT_ISSUE_BASELINE;
+    if improved {
         panic!(
             "type-table issue count for `base/result.vr` IMPROVED: {} < baseline {}.\n\
              Lower RESULT_ISSUE_BASELINE in this file to pin the new value, \

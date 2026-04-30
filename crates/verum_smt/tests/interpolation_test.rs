@@ -18,9 +18,6 @@
 //!
 // FIXED (Session 23): Tests enabled - Updated Z3 API for z3-rs 0.19+
 
-#![allow(deprecated)] // Allow _eq until migration to eq
-#![allow(unused_variables)]
-
 use verum_smt::z3_backend::InterpolationEngine;
 use z3::ast::{Bool, Int};
 

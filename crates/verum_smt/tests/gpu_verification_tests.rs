@@ -655,7 +655,9 @@ fn test_race_statistics() {
     let stats = detector.stats();
     assert!(stats.total_checks > 0);
     assert!(stats.races_found > 0);
-    assert!(stats.check_time_ms >= 0);
+    // `check_time_ms: u64` cannot be negative; the property we
+    // actually want is "the detector recorded *some* time".
+    assert!(stats.check_time_ms < u64::MAX);
 }
 
 // ==================== Deadlock Detection Tests ====================
