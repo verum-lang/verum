@@ -2544,6 +2544,37 @@ impl MetaContext {
             HygieneContext::new(),
             CheckerConfig::default(),
         );
+        // Seed the checker's binding table with the meta function's
+        // own local bindings (closes #237). Pre-fix the fresh checker
+        // had no bindings registered, so `flag_capture_if_shadowing`
+        // produced no violations regardless of input — the hygiene
+        // wiring landed at MacroExpansionPhase boundary but the
+        // detection itself was a no-op.
+        //
+        // Now: each name from `MetaContext.bindings` (the meta
+        // function's lexical scope at the quote-emission site) is
+        // pushed as an outer binding via `seed_outer_binding`. When
+        // `walk_quote_tokens` then hits an ident token in the
+        // post-splice body whose name matches one of these seeds,
+        // it records a `ShadowConflict` violation — exactly the
+        // accidental-capture class the doc names: "a quoted body
+        // referencing an identifier whose name happens to collide
+        // with an outer let / param binding the macro author did
+        // not anticipate".
+        //
+        // We use the quote's outer span as the placeholder for the
+        // seeded binding (it represents "from outside the quote";
+        // the precise location is the meta function's local-binding
+        // site which we don't track per-binding here — refining to
+        // per-binding origin is followup-class work).
+        let seed_names: Vec<verum_common::Text> = self
+            .bindings
+            .keys()
+            .cloned()
+            .collect();
+        for name in seed_names {
+            checker.seed_outer_binding(name, span);
+        }
         checker.check_post_splice_tokens(tokens);
         let violations = checker.take_violations();
         if violations.is_empty() {
@@ -4648,6 +4679,55 @@ mod hygiene_diagnostic_tests {
             ctx.diagnostics.len(),
             initial,
             "no violations on empty input → diagnostics count unchanged"
+        );
+    }
+
+    /// End-to-end pin closing #237: post-splice tokens that name
+    /// an identifier from `MetaContext.bindings` (the meta
+    /// function's local scope) MUST produce a ShadowConflict
+    /// diagnostic on `MetaContext.diagnostics`. Pre-fix the fresh
+    /// HygieneChecker had no bindings registered so the walk
+    /// produced no violations regardless of input — this test
+    /// would have asserted `diagnostics.len() == 0` (silent
+    /// no-op). Post-fix the seed_outer_binding loop populates the
+    /// table from `self.bindings` and the M402 ShadowConflict
+    /// fires.
+    #[test]
+    fn shadow_violation_fires_when_post_splice_names_a_meta_local() {
+        use verum_ast::expr::{TokenTree, TokenTreeToken, TokenTreeKind};
+        let mut ctx = MetaContext::new();
+        // Bind a meta-local "outer_var" — this represents a let
+        // in the meta function's body, the kind of scope the
+        // quote-site author would not anticipate.
+        ctx.bind(verum_common::Text::from("outer_var"), ConstValue::Int(42));
+        // Build a post-splice token tree containing an Ident
+        // whose text matches the bound name. The walker treats
+        // every Ident token in the quote body as a potential
+        // shadow if the name is in the binding table.
+        let outer_tok = TokenTree::Token(TokenTreeToken::new(
+            TokenTreeKind::Ident,
+            verum_common::Text::from("outer_var"),
+            Span::dummy(),
+        ));
+        let mut tokens: List<TokenTree> = List::new();
+        tokens.push(outer_tok);
+        let initial_diags = ctx.diagnostics.iter().count();
+        ctx.recheck_post_splice_hygiene(&tokens, Span::dummy());
+        let after = ctx.diagnostics.iter().count();
+        assert!(
+            after > initial_diags,
+            "post-splice ident matching meta-local must produce diagnostic \
+             (was {} → now {})",
+            initial_diags,
+            after,
+        );
+        // The new diagnostic must carry the M402 ShadowConflict code.
+        let last = ctx.diagnostics.iter().last().expect("diagnostic exists");
+        let msg = format!("{:?}", last);
+        assert!(
+            msg.contains("M402"),
+            "expected M402 ShadowConflict diagnostic (got: {})",
+            msg
         );
     }
 }

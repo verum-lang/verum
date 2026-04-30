@@ -875,6 +875,38 @@ impl HygieneChecker {
         self.walk_quote_tokens(tokens);
     }
 
+    /// Pre-populate the binding table with an outer-scope identifier
+    /// that the quote-site author should NOT shadow.
+    ///
+    /// Closes the production-empty-binding-table gap (#237): pre-fix
+    /// `recheck_post_splice_hygiene` constructed a fresh checker with
+    /// no bindings registered, so `walk_quote_tokens` produced no
+    /// violations regardless of input — the hygiene wiring landed but
+    /// fired only in unit tests that manually populated the table.
+    /// This public seeder lets the meta evaluator copy its local
+    /// bindings (`MetaContext.bindings`) into the checker before
+    /// running `check_post_splice_tokens`, so `flag_capture_if_shadowing`
+    /// has real outer-scope names to compare against.
+    ///
+    /// Symmetric with `add_binding` (the private internal-scope
+    /// variant) but parameterised on the raw name + span so the
+    /// caller doesn't need to mint a fresh `ScopeKind`.
+    pub fn seed_outer_binding(&mut self, name: Text, _span: Span) {
+        let scope_id = self.current_scope_id();
+        let scopes = self.current_scopes();
+        let entry = BindingEntry {
+            scope_id,
+            scopes,
+        };
+        self.bindings
+            .entry(name)
+            .or_insert_with(List::new)
+            .push(entry);
+        // Stat counter so telemetry surfaces "how many outer
+        // names were considered" alongside violations_found etc.
+        self.stats.bindings_verified += 1;
+    }
+
     /// Recursive walk shared by `check_quote_tokens` and the post-splice
     /// re-check entry point. Visits every token, recursing into groups,
     /// and on each identifier token consults the binding table to flag
