@@ -14,7 +14,7 @@
 
 use verum_common::Text;
 use verum_smt::variable_extraction::collect_typed_variables_from_bool;
-use z3::ast::{Ast, Bool, Int, Real};
+use z3::ast::{Bool, Int, Real};
 
 #[test]
 fn extracts_int_sort_for_int_variable() {
@@ -55,7 +55,7 @@ fn extracts_bool_sort_for_bool_variable() {
 fn extracts_real_sort_for_real_variable() {
     let _ctx = z3::Context::thread_local();
     let r = Real::new_const("r");
-    let one = Real::from_real(1, 1);
+    let one = Real::from_rational(1, 1);
     let formula = r.gt(&one);
 
     let typed = collect_typed_variables_from_bool(&formula);
