@@ -656,33 +656,20 @@ impl Session {
             );
         }
 
-        // Phase-not-realised: `CompilerOptions.continue_on_error`
-        // (default false) lands on the session via direct
-        // assignment from CLI / test harnesses but no production
-        // code path consults `session.options().continue_on_error`.
+        // `CompilerOptions.continue_on_error` is now load-bearing via
+        // `Session::collect_phase_error` (session.rs:1043) which the
+        // compilation pipeline calls at each phase site in
+        // `validate_module` (pipeline.rs).  When the flag is true,
+        // phase errors are converted into Severity::Error diagnostics
+        // and accumulated; the pipeline runs all phases and aborts at
+        // the final `abort_if_errors()` checkpoint.  When the flag is
+        // false (the default), `collect_phase_error` is a no-op
+        // pass-through and the pipeline retains its short-circuit
+        // semantics.  Closes #270.
         //
-        // The `continue_on_error` semantics (collect diagnostics
-        // across all phases instead of bailing on first hard error)
-        // would need plumbing into `CompilationPipeline::run` and
-        // each `phase_*` early-return site — every `?` in the
-        // phase methods short-circuits on the first hard error
-        // today.
-        //
-        // The sister field `check_only` is now load-bearing via
-        // the unified `CompilationPipeline::run` dispatch
-        // (pipeline.rs:RunResult::Checked), so this trace covers
-        // only `continue_on_error`.
-        if opts.continue_on_error {
-            tracing::warn!(
-                "CompilerOptions.continue_on_error={} — flag lands on the \
-                 session but no production code path consults it. The \
-                 semantics (collect diagnostics across all phases instead \
-                 of bailing on the first hard error) require pipeline-wide \
-                 diagnostic-accumulation plumbing at every `phase_*` \
-                 early-return site. Forward-looking knob.",
-                opts.continue_on_error,
-            );
-        }
+        // The safety_gate phase deliberately bypasses
+        // collect_phase_error — a safety violation is a HARD security
+        // boundary that always aborts.
     }
 
     /// Access the shared SMT routing statistics handle.
@@ -1039,6 +1026,51 @@ impl Session {
             anyhow::bail!("compilation failed with {} error(s)", self.error_count());
         }
         Ok(())
+    }
+
+    /// Phase-result reducer for the `continue_on_error` semantics.
+    ///
+    /// Pipeline phases historically used `phase.do_thing()?;` —
+    /// every phase short-circuits on the first hard error. That
+    /// model fails IDE / LSP / CI workflows that want ALL
+    /// diagnostics in one pass: a single missing semicolon hides
+    /// every subsequent type error.
+    ///
+    /// This helper lets the pipeline opt into accumulation: when
+    /// `CompilerOptions.continue_on_error` is true and a phase
+    /// returns `Err`, the error is converted into a Severity::Error
+    /// diagnostic (preserving the message) and `Ok(())` is returned
+    /// so the caller can keep running subsequent phases. The
+    /// accumulated diagnostics surface at `abort_if_errors()` at
+    /// the end of the pipeline.
+    ///
+    /// When `continue_on_error` is false (the default), this
+    /// function is a no-op pass-through — `result` is returned
+    /// verbatim, preserving the current short-circuit behaviour.
+    ///
+    /// Closes the inert-defense pattern at session.rs:659 — pre-fix
+    /// `continue_on_error` landed on the session but no production
+    /// code path consulted it.
+    pub fn collect_phase_error(&self, phase_name: &str, result: Result<()>) -> Result<()> {
+        if self.options().continue_on_error {
+            if let Err(e) = result {
+                // Convert the error into a Severity::Error diagnostic
+                // so it's visible in the same channel as phase-emitted
+                // diagnostics. Most phases already emit a diagnostic
+                // before returning Err, so this is typically additive
+                // context (the error message) rather than the only
+                // record of the failure.
+                let diag = verum_diagnostics::DiagnosticBuilder::new(
+                    verum_diagnostics::Severity::Error,
+                )
+                .message(format!("{}: {}", phase_name, e))
+                .build();
+                self.emit_diagnostic(diag);
+            }
+            Ok(())
+        } else {
+            result
+        }
     }
 
     /// Get source file content for a span
@@ -1594,6 +1626,99 @@ mod debug_assertions_override_tests {
         assert!(
             !session.cfg_evaluator().config().debug_assertions,
             "no override + opt-level=3 must auto-derive to false"
+        );
+    }
+}
+
+#[cfg(test)]
+mod continue_on_error_tests {
+    use super::*;
+
+    #[test]
+    fn collect_phase_error_default_passes_through_err() {
+        // Pin: with continue_on_error=false (the default), an Err
+        // result propagates unchanged. The pipeline retains its
+        // short-circuit semantics.
+        let opts = CompilerOptions::default();
+        assert!(!opts.continue_on_error,
+            "default continue_on_error must be false");
+        let session = Session::new(opts);
+        let phase_err: Result<()> = Err(anyhow::anyhow!("phase failed"));
+        let result = session.collect_phase_error("test_phase", phase_err);
+        assert!(result.is_err(),
+            "with continue_on_error=false, Err must propagate");
+    }
+
+    #[test]
+    fn collect_phase_error_default_passes_through_ok() {
+        // Pin: Ok results pass through unchanged regardless of flag.
+        let opts = CompilerOptions::default();
+        let session = Session::new(opts);
+        let phase_ok: Result<()> = Ok(());
+        assert!(session.collect_phase_error("test_phase", phase_ok).is_ok());
+    }
+
+    #[test]
+    fn collect_phase_error_continue_swallows_err() {
+        // Pin: with continue_on_error=true, an Err result is
+        // converted to a Severity::Error diagnostic and the function
+        // returns Ok(()). The pipeline can keep running subsequent
+        // phases.
+        let mut opts = CompilerOptions::default();
+        opts.continue_on_error = true;
+        let session = Session::new(opts);
+
+        let pre_count = session.error_count();
+        let phase_err: Result<()> = Err(anyhow::anyhow!(
+            "type error: cannot unify Int with Text"));
+        let result = session.collect_phase_error("type_check", phase_err);
+        assert!(result.is_ok(),
+            "with continue_on_error=true, Err must be swallowed");
+        let post_count = session.error_count();
+        assert_eq!(
+            post_count, pre_count + 1,
+            "exactly one error diagnostic must be added"
+        );
+    }
+
+    #[test]
+    fn collect_phase_error_continue_with_ok_does_not_emit_diagnostic() {
+        // Pin: under continue_on_error=true, Ok results do NOT
+        // emit a diagnostic — only Err results do.
+        let mut opts = CompilerOptions::default();
+        opts.continue_on_error = true;
+        let session = Session::new(opts);
+
+        let pre_count = session.error_count();
+        let phase_ok: Result<()> = Ok(());
+        assert!(session.collect_phase_error("test_phase", phase_ok).is_ok());
+        assert_eq!(
+            session.error_count(), pre_count,
+            "Ok result must not emit any diagnostic"
+        );
+    }
+
+    #[test]
+    fn collect_phase_error_continue_accumulates_multiple() {
+        // Pin: under continue_on_error=true, multiple Err results
+        // accumulate as multiple diagnostics — the pipeline can
+        // run all phases and surface every error in one pass.
+        // This is the IDE/LSP/CI use case.
+        let mut opts = CompilerOptions::default();
+        opts.continue_on_error = true;
+        let session = Session::new(opts);
+
+        let _ = session.collect_phase_error(
+            "phase1", Err(anyhow::anyhow!("error A")));
+        let _ = session.collect_phase_error(
+            "phase2", Err(anyhow::anyhow!("error B")));
+        let _ = session.collect_phase_error(
+            "phase3", Err(anyhow::anyhow!("error C")));
+
+        assert!(
+            session.error_count() >= 3,
+            "three Err results must accumulate as ≥3 diagnostics; got {}",
+            session.error_count()
         );
     }
 }

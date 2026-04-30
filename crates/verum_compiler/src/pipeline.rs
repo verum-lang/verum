@@ -1809,7 +1809,10 @@ impl<'s> CompilationPipeline<'s> {
     /// verify_mode = Runtime + no user-requested gates), but even
     /// then the safety gate still fires.
     fn validate_module(&mut self, module: &Module, skip_type_check: bool) -> Result<()> {
-        // Safety gate ALWAYS runs. Independent of verify_mode.
+        // Safety gate ALWAYS runs. Independent of verify_mode AND of
+        // continue_on_error — a safety violation is a HARD security
+        // boundary; collecting more diagnostics past that point risks
+        // running gate-bypassed analyses on unsafe code.
         self.phase_safety_gate(module)?;
 
         if skip_type_check {
@@ -1828,16 +1831,24 @@ impl<'s> CompilationPipeline<'s> {
                         *ffi_result.lock().unwrap() = self.phase_ffi_validation(module);
                     });
                 });
-                ffi_result.into_inner().unwrap()?;
+                self.session.collect_phase_error(
+                    "ffi_validation",
+                    ffi_result.into_inner().unwrap(),
+                )?;
             } else {
                 self.phase_context_validation(module);
                 self.phase_send_sync_validation(module);
-                self.phase_ffi_validation(module)?;
+                let r = self.phase_ffi_validation(module);
+                self.session.collect_phase_error("ffi_validation", r)?;
             }
-            return Ok(());
+            // Final accumulation point: under continue_on_error the
+            // per-phase errors were swallowed into the diagnostic
+            // stream; abort here if any accumulated.
+            return self.session.abort_if_errors();
         }
 
-        self.phase_type_check(module)?;
+        let r = self.phase_type_check(module);
+        self.session.collect_phase_error("type_check", r)?;
 
         // Post-typecheck parallel fan-out (#104). Same architectural
         // contract as `run_native_compilation`: every gate is `&self`,
@@ -1871,24 +1882,45 @@ impl<'s> CompilationPipeline<'s> {
                 });
             });
 
-            dep_result.into_inner().unwrap()?;
+            self.session.collect_phase_error(
+                "dependency_analysis",
+                dep_result.into_inner().unwrap(),
+            )?;
             if smt_enabled {
-                verify_result.into_inner().unwrap()?;
+                self.session.collect_phase_error(
+                    "verify",
+                    verify_result.into_inner().unwrap(),
+                )?;
             }
-            cbgr_result.into_inner().unwrap()?;
-            ffi_result.into_inner().unwrap()?;
+            self.session.collect_phase_error(
+                "cbgr_analysis",
+                cbgr_result.into_inner().unwrap(),
+            )?;
+            self.session.collect_phase_error(
+                "ffi_validation",
+                ffi_result.into_inner().unwrap(),
+            )?;
         } else {
-            self.phase_dependency_analysis(module)?;
+            let r = self.phase_dependency_analysis(module);
+            self.session.collect_phase_error("dependency_analysis", r)?;
             if smt_enabled {
-                self.phase_verify(module)?;
+                let r = self.phase_verify(module);
+                self.session.collect_phase_error("verify", r)?;
             }
             self.phase_context_validation(module);
             self.phase_send_sync_validation(module);
-            self.phase_cbgr_analysis(module)?;
-            self.phase_ffi_validation(module)?;
+            let r = self.phase_cbgr_analysis(module);
+            self.session.collect_phase_error("cbgr_analysis", r)?;
+            let r = self.phase_ffi_validation(module);
+            self.session.collect_phase_error("ffi_validation", r)?;
         }
 
-        Ok(())
+        // Final accumulation point: under continue_on_error the
+        // per-phase errors were swallowed into the diagnostic
+        // stream; abort here if any accumulated. Under the default
+        // (continue_on_error=false), this is a no-op since any phase
+        // Err already short-circuited above.
+        self.session.abort_if_errors()
     }
 
 
