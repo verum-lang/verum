@@ -22945,6 +22945,34 @@ impl TypeChecker {
             // Universe types: Type, Type(0), Type(1), Type(u)
             TypeKind::Universe { level } => {
                 use crate::ty::UniverseLevel;
+                // Honour `[types].universe_polymorphism = false`:
+                // reject POLYMORPHIC universe forms (level variable
+                // `Type(u)`, or expressions containing one — `Max`,
+                // `Succ`).  Concrete forms (`Type` and `Type(N)`)
+                // are always allowed: the universe level is fixed
+                // at declaration time, so no polymorphism is
+                // introduced.
+                //
+                // Pre-fix the manifest field was tracing-only at
+                // session.rs:472; the elaborator unconditionally
+                // synthesised `UniverseLevel::Variable` for
+                // `Type(u)` regardless of the flag — silently
+                // permitting the language feature even when the
+                // user explicitly disabled it.
+                let level_is_polymorphic = matches!(
+                    level,
+                    verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Variable(_))
+                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Max(_, _))
+                        | verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Succ(_))
+                );
+                if level_is_polymorphic && !self.universe_poly_enabled {
+                    return Err(TypeError::Other(verum_common::Text::from(
+                        "universe-polymorphic types (e.g. `Type(u)`, `Type(max(a,b))`, \
+                         `Type(succ u)`) require `[types].universe_polymorphism = true` \
+                         in Verum.toml — concrete `Type` / `Type(N)` are always \
+                         allowed",
+                    )));
+                }
                 let uni_level = match level {
                     verum_common::Maybe::None => UniverseLevel::TYPE,
                     verum_common::Maybe::Some(verum_ast::UniverseLevelExpr::Concrete(n)) => {
@@ -48917,6 +48945,29 @@ impl TypeChecker {
                 }
             }
             TypeDeclBody::Quotient { base, .. } => {
+                // Honour `[types].quotient = false` from Verum.toml:
+                // reject the quotient declaration with a hard error
+                // citing the manifest.  The pre-fix behaviour was
+                // unconditional alias registration regardless of the
+                // flag — meaning a project that disabled quotient
+                // types in its manifest still elaborated them
+                // silently.  Since the equivalence relation is not
+                // yet enforced at runtime (T1-T phase 2 is partial),
+                // permitting quotient declarations under `quotient =
+                // false` would also let users believe the relation
+                // is checked when it isn't — a soundness gap.
+                if !self.quotient_enabled {
+                    return Err(TypeError::Other(
+                        verum_common::Text::from(format!(
+                            "type `{}` declares a quotient body but \
+                             `[types].quotient` is disabled in Verum.toml — \
+                             enable it to use HIT-based modular equivalence \
+                             types, or rewrite as a plain type alias to \
+                             the carrier",
+                            type_name.as_str()
+                        )),
+                    ));
+                }
                 // T1-T phase 2: register the quotient type as an alias
                 // over its underlying carrier. Values of the quotient
                 // type are represented at runtime by values of the
