@@ -116,6 +116,17 @@ impl RichRenderer {
             self.render_location_header(diagnostic, output, indent);
         }
 
+        // 2b. Render synthetic-expansion provenance chain (#287).
+        // When the primary span lands in synthetic source (macro /
+        // @derive / monomorphization / @delegate), the builder's
+        // `with_expansion_chain` populates the chain ordered
+        // leaf-to-root. Renderer surfaces it as `= note: in
+        // <kind> → in <kind>` directly under the location header.
+        // Empty chain (user-source) is a no-op.
+        if !diagnostic.expansion_chain().is_empty() {
+            self.render_expansion_chain(diagnostic, output, indent);
+        }
+
         // 3. Render source snippets with underlines
         if self.config.show_source && !diagnostic.primary_labels().is_empty() {
             self.render_source_snippets(diagnostic, output, indent);
@@ -172,6 +183,34 @@ impl RichRenderer {
                 diagnostic.message()
             ));
         }
+    }
+
+    /// Render the synthetic-expansion chain as a note-style line.
+    /// Format: `   = note: in @derive expansion → in macro expansion`
+    /// (chain ordered leaf-to-root).  Closes #287.
+    fn render_expansion_chain(
+        &self,
+        diagnostic: &Diagnostic,
+        output: &mut String,
+        indent: usize,
+    ) {
+        let chain = diagnostic.expansion_chain();
+        if chain.is_empty() {
+            return;
+        }
+        let indent_str = " ".repeat(indent);
+        let label = self.config.color_scheme.severity_note.wrap("note");
+        let arrow = self.config.glyphs.arrow_right;
+        let chain_text: Vec<String> = chain
+            .iter()
+            .map(|kind| format!("in {}", kind.as_str()))
+            .collect();
+        output.push_str(&format!(
+            "{}   = {}: {}\n",
+            indent_str,
+            label,
+            chain_text.join(&format!(" {} ", arrow)),
+        ));
     }
 
     /// Render location header:   --> file.vr:42:15
