@@ -929,6 +929,26 @@ impl ProofExtractor {
     /// let extractor = ProofExtractor::with_config(config);
     /// ```
     pub fn with_config(config: ProofGenerationConfig) -> Self {
+        // Phase-not-realised tracing: `ProofGenerationConfig.
+        // enable_proof_cache` (default false; production preset
+        // sets true) is set in 5 callers but no production code
+        // path consults the flag. The struct doc claims "Enable
+        // caching of extracted proofs" but `extract_proof` /
+        // `extract_proof_term` perform fresh Z3 walks each call —
+        // there's no per-(formula, solver-state) memoisation hash
+        // stored anywhere on `ProofExtractor`. Surface a debug
+        // trace when `production()` or a custom config sets it
+        // to true so embedders see the gap rather than silently
+        // believing their `ProofGenerationConfig::production()`
+        // selection enabled extraction caching.
+        if config.enable_proof_cache {
+            tracing::debug!(
+                "ProofExtractor::with_config: enable_proof_cache=true is observed \
+                 but ProofExtractor does not yet implement extraction-result \
+                 memoisation — every extract_proof call performs a fresh Z3 walk. \
+                 Forward-looking knob for a future content-addressed proof cache."
+            );
+        }
         Self {
             simplify_proofs: config.simplify_proofs,
             max_depth: config.max_proof_depth,
