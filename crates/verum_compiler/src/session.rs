@@ -418,16 +418,15 @@ impl Session {
         //     citing panic; downstream nursery ops become
         //     unreachable without a handle (`async_nursery.rs:360`).
         //
-        // Tier 1 (AOT) gating for futures/nurseries is a follow-up
-        // (#262-AOT): the LLVM lowering currently emits
-        // Spawn/NurseryInit IR unconditionally.  Tier 0 (interpret)
-        // is the load-bearing path today and is fully gated; AOT
-        // gating requires a codegen-time rejection or runtime
-        // panic-on-execute branch in `verum_codegen/src/llvm/`.
-        // Until #262-AOT lands, AOT compilations of programs that
-        // use spawn/nursery succeed regardless of the manifest
-        // setting.  No runtime warn! needed for the Tier 0 path —
-        // observable behaviour matches the manifest there.
+        // Tier 1 (AOT) gating for futures/nurseries also wired
+        // (#262-AOT, task #281, commit follows): the LLVM lowering
+        // at `verum_codegen/src/llvm/instruction.rs::lower_spawn`
+        // and `Instruction::NurseryInit` arm rejects at codegen
+        // time when `LoweringConfig.futures_enabled` /
+        // `nurseries_enabled` are false.  The flags thread from
+        // `pipeline/native_codegen.rs::language_features.runtime`.
+        // Both Tier 0 (dispatch panic) and Tier 1 (codegen error)
+        // produce manifest-citing diagnostics on attempted use.
         let rt = &opts.language_features.runtime;
 
         // Honest production diagnostic for #271 (multi-threaded async

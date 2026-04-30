@@ -3966,6 +3966,26 @@ pub fn lower_instruction<'ctx>(
         // Nursery / Structured Concurrency — Real OS Threads
         // ====================================================================
         Instruction::NurseryInit { dst } => {
+            // Manifest-driven gate (#262-AOT, task #281): when
+            // `[runtime].nurseries = false`, refuse to lower
+            // `NurseryInit` at codegen time. Tier 1 mirror of the
+            // Tier 0 dispatch rejection at `verum_vbc::interpreter::
+            // dispatch_table::handlers::async_nursery::
+            // handle_nursery_init`. Once construction is rejected,
+            // every downstream nursery operation (Spawn, Await,
+            // Cancel, Config, Error) becomes unreachable since
+            // they all consume a nursery handle.
+            if !ctx.nurseries_enabled() {
+                return Err(LlvmLoweringError::UnsupportedInstruction(
+                    verum_common::Text::from(
+                        "NurseryInit instruction rejected: [runtime].nurseries \
+                         = false in Verum.toml disables nursery construction. \
+                         Set [runtime].nurseries = true (the manifest default) \
+                         to enable nursery {} blocks, or remove the nursery \
+                         from this build."
+                    ),
+                ));
+            }
             let i64_type = ctx.types().i64_type();
             let module = ctx.get_module();
 
@@ -23761,6 +23781,24 @@ fn lower_spawn<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg, func_id: u32, args: &verum_vbc::instruction::RegRange,
 ) -> Result<()> {
+    // Manifest-driven gate (#262-AOT, task #281): when
+    // `[runtime].futures = false`, refuse to lower `Spawn` at
+    // codegen time. Tier 1 mirror of the Tier 0 dispatch
+    // rejection at `verum_vbc::interpreter::dispatch_table::
+    // handlers::async_nursery::handle_spawn`. Failing loud at
+    // codegen produces a manifest-citing diagnostic and matches
+    // Tier 0's behaviour where the interpreter raises
+    // InterpreterError::Panic with the same message.
+    if !ctx.futures_enabled() {
+        return Err(LlvmLoweringError::UnsupportedInstruction(
+            verum_common::Text::from(
+                "Spawn instruction rejected: [runtime].futures = false in \
+                 Verum.toml disables async future spawning. Set \
+                 [runtime].futures = true (the manifest default) to enable \
+                 spawn(...), or remove the spawn call from this build."
+            ),
+        ));
+    }
     let i64_type = ctx.types().i64_type();
     let ptr_type = ctx.types().ptr_type();
     let i32_type = ctx.types().i32_type();
