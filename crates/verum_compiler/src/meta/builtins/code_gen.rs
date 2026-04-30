@@ -33,6 +33,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use verum_ast::{Expr, ExprKind, span::Span};
+use verum_ast::ty::{Ident, Path};
 use verum_common::{List, Text};
 
 use super::context_requirements::{BuiltinInfo, BuiltinRegistry};
@@ -219,8 +221,21 @@ pub fn gensym_counter() -> u64 {
 
 /// Create an identifier from text
 ///
-/// This creates an identifier that can be used in quote splices.
+/// Lifts a `Text` into an AST `Expr` representing the identifier as a
+/// single-segment `Path`, ready for use in `quote { ... }` splices.
 /// Example: `let name = ident("foo"); quote { let $name = 42; }`
+///
+/// Pre-fix `meta_ident("foo")` returned `ConstValue::Text("foo")` —
+/// quote splice consumers expect `ConstValue::Expr`, so the splice
+/// dropped the value rather than emitting an identifier reference.
+/// The pre-fix comment acknowledged it: `For now, an identifier is
+/// just a Text value / In a full implementation, this would create
+/// an Ident AST node`.
+///
+/// The text is validated as a syntactically-valid identifier before
+/// the lift — empty strings, leading digits, and non-ident characters
+/// produce `MetaError::Other` so a typo at compile time surfaces here
+/// instead of as a parse error later.
 fn meta_ident(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
         return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
@@ -228,15 +243,38 @@ fn meta_ident(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstVal
 
     match &args[0] {
         ConstValue::Text(t) => {
-            // For now, an identifier is just a Text value
-            // In a full implementation, this would create an Ident AST node
-            Ok(ConstValue::Text(t.clone()))
+            let s = t.as_str();
+            if !is_valid_ident(s) {
+                return Err(MetaError::Other(Text::from(format!(
+                    "ident({:?}) — argument is not a valid identifier (must start with \
+                     letter or `_`, then letters / digits / `_`)",
+                    s
+                ))));
+            }
+            // Span::dummy is the right span here — the identifier is
+            // synthesized at meta-eval time and has no source location.
+            // The downstream quote splice replaces it with the call
+            // site's span when it's spliced in.
+            let span = Span::dummy();
+            let path = Path::single(Ident::new(s, span));
+            Ok(ConstValue::Expr(Expr::new(ExprKind::Path(path), span)))
         }
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
         }),
     }
+}
+
+/// Verify that `s` is a syntactically-valid Verum identifier:
+/// non-empty, starts with letter or `_`, then alphanumerics / `_`.
+fn is_valid_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // ============================================================================
@@ -491,5 +529,87 @@ mod tests {
         let result = meta_compile_warning(&mut ctx, args).unwrap();
         assert_eq!(result, ConstValue::Unit);
         assert_eq!(ctx.warning_count, 1);
+    }
+
+    #[test]
+    fn ident_lifts_text_to_path_expr() {
+        // The headline regression: pre-fix `ident("foo")` returned
+        // `ConstValue::Text("foo")` and quote-splice consumers
+        // dropped the value because they expect `ConstValue::Expr`.
+        // Post-fix it returns an Expr wrapping a single-segment
+        // `Path(foo)`.
+        let mut ctx = MetaContext::new();
+        let args = List::from(vec![ConstValue::Text(Text::from("foo"))]);
+        let result = meta_ident(&mut ctx, args).unwrap();
+        match result {
+            ConstValue::Expr(expr) => match &expr.kind {
+                ExprKind::Path(path) => match path.as_ident() {
+                    Some(id) => assert_eq!(id.as_str(), "foo"),
+                    None => panic!("expected single-segment Path"),
+                },
+                other => panic!("expected ExprKind::Path, got {:?}", other),
+            },
+            other => panic!("expected ConstValue::Expr, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ident_accepts_underscore_and_alnum_names() {
+        let mut ctx = MetaContext::new();
+        for name in ["_priv", "abc123", "_x", "counter_42"] {
+            let args = List::from(vec![ConstValue::Text(Text::from(name))]);
+            let result = meta_ident(&mut ctx, args)
+                .unwrap_or_else(|e| panic!("`{}` should be valid: {:?}", name, e));
+            match result {
+                ConstValue::Expr(_) => {}
+                other => panic!("`{}` produced {:?}", name, other),
+            }
+        }
+    }
+
+    #[test]
+    fn ident_rejects_empty_string() {
+        let mut ctx = MetaContext::new();
+        let args = List::from(vec![ConstValue::Text(Text::new())]);
+        let result = meta_ident(&mut ctx, args);
+        assert!(matches!(result, Err(MetaError::Other(_))));
+    }
+
+    #[test]
+    fn ident_rejects_leading_digit() {
+        let mut ctx = MetaContext::new();
+        let args = List::from(vec![ConstValue::Text(Text::from("42foo"))]);
+        let result = meta_ident(&mut ctx, args);
+        assert!(matches!(result, Err(MetaError::Other(_))));
+    }
+
+    #[test]
+    fn ident_rejects_punctuation_in_name() {
+        let mut ctx = MetaContext::new();
+        for bad in ["foo bar", "foo-bar", "foo.bar", "foo!", "f@oo"] {
+            let args = List::from(vec![ConstValue::Text(Text::from(bad))]);
+            let result = meta_ident(&mut ctx, args);
+            assert!(
+                matches!(result, Err(MetaError::Other(_))),
+                "{:?} should be rejected, got {:?}",
+                bad,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn ident_rejects_non_text_argument() {
+        let mut ctx = MetaContext::new();
+        let args = List::from(vec![ConstValue::Int(42)]);
+        let result = meta_ident(&mut ctx, args);
+        assert!(matches!(result, Err(MetaError::TypeMismatch { .. })));
+    }
+
+    #[test]
+    fn ident_rejects_wrong_arity() {
+        let mut ctx = MetaContext::new();
+        let result = meta_ident(&mut ctx, List::new());
+        assert!(matches!(result, Err(MetaError::ArityMismatch { .. })));
     }
 }
