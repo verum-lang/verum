@@ -1281,6 +1281,19 @@ enum Commands {
         #[clap(long = "docker")]
         docker: bool,
 
+        /// Run the kernel-soundness IOU dashboard (#152 / Phase-1 of
+        /// trust-base reduction).  Enumerates every kernel rule whose
+        /// soundness lemma is admitted with an IOU reason in
+        /// `core/verify/kernel_soundness/`; groups by RuleCategory
+        /// (Structural / Cubical / Refinement / Quotient / Inductive /
+        /// SmtAxiom / Diakrisis); emits structured JSON + plain summary.
+        /// Drives discharge prioritisation: high-priority admits surface
+        /// at the top.  This is the metric-driven foundation for the
+        /// path to "constructively verified from first principles" —
+        /// each admit closed shrinks Verum's trusted base.
+        #[clap(long = "soundness-iou")]
+        soundness_iou: bool,
+
         /// Run the unified audit-bundle (#151).  Executes each of the
         /// load-bearing L1+L2+L3+L4 gates in dependency order
         /// (`--bridge-discharge`, `--kernel-discharged-axioms`,
@@ -3606,6 +3619,7 @@ fn run_command(cli: Cli) -> Result<()> {
             cross_format_roundtrip,
             docker,
             bundle,
+            soundness_iou,
             apply_graph,
             epsilon,
             coord,
@@ -3664,6 +3678,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 )
             } else if bundle {
                 commands::audit::audit_bundle_with_format(output_format)
+            } else if soundness_iou {
+                commands::audit::audit_soundness_iou_with_format(output_format)
             } else if apply_graph {
                 commands::audit::audit_apply_graph_with_format(output_format)
             } else if framework_axioms {
