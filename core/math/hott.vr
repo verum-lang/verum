@@ -205,7 +205,116 @@ public fn id_equiv<A>() -> Equiv<A, A> {
     equiv_id()
 }
 
+// -----------------------------------------------------------------------------
+// Equivalence-coherence laws (HoTT Book §4.2)
+// -----------------------------------------------------------------------------
+//
+// `IsEquiv` is the half-adjoint equivalence: section + retraction +
+// COHERENCE 2-cell witnessing that `ap(forward, retraction(a))` and
+// `section(forward(a))` are the *same* path in B. Without coherence,
+// the equivalence type is not a proposition (multiple isEquiv proofs
+// for the same f exist) and univalence breaks.
+//
+// Pre-fix `equiv_inv`, `equiv_compose`, `ua_inv`, the fiber-based
+// equiv constructor, and `propext` populated `coherence` with
+// `fn(_) -> refl(refl(...))` — a misleading PLACEHOLDER that:
+//
+//   1. Was structurally wrong for the coherence type (refl-of-refl
+//      lives in `HottPath<HottPath<X>(x,x)>(refl(x), refl(x))` —
+//      not the required `HottPath<HottPath<Y>(p, q)>` over the
+//      derived endpoints).
+//   2. Hid the actual proof obligation.
+//
+// Architectural fix: declare each coherence law as an explicit
+// `public axiom` with the full HoTT-Book type signature and a
+// `@framework(hott, ...)` annotation documenting the meta-theory
+// needed for kernel discharge. The constructors below CALL these
+// axioms — the proof obligation is now visible to the audit
+// gate (matching the MSFS framework-axiom pattern at
+// `core/math/absolute_layer.vr:100`). When the kernel grows a
+// `kernel_equiv_inv_coherence` / `kernel_equiv_compose_coherence`
+// dispatch rule, the axioms become functional and verification
+// promotes from Admitted to Proved.
+
+/// **HoTT Book §4.2.4**: inverting an equivalence preserves IsEquiv.
+///
+/// For `e : A ≃ B`, the inverted equivalence `e' : B ≃ A` (with
+/// `forward = e.inverse`, `inverse = e.forward`, `section =
+/// e.retraction`, `retraction = e.section`) satisfies:
+///
+///   `ap(e.inverse, e.section(b)) ≡ e.retraction(e.inverse(b))`
+///
+/// Both sides are paths in `A` from `e.inverse(e.forward(e.inverse(b)))`
+/// to `e.inverse(b)`. The 2-cell witnessing this equality is
+/// derivable from `e.coherence` via the cubical naturality
+/// square (HoTT-Book Lemma 2.4.4 + §4.2.4).
+///
+/// Discharge IOU: `kernel_equiv_inv_coherence(e, b)` — applies the
+/// naturality square + ap-functoriality at the cubical level.
+@framework(hott, "HoTT Book §4.2.4 — equiv_inv preserves IsEquiv")
+public axiom equiv_inv_coherence_law<A, B>(
+    e: &Equiv<A, B>,
+    b: B,
+) -> HottPath<HottPath<A>(
+    e.proof.inverse(e.forward(e.proof.inverse(b))),
+    e.proof.inverse(b),
+)>(
+    ap(e.proof.inverse,
+       e.forward(e.proof.inverse(b)),
+       b,
+       e.proof.section(b)),
+    e.proof.retraction(e.proof.inverse(b)),
+);
+
+/// **HoTT Book §4.2.5**: composing equivalences preserves IsEquiv.
+///
+/// For `e1 : A ≃ B` and `e2 : B ≃ C`, the composite `e2 ∘ e1 : A ≃ C`
+/// satisfies the coherence square over the composed section /
+/// retraction. The 2-cell is derivable from `e1.coherence` and
+/// `e2.coherence` via two applications of the naturality square.
+///
+/// Discharge IOU: `kernel_equiv_compose_coherence(e1, e2, a)` —
+/// applies HoTT-Book Lemma 4.2.5's explicit construction.
+@framework(hott, "HoTT Book §4.2.5 — equivalences compose")
+public axiom equiv_compose_coherence_law<A, B, C>(
+    e1: &Equiv<A, B>,
+    e2: &Equiv<B, C>,
+    a: A,
+) -> HottPath<HottPath<C>(
+    e2.forward(e1.forward(e1.proof.inverse(e2.proof.inverse(e2.forward(e1.forward(a)))))),
+    e2.forward(e1.forward(a)),
+)>(
+    ap(|x: A| e2.forward(e1.forward(x)),
+       e1.proof.inverse(e2.proof.inverse(e2.forward(e1.forward(a)))),
+       a,
+       trans(
+           e1.proof.inverse(e2.proof.inverse(e2.forward(e1.forward(a)))),
+           e1.proof.inverse(e1.forward(a)),
+           a,
+           ap(e1.proof.inverse,
+              e2.proof.inverse(e2.forward(e1.forward(a))),
+              e1.forward(a),
+              e2.proof.retraction(e1.forward(a))),
+           e1.proof.retraction(a),
+       )),
+    trans(
+        e2.forward(e1.forward(e1.proof.inverse(e2.proof.inverse(e2.forward(e1.forward(a)))))),
+        e2.forward(e2.proof.inverse(e2.forward(e1.forward(a)))),
+        e2.forward(e1.forward(a)),
+        ap(e2.forward,
+           e1.forward(e1.proof.inverse(e2.proof.inverse(e2.forward(e1.forward(a))))),
+           e2.proof.inverse(e2.forward(e1.forward(a))),
+           e1.proof.section(e2.proof.inverse(e2.forward(e1.forward(a))))),
+        e2.proof.section(e2.forward(e1.forward(a))),
+    ),
+);
+
 /// Inverse equivalence: if A ≃ B then B ≃ A.
+///
+/// The inverted equivalence's coherence is provided by
+/// `equiv_inv_coherence_law` — replaces the prior
+/// `refl(refl(b))` placeholder which was both type-wrong and
+/// hid the proof obligation.
 public fn equiv_inv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
     Equiv {
         forward: e.proof.inverse,
@@ -217,12 +326,19 @@ public fn equiv_inv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
             inverse: e.forward,
             section: e.proof.retraction,
             retraction: e.proof.section,
-            coherence: fn(b: B) -> refl(refl(b)),  // simplified coherence
+            coherence: fn(b: B) -> equiv_inv_coherence_law(&e, b),
         },
     }
 }
 
 /// Compose equivalences: if A ≃ B and B ≃ C then A ≃ C.
+///
+/// The composite equivalence's coherence is provided by
+/// `equiv_compose_coherence_law` — replaces the prior
+/// `refl(refl(a))` placeholder. The section and retraction are
+/// constructed via path-algebra `trans` chains; only the 2-cell
+/// coherence requires the framework-axiom IOU until the kernel
+/// dispatches `kernel_equiv_compose_coherence`.
 public fn equiv_compose<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C> {
     let f = |a: A| e2.forward(e1.forward(a));
     let g = |c: C| e1.proof.inverse(e2.proof.inverse(c));
@@ -250,7 +366,7 @@ public fn equiv_compose<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C
                    e2.proof.retraction(e1.forward(a))),
                 e1.proof.retraction(a),
             ),
-            coherence: fn(a: A) -> refl(refl(a)),
+            coherence: fn(a: A) -> equiv_compose_coherence_law(&e1, &e2, a),
         },
     }
 }
@@ -322,6 +438,36 @@ public type IsContrMap<A, B>(f: fn(A) -> B) is {
     fibers_contractible: fn(b: B) -> IsContr<Fiber<A, B>(f, b)>,
 };
 
+/// **HoTT Book Theorem 4.4.6**: equivalence-from-contractible-fibers
+/// preserves IsEquiv coherence.
+///
+/// For `f : A → B` with all fibers contractible, the derived
+/// `IsEquiv<A,B>` has section and retraction extracted from the
+/// fiber center / contraction. The coherence 2-cell is derivable
+/// from the contractible-fiber proof via the centred-fiber
+/// uniqueness lemma.
+///
+/// Discharge IOU: `kernel_contr_fiber_coherence(cm, a)` —
+/// applies HoTT-Book §4.4 derivation.
+@framework(hott, "HoTT Book §4.4 — equiv_from_contr_map preserves IsEquiv")
+public axiom contr_fiber_coherence_law<A, B>(
+    f: fn(A) -> B,
+    cm: &IsContrMap<A, B>(f),
+    a: A,
+) -> HottPath<HottPath<B>(
+    f(cm.fibers_contractible(f(a)).center.point),
+    f(a),
+)>(
+    ap(f,
+       cm.fibers_contractible(f(a)).center.point,
+       a,
+       ap(fn(fib: Fiber<A, B>(f, f(a))) -> fib.point,
+          cm.fibers_contractible(f(a)).center,
+          Fiber { point: a, path: refl(f(a)) },
+          cm.fibers_contractible(f(a)).contraction(Fiber { point: a, path: refl(f(a)) }))),
+    cm.fibers_contractible(f(a)).center.path,
+);
+
 /// Equivalence via contractible fibers (alternative characterization).
 public fn equiv_from_contr_map<A, B>(f: fn(A) -> B, cm: IsContrMap<A, B>(f)) -> Equiv<A, B> {
     Equiv {
@@ -341,7 +487,7 @@ public fn equiv_from_contr_map<A, B>(f: fn(A) -> B, cm: IsContrMap<A, B>(f)) -> 
                    canonical, Fiber { point: a, path: refl(f(a)) },
                    path_to_a)
             },
-            coherence: fn(a: A) -> refl(refl(f(a))),
+            coherence: fn(a: A) -> contr_fiber_coherence_law(f, &cm, a),
         },
     }
 }
@@ -359,8 +505,39 @@ public fn equiv_from_contr_map<A, B>(f: fn(A) -> B, cm: IsContrMap<A, B>(f)) -> 
 ///   ua(id_equiv)              ↦ refl(A)
 public axiom ua<A, B>(e: Equiv<A, B>) -> HottPath<Type>(A, B);
 
+/// **HoTT Book §2.10**: transport-equivalence coherence.
+///
+/// For `p : HottPath<Type>(A, B)`, the equivalence
+/// `ua_inv(p) = (transport(p, _), transport(sym(p), _))` satisfies
+/// the half-adjoint coherence: the two ways of round-tripping
+/// `transport(p, a)` agree up to a 2-cell. In CCHM cubical TT
+/// this 2-cell is built from `transport_roundtrip` + `hcomp`.
+///
+/// Discharge IOU: `kernel_transport_coherence(p, a)` — applies
+/// the cubical-TT transport-iso square.
+@framework(hott, "HoTT Book §2.10 — transport equivalence coherence")
+public axiom transport_coherence_law<A, B>(
+    p: HottPath<Type>(A, B),
+    a: A,
+) -> HottPath<HottPath<B>(
+    transport(p, transport(sym(A, B, p), transport(p, a))),
+    transport(p, a),
+)>(
+    ap(|x: A| transport(p, x),
+       transport(sym(A, B, p), transport(p, a)),
+       a,
+       @transport_roundtrip(sym(A, B, p), a)),
+    @transport_roundtrip(p, transport(p, a)),
+);
+
 /// Inverse of univalence: a path of types induces an equivalence.
 ///   ua_inv(p) builds the equivalence from transport along p.
+///
+/// Coherence is provided by `transport_coherence_law` — the
+/// cubical-TT roundtrip square. Replaces the prior
+/// `refl(refl(fwd(a)))` placeholder which was structurally
+/// unsound (refl-of-refl lives over `fwd(a)=fwd(a)`, not the
+/// derived endpoints).
 public fn ua_inv<A, B>(p: HottPath<Type>(A, B)) -> Equiv<A, B> {
     let fwd = |a: A| transport(p, a);
     let bwd = |b: B| transport(sym(A, B, p), b);
@@ -374,7 +551,7 @@ public fn ua_inv<A, B>(p: HottPath<Type>(A, B)) -> Equiv<A, B> {
             inverse: bwd,
             section: fn(b: B) -> @transport_roundtrip(p, b),
             retraction: fn(a: A) -> @transport_roundtrip(sym(A, B, p), a),
-            coherence: fn(a: A) -> refl(refl(fwd(a))),
+            coherence: fn(a: A) -> transport_coherence_law(p, a),
         },
     }
 }
@@ -400,7 +577,36 @@ public fn happly<A, B>(
     ap(|h: fn(A) -> B| h(x), f, g, p)
 }
 
+/// **HoTT Book §3.3**: equivalence between propositions has trivial
+/// coherence (all paths in a proposition are equal).
+///
+/// For propositions P and Q with mutual functions f, g, the
+/// half-adjoint coherence reduces to the proposition-uniqueness
+/// principle: every two paths in Q are themselves path-equal.
+/// Specifically `q_prop.all_paths` upgrades to a 2-cell because
+/// the path-space of a proposition is itself contractible.
+///
+/// Discharge IOU: `kernel_prop_coherence(q_prop, p1, p2)` —
+/// applies HoTT-Book Lemma 3.3.5 (paths in a Prop are unique).
+@framework(hott, "HoTT Book §3.3 — propositional equivalence coherence")
+public axiom prop_equiv_coherence_law<P, Q>(
+    f: fn(P) -> Q,
+    g: fn(Q) -> P,
+    p_prop: &IsProp<P>,
+    q_prop: &IsProp<Q>,
+    p: P,
+) -> HottPath<HottPath<Q>(f(g(f(p))), f(p))>(
+    ap(f, g(f(p)), p, p_prop.all_paths(g(f(p)), p)),
+    q_prop.all_paths(f(g(f(p))), f(p)),
+);
+
 /// Univalence for propositions: logically equivalent props are equal.
+///
+/// Coherence is provided by `prop_equiv_coherence_law` — uses the
+/// proposition-uniqueness principle (paths in a Prop are
+/// themselves equal) to derive the 2-cell from the underlying
+/// `IsProp` witnesses. Replaces the prior `refl(refl(f(p)))`
+/// placeholder which was structurally unsound.
 public fn propext<P, Q>(
     f: fn(P) -> Q,
     g: fn(Q) -> P,
@@ -417,7 +623,7 @@ public fn propext<P, Q>(
             inverse: g,
             section: fn(q: Q) -> q_prop.all_paths(f(g(q)), q),
             retraction: fn(p: P) -> p_prop.all_paths(g(f(p)), p),
-            coherence: fn(p: P) -> refl(refl(f(p))),
+            coherence: fn(p: P) -> prop_equiv_coherence_law(f, g, &p_prop, &q_prop, p),
         },
     })
 }
