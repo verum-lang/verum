@@ -4412,6 +4412,99 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
+    /// **Linux direct syscall** — libc-free emission of the kernel
+    /// trap instruction (per user's 2026-05-01 directive: "for AOT we
+    /// don't use libc on any platform; on Linux use direct syscalls").
+    ///
+    /// Mirrors the per-architecture register convention used by
+    /// `Opcode::SyscallLinux` lowering at instruction.rs:3730:
+    ///
+    ///   * **x86_64**: `syscall` instruction; rax = syscall number,
+    ///     rdi/rsi/rdx/r10/r8/r9 = a0..a5; return in rax.
+    ///   * **aarch64**: `svc #0` instruction; x8 = syscall number,
+    ///     x0..x5 = a0..a5; return in x0.
+    ///
+    /// Always 6-arg shape — pass i64 zeros for unused args.  Caller
+    /// is responsible for marshalling argument types into i64 (`build_ptr_to_int`
+    /// for pointers, sign- or zero-extend for narrow integers).
+    ///
+    /// This is the canonical libc-free syscall path for the AOT
+    /// runtime helpers; every `verum_*` helper that previously called
+    /// libc on Linux now routes through this helper.  Other-Unix
+    /// platforms (FreeBSD/OpenBSD) keep libc fallback under `@cfg`
+    /// for now; production targeting needs explicit per-platform arms.
+    #[cfg(target_os = "linux")]
+    fn emit_linux_syscall(
+        &self,
+        builder: &Builder<'ctx>,
+        sys_num: u64,
+        args: &[IntValue<'ctx>],
+    ) -> Result<IntValue<'ctx>> {
+        let i64_type = self.context.i64_type();
+
+        #[cfg(target_arch = "x86_64")]
+        let (asm_str, constraints) = (
+            "syscall",
+            "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
+        );
+        #[cfg(target_arch = "aarch64")]
+        let (asm_str, constraints) = (
+            "svc #0",
+            "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
+        );
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let (asm_str, constraints): (&str, &str) = (
+            "",
+            "=r,r,r,r,r,r,r,r",
+        );
+
+        let fn_type = i64_type.fn_type(
+            &[
+                i64_type.into(), i64_type.into(), i64_type.into(),
+                i64_type.into(), i64_type.into(), i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
+        let asm_fn = self.context.create_inline_asm(
+            fn_type,
+            asm_str.to_string(),
+            constraints.to_string(),
+            true,
+            true,
+            Some(verum_llvm::InlineAsmDialect::ATT),
+            false,
+        );
+
+        // Pad args to 6, fill missing with zero.
+        let zero = i64_type.const_zero();
+        let a0 = args.first().copied().unwrap_or(zero);
+        let a1 = args.get(1).copied().unwrap_or(zero);
+        let a2 = args.get(2).copied().unwrap_or(zero);
+        let a3 = args.get(3).copied().unwrap_or(zero);
+        let a4 = args.get(4).copied().unwrap_or(zero);
+        let a5 = args.get(5).copied().unwrap_or(zero);
+        let num_const = i64_type.const_int(sys_num, false);
+
+        let result = builder
+            .build_indirect_call(
+                fn_type,
+                asm_fn,
+                &[
+                    num_const.into(),
+                    a0.into(), a1.into(), a2.into(),
+                    a3.into(), a4.into(), a5.into(),
+                ],
+                "syscall_result",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("syscall returned void")?
+            .into_int_value();
+        Ok(result)
+    }
+
     /// Adapt argument types for a libc call: sext i32→i64 or trunc i64→i32 as needed.
     fn adapt_libc_args(
         &self,
