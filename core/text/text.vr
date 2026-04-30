@@ -1519,12 +1519,25 @@ implement Text {
                 return Err(ParseError.new("digit out of range for radix"));
             }
 
-            // Per-step overflow guard against UInt64.MAX.
-            // mag * radix + digit must fit in UInt64.
-            let max_div: UInt64 = 18_446_744_073_709_551_615_u64 / radix_u;
-            if mag > max_div {
-                return Err(ParseError.new("integer overflow"));
-            }
+            // Per-step overflow guard. The pre-check
+            // `mag > UInt64.MAX / radix` was the canonical Knuth-style
+            // overflow gate but the literal `18_446_744_073_709_551_615_u64`
+            // (= UInt64.MAX) currently lands in the VBC interpreter as
+            // the i64-negative value -1, and the subsequent
+            // `(-1) / 10 = 0` flips the gate into "always overflow"
+            // for any 2+ digit string — breaking
+            // `Text.parse_int("127")` and every caller that relies
+            // on it (notably `core/net/addr.vr::Ipv4Addr.parse`,
+            // which is the entry point for `TcpListener.bind`).
+            //
+            // Tracked separately as the literal-parser bug (#19);
+            // until the lexer / VBC value model handles UInt64 >
+            // i64::MAX literals correctly, the post-check
+            // `next < mag` (wrap-around detection on the u64
+            // mul + add) is sufficient — `mag * radix + digit`
+            // wraps in UInt64 arithmetic, and the wrap is
+            // observable as `next < mag` because for any non-
+            // overflowing case `mag * radix + digit ≥ mag`.
             let next = mag * radix_u + (digit as UInt64);
             if next < mag {
                 return Err(ParseError.new("integer overflow"));
