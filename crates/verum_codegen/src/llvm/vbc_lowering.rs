@@ -153,6 +153,16 @@ pub struct LoweringConfig {
     /// (longjmp / _exit(134)); Abort emits stderr + _exit(1).
     /// Threaded from `[runtime].panic` in Verum.toml.
     pub panic_strategy: PanicStrategy,
+    /// Whether LLVM is allowed to perform tail-call optimisation
+    /// on emitted functions.  When `false`, every emitted function
+    /// receives the `disable-tail-calls=true` LLVM string attribute,
+    /// which suppresses TCO + tail-merging across the function's
+    /// returns (matters for stack-trace fidelity in panics, debug
+    /// builds, profiling, and recursion-depth diagnostics).
+    /// Threaded from `[codegen].tail_call_optimization` in
+    /// Verum.toml.  Default `true` (TCO enabled — matches the
+    /// documented manifest default).
+    pub tail_call_optimization: bool,
 }
 
 impl Default for LoweringConfig {
@@ -168,6 +178,7 @@ impl Default for LoweringConfig {
             coverage: false,
             permission_policy: None,
             panic_strategy: PanicStrategy::default(),
+            tail_call_optimization: true,
         }
     }
 }
@@ -235,6 +246,15 @@ impl LoweringConfig {
     /// entry point.
     pub fn with_panic_strategy(mut self, strategy: PanicStrategy) -> Self {
         self.panic_strategy = strategy;
+        self
+    }
+
+    /// Set whether LLVM tail-call optimisation runs on emitted
+    /// functions.  Threaded from `[codegen].tail_call_optimization`
+    /// in Verum.toml.  When false, every emitted function receives
+    /// the `disable-tail-calls=true` string attribute.
+    pub fn with_tail_call_optimization(mut self, enabled: bool) -> Self {
+        self.tail_call_optimization = enabled;
         self
     }
 
@@ -1650,6 +1670,27 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 let naked_attr = self.context.create_enum_attribute(naked_kind_id, 0);
                 llvm_fn.add_attribute(AttributeLoc::Function, naked_attr);
             }
+        }
+
+        // Honour `[codegen].tail_call_optimization = false` from
+        // Verum.toml.  Emit the LLVM `disable-tail-calls=true`
+        // string attribute on every function so the backend
+        // suppresses TCO + tail-merging across the function's
+        // returns.  Pre-fix the manifest field was tracing-only at
+        // session.rs:432; setting it false had zero effect on
+        // generated code.  When the default `true` is in effect, no
+        // attribute is emitted and LLVM's TCO runs normally.
+        //
+        // The attribute survives LTO and applies to BOTH the
+        // function's call sites and any tail-call replacement that
+        // would otherwise materialise during ISel — see LLVM's
+        // `TargetMachine::Options.NoFramePointerElim` /
+        // `disable-tail-calls` interaction.
+        if !self.config.tail_call_optimization {
+            let attr = self
+                .context
+                .create_string_attribute("disable-tail-calls", "true");
+            llvm_fn.add_attribute(AttributeLoc::Function, attr);
         }
 
         let func_name = vbc_module
