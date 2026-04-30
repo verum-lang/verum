@@ -29,7 +29,18 @@
 
 module core.math.frameworks.msfs;
 
-mount core.math.frameworks.msfs.baseline.{
+// `public mount` so downstream theorem files can `mount
+// core.math.frameworks.msfs.{...};` and actually receive the
+// re-exported axioms. Pre-fix the 4 mount lines lacked the
+// `public` qualifier — the doc comment above advertised
+// "downstream theorem files mount one path: `mount core.math.
+// frameworks.msfs.{...};` rather than three separate paths" but
+// the umbrella's mounts were PRIVATE, so user code reaching for
+// these axioms had to reach through to each sub-file
+// individually. Same regression risk as the prior
+// `core.proof.tactics` private-mount fix (commit 38cc40cd).
+
+public mount core.math.frameworks.msfs.baseline.{
     Universe,
     InaccessibleCardinal,
     msfs_baseline_zfc_2inacc,
@@ -37,7 +48,7 @@ mount core.math.frameworks.msfs.baseline.{
     msfs_categorical_machinery_baseline,
 };
 
-mount core.math.frameworks.msfs.key_symbols.{
+public mount core.math.frameworks.msfs.key_symbols.{
     TwoCategory,
     InfinityNCat,
     TwoFunctor,
@@ -52,7 +63,7 @@ mount core.math.frameworks.msfs.key_symbols.{
     msfs_Syn_truncation,
 };
 
-mount core.math.frameworks.msfs.strcat.{
+public mount core.math.frameworks.msfs.strcat.{
     StrCatObject,
     StrCat,
     msfs_strcat_total_definition,
@@ -66,7 +77,7 @@ mount core.math.frameworks.msfs.strcat.{
 // `msfs_self_containment_theorem` inherits the kernel-checked
 // guarantee that the trusted boundary is exactly ZFC + 2-inacc +
 // Verum kernel.
-mount core.math.frameworks.msfs.self_containment.{
+public mount core.math.frameworks.msfs.self_containment.{
     MsfsSelfContainmentWitness,
     msfs_self_containment_theorem,
     msfs_trusted_boundary_corollary,

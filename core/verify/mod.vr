@@ -27,9 +27,9 @@
 // Dependencies
 //
 //   mount core.proof.tactics.*;    — tactic library (task #85)
-//   mount core.verify.level.*;     — VerificationLevel mirror
-//   mount core.verify.attempt.*;   — ProofAttempt / Outcome
-//   mount core.verify.certificate.*; — SmtCertificate stdlib view
+//   public mount core.verify.level.*;     — VerificationLevel mirror
+//   public mount core.verify.attempt.*;   — ProofAttempt / Outcome
+//   public mount core.verify.certificate.*; — SmtCertificate stdlib view
 //
 // See `docs/verification/gradual-verification.md` for the full
 // spec.
@@ -40,10 +40,15 @@ public module level;
 public module attempt;
 public module certificate;
 public module coherence;
+public module kernel_soundness;
 
 // Re-export the user-facing symbols at the umbrella so callers
-// can `mount core.verify.*;` without traversing the sub-paths.
-mount core.verify.level.*;
-mount core.verify.attempt.*;
-mount core.verify.certificate.*;
-mount core.verify.coherence.*;
+// can `public mount core.verify.*;` without traversing the sub-paths.
+public mount core.verify.level.*;
+public mount core.verify.attempt.*;
+public mount core.verify.certificate.*;
+public mount core.verify.coherence.*;
+// kernel_soundness is intentionally NOT splat-mounted here — it is
+// the meta-theoretic corpus, not a value-level API.  Callers reach
+// into `core.verify.kernel_soundness.{model,judgment,…}` by
+// fully-qualified path so the namespace stays uncluttered.

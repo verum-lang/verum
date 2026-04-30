@@ -26,7 +26,7 @@ module core.math.s_definable;
 public module class_s_s;
 public module lemma_3_4;
 
-mount core.math.s_definable.class_s_s.{
+public mount core.math.s_definable.class_s_s.{
     SSMembership,
     RefinedSSMembership,
     msfs_s_s_local_base,
@@ -45,7 +45,7 @@ mount core.math.s_definable.class_s_s.{
     msfs_refined_ss_depth_nonneg,
 };
 
-mount core.math.s_definable.lemma_3_4.{
+public mount core.math.s_definable.lemma_3_4.{
     FormallySDefinable,
     msfs_lemma_3_4_s_definability,
     msfs_lemma_3_4_outputs_in_s_s_global,
