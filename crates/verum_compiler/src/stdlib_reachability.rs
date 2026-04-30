@@ -55,11 +55,17 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
     let graph = stdlib_dep_graph::get_dep_graph()?;
     let index = stdlib_index::get_module_index()?;
 
-    let seeds = collect_user_mount_seeds(user);
+    // Build the seed set: user mounts ⋃ implicit prelude.
+    //
+    // The prelude must be in the seed set because `core/mod.vr`'s
+    // `public mount super.X` re-exports define the symbols that are
+    // available without an explicit `mount` (List, Map, Maybe, Result,
+    // …). User code may reference these without ever writing `mount
+    // core.collections`, so the BFS must seed them unconditionally.
+    let mut seeds = collect_user_mount_seeds(user);
+    seeds.extend(prelude_seeds(index));
+
     if seeds.is_empty() {
-        // No `mount` statements at all — nothing reachable from user
-        // perspective. Return an empty set; callers may decide to fall
-        // back to a minimal preload (e.g. just `core` itself).
         return Some(HashSet::new());
     }
 
@@ -73,6 +79,146 @@ pub fn compute_reachable_stdlib_modules(user: &Module) -> Option<HashSet<String>
         .filter(|m| index.module_to_file(m).is_some())
         .collect();
     Some(real)
+}
+
+/// Implicit-prelude seed set — modules whose contents are
+/// auto-imported into every user compilation via `core/mod.vr`'s
+/// `public mount super.X.{…}` re-export chain.
+///
+/// This is intentionally not hardcoded. We read `core/mod.vr` once
+/// (cached by the index) and parse its `mount super.…` body to
+/// discover which trees the prelude exposes. Any future change to the
+/// prelude shape automatically flows through without a compiler rebuild.
+fn prelude_seeds(index: &StdlibModuleIndex) -> Vec<String> {
+    let archive = match crate::embedded_stdlib::get_embedded_stdlib() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    let Some(root_src) = index.module_source(archive, "core") else {
+        return Vec::new();
+    };
+    extract_prelude_paths(root_src)
+}
+
+/// Extract the module-paths referenced by `public mount super.X` /
+/// `mount super.X` declarations inside `core/mod.vr`.
+///
+/// Lightweight regex-free scanner: line-oriented, handles single-line
+/// and multi-line nested `mount super.foo.{a, b, …}` forms. The result
+/// is the set of distinct module paths whose canonical form is
+/// `core.<rest>` (the `super` prefix is rewritten to `core` since
+/// `super` from inside `core/mod.vr` resolves to the same crate root
+/// in practice — that's what makes the prelude pattern work).
+fn extract_prelude_paths(src: &str) -> Vec<String> {
+    // Strip line + block comments so `// public mount super.foo;` in
+    // a doc-comment doesn't seed the prelude.
+    let stripped = strip_comments(src);
+    let mut out: Vec<String> = Vec::new();
+    let mut cursor = 0usize;
+    let bytes = stripped.as_bytes();
+
+    while cursor < bytes.len() {
+        // Find the next `mount` keyword on a token boundary.
+        let Some(rel) = stripped[cursor..].find("mount") else { break; };
+        let kw_pos = cursor + rel;
+        let preceded_ok = kw_pos == 0
+            || matches!(bytes[kw_pos - 1], b' ' | b'\t' | b'\n' | b'\r');
+        let followed_ok = matches!(bytes.get(kw_pos + 5), Some(b' ' | b'\t' | b'\n'));
+        if !preceded_ok || !followed_ok {
+            cursor = kw_pos + 5;
+            continue;
+        }
+        let stmt_end = stripped[kw_pos..].find(';').map(|p| kw_pos + p).unwrap_or(stripped.len());
+        let body = stripped[kw_pos + 5..stmt_end].trim();
+        cursor = stmt_end + 1;
+
+        // Only the `super.…` family is a prelude marker — everything
+        // else is a normal stdlib import that the dep graph already
+        // covers.
+        if !body.starts_with("super.") && body != "super" {
+            continue;
+        }
+        // Rewrite `super.X` → `core.X`.
+        let rewritten = body.replacen("super", "core", 1);
+        accumulate_prelude_paths(&rewritten, &mut out);
+    }
+    out
+}
+
+fn accumulate_prelude_paths(body: &str, out: &mut Vec<String>) {
+    // Drop any `as Alias` clause.
+    let body = match body.find(" as ") {
+        Some(p) => &body[..p],
+        None => body,
+    }.trim();
+
+    if let Some(brace_open) = body.find('{') {
+        let prefix = body[..brace_open].trim_end_matches('.').trim();
+        out.push(prefix.to_string());
+        let inner = &body[brace_open + 1..];
+        let close = inner.rfind('}').unwrap_or(inner.len());
+        let leaves = &inner[..close];
+        for leaf in leaves.split(',') {
+            let leaf = leaf.trim();
+            if leaf.is_empty() { continue; }
+            let leaf_head = leaf.split_whitespace().next().unwrap_or("");
+            let leaf_head = leaf_head.split('{').next().unwrap_or(leaf_head);
+            if leaf_head == "*" || leaf_head.is_empty() {
+                continue;
+            }
+            out.push(format!("{}.{}", prefix, leaf_head));
+        }
+    } else if let Some(p) = body.strip_suffix(".*") {
+        out.push(p.trim().to_string());
+    } else {
+        let p = body.trim().to_string();
+        out.push(p);
+    }
+}
+
+/// Strip `//` and `/* */` comments while preserving strings (the body
+/// of a real `mount … = …` would never contain a quoted `mount`, but
+/// doc-comments often do — defensive).
+fn strip_comments(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut in_block = false;
+    let mut in_string = false;
+    let mut in_line = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_line {
+            if c == b'\n' { in_line = false; out.push('\n'); }
+            i += 1;
+            continue;
+        }
+        if in_block {
+            if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                in_block = false;
+                i += 2;
+                continue;
+            }
+            if c == b'\n' { out.push('\n'); }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if c == b'\\' && i + 1 < bytes.len() {
+                out.push(c as char); out.push(bytes[i + 1] as char); i += 2; continue;
+            }
+            if c == b'"' { in_string = false; }
+            out.push(c as char); i += 1; continue;
+        }
+        if c == b'/' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'/' { in_line = true; i += 2; continue; }
+            if bytes[i + 1] == b'*' { in_block = true; i += 2; continue; }
+        }
+        if c == b'"' { in_string = true; }
+        out.push(c as char);
+        i += 1;
+    }
+    out
 }
 
 /// Walk the user AST and collect every module-path candidate referenced

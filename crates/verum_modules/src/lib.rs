@@ -572,6 +572,46 @@ impl ModuleRegistry {
         self.path_to_id.clear();
     }
 
+    /// Drop every module whose canonical path is NOT in `keep`.
+    ///
+    /// Returns `(kept, dropped)` counts. The `path_to_id` map is
+    /// rewritten to mirror the surviving module set so subsequent
+    /// `get_by_path` lookups are still consistent. Path aliases are
+    /// preserved verbatim — they are textual rewrites that resolve
+    /// to canonical paths, and a stale alias to a dropped module
+    /// simply yields `None` on the next probe (which is the desired
+    /// "not loaded" behaviour for the on-demand loader).
+    ///
+    /// This is the keystone of the on-demand stdlib loader: after the
+    /// usual full / cached load populates the registry, the pipeline
+    /// computes the user's reachable set and calls this method to
+    /// narrow the visible module surface for downstream type-check
+    /// passes (which see fewer exports → fewer name candidates →
+    /// faster resolution).
+    pub fn retain_paths(&mut self, keep: &std::collections::HashSet<String>) -> (usize, usize) {
+        let pre_len = self.modules.len();
+        // Build the surviving id-set in one pass over the small
+        // `path_to_id` index (cheaper than walking every ModuleInfo).
+        let surviving_ids: std::collections::HashSet<ModuleId> = self
+            .path_to_id
+            .iter()
+            .filter_map(|(path, id)| {
+                if keep.contains(path.as_str()) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        self.modules.retain(|id, _| surviving_ids.contains(id));
+        self.path_to_id
+            .retain(|path, _| keep.contains(path.as_str()));
+
+        let post_len = self.modules.len();
+        (post_len, pre_len.saturating_sub(post_len))
+    }
+
     /// Get the number of registered modules
     pub fn len(&self) -> usize {
         self.modules.len()

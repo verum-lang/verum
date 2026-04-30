@@ -179,27 +179,65 @@ struct Edges {
     nested: Vec<String>,
 }
 
-/// Walk `mount … ;` statements in a single source.
-fn extract_mounts(src: &str) -> Edges {
+/// Walk `mount … ;` and `module X;` statements in a single source.
+///
+/// Two categories of dependency edges land in the graph:
+///
+///   * `mount path;`           — explicit imports.
+///   * `module X;`             — submodule declarations. These are the
+///                               implicit "this file exposes a child
+///                               module loaded from `X.vr`" form
+///                               (equivalent to `mod X;` in Rust).
+///
+/// Treating `module` declarations as nested edges is what lets a
+/// `mount core.collections` correctly pull in `core.collections.list`,
+/// `core.collections.map`, … which are not `mount`-imported by
+/// `core/collections/mod.vr` but listed there as `public module list;`.
+///
+/// `current_module` is the module path of the file being scanned —
+/// used to resolve relative `module X;` declarations to their canonical
+/// child path.
+fn extract_mounts(src: &str, current_module: &str) -> Edges {
     let stripped = strip_comments(src);
     let mut edges = Edges { path: Vec::new(), glob: Vec::new(), nested: Vec::new() };
 
-    // Find each `mount` keyword that starts a statement (preceded by
-    // whitespace or visibility modifier or start of line, followed by
-    // whitespace).
     let bytes = stripped.as_bytes();
     let mut i = 0;
     while i + 5 < bytes.len() {
-        // Look for "mount" keyword on a token boundary
+        // Look for "mount" keyword on a token boundary.
         if bytes[i..].starts_with(b"mount") {
             let preceded_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r');
             let followed_ok = matches!(bytes.get(i + 5), Some(b' ' | b'\t' | b'\n'));
             if preceded_ok && followed_ok {
-                // Check we're not inside `public mount …` for re-export
-                // handling — public mount counts equally as a dep edge.
                 let stmt_end = stripped[i..].find(';').map(|p| i + p).unwrap_or(stripped.len());
                 let body = &stripped[i + 5..stmt_end];
                 parse_mount_body(body.trim(), &mut edges);
+                i = stmt_end + 1;
+                continue;
+            }
+        }
+        // Look for "module X;" submodule declarations.
+        if bytes[i..].starts_with(b"module") {
+            let preceded_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r');
+            let followed_ok = matches!(bytes.get(i + 6), Some(b' ' | b'\t' | b'\n'));
+            if preceded_ok && followed_ok {
+                let stmt_end = stripped[i..].find(';').map(|p| i + p).unwrap_or(stripped.len());
+                let body = stripped[i + 6..stmt_end].trim();
+                // Skip module bodies (`module X { … }`) — those are inline
+                // sub-modules whose contents we'd need to recursively walk.
+                // The bare `module X;` form is what creates a child file
+                // dependency.
+                if !body.is_empty() && !body.contains('{') {
+                    let name = body.split_whitespace().next().unwrap_or("");
+                    if !name.is_empty() {
+                        let child = if current_module.is_empty() {
+                            name.to_string()
+                        } else {
+                            format!("{}.{}", current_module, name)
+                        };
+                        edges.nested.push(child);
+                    }
+                }
                 i = stmt_end + 1;
                 continue;
             }
@@ -321,7 +359,7 @@ fn build_dep_graph(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     for (rel, bytes) in files {
         let module = file_to_module(rel);
         let src = std::str::from_utf8(bytes).unwrap_or("");
-        let edges = extract_mounts(src);
+        let edges = extract_mounts(src, &module);
         entries.push((module, edges));
     }
     // Sort for deterministic on-disk layout
@@ -346,9 +384,10 @@ fn build_dep_graph(files: &[(String, Vec<u8>)]) -> Vec<u8> {
 
 fn dep_edge_count(files: &[(String, Vec<u8>)]) -> usize {
     let mut total = 0;
-    for (_, bytes) in files {
+    for (rel, bytes) in files {
+        let module = file_to_module(rel);
         let src = std::str::from_utf8(bytes).unwrap_or("");
-        let e = extract_mounts(src);
+        let e = extract_mounts(src, &module);
         total += e.path.len() + e.glob.len() + e.nested.len();
     }
     total
