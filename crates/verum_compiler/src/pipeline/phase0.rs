@@ -18,11 +18,14 @@
 //!     explicit start path.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info};
 
-use super::CompilationPipeline;
+use crate::phases::phase0_stdlib::Phase0CoreCompiler;
+
+use super::{CompilationMode, CompilationPipeline};
 
 impl<'s> CompilationPipeline<'s> {
     // ==================== PHASE 0: stdlib COMPILATION ====================
@@ -44,7 +47,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// Phase 0: Compile verum_std to static lib, generate C-compatible FFI exports,
     /// build symbol registry, prepare LLVM bitcode for LTO, cache monomorphized generics.
-    fn phase0_stdlib_preparation(&mut self) -> Result<()> {
+    pub(super) fn phase0_stdlib_preparation(&mut self) -> Result<()> {
         // Check if we already have cached artifacts
         if self.stdlib_artifacts.is_some() {
             debug!("Phase 0: Using cached stdlib artifacts");
@@ -124,7 +127,7 @@ impl<'s> CompilationPipeline<'s> {
     /// via `extract_exports_from_module`. Hardcoded synthetic exports were removed because
     /// they duplicated information that should live in the .vr source files and could
     /// drift out of sync with the actual stdlib definitions.
-    fn add_stdlib_builtin_exports(
+    pub(super) fn add_stdlib_builtin_exports(
         &self,
         _export_table: &mut verum_modules::ExportTable,
         _module_id: verum_modules::ModuleId,
@@ -146,7 +149,7 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// This ensures reliable workspace detection regardless of where the
     /// compilation is invoked from (test directories, CI/CD, etc.).
-    fn find_workspace_root(&self) -> Result<PathBuf> {
+    pub(super) fn find_workspace_root(&self) -> Result<PathBuf> {
         // Strategy 1: Environment variable (highest priority, used by tests)
         if let Ok(workspace_root) = std::env::var("VERUM_WORKSPACE_ROOT") {
             let path = PathBuf::from(&workspace_root);
@@ -197,7 +200,7 @@ impl<'s> CompilationPipeline<'s> {
     /// 1. A directory containing `core/mod.vr` (stdlib source tree — most reliable)
     /// 2. A directory containing `Verum.toml` with a `core/` sibling
     /// 3. A directory containing `Cargo.toml` with `[workspace]` and `core/` (dev mode)
-    fn find_workspace_from_path(&self, start_path: &Path) -> Option<PathBuf> {
+    pub(super) fn find_workspace_from_path(&self, start_path: &Path) -> Option<PathBuf> {
         // Canonicalize to get absolute path (resolve symlinks)
         let abs_path = start_path.canonicalize().ok()?;
 
