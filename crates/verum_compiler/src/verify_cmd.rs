@@ -551,6 +551,17 @@ impl<'s> VerifyCommand<'s> {
         // `apply <name>` dispatches to siblings declared in the same file.
         let mut proof_engine = ProofSearchEngine::with_hints(module_hints.clone());
 
+        // Honour the user-configured SMT timeout on the proof search
+        // engine. `ProofSearchEngine::with_hints` defaults to 5s
+        // (proof_search.rs:2349); the SmtContext above (line 548) gets
+        // the configured timeout via `ContextConfig.timeout`, but the
+        // proof-search engine's own internal timeout (consulted at
+        // depth-bounded search entry points) silently used 5s
+        // regardless. Mirror the same fix as the pipeline.rs site
+        // (commit 8a80b1ea) so verify_cmd's per-theorem proof-search
+        // also honours `--smt-timeout`.
+        proof_engine.set_timeout(timeout);
+
         // Install the pre-built refinement-reflection registry so SMT
         // queries can unfold calls to user-defined pure functions.
         if !reflection_registry.is_empty() {
