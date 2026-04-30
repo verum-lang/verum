@@ -94,7 +94,7 @@ pub struct AuditConfig {
 }
 
 /// Audit level
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuditLevel {
     /// Log all operations
@@ -105,6 +105,41 @@ pub enum AuditLevel {
 
     /// Log only security events
     Security,
+}
+
+impl AuditLevel {
+    /// Decide whether the given audit action passes the configured
+    /// log-level filter. Load-bearing filter consulted by
+    /// `SecurityScanner::log_action` — pre-fix the level was
+    /// documented but `log_action` recorded every call regardless.
+    ///
+    ///   * `All`      — every action is recorded.
+    ///   * `Changes`  — only state-changing package operations
+    ///                  (`Install`, `Update`, `Remove`, `Publish`,
+    ///                  `Yank`) are recorded.
+    ///   * `Security` — only security-flavoured actions
+    ///                  (`SecurityScan`, `VulnerabilityFound`) are
+    ///                  recorded.
+    pub fn includes(&self, action: &super::security::AuditAction) -> bool {
+        use super::security::AuditAction::*;
+        match self {
+            AuditLevel::All => true,
+            AuditLevel::Changes => matches!(
+                action,
+                Install | Update | Remove | Publish | Yank
+            ),
+            AuditLevel::Security => matches!(
+                action,
+                SecurityScan | VulnerabilityFound
+            ),
+        }
+    }
+}
+
+impl Default for AuditLevel {
+    fn default() -> Self {
+        AuditLevel::All
+    }
 }
 
 /// Compliance configuration
@@ -183,11 +218,13 @@ impl EnterpriseClient {
             None
         };
 
-        // Phase-not-realised tracing for inert AuditConfig fields.
-        // `audit.enabled` IS consumed at cog_manager.rs:190/263/332
-        // (gates `security::log_action` calls), but three companion
-        // fields land on the manifest without reaching production
-        // code paths:
+        // Phase-not-realised tracing for the two AuditConfig fields
+        // that remain inert. `audit.enabled` IS consumed at
+        // cog_manager.rs:190/263/332 (gates `security::log_action`
+        // calls), and `audit.log_level` IS now consumed by
+        // `SecurityScanner` via `with_audit_level` — see
+        // `cog_manager.rs::CogManager::new`. Two companion fields
+        // remain inert:
         //
         // - `audit.log_file` (PathBuf) — `security::save_audit_log`
         //   takes a path argument from the caller; no caller threads
@@ -198,32 +235,24 @@ impl EnterpriseClient {
         // - `audit.retention_days` (u32) — no rotation/eviction
         //   pass exists; old entries persist indefinitely.
         //
-        // - `audit.log_level` (AuditLevel: All/Changes/Security) —
-        //   `log_action` records every call regardless of the
-        //   configured level; no filtering happens at the recorder.
-        //
-        // Surface a debug trace when the user has set any of these
-        // to a non-default-equivalent value so embedders writing
-        // `[audit] log_file = "/var/log/verum.log"` see the value
-        // was observed but not threaded through.
+        // Surface a debug trace when the user has set either of
+        // these to a non-default-equivalent value so embedders
+        // writing `[audit] log_file = "/var/log/verum.log"` see
+        // the value was observed but not threaded through.
         if config.audit.enabled {
             let default_log_file = std::path::PathBuf::from("verum-audit.log");
             let log_file_overridden = config.audit.log_file != default_log_file;
             let retention_overridden = config.audit.retention_days != 90;
-            let log_level_overridden =
-                !matches!(config.audit.log_level, AuditLevel::All);
-            if log_file_overridden || retention_overridden || log_level_overridden {
+            if log_file_overridden || retention_overridden {
                 tracing::debug!(
-                    "EnterpriseConfig.audit surface: log_file={:?}, retention_days={}, \
-                     log_level={:?} (these fields land on the AuditConfig and are \
-                     parsed from the manifest, but `security::log_action` records \
-                     in-memory only — no caller flushes to log_file, no rotation \
-                     pass honours retention_days, and no level-filtering applies \
-                     log_level. Forward-looking; only `audit.enabled` reaches the \
-                     recorder gate today.)",
+                    "EnterpriseConfig.audit surface: log_file={:?}, retention_days={} \
+                     (these fields land on the AuditConfig and are parsed from the \
+                     manifest, but `security::log_action` records in-memory only — \
+                     no caller flushes to log_file, and no rotation pass honours \
+                     retention_days. Forward-looking. The sister field `log_level` \
+                     IS now wired via `SecurityScanner::with_audit_level`.)",
                     config.audit.log_file,
                     config.audit.retention_days,
-                    config.audit.log_level,
                 );
             }
         }
