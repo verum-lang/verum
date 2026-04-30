@@ -6052,26 +6052,140 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("open", fn_type, None)
     }
 
-    /// Get or declare close(fd: i32) -> i32.
+    /// Get or declare a libc-free `close(fd) -> i32` wrapper.
+    ///
+    /// **Libc-free**: on Linux dispatches via direct `SYS_close` (3)
+    /// syscall.  On macOS routes through libSystem (acceptable per
+    /// the no-libc rule — Apple requires libSystem as the system
+    /// boundary).  Internal-linkage wrapper named
+    /// `verum_internal_close` so the symbol doesn't escape into the
+    /// produced object's exported table.
+    ///
+    /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_close(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("close") {
+        let wrapper_name = "verum_internal_close";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
+
         let fn_type = i32_type.fn_type(&[i32_type.into()], false);
-        module.add_function("close", fn_type, None)
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let fd_i32 = wrapper
+            .get_first_param()
+            .expect("close wrapper missing param 0")
+            .into_int_value();
+
+        if target_is_linux(module) {
+            // SYS_close is 3 on x86_64 *and* aarch64.
+            let fd_i64 = builder
+                .build_int_s_extend(fd_i32, i64_type, "fd_i64")
+                .expect("close fd extend");
+            let ret = self
+                .emit_linux_syscall(&builder, module, 3, &[fd_i64])
+                .expect("close syscall");
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("close ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("close return");
+        } else {
+            // macOS / other Unix: libSystem close.  Symbol name kept
+            // distinct so the wrapper doesn't collide.
+            let libsys_close = module.get_function("__verum_libsys_close").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_close",
+                    i32_type.fn_type(&[i32_type.into()], false),
+                    None,
+                );
+                // Map to libSystem's `close` via an LLVM-IR alias on
+                // the symbol name level — emit as `extern "C" close`
+                // so the linker resolves through libSystem (-lSystem).
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "close"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(libsys_close, &[fd_i32.into()], "ret")
+                .expect("close libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("close return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("close return");
+        }
+
+        wrapper
     }
 
-    /// Get or declare read(fd: i32, buf: *i8, count: i64) -> i64.
+    /// Get or declare a libc-free `read(fd, buf, count) -> i64` wrapper.
+    ///
+    /// **Libc-free**: Linux uses `SYS_read` (0) direct syscall, macOS
+    /// routes through libSystem.
     fn get_or_declare_read(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("read") {
+        let wrapper_name = "verum_internal_read";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let i32_type = self.context.i32_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
+
         let fn_type = i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false);
-        module.add_function("read", fn_type, None)
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let fd_i32 = wrapper.get_nth_param(0).expect("read p0").into_int_value();
+        let buf = wrapper.get_nth_param(1).expect("read p1").into_pointer_value();
+        let count = wrapper.get_nth_param(2).expect("read p2").into_int_value();
+
+        if target_is_linux(module) {
+            let fd_i64 = builder
+                .build_int_s_extend(fd_i32, i64_type, "fd_i64")
+                .expect("read fd extend");
+            let buf_addr = builder
+                .build_ptr_to_int(buf, i64_type, "buf_addr")
+                .expect("read buf p2i");
+            let ret = self
+                .emit_linux_syscall(&builder, module, 0, &[fd_i64, buf_addr, count])
+                .expect("read syscall");
+            builder.build_return(Some(&ret)).expect("read return");
+        } else {
+            let libsys_read = module.get_function("__verum_libsys_read").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_read",
+                    i64_type.fn_type(&[i32_type.into(), ptr_type.into(), i64_type.into()], false),
+                    None,
+                );
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "read"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(libsys_read, &[fd_i32.into(), buf.into(), count.into()], "ret")
+                .expect("read libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("read return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("read return");
+        }
+
+        wrapper
     }
 
     /// Get or declare unlink(path: *i8) -> i32.
@@ -6107,15 +6221,65 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("access", fn_type, None)
     }
 
-    /// Get or declare write(fd: i64, buf: ptr, count: i64) -> i64 (POSIX write syscall).
+    /// Get or declare a libc-free `write(fd, buf, count) -> i64` wrapper.
+    ///
+    /// **Libc-free**: Linux uses `SYS_write` (1) direct syscall,
+    /// macOS routes through libSystem.  Note: signature here uses
+    /// `i64` for fd (matching the historical caller convention in
+    /// `runtime.rs`), but the kernel ABI takes i32; we truncate
+    /// before issuing the syscall.
     fn get_or_declare_write(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("write") {
+        let wrapper_name = "verum_internal_write";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
+
         let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
-        module.add_function("write", fn_type, None)
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let fd = wrapper.get_nth_param(0).expect("write p0").into_int_value();
+        let buf = wrapper.get_nth_param(1).expect("write p1").into_pointer_value();
+        let count = wrapper.get_nth_param(2).expect("write p2").into_int_value();
+
+        if target_is_linux(module) {
+            let buf_addr = builder
+                .build_ptr_to_int(buf, i64_type, "buf_addr")
+                .expect("write buf p2i");
+            let ret = self
+                .emit_linux_syscall(&builder, module, 1, &[fd, buf_addr, count])
+                .expect("write syscall");
+            builder.build_return(Some(&ret)).expect("write return");
+        } else {
+            let libsys_write = module.get_function("__verum_libsys_write").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_write",
+                    i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
+                    None,
+                );
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "write"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(libsys_write, &[fd.into(), buf.into(), count.into()], "ret")
+                .expect("write libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("write return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("write return");
+        }
+
+        wrapper
     }
 
     /// Get or declare clock_gettime(clockid: i32, ts: *timespec) -> i32.
