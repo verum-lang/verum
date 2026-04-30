@@ -610,6 +610,47 @@ impl TierContext {
         self.decisions.len()
     }
 
+    /// Iterate over all `(ExprId, CbgrTier)` decisions.
+    ///
+    /// Used by per-function tier-analysis aggregators in the
+    /// compiler pipeline that need to merge multiple per-function
+    /// `TierContext`s into a module-level one.  Pre-#118 the
+    /// pipeline iterated `0..decision_count()` and constructed
+    /// `ExprId(i)` for `i in 0..N` — but `from_analysis_result`
+    /// populates decisions with span-encoded `ExprId(start<<32|end)`
+    /// values, so the `0..N` lookup always missed and the merge
+    /// silently inserted only `default_tier` (Tier0).  CBGR tier
+    /// promotion (~15ns → 0ns) was never applied to user code.
+    /// Exposing the canonical iterator makes the correct merge a
+    /// one-liner: `for (id, t) in src.iter_decisions() { dst.set_tier(id, t); }`.
+    pub fn iter_decisions(&self) -> impl Iterator<Item = (ExprId, CbgrTier)> + '_ {
+        self.decisions.iter().map(|(k, v)| (*k, *v))
+    }
+
+    /// Iterate over all `(ExprId, Tier0Reason)` entries — the
+    /// companion of `iter_decisions` for the per-function aggregator
+    /// when it wants to preserve diagnostic provenance for refs that
+    /// stayed at Tier 0 (e.g., escape-via-return).
+    pub fn iter_tier0_reasons(&self) -> impl Iterator<Item = (ExprId, Tier0Reason)> + '_ {
+        self.tier0_reasons.iter().map(|(k, v)| (*k, *v))
+    }
+
+    /// Merge another tier context's decisions into this one.
+    ///
+    /// Conflict policy: later wins (last-write semantics inside the
+    /// `Map::insert`).  In practice the per-function aggregator
+    /// produces disjoint key sets — every function's expressions
+    /// have distinct (start,end) spans within a module — so this
+    /// behaves like a disjoint union for the canonical caller.
+    pub fn merge_from(&mut self, other: &TierContext) {
+        for (id, t) in other.iter_decisions() {
+            self.decisions.insert(id, t);
+        }
+        for (id, r) in other.iter_tier0_reasons() {
+            self.tier0_reasons.insert(id, r);
+        }
+    }
+
     // ==================== Unsafe Block Management (Phase 5.4) ====================
 
     /// Enter an unsafe block.
@@ -2273,5 +2314,98 @@ mod tests {
         // Add unresolved forward jump
         ctx.record_forward_jump("undefined_label");
         assert!(ctx.validate().is_err());
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // #118 — TierContext merge regression tests.
+    //
+    // Pre-#118 the compiler pipeline merged per-function tier
+    // analyses with `for i in 0..decision_count() { dst.set_tier(
+    // ExprId(i), src.get_tier(ExprId(i))) }`, which always missed
+    // the span-encoded keys produced by `from_analysis_result` and
+    // silently inserted only `default_tier` (Tier0). These tests
+    // pin the canonical `iter_decisions()` / `merge_from()` API so
+    // a future regression in the per-function aggregator surfaces
+    // here instead of as silent runtime CBGR overhead in user code.
+    // ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn iter_decisions_returns_canonical_expr_id_keys() {
+        let mut tc = TierContext::new();
+        tc.enabled = true;
+        let span_id_a = ExprId(((42u64) << 32) | 47u64);
+        let span_id_b = ExprId(((100u64) << 32) | 110u64);
+        tc.set_tier(span_id_a, CbgrTier::Tier1);
+        tc.set_tier(span_id_b, CbgrTier::Tier0);
+
+        let collected: Vec<_> = tc.iter_decisions().collect();
+        assert_eq!(collected.len(), 2);
+        // Keys must be the original span-encoded ExprIds, not 0..N.
+        let ids: Vec<u64> = collected.iter().map(|(id, _)| id.0).collect();
+        assert!(ids.contains(&span_id_a.0));
+        assert!(ids.contains(&span_id_b.0));
+    }
+
+    #[test]
+    fn merge_from_preserves_span_keys_and_tiers() {
+        let mut src = TierContext::new();
+        src.enabled = true;
+        let span_a = ExprId(((42u64) << 32) | 47u64);
+        let span_b = ExprId(((100u64) << 32) | 110u64);
+        src.set_tier(span_a, CbgrTier::Tier1);
+        src.set_tier(span_b, CbgrTier::Tier2);
+
+        let mut dst = TierContext::new();
+        dst.enabled = true;
+        dst.merge_from(&src);
+
+        // Both decisions land at their original span-encoded ExprIds —
+        // the bug was inserting at ExprId(0..N) instead.
+        assert_eq!(dst.get_tier(span_a), CbgrTier::Tier1);
+        assert_eq!(dst.get_tier(span_b), CbgrTier::Tier2);
+        // Querying via the buggy ExprId(0) / ExprId(1) should NOT
+        // yield Tier1/Tier2 — those slots only carry the default.
+        assert_eq!(dst.get_tier(ExprId(0)), CbgrTier::Tier0);
+        assert_eq!(dst.get_tier(ExprId(1)), CbgrTier::Tier0);
+    }
+
+    #[test]
+    fn merge_from_disjoint_function_unions_decisions() {
+        // Each "function" produces a TierContext whose ExprIds are
+        // span-disjoint from every other function — the realistic
+        // pipeline pattern. Aggregator must contain the union.
+        let mut fn_a = TierContext::new();
+        fn_a.enabled = true;
+        fn_a.set_tier(ExprId(((10u64) << 32) | 12), CbgrTier::Tier1);
+        fn_a.set_tier(ExprId(((14u64) << 32) | 16), CbgrTier::Tier1);
+
+        let mut fn_b = TierContext::new();
+        fn_b.enabled = true;
+        fn_b.set_tier(ExprId(((30u64) << 32) | 32), CbgrTier::Tier2);
+
+        let mut agg = TierContext::new();
+        agg.enabled = true;
+        agg.merge_from(&fn_a);
+        agg.merge_from(&fn_b);
+
+        assert_eq!(agg.decision_count(), 3);
+        assert_eq!(agg.get_tier(ExprId(((10u64) << 32) | 12)), CbgrTier::Tier1);
+        assert_eq!(agg.get_tier(ExprId(((14u64) << 32) | 16)), CbgrTier::Tier1);
+        assert_eq!(agg.get_tier(ExprId(((30u64) << 32) | 32)), CbgrTier::Tier2);
+    }
+
+    #[test]
+    fn merge_from_preserves_tier0_reasons() {
+        let mut src = TierContext::new();
+        src.enabled = true;
+        let span = ExprId(((42u64) << 32) | 47u64);
+        src.set_tier_with_reason(span, CbgrTier::Tier0, Some(Tier0Reason::Escapes));
+
+        let mut dst = TierContext::new();
+        dst.enabled = true;
+        dst.merge_from(&src);
+
+        assert_eq!(dst.get_tier(span), CbgrTier::Tier0);
+        assert_eq!(dst.get_tier0_reason(span), Some(Tier0Reason::Escapes));
     }
 }
