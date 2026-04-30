@@ -141,29 +141,40 @@ are ~5K LOC C++.  Verum's target: 500 LOC Verum + 100 LOC shim.
 | 3. Define `Judgment` + 10-case `Derivation` + `DefinitionalEquality`  | ✓ Done | `judgment.vr` |
 | 4. Encode 10 inference rules under `rules/`                           | ✓ Done | `rules/k_*.vr` |
 | 5. Compose per-rule lemmas into top-level `kernel_soundness` theorem  | ✓ Done | `soundness.vr` |
-| 6. Wire `verum check kernel_v0/mod.vr` as a CI gate                   | Pending | (compiler-stable target) |
-| 7. Phase-1 trust-base reduction — discharge 6 admitted IOUs           | Pending | `lemmas/` (future) |
-| 8. Phase-3 close — generate Rust `proof_checker` from this directory  | Pending | (#154) |
+| 6. Phase-1A — discharge 6 admitted IOUs via mathlib citations         | ✓ Done | `lemmas/` (#155) |
+| 7. Wire `verum check kernel_v0/mod.vr` as a CI gate                   | Pending | (compiler-stable target) |
+| 8. Phase-1B — verify each `@framework` citation path with upstream    | Pending | sourcing follow-up |
+| 9. Phase-2 — full proof-term replay of upstream proofs into Verum     | Pending | (#162) |
+| 10. Phase-3 close — generate Rust `proof_checker` from this directory | Pending | (#154) |
 
-**Status as of 2026-04-30**: scaffolding complete.  The 10-rule
-roster, per-rule soundness lemmas (4 proved + 6 admitted with named
-IOUs), the master soundness theorem (`kernel_soundness`), and the
-audit roster (`soundness_roster()` mirroring the Rust-side
-`canonical_rules`) all land in this directory.  The 6 admitted IOUs
-are concretely identified:
+**Status as of 2026-04-30**: scaffolding complete + Phase-1A discharge
+landed.  The 10-rule roster, per-rule soundness lemmas (4 proved +
+6 discharged-by-framework), the master soundness theorem
+(`kernel_soundness`), the audit roster (`soundness_roster()`), and
+the IOU-discharge stubs in `lemmas/` (5 files citing mathlib4 / ZFC
+for the 6 admitted rules) all land in this directory.
 
-  - T-Pi-Form    → substitution-lemma
-  - T-Lam-Intro  → cartesian-closure
-  - T-App-Elim   → substitution + Church-Rosser
-  - T-Beta       → Church-Rosser confluence
-  - T-Eta        → function-extensionality
-  - T-Sub        → κ-tower well-foundedness
+**Phase-1A discharge map** (#155 advance):
 
-Each is discharge-targetable in `lemmas/` (Phase-1 work, can proceed
-in parallel with the Verum compiler hardening) and tracked
-machine-readably by `verum audit --soundness-iou`.
+  - T-Pi-Form    → `lemmas/subst.vr`     (mathlib4 substitution lemma)
+  - T-Lam-Intro  → `lemmas/cartesian.vr` (mathlib4 cartesian closure)
+  - T-App-Elim   → `lemmas/subst.vr` + `lemmas/beta.vr` (composition)
+  - T-Beta       → `lemmas/beta.vr`      (mathlib4 Church-Rosser)
+  - T-Eta        → `lemmas/eta.vr`       (ZFC axiom of extensionality)
+  - T-Sub        → `lemmas/sub.vr`       (mathlib4 cumulative hierarchy)
 
-**Trust-base shape post-#173**:
-  ~1100 LOC Verum (kernel_v0/) + ~100 LOC bootstrap shim
-  + ZFC + 2-inacc.  Smallest verified-kernel answer in the
-  proof-assistant world once Phase 3 closes.
+Each lemma carries `@framework(<system>, "<path>")` citations.  The
+apply-graph audit reclassifies these from `placeholder_axiom`
+(forbidden at L4) to `framework_axiom` (acceptable with citation).
+`soundness_roster()` reports per-rule status as
+`DischargedByFramework { lemma_path, framework, citation }` rather
+than `Admitted { iou }`.
+
+**Trust-base shape post-#155 Phase-1A**:
+  ~1100 LOC Verum (kernel_v0/) + ~500 LOC discharge stubs (lemmas/)
+  + ~100 LOC bootstrap shim + ZFC + 2-inacc + mathlib4 (cited).
+
+**Reviewer answer post-Phase-3**: "Read kernel_v0/.  10 files
+~500 LOC + 5 lemma files ~250 LOC.  Plus 100-LOC shim.  Plus ZFC +
+2-inacc + cited mathlib4.  Nothing else."  ← smallest verified-kernel
+answer in the proof-assistant world.

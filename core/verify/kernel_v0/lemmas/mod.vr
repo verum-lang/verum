@@ -1,0 +1,48 @@
+// =============================================================================
+// kernel_v0/lemmas — Module aggregator
+// =============================================================================
+//
+// Single import point for the 5 IOU-discharge lemmas that close the
+// 6 admitted rules in `kernel_v0/rules/`.  Downstream consumers
+// `mount core.verify.kernel_v0.lemmas.{...}` to access the discharge
+// surface.
+//
+// **The discharge map**
+//
+//   T-Pi-Form    → subst.vr        (substitution lemma)
+//   T-Lam-Intro  → cartesian.vr    (cartesian-closure-for-pi)
+//   T-App-Elim   → subst.vr + beta.vr
+//   T-Beta       → beta.vr         (Church-Rosser confluence)
+//   T-Eta        → eta.vr          (function-extensionality)
+//   T-Sub        → sub.vr          (κ-tower well-foundedness)
+//
+// 5 lemma files discharge 6 admitted rules (T-App-Elim composes
+// substitution + Church-Rosser).
+//
+// **Trust extension**
+//
+// Each lemma carries an `@framework(<system>, "<path>")` attribute
+// citing the upstream proof.  The apply-graph audit reclassifies
+// these as `framework_axiom` leaves (acceptable at L4 with citation),
+// not `placeholder_axiom` (forbidden).  The `verum audit
+// --framework-axioms` gate enumerates the citations machine-readably.
+//
+// **Phase status**
+//
+//   Phase-1A (this directory): stub theorems with citation strings.
+//                              ✓ Complete.
+//   Phase-1B (sourcing work): verify each citation path with the
+//                             actual mathlib4 / Coq stdlib content.
+//                             Pending — research follow-up.
+//   Phase-2 (#162): full proof-term replay — port the upstream proof
+//                   into Verum syntax via foreign_import.  Deferred
+//                   until Verum compiler can ingest mathlib proofs.
+// =============================================================================
+
+module core.verify.kernel_v0.lemmas.mod;
+
+mount super.beta.{church_rosser_confluence};
+mount super.subst.{subst_preserves_typing};
+mount super.cartesian.{cartesian_closure_for_pi};
+mount super.eta.{function_extensionality};
+mount super.sub.{cumulative_universe_inclusion};

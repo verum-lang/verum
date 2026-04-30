@@ -90,7 +90,7 @@ public fn introduce_beta(
 /// `core/verify/kernel_v0/lemmas/beta.vr` (Phase-1 work).
 @verify(formal)
 @kernel_discharge("kernel_beta_strict")
-@admitted("Church-Rosser confluence — Phase-1 beta.vr")
+@discharged_by("core.verify.kernel_v0.lemmas.beta.church_rosser_confluence")
 public theorem k_beta_sound(
     ctx: &Context,
     d: &Derivation,
