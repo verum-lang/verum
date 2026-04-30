@@ -211,6 +211,30 @@ pub struct CommonPipelineConfig {
     /// `MacroExpansionPhase::with_macro_recursion_limit`. Default
     /// 128 — matches the manifest's `default_macro_depth()`.
     pub macro_recursion_limit: u32,
+    /// Enable higher-kinded protocol declarations (sourced from
+    /// `[types] higher_kinded`). Forwarded to `SemanticAnalysisPhase
+    /// ::with_higher_kinded_enabled` and through to the type-checker.
+    pub higher_kinded_enabled: bool,
+    /// Enable universe-polymorphism (`Type(u)`, `@universe_poly`)
+    /// (sourced from `[types] universe_polymorphism`). Default false.
+    /// Forwarded via `with_universe_poly_enabled`.
+    pub universe_poly_enabled: bool,
+    /// Enable coinductive type declarations (`codata` + copatterns)
+    /// (sourced from `[types] coinductive`). Forwarded via
+    /// `with_coinductive_enabled`.
+    pub coinductive_enabled: bool,
+    /// Enable quotient types (HIT-based modular equivalence)
+    /// (sourced from `[types] quotient`). Forwarded via
+    /// `with_quotient_enabled`.
+    pub quotient_enabled: bool,
+    /// Enable automatic protocol-impl resolution (sourced from
+    /// `[types] instance_search`). Forwarded via
+    /// `with_instance_search_enabled`.
+    pub instance_search_enabled: bool,
+    /// Maximum coherence-check depth for instance resolution
+    /// (sourced from `[types] coherence_check_depth`). Default 16.
+    /// Forwarded via `with_coherence_check_depth`.
+    pub coherence_check_depth: u32,
     /// Optional shared routing-stats collector. When present, the
     /// contract-verification phase installs it on the underlying
     /// `SmtContext` so every Z3 check records telemetry — making
@@ -237,6 +261,12 @@ impl Default for CommonPipelineConfig {
             unsafe_allowed: true,
             ffi_allowed: true,
             macro_recursion_limit: 128,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             routing_stats: None,
         }
     }
@@ -261,6 +291,12 @@ impl CommonPipelineConfig {
             unsafe_allowed: true,
             ffi_allowed: true,
             macro_recursion_limit: 128,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             routing_stats: None,
         }
     }
@@ -283,6 +319,12 @@ impl CommonPipelineConfig {
             unsafe_allowed: true,
             ffi_allowed: true,
             macro_recursion_limit: 128,
+            higher_kinded_enabled: true,
+            universe_poly_enabled: false,
+            coinductive_enabled: true,
+            quotient_enabled: true,
+            instance_search_enabled: true,
+            coherence_check_depth: 16,
             routing_stats: None,
         }
     }
@@ -804,22 +846,34 @@ pub fn run_common_pipeline(
     // Phase 4: Semantic Analysis (Type Checking)
     // When core sources are prepended, tell the semantic phase how many user modules
     // there are so it can treat stdlib registration errors as non-fatal.
+    // All [types] flags forward through CommonPipelineConfig — closes the
+    // inert-defense gap where six builders
+    // (with_higher_kinded_enabled / with_universe_poly_enabled /
+    //  with_coinductive_enabled / with_quotient_enabled /
+    //  with_instance_search_enabled / with_coherence_check_depth)
+    // existed on SemanticAnalysisPhase but had no production caller.
     let semantic_phase = if config.core_source_path.is_some() {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_user_module_count(user_source_count)
             .with_cubical_enabled(config.cubical_enabled)
             .with_dependent_enabled(config.dependent_enabled)
+            .with_higher_kinded_enabled(config.higher_kinded_enabled)
+            .with_universe_poly_enabled(config.universe_poly_enabled)
+            .with_coinductive_enabled(config.coinductive_enabled)
+            .with_quotient_enabled(config.quotient_enabled)
+            .with_instance_search_enabled(config.instance_search_enabled)
+            .with_coherence_check_depth(config.coherence_check_depth)
     } else {
         semantic_analysis::SemanticAnalysisPhase::new()
             .with_cubical_enabled(config.cubical_enabled)
             .with_dependent_enabled(config.dependent_enabled)
+            .with_higher_kinded_enabled(config.higher_kinded_enabled)
+            .with_universe_poly_enabled(config.universe_poly_enabled)
+            .with_coinductive_enabled(config.coinductive_enabled)
+            .with_quotient_enabled(config.quotient_enabled)
+            .with_instance_search_enabled(config.instance_search_enabled)
+            .with_coherence_check_depth(config.coherence_check_depth)
     };
-    // Note: remaining [types] flags (higher_kinded, universe_polymorphism,
-    // coinductive, quotient, instance_search, coherence_check_depth) are
-    // set from their defaults on SemanticAnalysisPhase and passed through
-    // to TypeChecker. The run_common_pipeline API doesn't expose them
-    // individually — they're consumed via the Session's language_features
-    // when using the full CompilationPipeline path.
     let semantic_input = PhaseInput {
         data: current_data,
         context: context.clone(),
