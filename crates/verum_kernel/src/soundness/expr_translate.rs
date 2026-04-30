@@ -219,6 +219,61 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
                 parens_if_complex(&recv_text)
             ))
         }
+        ExprKind::Block(block) => {
+            // Trivial passthrough: a block with no statements and a
+            // final expression renders as that expression.  Blocks
+            // with let-bindings or multiple statements fall back —
+            // their lowering needs `let x := e in body` form which
+            // requires statement-by-statement walking + variable-
+            // hygiene tracking, separate scope.
+            if block.stmts.iter().count() == 0 {
+                let final_expr = match &block.expr {
+                    verum_common::Maybe::Some(e) => e,
+                    verum_common::Maybe::None => return None,
+                };
+                render_expr_coq(final_expr)
+            } else {
+                None
+            }
+        }
+        ExprKind::If { condition, then_branch, else_branch } => {
+            // `if cond { p } else q` → `(if cond then p else q)`.
+            // Coq + Lean both accept the same surface syntax for the
+            // propositional if-then-else.  Restrictions:
+            //   * The condition must be a single Expr (no let-
+            //     chains — those need pattern rendering).
+            //   * Both branches must render cleanly.
+            //   * The `else_branch` must be present — without it the
+            //     statement isn't a propositional if-then-else.
+            let cond_kinds: Vec<&verum_ast::expr::ConditionKind> =
+                condition.conditions.iter().collect();
+            if cond_kinds.len() != 1 {
+                return None;
+            }
+            let cond_expr = match cond_kinds[0] {
+                verum_ast::expr::ConditionKind::Expr(e) => e,
+                _ => return None,
+            };
+            let cond_text = render_expr_coq(cond_expr)?;
+            // then_branch: Block with no stmts + final expr.
+            if then_branch.stmts.iter().count() != 0 {
+                return None;
+            }
+            let then_expr = match &then_branch.expr {
+                verum_common::Maybe::Some(e) => e,
+                verum_common::Maybe::None => return None,
+            };
+            let then_text = render_expr_coq(then_expr)?;
+            let else_expr = match else_branch {
+                verum_common::Maybe::Some(e) => e,
+                verum_common::Maybe::None => return None,
+            };
+            let else_text = render_expr_coq(else_expr)?;
+            Some(format!(
+                "(if {} then {} else {})",
+                cond_text, then_text, else_text
+            ))
+        }
         ExprKind::Forall { bindings, body } => {
             let names: Vec<String> = bindings
                 .iter()
@@ -375,6 +430,46 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
                 "({} {})",
                 field.as_str(),
                 parens_if_complex(&recv_text)
+            ))
+        }
+        ExprKind::Block(block) => {
+            if block.stmts.iter().count() == 0 {
+                let final_expr = match &block.expr {
+                    verum_common::Maybe::Some(e) => e,
+                    verum_common::Maybe::None => return None,
+                };
+                render_expr_lean(final_expr)
+            } else {
+                None
+            }
+        }
+        ExprKind::If { condition, then_branch, else_branch } => {
+            let cond_kinds: Vec<&verum_ast::expr::ConditionKind> =
+                condition.conditions.iter().collect();
+            if cond_kinds.len() != 1 {
+                return None;
+            }
+            let cond_expr = match cond_kinds[0] {
+                verum_ast::expr::ConditionKind::Expr(e) => e,
+                _ => return None,
+            };
+            let cond_text = render_expr_lean(cond_expr)?;
+            if then_branch.stmts.iter().count() != 0 {
+                return None;
+            }
+            let then_expr = match &then_branch.expr {
+                verum_common::Maybe::Some(e) => e,
+                verum_common::Maybe::None => return None,
+            };
+            let then_text = render_expr_lean(then_expr)?;
+            let else_expr = match else_branch {
+                verum_common::Maybe::Some(e) => e,
+                verum_common::Maybe::None => return None,
+            };
+            let else_text = render_expr_lean(else_expr)?;
+            Some(format!(
+                "(if {} then {} else {})",
+                cond_text, then_text, else_text
             ))
         }
         ExprKind::Forall { bindings, body } => {
@@ -786,8 +881,6 @@ fn classify_unrenderable_type(ty: &Type) -> &'static str {
 fn classify_unrenderable(expr: &Expr) -> &'static str {
     match &expr.kind {
         ExprKind::Match { .. } => "match expression",
-        ExprKind::If { .. } => "if-then-else",
-        ExprKind::Block(_) => "block expression",
         ExprKind::Closure { .. } => "closure expression",
         ExprKind::Tuple(_) => "tuple expression",
         ExprKind::Array(_) => "array literal",
@@ -1269,6 +1362,151 @@ mod tests {
             TranslatedExpr::Fallback { .. } => { /* expected */ }
             other => panic!("expected Fallback, got {:?}", other),
         }
+    }
+
+    // =========================================================================
+    // Block + If translator tests (#148 / MSFS-L4.12)
+    // =========================================================================
+
+    fn block_with_expr(e: Expr) -> Expr {
+        Expr::new(
+            ExprKind::Block(verum_ast::expr::Block::new(
+                verum_common::List::new(),
+                verum_common::Maybe::Some(Heap::new(e)),
+                Span::dummy(),
+            )),
+            Span::dummy(),
+        )
+    }
+
+    fn if_expr(cond: Expr, then_e: Expr, else_e: Expr) -> Expr {
+        let if_cond = verum_ast::expr::IfCondition {
+            conditions: [verum_ast::expr::ConditionKind::Expr(cond)]
+                .into_iter()
+                .collect(),
+            span: Span::dummy(),
+        };
+        let then_block = verum_ast::expr::Block::new(
+            verum_common::List::new(),
+            verum_common::Maybe::Some(Heap::new(then_e)),
+            Span::dummy(),
+        );
+        Expr::new(
+            ExprKind::If {
+                condition: Heap::new(if_cond),
+                then_branch: then_block,
+                else_branch: verum_common::Maybe::Some(Heap::new(else_e)),
+            },
+            Span::dummy(),
+        )
+    }
+
+    #[test]
+    fn coq_translates_block_passthrough() {
+        // `{ x = y }` — block with single expression, no statements —
+        // renders as the inner expression's translation.
+        let inner = binop(BinOp::Eq, ident_expr("x"), ident_expr("y"));
+        let block = block_with_expr(inner);
+        let text = CoqExprRenderer::new().render(&block).text().unwrap().to_string();
+        assert_eq!(text, "(x = y)");
+    }
+
+    #[test]
+    fn lean_translates_block_passthrough() {
+        let inner = binop(BinOp::Eq, ident_expr("x"), ident_expr("y"));
+        let block = block_with_expr(inner);
+        let text = LeanExprRenderer::new().render(&block).text().unwrap().to_string();
+        assert_eq!(text, "(x = y)");
+    }
+
+    #[test]
+    fn block_with_statements_falls_back() {
+        // Block with let-bindings or other statements — needs
+        // `let x := e in body` rendering.  Not supported in the V0
+        // translator, so falls back.
+        use verum_ast::stmt::Stmt;
+        let mut stmts: verum_common::List<Stmt> = verum_common::List::new();
+        stmts.push(Stmt::expr(ident_expr("x"), true));
+        let block_expr = Expr::new(
+            ExprKind::Block(verum_ast::expr::Block::new(
+                stmts,
+                verum_common::Maybe::Some(Heap::new(ident_expr("y"))),
+                Span::dummy(),
+            )),
+            Span::dummy(),
+        );
+        match CoqExprRenderer::new().render(&block_expr) {
+            TranslatedExpr::Fallback { .. } => { /* expected */ }
+            other => panic!("expected Fallback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn coq_translates_if_then_else() {
+        // `if a == 0 then b else c` → `(if (a = 0) then b else c)`.
+        let cond = binop(BinOp::Eq, ident_expr("a"), int_lit(0));
+        let then_e = ident_expr("b");
+        let else_e = ident_expr("c");
+        let e = if_expr(cond, then_e, else_e);
+        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(if (a = 0) then b else c)");
+    }
+
+    #[test]
+    fn lean_translates_if_then_else() {
+        let cond = binop(BinOp::Eq, ident_expr("a"), int_lit(0));
+        let then_e = ident_expr("b");
+        let else_e = ident_expr("c");
+        let e = if_expr(cond, then_e, else_e);
+        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        assert_eq!(text, "(if (a = 0) then b else c)");
+    }
+
+    #[test]
+    fn if_without_else_branch_falls_back() {
+        // `if cond { p }` (no else) isn't a propositional if-then-
+        // else — fall back so the foreign tool sees the original
+        // text in a comment.
+        let cond = ident_expr("cond");
+        let then_block = verum_ast::expr::Block::new(
+            verum_common::List::new(),
+            verum_common::Maybe::Some(Heap::new(ident_expr("p"))),
+            Span::dummy(),
+        );
+        let if_cond = verum_ast::expr::IfCondition {
+            conditions: [verum_ast::expr::ConditionKind::Expr(cond)]
+                .into_iter()
+                .collect(),
+            span: Span::dummy(),
+        };
+        let e = Expr::new(
+            ExprKind::If {
+                condition: Heap::new(if_cond),
+                then_branch: then_block,
+                else_branch: verum_common::Maybe::None,
+            },
+            Span::dummy(),
+        );
+        match CoqExprRenderer::new().render(&e) {
+            TranslatedExpr::Fallback { .. } => { /* expected */ }
+            other => panic!("expected Fallback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn if_inside_logical_and_translates_recursively() {
+        // `(if c then p else q) && r` — pin recursive descent through
+        // Binary into If.  Common pattern in proposition translation
+        // when conditional definitions are inlined.
+        let cond = ident_expr("c");
+        let then_e = ident_expr("p");
+        let else_e = ident_expr("q");
+        let if_e = if_expr(cond, then_e, else_e);
+        let outer = binop(BinOp::And, if_e, ident_expr("r"));
+        let text = CoqExprRenderer::new().render(&outer).text().unwrap().to_string();
+        assert!(text.contains("(if c then p else q)"));
+        assert!(text.contains("/\\"));
+        assert!(text.contains("r"));
     }
 
     #[test]
