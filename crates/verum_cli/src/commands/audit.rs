@@ -2087,6 +2087,28 @@ pub fn audit_bridge_discharge_with_format(format: AuditFormat) -> Result<()> {
 
     let report = finalise_report(aggregator, modules_scanned, items_walked);
 
+    // #172 audit-output discipline: every gate writes its JSON to
+    // disk regardless of `--format` so the bundle dispatcher (#151)
+    // and downstream tooling can read each per-gate report reliably.
+    if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
+        let dir = manifest_dir.join("target").join("audit-reports");
+        let _ = std::fs::create_dir_all(&dir);
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "command": "audit-bridge-discharge",
+            "modules_scanned": report.modules_scanned,
+            "items_walked": report.items_walked,
+            "total_callsites": report.total_callsites,
+            "total_false_discharges": report.total_false_discharges,
+            "bridges": report.bridges,
+            "unknown_bridges": report.unknown_bridges,
+        });
+        let _ = std::fs::write(
+            dir.join("bridge-discharge.json"),
+            serde_json::to_string_pretty(&payload).unwrap(),
+        );
+    }
+
     match format {
         AuditFormat::Plain => print_bridge_discharge_report_plain(&report),
         AuditFormat::Json => print_bridge_discharge_report_json(&report),
@@ -2194,7 +2216,16 @@ fn print_bridge_discharge_report_json(
         "bridges": report.bridges,
         "unknown_bridges": report.unknown_bridges,
     });
-    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+    let pretty = serde_json::to_string_pretty(&payload).unwrap();
+    // #172 audit-output discipline: every gate writes its JSON to
+    // disk regardless of `--format` so bundle dispatcher (#151) and
+    // downstream tooling can reliably read each per-gate report.
+    if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
+        let dir = manifest_dir.join("target").join("audit-reports");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("bridge-discharge.json"), &pretty);
+    }
+    println!("{}", pretty);
 }
 
 // =============================================================================
@@ -7086,7 +7117,44 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
                 ));
             }
             out.push_str("  ]\n}");
+            // #172 audit-output discipline: write JSON to disk
+            // regardless of `--format` so bundle dispatcher (#151) and
+            // downstream tooling can reliably read each per-gate report.
+            if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
+                let dir = manifest_dir.join("target").join("audit-reports");
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::write(dir.join("kernel-discharged-axioms.json"), &out);
+            }
             println!("{}", out);
+        }
+    }
+
+    // Even Plain output writes JSON for the bundle dispatcher (#172).
+    if matches!(format, AuditFormat::Plain) {
+        if let Ok(manifest_dir) = Manifest::find_manifest_dir() {
+            let dir = manifest_dir.join("target").join("audit-reports");
+            let _ = std::fs::create_dir_all(&dir);
+            let mut out = String::new();
+            out.push_str("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!("  \"files_scanned\": {},\n", vr_files.len()));
+            out.push_str(&format!("  \"files_parsed\": {},\n", parsed_files));
+            out.push_str(&format!("  \"files_skipped\": {},\n", skipped_files));
+            out.push_str(&format!("  \"discharge_count\": {},\n", total));
+            out.push_str(&format!("  \"unrecognised_count\": {},\n", unrecognised));
+            out.push_str("  \"discharges\": [\n");
+            for (i, cite) in cites.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {{ \"axiom\": \"{}\", \"intrinsic\": \"{}\", \"file\": \"{}\", \"recognised\": {} }}{}\n",
+                    json_escape(cite.axiom_name.as_str()),
+                    json_escape(cite.intrinsic_name.as_str()),
+                    json_escape(&cite.file.display().to_string()),
+                    cite.recognised,
+                    if i + 1 < cites.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n}");
+            let _ = std::fs::write(dir.join("kernel-discharged-axioms.json"), &out);
         }
     }
 
