@@ -225,30 +225,71 @@ pub(in super::super) fn handle_align_of(state: &mut InterpreterState) -> Interpr
 pub(in super::super) fn handle_make_variant(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let tag = read_varint(state)? as u32;
-    let field_count = read_varint(state)? as usize;
+    let field_count = read_varint(state)? as u32;
+    alloc_variant_into(state, dst, tag, field_count)?;
+    Ok(DispatchResult::Continue)
+}
 
+/// Shared variant-allocation helper — used by both the legacy
+/// `MakeVariant` (`0x86`) handler above and the typed
+/// `MakeVariantTyped` (Extended sub-op `0x01`) handler in
+/// `handlers/extended.rs`.  Performance-critical: a single
+/// `heap.alloc_with_init` call with the in-place tag + field_count
+/// store inside the closure (no per-instruction branching beyond
+/// what was already in `MakeVariant`).
+///
+/// Centralising this in one helper guarantees that switching a
+/// variant-construction site from `MakeVariant` to `MakeVariantTyped`
+/// (Phase 3c) produces bit-equivalent runtime state — the
+/// observable layout is determined entirely by `(tag, field_count)`.
+#[inline]
+pub(in super::super) fn alloc_variant_into(
+    state: &mut InterpreterState,
+    dst: Reg,
+    tag: u32,
+    field_count: u32,
+) -> InterpreterResult<()> {
+    // Legacy `MakeVariant` path — no parent-type info available, so
+    // we fall back to the synthetic `0x8000+tag` sentinel that
+    // downstream consumers (`format_variant_for_print_depth`,
+    // pattern-match dispatch) recognise as "tag is meaningful but
+    // type_id is not".  Prefer `alloc_variant_into_with_type_id`
+    // when the codegen knows the parent sum-type id.
+    alloc_variant_into_with_type_id(state, dst, tag, field_count, TypeId(0x8000 + tag))
+}
 
-    // Allocate variant object with space for tag + field_count + N payload values
-    // Layout: [tag:u32][field_count:u32][payload:Value * field_count]
-    let data_size = 8 + field_count * std::mem::size_of::<Value>();
-    let type_id = TypeId(0x8000 + tag); // Use tag-specific type ID
-
+/// Same as `alloc_variant_into` but the caller supplies the concrete
+/// parent sum-type id (typically resolved by codegen via
+/// `type_name_to_id.get(parent_type_name)`).  Storing the real type_id
+/// in the heap header lets `format_variant_for_print_depth` resolve
+/// the variant constructor name in O(N_variants_of_type) instead of
+/// scanning every type in the module — and crucially produces the
+/// correct name when distinct sum types share variant tags (e.g.
+/// `Result.Err` and `ShellError.SpawnFailed` both have tag=1).
+#[inline]
+pub(in super::super) fn alloc_variant_into_with_type_id(
+    state: &mut InterpreterState,
+    dst: Reg,
+    tag: u32,
+    field_count: u32,
+    type_id: TypeId,
+) -> InterpreterResult<()> {
+    let data_size = 8 + (field_count as usize) * std::mem::size_of::<Value>();
     let obj = state.heap.alloc_with_init(
         type_id,
         data_size,
         |data| {
-            // Write tag at offset 0, field_count at offset 4
             let tag_ptr = data.as_mut_ptr() as *mut u32;
             unsafe {
                 *tag_ptr = tag;
-                *tag_ptr.add(1) = field_count as u32;
+                *tag_ptr.add(1) = field_count;
             }
         },
     )?;
     state.record_allocation();
 
     state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-    Ok(DispatchResult::Continue)
+    Ok(())
 }
 
 /// SetVariantData (0x87) - Set a field in a variant's payload.

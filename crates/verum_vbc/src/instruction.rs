@@ -4432,6 +4432,31 @@ pub enum FfiSubOpcode {
     /// Sets `dst` to true if `ptr` is null, false otherwise.
     PtrIsNull = 0x66,
 
+    /// Read signed primitive through raw pointer (sign-extending variant
+    /// of [`DerefRaw`]).
+    ///
+    /// Format: `dst:reg, ptr:reg, size:u8`
+    /// size: 1=i8, 2=i16, 4=i32, 8=i64
+    ///
+    /// Reads `size` bytes from `ptr` and **sign-extends** to i64.
+    /// Mirror of `DerefRaw` for code paths that need precise C-typed
+    /// pointer reads of `int8_t` / `int16_t` / `int32_t` slots.
+    ///
+    /// Why a separate opcode rather than a flag on `DerefRaw`:
+    /// `DerefRaw` deliberately chose zero-extension as its default
+    /// (CRC32 / unsigned-byte-array invariant — see comment at the
+    /// `DerefRaw` handler).  Adding a sign-extending opcode keeps
+    /// both semantics explicit at the bytecode level and lets
+    /// codegen pick the right one based on the static type of the
+    /// pointee (signed C type → `DerefRawSigned`, unsigned C type
+    /// or byte-array element → `DerefRaw`).
+    ///
+    /// # Safety
+    /// The pointer must be valid for reads of `size` bytes.  Bypasses
+    /// CBGR validation; caller takes responsibility per the FFI
+    /// contract.
+    DerefRawSigned = 0x67,
+
     // ========================================================================
     // Time Operations (0x70-0x7F)
     // ========================================================================
@@ -4652,6 +4677,7 @@ impl FfiSubOpcode {
             0x60 => Some(Self::DerefRaw),
             0x61 => Some(Self::DerefMutRaw),
             0x62 => Some(Self::DerefRawPtr),
+            0x67 => Some(Self::DerefRawSigned),
             0x63 => Some(Self::PtrAdd),
             0x64 => Some(Self::PtrSub),
             0x65 => Some(Self::PtrDiff),
@@ -4740,6 +4766,7 @@ impl FfiSubOpcode {
             Self::DerefRaw => "FFI_DEREF_RAW",
             Self::DerefMutRaw => "FFI_DEREF_MUT_RAW",
             Self::DerefRawPtr => "FFI_DEREF_RAW_PTR",
+            Self::DerefRawSigned => "FFI_DEREF_RAW_SIGNED",
             Self::PtrAdd => "FFI_PTR_ADD",
             Self::PtrSub => "FFI_PTR_SUB",
             Self::PtrDiff => "FFI_PTR_DIFF",
@@ -7963,6 +7990,29 @@ pub enum ExtendedSubOpcode {
     /// (length-prefixed) operand block.
     Reserved = 0x00,
 
+    /// Typed variant construction (#146 Phase 3).  Sub-op `0x01`.
+    /// Wire format: `[0x1F][0x01][reg:dst][varint:type_id]
+    /// [varint:tag][varint:field_count]`.
+    ///
+    /// Behavioural superset of [`Opcode::MakeVariant`] (`0x86`):
+    /// allocates the variant heap object, populates the tag, and
+    /// reserves `field_count` payload slots (subsequently filled
+    /// via `SetVariantData`).  Adds the `type_id` operand so the
+    /// interpreter / runtime can validate the (type_id, tag,
+    /// field_count) tuple against the global type table at
+    /// allocation time — closes the soundness gap where a
+    /// downstream lowering bug could mint a variant whose
+    /// in-memory layout disagrees with what every consumer
+    /// (pattern matching, GetVariantData, derive(Eq)) assumes.
+    ///
+    /// Release builds: layout-identical to MakeVariant (the
+    /// type_id is consumed and discarded in zero-cost form once
+    /// codegen has proved the tuple consistent).
+    /// Debug builds: a `verum_runtime::variant_layout_check`
+    /// call is emitted before the allocation, trapping mismatches
+    /// via `verum_panic`.
+    MakeVariantTyped = 0x01,
+
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code.  Format: `[0x1F][0x10][reg:u16]`.
     ///
@@ -7986,6 +8036,7 @@ impl ExtendedSubOpcode {
     pub fn from_byte(byte: u8) -> Option<Self> {
         match byte {
             0x00 => Some(Self::Reserved),
+            0x01 => Some(Self::MakeVariantTyped),
             0x10 => Some(Self::ProcessExit),
             _ => None,
         }
@@ -8000,6 +8051,7 @@ impl ExtendedSubOpcode {
     pub fn mnemonic(self) -> &'static str {
         match self {
             Self::Reserved => "EXT_RESERVED",
+            Self::MakeVariantTyped => "EXT_MAKE_VARIANT_TYPED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
         }
     }
@@ -9517,6 +9569,36 @@ pub enum Instruction {
     MakeVariant {
         /// Destination register for variant.
         dst: Reg,
+        /// Variant tag.
+        tag: u32,
+        /// Number of payload fields to allocate space for.
+        field_count: u32,
+    },
+    /// Create variant with type-id-validated layout (#146 Phase 3).
+    ///
+    /// Encoded under `Opcode::Extended = 0x1F` with sub-op
+    /// `ExtendedSubOpcode::MakeVariantTyped = 0x01`.  Wire format:
+    /// `[0x1F][0x01][reg:dst][varint:type_id][varint:tag]
+    /// [varint:field_count]`.
+    ///
+    /// Behaves identically to `MakeVariant` at the heap-allocation
+    /// level (same object header, same field-count reservation,
+    /// same tag store).  The added `type_id` operand lets the
+    /// interpreter cross-check the `(type_id, tag, field_count)`
+    /// tuple against the global type table at allocation time —
+    /// codegen drift that would otherwise produce a layout-
+    /// inconsistent variant traps with `LayoutMismatch` instead of
+    /// surviving until pattern-matching reads the wrong field.
+    ///
+    /// Codegen prefers this variant whenever the constructor's
+    /// parent type has a stable type_id assigned (the common
+    /// case post-monomorphisation).  Falls back to `MakeVariant`
+    /// when the type_id is unresolvable.
+    MakeVariantTyped {
+        /// Destination register for variant.
+        dst: Reg,
+        /// Stable type-table index of the variant's parent type.
+        type_id: u32,
         /// Variant tag.
         tag: u32,
         /// Number of payload fields to allocate space for.

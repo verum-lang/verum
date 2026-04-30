@@ -58,7 +58,10 @@ use crate::instruction::{
     TensorBinaryOp, TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp,
     TensorReduceOp, TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
 };
-#[cfg(test)]
+// `ExtendedSubOpcode` is consumed both by the encoder (typed
+// `MakeVariantTyped` arm — #146 Phase 3a) and by the test
+// assertions; promote it out of `#[cfg(test)]` so the production
+// path can reference the documented sub-op constants.
 use crate::instruction::ExtendedSubOpcode;
 #[cfg(test)]
 use crate::instruction::RegRange;
@@ -2147,6 +2150,26 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         Instruction::MakeVariant { dst, tag, field_count } => {
             output.push(Opcode::MakeVariant.to_byte());
             encode_reg(*dst, output);
+            encode_varint(*tag as u64, output);
+            encode_varint(*field_count as u64, output);
+        }
+
+        // #146 Phase 3 — typed variant under Extended sub-op 0x01.
+        // Wire format: [0x1F][0x01][reg:dst][varint:type_id]
+        // [varint:tag][varint:field_count].  Performance-critical:
+        // varint encoding keeps the typical 6-byte footprint
+        // (1 + 1 + 2 (reg) + 1 (type_id) + 1 (tag) + 1 (field_count))
+        // for small ids — only 1 byte over MakeVariant.
+        Instruction::MakeVariantTyped {
+            dst,
+            type_id,
+            tag,
+            field_count,
+        } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::MakeVariantTyped.to_byte());
+            encode_reg(*dst, output);
+            encode_varint(*type_id as u64, output);
             encode_varint(*tag as u64, output);
             encode_varint(*field_count as u64, output);
         }
@@ -4751,14 +4774,39 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // Generic Extended Operations (#167 Part A)
         // ====================================================================
         Opcode::Extended => {
-            // Sub-op byte selects the extended-instruction kind; operands
-            // are consumed by the dispatch handler at execution time
-            // (matches the convention of every other *Extended opcode).
+            // Sub-op byte selects the extended-instruction kind.  For
+            // typed sub-ops (MakeVariantTyped, …) we decode the
+            // operands into the dedicated `Instruction::*` variant so
+            // the validator + disassembler get a structural view.
+            // For opaque sub-ops we keep the legacy contract:
+            // operands are consumed by the dispatch handler at
+            // execution time and decode returns
+            // `Instruction::Extended { sub_op, operands: vec![] }`.
             let sub_op = decode_u8(data, offset)?;
-            Ok(Instruction::Extended {
-                sub_op,
-                operands: vec![],
-            })
+            match ExtendedSubOpcode::from_byte(sub_op) {
+                Some(ExtendedSubOpcode::MakeVariantTyped) => {
+                    // #146 Phase 3a — `[reg:dst][varint:type_id]
+                    // [varint:tag][varint:field_count]`.
+                    let dst = decode_reg(data, offset)?;
+                    let type_id = decode_varint(data, offset)? as u32;
+                    let tag = decode_varint(data, offset)? as u32;
+                    let field_count = decode_varint(data, offset)? as u32;
+                    Ok(Instruction::MakeVariantTyped {
+                        dst,
+                        type_id,
+                        tag,
+                        field_count,
+                    })
+                }
+                // Opaque sub-ops (Reserved=0x00, ProcessExit=0x10,
+                // unknown future entries): fall through to the
+                // legacy carrier shape; the dispatch handler reads
+                // operands from the stream at execution time.
+                _ => Ok(Instruction::Extended {
+                    sub_op,
+                    operands: vec![],
+                }),
+            }
         }
 
         // ====================================================================
@@ -7492,5 +7540,130 @@ mod tests {
         );
         assert_eq!(ExtendedSubOpcode::from_byte(0xFF), None);
         assert_eq!(ExtendedSubOpcode::Reserved.mnemonic(), "EXT_RESERVED");
+    }
+
+    // ============================================================
+    // #146 Phase 3a — MakeVariantTyped round-trip pin tests
+    //
+    // The typed variant lives in the secondary opcode space at
+    // sub-op `0x01`.  Wire format:
+    //   `[0x1F (Extended)][0x01 (sub-op)][reg:dst][varint:type_id]
+    //    [varint:tag][varint:field_count]`
+    //
+    // Encoder writes the typed fields out; decoder recognises the
+    // sub-op and reconstructs `Instruction::MakeVariantTyped` (so
+    // disassembler + validator see a structural view).
+    // ============================================================
+
+    #[test]
+    fn test_make_variant_typed_subop_byte_value() {
+        // Pin the wire-protocol byte for sub-op 0x01.  A refactor
+        // that re-numbers extended sub-ops without keeping
+        // `MakeVariantTyped = 0x01` would break every previously-
+        // emitted .vbc archive that contains typed variant
+        // constructions.
+        assert_eq!(ExtendedSubOpcode::MakeVariantTyped.to_byte(), 0x01);
+        assert_eq!(
+            ExtendedSubOpcode::from_byte(0x01),
+            Some(ExtendedSubOpcode::MakeVariantTyped)
+        );
+        assert_eq!(
+            ExtendedSubOpcode::MakeVariantTyped.mnemonic(),
+            "EXT_MAKE_VARIANT_TYPED"
+        );
+    }
+
+    #[test]
+    fn test_make_variant_typed_roundtrip_small_ids() {
+        // Common case: small type_id / tag / field_count fit in
+        // 1-byte varints each, giving a tight 6-byte encoding:
+        //   [0x1F][0x01][reg-2-bytes][varint-1][varint-1][varint-1]
+        let instr = Instruction::MakeVariantTyped {
+            dst: Reg::new(7),
+            type_id: 42,
+            tag: 1,
+            field_count: 2,
+        };
+        let mut encoded = Vec::new();
+        encode_instruction(&instr, &mut encoded);
+        // Wire prefix: Extended (0x1F) + MakeVariantTyped sub-op (0x01).
+        assert_eq!(encoded[0], 0x1F);
+        assert_eq!(encoded[1], 0x01);
+
+        let mut offset = 0;
+        let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
+        assert_eq!(offset, encoded.len());
+        assert_eq!(decoded, instr);
+    }
+
+    #[test]
+    fn test_make_variant_typed_roundtrip_large_ids() {
+        // Large-id case: type_id near u32 max stresses the
+        // multi-byte varint path; round-trip must preserve all
+        // 32 bits of every operand.  Catches subtle truncation
+        // bugs (e.g. accidentally narrowing through `u16` mid-pipe).
+        let instr = Instruction::MakeVariantTyped {
+            dst: Reg::new(255),
+            type_id: 0xDEADBEEF,
+            tag: 0x7FFF_FFFF,
+            field_count: 1024,
+        };
+        let mut encoded = Vec::new();
+        encode_instruction(&instr, &mut encoded);
+        let mut offset = 0;
+        let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
+        assert_eq!(offset, encoded.len());
+        assert_eq!(decoded, instr);
+    }
+
+    #[test]
+    fn test_make_variant_typed_roundtrip_zero_fields() {
+        // Nullary variant case (field_count = 0): every payload
+        // slot pre-allocation cost is gone; the heap object still
+        // carries the (type_id, tag) pair.  Common shape for
+        // unit-only constructors like `None`, `Nil`, `Empty`.
+        let instr = Instruction::MakeVariantTyped {
+            dst: Reg::new(0),
+            type_id: 100,
+            tag: 0,
+            field_count: 0,
+        };
+        let mut encoded = Vec::new();
+        encode_instruction(&instr, &mut encoded);
+        let mut offset = 0;
+        let decoded = decode_instruction(&encoded, &mut offset).expect("decode");
+        assert_eq!(offset, encoded.len());
+        assert_eq!(decoded, instr);
+    }
+
+    #[test]
+    fn test_make_variant_typed_distinct_from_untyped() {
+        // Pin the wire-format separation: MakeVariant (0x86) and
+        // MakeVariantTyped (0x1F + 0x01) are distinct opcodes.  A
+        // refactor that accidentally aliased them would silently
+        // turn typed-variant emissions into the legacy untyped
+        // form (with the synthetic `0x8000+tag` sentinel TypeId),
+        // breaking tag-disambiguation for sum types that share
+        // tags.
+        let typed = Instruction::MakeVariantTyped {
+            dst: Reg::new(3),
+            type_id: 50,
+            tag: 1,
+            field_count: 1,
+        };
+        let untyped = Instruction::MakeVariant {
+            dst: Reg::new(3),
+            tag: 1,
+            field_count: 1,
+        };
+        let mut typed_bytes = Vec::new();
+        let mut untyped_bytes = Vec::new();
+        encode_instruction(&typed, &mut typed_bytes);
+        encode_instruction(&untyped, &mut untyped_bytes);
+        // Wire prefixes must differ: typed starts with 0x1F,
+        // untyped starts with 0x86.
+        assert_eq!(typed_bytes[0], 0x1F);
+        assert_eq!(untyped_bytes[0], Opcode::MakeVariant.to_byte());
+        assert_ne!(typed_bytes, untyped_bytes);
     }
 }
