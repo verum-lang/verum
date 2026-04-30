@@ -640,6 +640,22 @@ fn closure_param_name(param: &verum_ast::ClosureParam) -> Text {
     }
 }
 
+/// Helper to extract a binder name from a quantifier binding's
+/// pattern. Returns `None` for patterns that don't introduce a
+/// single named binder (tuple, record, etc.) — the alpha-equivalence
+/// path treats those as not contributing to the binding map and
+/// continues structural comparison through the body. Single-name
+/// binders are the common case for ∀x. P(x) / ∃x. P(x) and the only
+/// shape currently exercised by the body-shape gates in
+/// apply_inference_rule.
+fn quantifier_binding_name(qb: &verum_ast::expr::QuantifierBinding) -> Option<Text> {
+    use verum_ast::PatternKind;
+    match &qb.pattern.kind {
+        PatternKind::Ident { name, .. } => Some(Text::from(name.as_str())),
+        _ => None,
+    }
+}
+
 // ==================== Configuration ====================
 
 /// Configuration for proof validation
@@ -7575,6 +7591,101 @@ impl ProofValidator {
             // Block expressions
             (ExprKind::Block(b1), ExprKind::Block(b2)) => {
                 self.blocks_eq(b1, b2, left_bindings, right_bindings, depth)
+            }
+
+            // Universal quantifier: ∀x. P(x)
+            //
+            // Alpha-equivalence: two foralls are equal iff they bind
+            // the same number of variables and their bodies are
+            // equal under matching bound-variable depths. Mirrors the
+            // closure arm above (line ~7488).
+            //
+            // Pre-fix this arm was missing — `expr_eq` returned false
+            // for any Forall vs Forall pair (even structurally
+            // identical ones). That made `validate_axiom`'s
+            // formula-match check fail for every quantified axiom,
+            // blocking direct end-to-end testing of the
+            // forall_elim / exists_intro body-shape gates landed in
+            // d6ff4523.
+            (
+                ExprKind::Forall {
+                    bindings: b1,
+                    body: body1,
+                },
+                ExprKind::Forall {
+                    bindings: b2,
+                    body: body2,
+                },
+            ) => {
+                if b1.len() != b2.len() {
+                    return false;
+                }
+
+                let new_depth = depth + 1;
+                let mut added_left: Vec<Text> = Vec::new();
+                let mut added_right: Vec<Text> = Vec::new();
+                for (qb1, qb2) in b1.iter().zip(b2.iter()) {
+                    if let Some(n1) = quantifier_binding_name(qb1) {
+                        left_bindings.insert(n1.clone(), new_depth);
+                        added_left.push(n1);
+                    }
+                    if let Some(n2) = quantifier_binding_name(qb2) {
+                        right_bindings.insert(n2.clone(), new_depth);
+                        added_right.push(n2);
+                    }
+                }
+
+                let result =
+                    self.expr_eq_impl(body1, body2, left_bindings, right_bindings, new_depth);
+
+                for n in &added_left {
+                    left_bindings.remove(n);
+                }
+                for n in &added_right {
+                    right_bindings.remove(n);
+                }
+                result
+            }
+
+            // Existential quantifier: ∃x. P(x) — symmetric handling.
+            (
+                ExprKind::Exists {
+                    bindings: b1,
+                    body: body1,
+                },
+                ExprKind::Exists {
+                    bindings: b2,
+                    body: body2,
+                },
+            ) => {
+                if b1.len() != b2.len() {
+                    return false;
+                }
+
+                let new_depth = depth + 1;
+                let mut added_left: Vec<Text> = Vec::new();
+                let mut added_right: Vec<Text> = Vec::new();
+                for (qb1, qb2) in b1.iter().zip(b2.iter()) {
+                    if let Some(n1) = quantifier_binding_name(qb1) {
+                        left_bindings.insert(n1.clone(), new_depth);
+                        added_left.push(n1);
+                    }
+                    if let Some(n2) = quantifier_binding_name(qb2) {
+                        right_bindings.insert(n2.clone(), new_depth);
+                        added_right.push(n2);
+                    }
+                }
+
+                let result =
+                    self.expr_eq_impl(body1, body2, left_bindings, right_bindings, new_depth);
+
+                for n in &added_left {
+                    left_bindings.remove(n);
+                }
+                for n in &added_right {
+                    right_bindings.remove(n);
+                }
+                result
             }
 
             // Different expression kinds are not equal
