@@ -101,19 +101,47 @@ impl CogManager {
                 ));
             }
 
-            // Check enterprise policy
+            // Check enterprise policy. `require_vulnerability_scan`
+            // is the umbrella gate; `max_severity` is the ceiling
+            // — vulnerabilities at or below the ceiling pass through
+            // (the user was warned above) and only those that
+            // EXCEED the configured ceiling trip the install block.
+            // Pre-fix the install path treated any vuln as a hard
+            // block under `require_vulnerability_scan = true`,
+            // ignoring `max_severity` entirely and so making the
+            // documented ceiling field inert.
             if let Some(ent) = &self.enterprise
                 && ent.config().compliance.require_vulnerability_scan
             {
-                return Err(CliError::Custom(
-                    "Cog has vulnerabilities - installation blocked by policy".into(),
-                ));
+                let blocking: List<_> = scan_result
+                    .vulnerabilities
+                    .iter()
+                    .filter(|v| ent.vulnerability_exceeds_policy(&v.vulnerability.severity))
+                    .collect();
+                if !blocking.is_empty() {
+                    return Err(CliError::Custom(format!(
+                        "Cog has {} vulnerability(ies) above the configured \
+                         max_severity = '{}' ceiling — installation blocked \
+                         by policy",
+                        blocking.len(),
+                        ent.config().compliance.max_severity,
+                    )));
+                }
             }
         }
 
-        // Check license compliance
+        // Check license compliance. Gated on
+        // `compliance.license_compliance`: pre-fix this flag was
+        // documented as "License compliance checks" but the check
+        // unconditionally fired whenever an enterprise client was
+        // configured, so flipping the flag had no effect. Wiring the
+        // gate restores the documented kill-switch semantics so a
+        // project that ships `enterprise.toml` for proxy / audit
+        // purposes alone doesn't accidentally enable license
+        // compliance just by configuring `allowed_licenses`.
         if let Some(license) = &metadata.license
             && let Some(ent) = &self.enterprise
+            && ent.license_compliance_enabled()
             && !ent.is_license_allowed(license.as_str())
         {
             return Err(CliError::Custom(format!(
