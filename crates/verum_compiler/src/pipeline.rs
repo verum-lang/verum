@@ -127,15 +127,15 @@ mod vbc_codegen;
 /// Cached parsed stdlib modules for process-level reuse.
 /// Stores parsed Module ASTs and source text so subsequent pipeline instances
 /// skip file I/O and parsing (the expensive part of stdlib loading).
-struct CachedStdlibModules {
+pub(super) struct CachedStdlibModules {
     /// (module_path_string, parsed_module, source_text) triples
-    entries: Vec<(Text, Module, Text)>,
+    pub(super) entries: Vec<(Text, Module, Text)>,
 }
 
 static GLOBAL_STDLIB_MODULES: std::sync::OnceLock<std::sync::RwLock<Option<CachedStdlibModules>>> =
     std::sync::OnceLock::new();
 
-fn global_stdlib_cache() -> &'static std::sync::RwLock<Option<CachedStdlibModules>> {
+pub(super) fn global_stdlib_cache() -> &'static std::sync::RwLock<Option<CachedStdlibModules>> {
     GLOBAL_STDLIB_MODULES.get_or_init(|| std::sync::RwLock::new(None))
 }
 
@@ -152,7 +152,7 @@ fn global_stdlib_cache() -> &'static std::sync::RwLock<Option<CachedStdlibModule
 static GLOBAL_STDLIB_REGISTRY: std::sync::OnceLock<std::sync::RwLock<Option<ModuleRegistry>>> =
     std::sync::OnceLock::new();
 
-fn global_stdlib_registry_cache() -> &'static std::sync::RwLock<Option<ModuleRegistry>> {
+pub(super) fn global_stdlib_registry_cache() -> &'static std::sync::RwLock<Option<ModuleRegistry>> {
     GLOBAL_STDLIB_REGISTRY.get_or_init(|| std::sync::RwLock::new(None))
 }
 
@@ -282,7 +282,7 @@ struct SerializableRegistryCache {
 const REGISTRY_CACHE_FORMAT_VERSION: u32 = 3;
 
 /// Compute blake3 content hash of all .vr files under a directory.
-fn compute_stdlib_content_hash(stdlib_path: &Path) -> String {
+pub(super) fn compute_stdlib_content_hash(stdlib_path: &Path) -> String {
     let mut hasher = blake3::Hasher::new();
 
     // Collect all .vr files sorted for deterministic hashing
@@ -337,7 +337,7 @@ fn stdlib_cache_dir(workspace_root: &Path) -> PathBuf {
 /// Try to load a cached ModuleRegistry from disk.
 ///
 /// Returns `Some(registry)` if a valid cache exists matching the given content hash.
-fn try_load_registry_from_disk(
+pub(super) fn try_load_registry_from_disk(
     workspace_root: &Path,
     content_hash: &str,
 ) -> Option<ModuleRegistry> {
@@ -2581,8 +2581,6 @@ impl<'s> CompilationPipeline<'s> {
         }
 
         Ok(result)
-    }
-
     }
 
     /// Register meta declarations from a parsed module.

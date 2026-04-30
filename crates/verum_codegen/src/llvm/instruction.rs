@@ -15709,6 +15709,14 @@ fn lower_extended<'ctx>(
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             Ok(())
         }
+        Some(ExtendedSubOpcode::MakeVariantTyped) => {
+            // Stage A — typed variant constructor sub-opcode is
+            // emitted by the type-driven codegen path; the LLVM
+            // lowering stays on the existing untyped MakeVariant
+            // path until the typed runtime is wired (#251 follow-up).
+            ctx.emit_unimplemented_sub_op("Extended", sub_op);
+            Ok(())
+        }
         None => {
             ctx.emit_unimplemented_sub_op("Extended", sub_op);
             Ok(())
@@ -17969,6 +17977,21 @@ fn lower_ffi_extended<'ctx>(
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let _ = i64_ty;
             Ok(())
+        }
+
+        Some(FfiSubOpcode::DerefRawSigned) => {
+            // 0x67 — sign-extending raw deref. The existing
+            // `DerefRaw` arm already performs sign-extension at
+            // the i64-narrowing site (see comment on the
+            // `DerefRaw` arm); routing `DerefRawSigned` through
+            // the same path preserves bit-equivalence for callers
+            // that previously emitted `DerefRaw` against a signed
+            // C type. Future divergence (e.g. emit `IntCast` with
+            // `s_extend = false` for unsigned `DerefRaw`) lives in
+            // a follow-up commit; this arm just stops the
+            // non-exhaustive-match build error from blocking
+            // downstream crates.
+            return lower_ffi_extended(ctx, FfiSubOpcode::DerefRaw as u8, operands);
         }
 
         None => Err(LlvmLoweringError::internal(format!(
