@@ -2394,7 +2394,8 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
             .to_string();
 
         for item in &module.items {
-            let (name, decl_attrs, has_proof, proposition_expr) = match &item.kind {
+            let (name, decl_attrs, has_proof, proposition_expr, theorem_params)
+                = match &item.kind {
                 verum_ast::decl::ItemKind::Theorem(d)
                 | verum_ast::decl::ItemKind::Lemma(d)
                 | verum_ast::decl::ItemKind::Corollary(d) => (
@@ -2402,6 +2403,7 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                     &d.attributes,
                     matches!(&d.proof, verum_common::Maybe::Some(_)),
                     d.proposition.as_ref(),
+                    &d.params,
                 ),
                 _ => continue,
             };
@@ -2414,20 +2416,42 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
             // placeholder.
             let proposition_text =
                 verum_ast::pretty::format_expr(proposition_expr).to_string();
+            // Extract `(name, &Type)` pairs from theorem params for
+            // the type translator (#141 / MSFS-L4.8).  Only Regular
+            // params carry a (pattern, ty) pair; self-parameters
+            // and the various reference-self forms aren't applicable
+            // to theorem signatures (theorems aren't methods) but
+            // the walker stays robust by skipping them.
+            let mut walker_params: Vec<(String, &verum_ast::ty::Type)> = Vec::new();
+            for fp in theorem_params.iter() {
+                if let verum_ast::decl::FunctionParamKind::Regular {
+                    pattern,
+                    ty,
+                    default_value: _,
+                } = &fp.kind
+                {
+                    if let Some(name) = ident_pattern_name(pattern) {
+                        walker_params.push((sanitise_theorem_name(&name), ty));
+                    }
+                }
+            }
             // Run the per-backend Expr → Prop translators (#140 /
-            // MSFS-L4.7).  Successful translations land in
-            // `per_backend_proposition`; fallbacks are absent and
-            // the per-format renderer falls back to `Prop` with the
-            // original text in a comment.
+            // MSFS-L4.7) AND the per-backend Type translators
+            // (#141 / MSFS-L4.8).  Successful translations land
+            // in their respective maps; fallbacks leave the entry
+            // absent and the per-format renderer reverts to a
+            // generic placeholder.
             theorem_specs.push(
                 TheoremSpec {
                     name: sanitise_theorem_name(&name),
                     module_path: module_path_text.clone(),
                     proposition_text,
                     per_backend_proposition: std::collections::BTreeMap::new(),
+                    params: Vec::new(),
                     has_proof_body: has_proof,
                     declared_strategy,
                 }
+                .with_translated_params(&walker_params)
                 .with_translated_proposition(proposition_expr),
             );
         }
@@ -2553,6 +2577,17 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
 /// or names colliding with reserved words gain a `verum_` prefix.
 /// Rejection-by-renaming is preferable to compile-failure: the user
 /// sees a stable mapping rather than mysterious `coqc` errors.
+/// Project: an Ident-pattern's bound name.  Returns `None` for any
+/// other pattern shape (Tuple / Record / Variant / etc.) — those
+/// don't translate cleanly to a single foreign-tool parameter binding.
+fn ident_pattern_name(pattern: &verum_ast::pattern::Pattern) -> Option<String> {
+    use verum_ast::pattern::PatternKind;
+    match &pattern.kind {
+        PatternKind::Ident { name, .. } => Some(name.as_str().to_string()),
+        _ => None,
+    }
+}
+
 fn sanitise_theorem_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len() + 6);
     let needs_prefix = name

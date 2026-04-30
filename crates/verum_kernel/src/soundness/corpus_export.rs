@@ -46,7 +46,24 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::expr_translate::{CoqExprRenderer, ExprRenderer, LeanExprRenderer, TranslatedExpr};
+use super::expr_translate::{
+    CoqExprRenderer, CoqTypeRenderer, ExprRenderer, LeanExprRenderer, LeanTypeRenderer,
+    TranslatedExpr, TranslatedType, TypeRenderer,
+};
+
+/// One theorem parameter — name + per-backend type text (#141).
+/// `per_backend_type_text` keys are backend ids (`"coq"`, `"lean"`);
+/// when a backend's translator succeeded, the value is the foreign-
+/// tool type syntax for the parameter.  When it fell back, the entry
+/// for that backend is absent and the per-format renderer emits a
+/// generic `Type` placeholder so the binding still exists.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoremParam {
+    /// Parameter name (already sanitised to a foreign-tool identifier).
+    pub name: String,
+    /// Per-backend rendered type text — keys: `"coq"` / `"lean"`.
+    pub per_backend_type_text: std::collections::BTreeMap<String, String>,
+}
 
 /// One theorem's cross-format export specification — what the
 /// per-format renderer needs.  Constructed from the AST by the
@@ -77,6 +94,24 @@ pub struct TheoremSpec {
     /// comment.
     #[serde(default)]
     pub per_backend_proposition: std::collections::BTreeMap<String, String>,
+    /// **Theorem parameters (#141 / MSFS-L4.8)**.  Each entry is a
+    /// (name, per-backend-type-text) pair where the inner map keys
+    /// are backend ids (`"coq"` / `"lean"`).  When a parameter's
+    /// type translates cleanly for a backend, the corresponding
+    /// renderer emits the parameter binding before the colon-
+    /// separator: `Theorem foo (n : Z) : (n = 7).` instead of
+    /// `Theorem foo : (n = 7).`  Without parameter declarations the
+    /// foreign tool rejects on undeclared identifier — so this is
+    /// the load-bearing piece that makes the type-structure gate
+    /// (#140) actually fire.
+    ///
+    /// Parameters whose types fall back are still emitted with a
+    /// generic `Type` placeholder so the binding exists; the
+    /// foreign tool then validates that the proposition's free
+    /// variables are at least DECLARED, even when their types
+    /// can't be translated faithfully.
+    #[serde(default)]
+    pub params: Vec<TheoremParam>,
     /// Whether the theorem has a proof body.  Statements without a
     /// proof body are treated as axioms (postulates) in the foreign
     /// tool; ones with a proof body get `sorry` / `Admitted.` as a
@@ -110,6 +145,38 @@ impl TheoremSpec {
                     // in a comment.
                 }
             }
+        }
+        self
+    }
+
+    /// Populate `params` by running the [`TypeRenderer`]s over each
+    /// parameter's type (#141 / MSFS-L4.8).  Per-backend translation
+    /// failures leave that backend's entry absent for the parameter;
+    /// the renderer then emits a generic `Type` placeholder so the
+    /// binding still exists at the foreign-tool level.
+    ///
+    /// `params` is a slice of `(parameter_name, parameter_type)` pairs
+    /// extracted from the theorem's AST by the audit walker.  Names
+    /// should already be sanitised to valid foreign-tool identifiers.
+    pub fn with_translated_params(
+        mut self,
+        params: &[(String, &verum_ast::ty::Type)],
+    ) -> Self {
+        for (name, ty) in params {
+            let mut per_backend_type_text: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            for renderer in [
+                Box::new(CoqTypeRenderer::new()) as Box<dyn TypeRenderer>,
+                Box::new(LeanTypeRenderer::new()) as Box<dyn TypeRenderer>,
+            ] {
+                if let TranslatedType::Translated { text } = renderer.render(ty) {
+                    per_backend_type_text.insert(renderer.id().to_string(), text);
+                }
+            }
+            self.params.push(TheoremParam {
+                name: name.clone(),
+                per_backend_type_text,
+            });
         }
         self
     }
@@ -202,16 +269,20 @@ impl CorpusBackend for CoqCorpusBackend {
             "(* Proposition (Verum source): {} *)\n",
             sanitise_for_comment(&spec.proposition_text)
         ));
+        let coq_params = render_params_for_backend(spec, "coq");
         if spec.has_proof_body {
             content.push_str(&format!(
-                "Theorem {} : {}.\n\
+                "Theorem {}{} : {}.\n\
                  Proof.\n  \
                    admit.\n\
                  Admitted.\n",
-                spec.name, coq_type,
+                spec.name, coq_params, coq_type,
             ));
         } else {
-            content.push_str(&format!("Axiom {} : {}.\n", spec.name, coq_type));
+            content.push_str(&format!(
+                "Axiom {}{} : {}.\n",
+                spec.name, coq_params, coq_type
+            ));
         }
         RenderedTheorem { filename, content }
     }
@@ -274,13 +345,17 @@ impl CorpusBackend for LeanCorpusBackend {
             .get("lean")
             .map(|s| s.as_str())
             .unwrap_or("Prop");
+        let lean_params = render_params_for_backend(spec, "lean");
         if spec.has_proof_body {
             content.push_str(&format!(
-                "theorem {} : {} := by sorry\n",
-                spec.name, lean_type,
+                "theorem {}{} : {} := by sorry\n",
+                spec.name, lean_params, lean_type,
             ));
         } else {
-            content.push_str(&format!("axiom {} : {}\n", spec.name, lean_type));
+            content.push_str(&format!(
+                "axiom {}{} : {}\n",
+                spec.name, lean_params, lean_type
+            ));
         }
         RenderedTheorem { filename, content }
     }
@@ -292,6 +367,32 @@ impl CorpusBackend for LeanCorpusBackend {
 /// and Lean (`/-! … -/`) only require the closing-delimiter avoidance.
 fn sanitise_for_comment(text: &str) -> String {
     text.replace("*)", "* )").replace("-/", "- /")
+}
+
+/// Render the parameter-binding text for a given backend.  Produces
+/// the form ` (n1 : T1) (n2 : T2) ...` (with a leading space)
+/// suitable for embedding between the theorem name and the colon-
+/// separator.  Empty when no params.
+///
+/// Type-translation failures fall back to a generic `Type` placeholder
+/// (Coq) / `Type` (Lean) so the parameter binding still exists at the
+/// foreign-tool level — the foreign tool then validates that the
+/// proposition's free variables are at least DECLARED, even when
+/// their types can't be translated faithfully.
+fn render_params_for_backend(spec: &TheoremSpec, backend_id: &str) -> String {
+    if spec.params.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for p in &spec.params {
+        let ty_text = p
+            .per_backend_type_text
+            .get(backend_id)
+            .map(|s| s.as_str())
+            .unwrap_or("Type");
+        out.push_str(&format!(" ({} : {})", p.name, ty_text));
+    }
+    out
 }
 
 // =============================================================================
@@ -318,6 +419,7 @@ mod tests {
             module_path: "test_module".to_string(),
             proposition_text: prop.to_string(),
             per_backend_proposition: std::collections::BTreeMap::new(),
+            params: Vec::new(),
             has_proof_body: true,
             declared_strategy: None,
         }
@@ -329,6 +431,7 @@ mod tests {
             module_path: "test_module".to_string(),
             proposition_text: prop.to_string(),
             per_backend_proposition: std::collections::BTreeMap::new(),
+            params: Vec::new(),
             has_proof_body: false,
             declared_strategy: None,
         }
@@ -470,6 +573,142 @@ mod tests {
         assert!(coq.content.contains("Axiom nat_zero_pos : (0 = 0)."));
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(lean.content.contains("axiom nat_zero_pos : (0 = 0)"));
+    }
+
+    #[test]
+    fn theorem_param_emission_with_int_parameter_in_coq() {
+        // Theorem `foo(n: Int) ensures n == 7` → Coq emission must
+        // declare `n : Z` before the colon-separator.
+        let mut spec = spec_proven("eq_thm", "n == 7");
+        spec.per_backend_proposition.insert("coq".into(), "(n = 7)".into());
+        spec.params.push(TheoremParam {
+            name: "n".to_string(),
+            per_backend_type_text: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("coq".to_string(), "Z".to_string());
+                m
+            },
+        });
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("Theorem eq_thm (n : Z) : (n = 7)."),
+            "Coq output must declare param before colon; got:\n{}",
+            coq.content,
+        );
+    }
+
+    #[test]
+    fn theorem_param_emission_with_int_parameter_in_lean() {
+        let mut spec = spec_proven("eq_thm", "n == 7");
+        spec.per_backend_proposition.insert("lean".into(), "(n = 7)".into());
+        spec.params.push(TheoremParam {
+            name: "n".to_string(),
+            per_backend_type_text: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("lean".to_string(), "Int".to_string());
+                m
+            },
+        });
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            lean.content.contains("theorem eq_thm (n : Int) : (n = 7) := by sorry"),
+            "Lean output must declare param before colon; got:\n{}",
+            lean.content,
+        );
+    }
+
+    #[test]
+    fn untranslated_param_type_falls_back_to_type_placeholder() {
+        // Parameter whose type didn't translate (per_backend_type_text
+        // for that backend is absent) → emission falls back to `Type`
+        // so the binding still exists.  Foreign tool then validates
+        // that the proposition's free variables are at least
+        // DECLARED.  Pin both Coq and Lean independently — each
+        // backend gets its own per_backend_proposition entry so the
+        // test isolates param-fallback behavior from proposition
+        // fallback.
+        let mut spec = spec_proven("opaque_thm", "P x");
+        spec.per_backend_proposition.insert("coq".into(), "(P x)".into());
+        spec.per_backend_proposition.insert("lean".into(), "(P x)".into());
+        spec.params.push(TheoremParam {
+            name: "x".to_string(),
+            per_backend_type_text: std::collections::BTreeMap::new(),
+        });
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("Theorem opaque_thm (x : Type) : (P x)."),
+            "Coq emission with untranslated param type must use `Type` placeholder; got:\n{}",
+            coq.content,
+        );
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            lean.content.contains("theorem opaque_thm (x : Type) : (P x) := by sorry"),
+            "Lean emission with untranslated param type must use `Type` placeholder; got:\n{}",
+            lean.content,
+        );
+    }
+
+    #[test]
+    fn multiple_params_emit_in_declaration_order() {
+        let mut spec = spec_proven("multi_param_thm", "a == b");
+        spec.per_backend_proposition.insert("coq".into(), "(a = b)".into());
+        for (name, ty) in [("a", "Z"), ("b", "Z")] {
+            spec.params.push(TheoremParam {
+                name: name.to_string(),
+                per_backend_type_text: {
+                    let mut m = std::collections::BTreeMap::new();
+                    m.insert("coq".to_string(), ty.to_string());
+                    m
+                },
+            });
+        }
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(coq.content.contains("Theorem multi_param_thm (a : Z) (b : Z) : (a = b)."));
+    }
+
+    #[test]
+    fn params_with_translated_proposition_compose_correctly() {
+        // The two with_* methods compose: with_translated_params
+        // populates `params`, with_translated_proposition populates
+        // `per_backend_proposition`.  Both end up in the emitted
+        // theorem header.
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::{Ident as TyIdent, Path as TyPath, Type, TypeKind};
+        use verum_ast::Span;
+        use verum_common::Heap;
+
+        let lit_zero = verum_ast::Expr::new(
+            ExprKind::Literal(verum_ast::Literal::int(0, Span::dummy())),
+            Span::dummy(),
+        );
+        let path_n = verum_ast::Expr::new(
+            ExprKind::Path(TyPath::single(TyIdent::new("n", Span::dummy()))),
+            Span::dummy(),
+        );
+        let prop = verum_ast::Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Eq,
+                left: Heap::new(path_n),
+                right: Heap::new(lit_zero),
+            },
+            Span::dummy(),
+        );
+        let int_ty = Type::new(TypeKind::Int, Span::dummy());
+        let spec = spec_proven("zero_thm", "n == 0")
+            .with_translated_params(&[("n".to_string(), &int_ty)])
+            .with_translated_proposition(&prop);
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("Theorem zero_thm (n : Z) : (n = 0)."),
+            "Coq emission must combine param + translated proposition; got:\n{}",
+            coq.content,
+        );
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            lean.content.contains("theorem zero_thm (n : Int) : (n = 0) := by sorry"),
+            "Lean emission must combine param + translated proposition; got:\n{}",
+            lean.content,
+        );
     }
 
     #[test]
