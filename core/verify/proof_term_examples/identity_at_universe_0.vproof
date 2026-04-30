@@ -1,0 +1,11 @@
+{
+  "term": { "Lam": [{"Universe": 0}, {"Var": 0}] },
+  "claimed_type": { "Pi": [{"Universe": 0}, {"Universe": 0}] },
+  "metadata": {
+    "name": "identity_at_universe_0",
+    "description": "Identity function at type Universe(0). Term: λ(x:Univ(0)). x. Type: Π(_:Univ(0)).Univ(0).",
+    "source": "core/verify/proof_term_examples/",
+    "kernel_rules_used": "T-Lam-Intro, T-Var",
+    "complexity": "trivial"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "term": {
+    "Lam": [
+      {"Universe": 0},
+      {"Lam": [{"Var": 0}, {"Var": 0}]}
+    ]
+  },
+  "claimed_type": {
+    "Pi": [
+      {"Universe": 0},
+      {"Pi": [{"Var": 0}, {"Var": 1}]}
+    ]
+  },
+  "metadata": {
+    "name": "polymorphic_identity",
+    "description": "Polymorphic identity. Term: λ(A:Univ(0)).λ(x:A).x. Type: Π(A:Univ(0)).Π(_:A).A.",
+    "source": "core/verify/proof_term_examples/",
+    "kernel_rules_used": "T-Lam-Intro, T-Var, T-Pi-Form",
+    "complexity": "depends_on_dependent_types",
+    "note": "Inner Var(1) refers to the outer A binder — verifies de Bruijn shifting works under nested binders."
+  }
+}
