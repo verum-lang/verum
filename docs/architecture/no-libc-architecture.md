@@ -110,14 +110,17 @@ shipping):
 
 | File                                          | Symbol(s)             | Replacement                                  |
 |-----------------------------------------------|-----------------------|----------------------------------------------|
-| `runtime.rs::get_or_declare_open`             | `open`                | Linux `SYS_open` (256 / 56) ; libSystem on macOS. |
-| `runtime.rs::get_or_declare_close`            | `close`               | Linux `SYS_close` (3) ; libSystem on macOS.   |
-| `runtime.rs::get_or_declare_read`             | `read`                | Linux `SYS_read` (0) ; libSystem on macOS.    |
-| `runtime.rs::get_or_declare_write`            | `write`               | Linux `SYS_write` (1) ; libSystem on macOS.   |
-| `runtime.rs::get_or_declare_strlen`           | `strlen`              | Inline `strlen` loop emitted in IR.          |
-| `runtime.rs::get_or_declare_memcpy`           | `memcpy` (libc shape) | Use `FfiLowering::lower_memcpy` (LLVM intrinsic — already libc-free, but the orphan `get_or_declare_memcpy` declaration in runtime.rs is dead code). |
-| `runtime.rs::get_or_declare_malloc`           | `malloc`              | `core/mem/allocator.vr`'s mmap-backed arena. |
-| `runtime.rs::get_or_declare_memset` (orphan)  | `memset` (libc shape) | Same — orphan, delete.                       |
+| `runtime.rs::get_or_declare_open`             | `open`                | Linux `SYS_open` (256 / 56) ; libSystem on macOS. **Open.** |
+| ✅ `runtime.rs::get_or_declare_close`         | `close`               | Linux `SYS_close` (3) direct syscall ; libSystem on macOS. **Closed (commit pending).** |
+| ✅ `runtime.rs::get_or_declare_read`          | `read`                | Linux `SYS_read` (0) direct syscall ; libSystem on macOS. **Closed.** |
+| ✅ `runtime.rs::get_or_declare_write`         | `write`               | Linux `SYS_write` (1) direct syscall ; libSystem on macOS. **Closed.** |
+| ✅ `runtime.rs::get_or_declare_strlen`        | `strlen`              | Open-coded null-byte scan loop emitted in IR (no symbol). **Closed.** |
+| ✅ `runtime.rs::get_or_declare_memcpy`        | `memcpy`              | Internal-linkage wrapper over `llvm.memcpy.p0.p0.i64`. **Closed.** |
+| ✅ `runtime.rs::get_or_declare_memset`        | `memset`              | Internal-linkage wrapper over `llvm.memset.p0.i64`. **Closed.** |
+| `runtime.rs::get_or_declare_malloc`           | `malloc`              | `core/mem/allocator.vr`'s mmap-backed arena. **Open.** |
+| `runtime.rs::get_or_declare_unlink`           | `unlink`              | Linux `SYS_unlink` (87) ; libSystem on macOS. **Open.** |
+| `runtime.rs::get_or_declare_lseek`            | `lseek`               | Linux `SYS_lseek` (8) ; libSystem on macOS. **Open.** |
+| `runtime.rs::get_or_declare_access`           | `access`              | Linux `SYS_access` (21) ; libSystem on macOS. **Open.** |
 | `runtime.rs::get_or_declare_clock_gettime`    | `clock_gettime`       | Already replaced for Linux / macOS via direct syscall + libSystem; the helper itself remains for the macOS + other-Unix fallback paths.  Audit each remaining call. |
 | `runtime.rs::get_or_declare_nanosleep`        | `nanosleep`           | Same as clock_gettime.                       |
 | `runtime.rs::get_or_declare_freeaddrinfo`     | `freeaddrinfo`        | Audit usage; the resolver path likely shouldn't require this in a no-libc world. |
