@@ -179,24 +179,20 @@ struct Edges {
     nested: Vec<String>,
 }
 
-/// Walk `mount … ;` and `module X;` statements in a single source.
+/// Walk `mount … ;` statements in a single source.
 ///
-/// Two categories of dependency edges land in the graph:
+/// Only `mount` statements are recorded as edges. `module X;` submodule
+/// declarations are deliberately NOT recorded: they declare that a
+/// child `X.vr` exists, but importing the parent should NOT pull in
+/// every child — that would re-collapse the reachable set to "the whole
+/// stdlib" via the implicit parent → children chain in every `mod.vr`.
+/// Children that the user actually consumes are reached through the
+/// parent's `public mount .child.{Item}` re-exports, which DO appear
+/// as edges.
 ///
-///   * `mount path;`           — explicit imports.
-///   * `module X;`             — submodule declarations. These are the
-///                               implicit "this file exposes a child
-///                               module loaded from `X.vr`" form
-///                               (equivalent to `mod X;` in Rust).
-///
-/// Treating `module` declarations as nested edges is what lets a
-/// `mount core.collections` correctly pull in `core.collections.list`,
-/// `core.collections.map`, … which are not `mount`-imported by
-/// `core/collections/mod.vr` but listed there as `public module list;`.
-///
-/// `current_module` is the module path of the file being scanned —
-/// used to resolve relative `module X;` declarations to their canonical
-/// child path.
+/// `current_module` is the module path of the file being scanned. It
+/// is currently unused but reserved for future relative-path edges
+/// (e.g. resolving a stray `super` reference inside a stdlib module).
 fn extract_mounts(src: &str, current_module: &str) -> Edges {
     let stripped = strip_comments(src);
     let mut edges = Edges { path: Vec::new(), glob: Vec::new(), nested: Vec::new() };
@@ -211,33 +207,7 @@ fn extract_mounts(src: &str, current_module: &str) -> Edges {
             if preceded_ok && followed_ok {
                 let stmt_end = stripped[i..].find(';').map(|p| i + p).unwrap_or(stripped.len());
                 let body = &stripped[i + 5..stmt_end];
-                parse_mount_body(body.trim(), &mut edges);
-                i = stmt_end + 1;
-                continue;
-            }
-        }
-        // Look for "module X;" submodule declarations.
-        if bytes[i..].starts_with(b"module") {
-            let preceded_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r');
-            let followed_ok = matches!(bytes.get(i + 6), Some(b' ' | b'\t' | b'\n'));
-            if preceded_ok && followed_ok {
-                let stmt_end = stripped[i..].find(';').map(|p| i + p).unwrap_or(stripped.len());
-                let body = stripped[i + 6..stmt_end].trim();
-                // Skip module bodies (`module X { … }`) — those are inline
-                // sub-modules whose contents we'd need to recursively walk.
-                // The bare `module X;` form is what creates a child file
-                // dependency.
-                if !body.is_empty() && !body.contains('{') {
-                    let name = body.split_whitespace().next().unwrap_or("");
-                    if !name.is_empty() {
-                        let child = if current_module.is_empty() {
-                            name.to_string()
-                        } else {
-                            format!("{}.{}", current_module, name)
-                        };
-                        edges.nested.push(child);
-                    }
-                }
+                parse_mount_body(body.trim(), current_module, &mut edges);
                 i = stmt_end + 1;
                 continue;
             }
@@ -249,7 +219,12 @@ fn extract_mounts(src: &str, current_module: &str) -> Edges {
 
 /// Parse the body of a `mount` statement: everything between `mount`
 /// and `;`, with leading/trailing whitespace already stripped.
-fn parse_mount_body(body: &str, edges: &mut Edges) {
+///
+/// `current_module` is used to resolve relative-leading-dot imports
+/// (`public mount .submodule.{Item}` inside `core/foo/mod.vr` resolves
+/// to `core.foo.submodule.Item`). Without this, the relative form
+/// drops information and produces bogus root-level edges.
+fn parse_mount_body(body: &str, current_module: &str, edges: &mut Edges) {
     // Drop any trailing `as Alias` clause — doesn't affect dep edges.
     let body = match body.find(" as ") {
         Some(p) => &body[..p],
@@ -263,8 +238,8 @@ fn parse_mount_body(body: &str, edges: &mut Edges) {
 
     if let Some(brace_open) = body.find('{') {
         // Nested mount: prefix.{a, b, c, …}
-        let prefix = body[..brace_open].trim_end_matches('.').trim();
-        let prefix_path = normalise_path(prefix);
+        let prefix_raw = body[..brace_open].trim_end_matches('.').trim();
+        let prefix_path = resolve_path(prefix_raw, current_module);
         let inner = &body[brace_open + 1..];
         let close = inner.rfind('}').unwrap_or(inner.len());
         let leaves = &inner[..close];
@@ -290,7 +265,7 @@ fn parse_mount_body(body: &str, edges: &mut Edges) {
             }
         }
     } else if let Some(p) = body.strip_suffix(".*") {
-        let normalised = normalise_path(p);
+        let resolved = resolve_path(p, current_module);
         // Suppress prelude-style globs.
         //
         // `mount core.*;` is the canonical "import the implicit prelude"
@@ -300,18 +275,54 @@ fn parse_mount_body(body: &str, edges: &mut Edges) {
         // defeat reachability pruning entirely. Identifiers actually
         // referenced via the prelude are resolved by the existing
         // late-resolution path during type-check.
-        if !is_prelude_glob(&normalised) {
-            edges.glob.push(normalised);
+        if !is_prelude_glob(&resolved) {
+            edges.glob.push(resolved);
         }
     } else {
         // Plain `mount path`. The path may name a module OR an item
         // within a module — record both the path and its parent.
-        let p = normalise_path(body);
+        let p = resolve_path(body, current_module);
         edges.path.push(p.clone());
         if let Some(dot) = p.rfind('.') {
             edges.path.push(p[..dot].to_string());
         }
     }
+}
+
+/// Resolve a possibly-relative mount path to its absolute module path.
+///
+/// `public mount .list.List` inside `core/collections/mod.vr` (current
+/// module = `core.collections`) resolves to `core.collections.list.List`.
+/// `public mount super.base.X` inside `core/mod.vr` (current = `core`)
+/// resolves to `core.base.X` (the `super` form is rewritten the same
+/// way; pragma-level `super` refers to the same crate root).
+///
+/// Absolute paths (no leading `.` and no `super.`) pass through
+/// unchanged.
+fn resolve_path(raw: &str, current_module: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(rest) = trimmed.strip_prefix('.') {
+        let rest = rest.trim_start_matches('.');
+        if rest.is_empty() {
+            return current_module.to_string();
+        }
+        if current_module.is_empty() {
+            return rest.to_string();
+        }
+        return format!("{}.{}", current_module, rest);
+    }
+    // `super.X` from inside the crate root resolves to `core.X`.
+    if let Some(rest) = trimmed.strip_prefix("super.") {
+        // Pragmatically: `super` refers to the crate root in stdlib
+        // headers, where the current module's root segment is `core`.
+        let root = current_module.split('.').next().unwrap_or("core");
+        return format!("{}.{}", root, rest);
+    }
+    if trimmed == "super" {
+        let root = current_module.split('.').next().unwrap_or("core");
+        return root.to_string();
+    }
+    trimmed.to_string()
 }
 
 /// Split a comma-separated list while respecting brace/paren nesting.
