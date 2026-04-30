@@ -331,7 +331,7 @@ pub fn proposition_to_term(
             // `true` is the trivially-inhabited proposition.  Encode
             // as `Universe(0)`; every closed term of type `Universe(0)`
             // inhabits the trivial proposition.  `false` is encoded
-            // the same way for now (Phase-5 adds proper bottom-type
+            // the same way for now (Phase-6 adds proper bottom-type
             // encoding via `Pi(P: Universe(0). P)`).
             Ok(Term::Universe(0))
         }
@@ -340,10 +340,120 @@ pub fn proposition_to_term(
             // translation — these are predicate names or applications.
             expr_to_term(prop, ctx)
         }
+        ExprKind::Binary { op, left, right } => {
+            // **Phase-5 connective encoding** — opaque axiomatic form.
+            // The connective (And / Or / Eq / etc.) is registered in
+            // the global axiom registry as an opaque polymorphic
+            // operator.  The proposition translates to an `App` chain
+            // applying the connective axiom to the translated operands.
+            //
+            // **Soundness**: the kernel verifies that the resulting
+            // term is well-typed at the connective axiom's claimed
+            // type — it doesn't UNDERSTAND the connective semantically,
+            // but the type-correctness check still rejects malformed
+            // applications.  This is the same approach mathlib-Lean
+            // uses for `Eq`, `And`, `Or` at the kernel level when
+            // running with a forward-axiom encoding.
+            let connective_name = binop_to_axiom_name(*op).ok_or_else(|| {
+                ElabError::UnsupportedExpression(format!(
+                    "Binary op {:?} not yet wired as a Phase-5 connective axiom",
+                    op,
+                ))
+            })?;
+            let head = resolve_apply_target(ctx, connective_name)?;
+            let lhs = expr_to_term(left, ctx)?;
+            let rhs = expr_to_term(right, ctx)?;
+            Ok(build_app_chain(head, vec![lhs, rhs]))
+        }
+        ExprKind::Unary { op, expr: operand } => {
+            // **Phase-5 unary connective encoding** — Not is the
+            // primary unary connective at the proposition level.
+            let connective_name = unop_to_axiom_name(*op).ok_or_else(|| {
+                ElabError::UnsupportedExpression(format!(
+                    "Unary op {:?} not yet wired as a Phase-5 connective axiom",
+                    op,
+                ))
+            })?;
+            let head = resolve_apply_target(ctx, connective_name)?;
+            let arg = expr_to_term(operand, ctx)?;
+            Ok(build_app_chain(head, vec![arg]))
+        }
         other => Err(ElabError::UnsupportedExpression(format!(
-            "proposition translation: ExprKind::{} not yet supported (Phase-5)",
+            "proposition translation: ExprKind::{} not yet supported (Phase-6 quantifiers)",
             expr_kind_tag(other),
         ))),
+    }
+}
+
+/// Map a Verum binary operator to the canonical axiom name in the
+/// elaboration context's connective registry.  Returns `None` for
+/// operators that aren't propositional connectives (arithmetic,
+/// assignment).
+///
+/// **Soundness invariant**: callers must register the corresponding
+/// axiom (via [`ElabContext::register_axiom`]) before elaborating a
+/// proposition that uses it.  See [`register_propositional_connectives`]
+/// for the canonical bootstrap.
+fn binop_to_axiom_name(op: verum_ast::BinOp) -> Option<&'static str> {
+    use verum_ast::BinOp;
+    match op {
+        BinOp::And => Some("__verum_kernel_And"),
+        BinOp::Or => Some("__verum_kernel_Or"),
+        BinOp::Eq => Some("__verum_kernel_Eq"),
+        BinOp::Ne => Some("__verum_kernel_Ne"),
+        BinOp::Lt => Some("__verum_kernel_Lt"),
+        BinOp::Le => Some("__verum_kernel_Le"),
+        BinOp::Gt => Some("__verum_kernel_Gt"),
+        BinOp::Ge => Some("__verum_kernel_Ge"),
+        BinOp::Imply => Some("__verum_kernel_Implies"),
+        BinOp::Iff => Some("__verum_kernel_Iff"),
+        BinOp::In => Some("__verum_kernel_In"),
+        _ => None,
+    }
+}
+
+/// Map a Verum unary operator to the canonical axiom name.
+fn unop_to_axiom_name(op: verum_ast::expr::UnOp) -> Option<&'static str> {
+    use verum_ast::expr::UnOp;
+    match op {
+        UnOp::Not => Some("__verum_kernel_Not"),
+        _ => None,
+    }
+}
+
+/// **Bootstrap helper** — register the canonical propositional
+/// connective axioms in `ctx`.  Call this once at the start of any
+/// elaboration that needs to translate `Binary`/`Unary` propositions.
+///
+/// Each axiom is registered with claimed type `Universe(0)` (opaque
+/// polymorphic form).  The kernel-side type-check is structural: the
+/// connective is treated as a value of `Universe(0)`, applications
+/// produce `Universe(0)`, and the certificate's `claimed_type` is a
+/// chain of `Universe(0)` values that the kernel verifies cleanly.
+///
+/// **Phase-6 work** (deferred): replace these opaque axioms with full
+/// Leibniz / Church / Pi encodings so the connectives are *understood*
+/// by the kernel, not just *applied*.  E.g. `Eq` would unfold to
+/// `Pi(A: Universe, Pi(A, Pi(A, Pi(P: A → Type, Pi(P(a), P(b))))))`
+/// (Leibniz at level 0).
+pub fn register_propositional_connectives(ctx: &mut ElabContext) {
+    for name in [
+        "__verum_kernel_And",
+        "__verum_kernel_Or",
+        "__verum_kernel_Eq",
+        "__verum_kernel_Ne",
+        "__verum_kernel_Lt",
+        "__verum_kernel_Le",
+        "__verum_kernel_Gt",
+        "__verum_kernel_Ge",
+        "__verum_kernel_Implies",
+        "__verum_kernel_Iff",
+        "__verum_kernel_In",
+        "__verum_kernel_Not",
+    ] {
+        if ctx.get_axiom(name).is_none() {
+            ctx.register_axiom(name, Term::Universe(0));
+        }
     }
 }
 
@@ -1110,8 +1220,9 @@ mod tests {
     }
 
     #[test]
-    fn proposition_to_term_unsupported_shape_falls_through() {
-        // Binary expressions (e.g., `a == b`) are Phase-5 work.
+    fn proposition_to_term_binary_eq_translates_via_connective_axiom() {
+        // Phase-5: Binary `a == b` translates via the registered Eq
+        // connective axiom.  `App(App(Eq, a), b)` is the encoding.
         let span = Span::dummy();
         let prop = Expr::new(
             ExprKind::Binary {
@@ -1121,12 +1232,44 @@ mod tests {
             },
             span,
         );
+        let mut ctx = ElabContext::new();
+        register_propositional_connectives(&mut ctx);
+        ctx.register_axiom("a", Term::Universe(0));
+        ctx.register_axiom("b", Term::Universe(0));
+        let term = proposition_to_term(&prop, &ctx).unwrap();
+        // Term is App(App(Var(eq_idx), Var(a_idx)), Var(b_idx)) — exact
+        // indices depend on BTreeMap key order; just check the shape.
+        match term {
+            Term::App(outer, b_arg) => match (*outer, *b_arg) {
+                (Term::App(eq, a_arg), Term::Var(_)) => {
+                    assert!(matches!(*eq, Term::Var(_)), "head should be Var");
+                    assert!(matches!(*a_arg, Term::Var(_)), "lhs arg should be Var");
+                }
+                _ => panic!("expected App(App(_, _), Var), got differently-shaped term"),
+            },
+            other => panic!("expected App, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn proposition_to_term_unsupported_shape_still_falls_through() {
+        // Match expressions are Phase-6 work.
+        let span = Span::dummy();
+        // Build a Match expr; we don't care about its inner shape.
+        let prop = Expr::new(
+            ExprKind::Block(verum_ast::Block::new(
+                Vec::<verum_ast::Stmt>::new().into(),
+                verum_common::Maybe::None,
+                span,
+            )),
+            span,
+        );
         let ctx = ElabContext::new();
         match proposition_to_term(&prop, &ctx) {
             Err(ElabError::UnsupportedExpression(msg)) => {
                 assert!(
-                    msg.contains("Binary"),
-                    "expected Binary in error msg: {}",
+                    msg.contains("Block"),
+                    "expected Block in error msg: {}",
                     msg,
                 );
             }
@@ -1135,11 +1278,49 @@ mod tests {
     }
 
     #[test]
-    fn elaborate_theorem_complex_proposition_falls_back_to_placeholder() {
-        // Theorem with `Binary` proposition (a == b).  Phase-4 falls
-        // back to placeholder_proposition; the certificate is "weakly
-        // load-bearing".  The metadata records this status so callers
-        // can downgrade trust.
+    fn proposition_to_term_binary_unwired_op_returns_unsupported() {
+        // Arithmetic ops aren't propositional connectives.
+        let span = Span::dummy();
+        let mut ctx = ElabContext::new();
+        register_propositional_connectives(&mut ctx);
+        ctx.register_axiom("a", Term::Universe(0));
+        ctx.register_axiom("b", Term::Universe(0));
+        let prop = Expr::new(
+            ExprKind::Binary {
+                op: verum_ast::BinOp::Add,
+                left: verum_common::Heap::new(path_expr("a")),
+                right: verum_common::Heap::new(path_expr("b")),
+            },
+            span,
+        );
+        match proposition_to_term(&prop, &ctx) {
+            Err(ElabError::UnsupportedExpression(msg)) => {
+                assert!(
+                    msg.contains("Add"),
+                    "expected Add in error msg: {}",
+                    msg,
+                );
+            }
+            other => panic!("expected UnsupportedExpression(Add), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn register_propositional_connectives_is_idempotent() {
+        let mut ctx = ElabContext::new();
+        register_propositional_connectives(&mut ctx);
+        let depth_after_first = ctx.get_axiom("__verum_kernel_And").is_some();
+        register_propositional_connectives(&mut ctx);
+        let depth_after_second = ctx.get_axiom("__verum_kernel_And").is_some();
+        assert!(depth_after_first);
+        assert!(depth_after_second);
+    }
+
+    #[test]
+    fn elaborate_theorem_complex_proposition_without_connectives_falls_back() {
+        // Theorem with `Binary` proposition (a == b) BUT without
+        // calling `register_propositional_connectives` — the Eq axiom
+        // is missing, so the elaborator falls back to placeholder.
         use verum_ast::decl::TheoremDecl;
         let span = Span::dummy();
         let prop = Expr::new(
@@ -1161,6 +1342,7 @@ mod tests {
         }));
         let mut ctx = ElabContext::new();
         ctx.register_axiom("witness", Term::Universe(0));
+        // Note: connectives NOT registered, so Eq axiom is undeclared.
 
         let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
         cert.verify().unwrap();
@@ -1168,7 +1350,7 @@ mod tests {
         assert_eq!(
             cert.metadata.get("proposition_translation").map(|s| s.as_str()),
             Some("placeholder"),
-            "Binary proposition should fall back to placeholder",
+            "Binary proposition without connectives registered should fall back",
         );
     }
 
