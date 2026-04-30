@@ -170,7 +170,10 @@ fn walk_and_elaborate(
     out_dir: &Path,
 ) -> Result<Vec<ElaborationRow>> {
     use verum_common::span::FileId;
-    use verum_fast_parser::FastParser;
+    // verum_parser re-exports FastParser at the crate root; verum_cli
+    // depends on verum_parser via [dependencies] but only on
+    // verum_fast_parser via [dev-dependencies], so use the re-export.
+    use verum_parser::FastParser;
 
     let source = std::fs::read_to_string(source_path).map_err(|e| {
         CliError::custom(format!("read {}: {}", source_path.display(), e))
@@ -220,7 +223,7 @@ fn walk_and_elaborate(
         register_propositional_connectives(&mut ctx);
         register_kernel_v0_lemmas(&mut ctx);
         register_kernel_bridge_dispatchers(&mut ctx);
-        let row = match elaborate_theorem(theorem, &mut ctx) {
+        let row = match elaborate_theorem(&theorem, &mut ctx) {
             Ok(cert) => {
                 let vproof_path = out_dir.join(format!("{}.vproof", name));
                 let json = serde_json::to_string_pretty(&cert).map_err(|e| {
@@ -242,7 +245,7 @@ fn walk_and_elaborate(
                 // proposition_to_term (the matching certificate
                 // metadata records `claimed_type_source: placeholder`).
                 let vgoal_path =
-                    match from_theorem_decl(theorem, TheoremKind::Theorem, &ctx) {
+                    match from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx) {
                         Ok(goal) => {
                             let path = out_dir.join(format!("{}.vgoal", name));
                             let goal_json = serde_json::to_string_pretty(&goal)
