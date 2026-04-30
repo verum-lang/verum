@@ -20,8 +20,13 @@
 
 use std::path::PathBuf;
 
+use std::time::Instant;
+
 use anyhow::Result;
 use tracing::{debug, warn};
+
+use verum_ast::Module;
+use verum_common::Text;
 
 use super::CompilationPipeline;
 
