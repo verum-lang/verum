@@ -154,71 +154,84 @@ impl AuditRegistry {
 impl Default for AuditRegistry {
     fn default() -> Self {
         let mut r = Self::new();
-        // Initial migration batch — proof of concept covering the
-        // most-used L4 gates.  Future passes wrap the remaining
-        // ~40 ad-hoc `audit_X_with_format` functions; each is one
-        // unit struct + impl AuditGate per gate.
+        // Full migration of all 24 audit gates.  Each gate is one
+        // unit struct + one `impl AuditGate` block; the trait impl
+        // routes through the existing `audit::audit_*_with_format`
+        // function, so all current behaviour is preserved.
+        r.register(Box::new(AccessibilityGate));
+        r.register(Box::new(ApplyGraphGate));
+        r.register(Box::new(BridgeAdmitsGate));
+        r.register(Box::new(BridgeDischargeGate));
+        r.register(Box::new(BundleGate));
+        r.register(Box::new(CoherentGate));
+        r.register(Box::new(CoordGate));
+        r.register(Box::new(CoordConsistencyGate));
+        r.register(Box::new(CrossFormatRoundtripGate));
+        r.register(Box::new(EpsilonGate));
         r.register(Box::new(FrameworkAxiomsGate));
         r.register(Box::new(FrameworkConflictsGate));
+        r.register(Box::new(FrameworkSoundnessGate));
+        r.register(Box::new(HygieneGate));
+        r.register(Box::new(HygieneStrictGate));
+        r.register(Box::new(KernelRechecksGate));
         r.register(Box::new(KernelSoundnessGate));
-        r.register(Box::new(BridgeDischargeGate));
+        r.register(Box::new(LadderMonotonicityGate));
+        r.register(Box::new(Owl2ClassifyGate));
+        r.register(Box::new(ProofHonestyGate));
+        r.register(Box::new(ProofTermLibraryGate));
+        r.register(Box::new(RoundTripGate));
+        r.register(Box::new(SignaturesGate));
         r.register(Box::new(SoundnessIouGate));
         r
     }
 }
 
 // =============================================================================
-// Initial migration batch — wrappers over existing free functions.
+// Audit gates — one struct + impl per gate.  Each impl wraps the
+// existing `audit::audit_*_with_format` free function; future
+// inlining passes can move the body and delete the free function.
 // =============================================================================
 
-/// `verum audit --framework-axioms`
-pub struct FrameworkAxiomsGate;
-impl AuditGate for FrameworkAxiomsGate {
-    fn name(&self) -> &'static str {
-        "framework-axioms"
-    }
+/// `verum audit --accessibility` — accessibility audit of public surfaces.
+pub struct AccessibilityGate;
+impl AuditGate for AccessibilityGate {
+    fn name(&self) -> &'static str { "accessibility" }
     fn description(&self) -> &'static str {
-        "Enumerate every @framework(<corpus>, \"<citation>\") marker in the project, grouping by corpus."
+        "Accessibility audit: report public surfaces missing visibility annotations."
     }
     fn run(&self, format: AuditFormat) -> Result<()> {
-        super::audit::audit_framework_axioms_with_format(format)
+        super::audit::audit_accessibility_with_format(format)
     }
 }
 
-/// `verum audit --framework-conflicts`
-pub struct FrameworkConflictsGate;
-impl AuditGate for FrameworkConflictsGate {
-    fn name(&self) -> &'static str {
-        "framework-conflicts"
-    }
+/// `verum audit --apply-graph` — transitive bridge-discharge walker.
+pub struct ApplyGraphGate;
+impl AuditGate for ApplyGraphGate {
+    fn name(&self) -> &'static str { "apply-graph" }
     fn description(&self) -> &'static str {
-        "Detect contradictory framework axioms (e.g., univalence + uip declared simultaneously)."
+        "Walk the apply-graph DFS-style; classify every leaf (kernel_strict / framework_axiom / placeholder_axiom / unresolved)."
     }
     fn run(&self, format: AuditFormat) -> Result<()> {
-        super::audit::audit_framework_conflicts_with_format(format)
+        super::audit::audit_apply_graph_with_format(format)
     }
 }
 
-/// `verum audit --kernel-soundness`
-pub struct KernelSoundnessGate;
-impl AuditGate for KernelSoundnessGate {
-    fn name(&self) -> &'static str {
-        "kernel-soundness"
-    }
+/// `verum audit --bridge-admits` — track @kernel_discharge admit roster.
+pub struct BridgeAdmitsGate;
+impl AuditGate for BridgeAdmitsGate {
+    fn name(&self) -> &'static str { "bridge-admits" }
     fn description(&self) -> &'static str {
-        "Walk every kernel rule's per-rule soundness lemma; report Proved / Admitted / DischargedByFramework status."
+        "Enumerate every @kernel_discharge admit, listing the bridging dispatcher intrinsic and its discharge status."
     }
     fn run(&self, format: AuditFormat) -> Result<()> {
-        super::audit::audit_kernel_soundness_with_format(format)
+        super::audit::audit_bridge_admits_with_format(format)
     }
 }
 
-/// `verum audit --bridge-discharge`
+/// `verum audit --bridge-discharge` — kernel-bridge resolution audit.
 pub struct BridgeDischargeGate;
 impl AuditGate for BridgeDischargeGate {
-    fn name(&self) -> &'static str {
-        "bridge-discharge"
-    }
+    fn name(&self) -> &'static str { "bridge-discharge" }
     fn description(&self) -> &'static str {
         "Audit the @kernel_discharge bridge between Verum theorems and the dispatcher's intrinsic verifiers."
     }
@@ -227,12 +240,238 @@ impl AuditGate for BridgeDischargeGate {
     }
 }
 
-/// `verum audit --soundness-iou`
+/// `verum audit --bundle` — composed L4-load-bearing dispatcher.
+pub struct BundleGate;
+impl AuditGate for BundleGate {
+    fn name(&self) -> &'static str { "bundle" }
+    fn description(&self) -> &'static str {
+        "Composed audit bundle: runs every load-bearing gate in dependency order; emits unified verdict."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_bundle_with_format(format)
+    }
+}
+
+/// `verum audit --coherent` — coherence-condition audit.
+pub struct CoherentGate;
+impl AuditGate for CoherentGate {
+    fn name(&self) -> &'static str { "coherent" }
+    fn description(&self) -> &'static str {
+        "Audit categorical coherence conditions (associator / unitor / pentagon / triangle)."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_coherent_with_format(format)
+    }
+}
+
+/// `verum audit --coord` — coordinate-system audit.
+pub struct CoordGate;
+impl AuditGate for CoordGate {
+    fn name(&self) -> &'static str { "coord" }
+    fn description(&self) -> &'static str {
+        "Coordinate-system audit: verify diakrisis / cohesive-triple / framework consistency."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_coord_with_format(format)
+    }
+}
+
+/// `verum audit --coord-consistency` — coordinate consistency audit.
+pub struct CoordConsistencyGate;
+impl AuditGate for CoordConsistencyGate {
+    fn name(&self) -> &'static str { "coord-consistency" }
+    fn description(&self) -> &'static str {
+        "Coordinate-consistency audit: cross-coordinate-system invariants."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_coord_consistency_with_format(format)
+    }
+}
+
+/// `verum audit --cross-format-roundtrip` — emit + foreign re-check.
+pub struct CrossFormatRoundtripGate;
+impl AuditGate for CrossFormatRoundtripGate {
+    fn name(&self) -> &'static str { "cross-format-roundtrip" }
+    fn description(&self) -> &'static str {
+        "Emit corpus theorems to Coq/Lean; re-check via the foreign toolchain (native or Docker)."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_cross_format_roundtrip_with_format(format)
+    }
+}
+
+/// `verum audit --epsilon` — ε-parameter audit.
+pub struct EpsilonGate;
+impl AuditGate for EpsilonGate {
+    fn name(&self) -> &'static str { "epsilon" }
+    fn description(&self) -> &'static str {
+        "ε-parameter audit: scan diakrisis epsilon-rule applications for consistency."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_epsilon_with_format(format)
+    }
+}
+
+/// `verum audit --framework-axioms` — @framework citation enumeration.
+pub struct FrameworkAxiomsGate;
+impl AuditGate for FrameworkAxiomsGate {
+    fn name(&self) -> &'static str { "framework-axioms" }
+    fn description(&self) -> &'static str {
+        "Enumerate every @framework(<corpus>, \"<citation>\") marker in the project, grouping by corpus."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_framework_axioms_with_format(format)
+    }
+}
+
+/// `verum audit --framework-conflicts` — contradictory-axiom detector.
+pub struct FrameworkConflictsGate;
+impl AuditGate for FrameworkConflictsGate {
+    fn name(&self) -> &'static str { "framework-conflicts" }
+    fn description(&self) -> &'static str {
+        "Detect contradictory framework axioms (e.g. univalence + uip declared simultaneously)."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_framework_conflicts_with_format(format)
+    }
+}
+
+/// `verum audit --framework-soundness` — framework citation soundness.
+pub struct FrameworkSoundnessGate;
+impl AuditGate for FrameworkSoundnessGate {
+    fn name(&self) -> &'static str { "framework-soundness" }
+    fn description(&self) -> &'static str {
+        "Soundness audit: every @framework citation resolves to a legitimate upstream proof or axiom."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_framework_soundness_with_format(format)
+    }
+}
+
+/// `verum audit --hygiene` — macro-hygiene audit.
+pub struct HygieneGate;
+impl AuditGate for HygieneGate {
+    fn name(&self) -> &'static str { "hygiene" }
+    fn description(&self) -> &'static str {
+        "Macro-hygiene audit: detect accidental capture / undeclared captures in macro expansions."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_hygiene_with_format(format)
+    }
+}
+
+/// `verum audit --hygiene-strict` — strict macro-hygiene audit.
+pub struct HygieneStrictGate;
+impl AuditGate for HygieneStrictGate {
+    fn name(&self) -> &'static str { "hygiene-strict" }
+    fn description(&self) -> &'static str {
+        "Strict macro-hygiene audit: same as --hygiene but rejects on every violation (no warnings)."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_hygiene_strict_with_format(format)
+    }
+}
+
+/// `verum audit --kernel-recheck` — kernel re-check audit.
+pub struct KernelRechecksGate;
+impl AuditGate for KernelRechecksGate {
+    fn name(&self) -> &'static str { "kernel-recheck" }
+    fn description(&self) -> &'static str {
+        "Kernel re-check audit: walk every theorem with @verify(formal) and re-discharge its proof body via the kernel."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_kernel_recheck_with_format(format)
+    }
+}
+
+/// `verum audit --kernel-soundness` — per-rule soundness-lemma status.
+pub struct KernelSoundnessGate;
+impl AuditGate for KernelSoundnessGate {
+    fn name(&self) -> &'static str { "kernel-soundness" }
+    fn description(&self) -> &'static str {
+        "Walk every kernel rule's per-rule soundness lemma; report Proved / Admitted / DischargedByFramework status."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_kernel_soundness_with_format(format)
+    }
+}
+
+/// `verum audit --ladder-monotonicity` — verify-ladder monotonicity.
+pub struct LadderMonotonicityGate;
+impl AuditGate for LadderMonotonicityGate {
+    fn name(&self) -> &'static str { "ladder-monotonicity" }
+    fn description(&self) -> &'static str {
+        "Verification-ladder monotonicity: no theorem proves at L_n if it doesn't also prove at L_{n+1}."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_ladder_monotonicity_with_format(format)
+    }
+}
+
+/// `verum audit --owl2-classify` — OWL2 ontology classification audit.
+pub struct Owl2ClassifyGate;
+impl AuditGate for Owl2ClassifyGate {
+    fn name(&self) -> &'static str { "owl2-classify" }
+    fn description(&self) -> &'static str {
+        "OWL2 classification audit: walk ontology files and report DL-fragment classification."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_owl2_classify_with_format(format)
+    }
+}
+
+/// `verum audit --proof-honesty` — admitted-proof reporting.
+pub struct ProofHonestyGate;
+impl AuditGate for ProofHonestyGate {
+    fn name(&self) -> &'static str { "proof-honesty" }
+    fn description(&self) -> &'static str {
+        "Proof-honesty audit: every theorem with `Admitted.`/`sorry` carries a structured admit reason."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_proof_honesty_with_format(format)
+    }
+}
+
+/// `verum audit --proof-term-library` — canonical-certificate library audit.
+pub struct ProofTermLibraryGate;
+impl AuditGate for ProofTermLibraryGate {
+    fn name(&self) -> &'static str { "proof-term-library" }
+    fn description(&self) -> &'static str {
+        "Walk core/verify/proof_term_examples/; verify every canonical certificate via the minimal kernel."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_proof_term_library_with_format(format)
+    }
+}
+
+/// `verum audit --round-trip` — emit + re-import round-trip audit.
+pub struct RoundTripGate;
+impl AuditGate for RoundTripGate {
+    fn name(&self) -> &'static str { "round-trip" }
+    fn description(&self) -> &'static str {
+        "Round-trip audit: emit corpus theorems to a foreign format, re-import, and confirm equivalence."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_round_trip_with_format(format)
+    }
+}
+
+/// `verum audit --signatures` — provenance-signature audit.
+pub struct SignaturesGate;
+impl AuditGate for SignaturesGate {
+    fn name(&self) -> &'static str { "signatures" }
+    fn description(&self) -> &'static str {
+        "Verify every cross-format-emitted file's `verum_signature: <kernel_version>:<blake3>` header pins to the source state."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_signatures_with_format(format)
+    }
+}
+
+/// `verum audit --soundness-iou` — IOU dashboard.
 pub struct SoundnessIouGate;
 impl AuditGate for SoundnessIouGate {
-    fn name(&self) -> &'static str {
-        "soundness-iou"
-    }
+    fn name(&self) -> &'static str { "soundness-iou" }
     fn description(&self) -> &'static str {
         "IOU dashboard: per-kernel-rule soundness-lemma admit reasons, grouped by RuleCategory."
     }
@@ -241,37 +480,46 @@ impl AuditGate for SoundnessIouGate {
     }
 }
 
-// =============================================================================
-// Migration TODO
-// =============================================================================
-//
-// The remaining ~40 audit-gate free functions in `audit.rs` follow
-// the same wrapper pattern.  Each migration is mechanical:
-//
-//   1. Add a unit struct: `pub struct <Name>Gate;`
-//   2. `impl AuditGate for <Name>Gate` with `name`, `description`,
-//      `run` methods.
-//   3. Register the gate in `AuditRegistry::default()`.
-//
-// Migrated batches should land as separate commits under
-// `feat(verum_cli/audit_gate): migrate <gate-name> (#169)`.
-//
-// Once every gate is migrated, the inlining pass can move the
-// gate body from the free function into the trait impl and
-// delete the free function — closing the refactor.
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn registry_default_includes_initial_batch() {
+    fn registry_default_includes_every_gate() {
         let r = AuditRegistry::default();
-        assert!(r.get("framework-axioms").is_some());
-        assert!(r.get("framework-conflicts").is_some());
-        assert!(r.get("kernel-soundness").is_some());
-        assert!(r.get("bridge-discharge").is_some());
-        assert!(r.get("soundness-iou").is_some());
+        for name in [
+            "accessibility",
+            "apply-graph",
+            "bridge-admits",
+            "bridge-discharge",
+            "bundle",
+            "coherent",
+            "coord",
+            "coord-consistency",
+            "cross-format-roundtrip",
+            "epsilon",
+            "framework-axioms",
+            "framework-conflicts",
+            "framework-soundness",
+            "hygiene",
+            "hygiene-strict",
+            "kernel-recheck",
+            "kernel-soundness",
+            "ladder-monotonicity",
+            "owl2-classify",
+            "proof-honesty",
+            "proof-term-library",
+            "round-trip",
+            "signatures",
+            "soundness-iou",
+        ] {
+            assert!(
+                r.get(name).is_some(),
+                "default registry must include `{}`",
+                name,
+            );
+        }
+        assert_eq!(r.len(), 24, "expected 24 gates in the default registry");
     }
 
     #[test]
@@ -289,7 +537,7 @@ mod tests {
     fn registry_list_returns_name_description_pairs() {
         let r = AuditRegistry::default();
         let entries = r.list();
-        assert_eq!(entries.len(), 5);
+        assert_eq!(entries.len(), 24);
         for (name, desc) in &entries {
             assert!(!name.is_empty());
             assert!(!desc.is_empty());
@@ -303,8 +551,8 @@ mod tests {
         for (name, _) in r.list() {
             for c in name.chars() {
                 assert!(
-                    c.is_ascii_lowercase() || c == '-',
-                    "gate name '{}' should be kebab-case",
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-',
+                    "gate name '{}' should be lowercase-kebab-case (digits allowed)",
                     name,
                 );
             }
