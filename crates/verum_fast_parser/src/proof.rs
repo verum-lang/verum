@@ -1688,10 +1688,104 @@ impl<'a> RecursiveParser<'a> {
             | Some(TokenKind::Ident(_))
             | Some(TokenKind::LParen)
             | Some(TokenKind::LBrace) => {
-                let tactic = self.parse_tactic_expr()?;
-                // Tactic applications don't need the semicolon consumed here
-                // because the caller (parse_structured_proof_body) already handles optional semicolons
-                ProofStepKind::Tactic(tactic)
+                // Disambiguate Ident/LParen/LBrace-leading proof steps:
+                // they could be EITHER a tactic call (`my_tactic(args)`,
+                // `(...) ; ...`, `{ proof_block }`) OR a bare expression
+                // step (`bound_run == direct_run`, `lhs.value == rhs.value &&
+                // lhs.output == rhs.output`, etc.).
+                //
+                // Pre-fix `parse_tactic_expr` consumed the leading path
+                // as a Named tactic and then the proof-step loop failed
+                // when it hit `==` / `!=` / `<` / `<=` / `>` / `>=` /
+                // `&&` / `||` — surfacing as
+                //
+                //   "expected proof step (have, show, suffices, let,
+                //    obtain, calc, cases, or tactic)"
+                //
+                // for stdlib monad-law theorems like
+                // `core.action.monads.reader::reader_left_identity`
+                // (proof tail `bound_run_at_env == direct_run_at_env`)
+                // and `core.action.monads.writer::writer_left_identity`
+                // (tail `bound.value == rhs.value && bound.output ==
+                // rhs.output`). Lenient-skip codegen swallowed the
+                // warnings at stdlib load time.
+                //
+                // Strategy: speculatively try `optional(parse_expr)`.
+                // If it succeeds AND consumes a binary
+                // comparison/logical operator anywhere in its span,
+                // use the bare-expression-step path. Otherwise rewind
+                // and use the tactic path. Detecting "consumed a
+                // binop" reliably means walking the resulting Expr
+                // tree — but a cheaper proxy is to compare the start
+                // and end positions: if the expression spans more
+                // tokens than parse_tactic_expr would have (a path
+                // followed by optional args), it's an expression.
+                //
+                // Simplest mechanical proxy: scan from current
+                // position forward looking for a top-level binop
+                // before the next `;` / `}` / proof-step keyword.
+                // We bound the scan with a paren/bracket depth
+                // counter so we don't get fooled by `f(x == y)`.
+                let mut depth_paren = 0i32;
+                let mut depth_brack = 0i32;
+                let mut depth_brace = 0i32;
+                let mut found_binop_at_top = false;
+                let mut probe = 0usize;
+                loop {
+                    let kind = self.stream.peek_nth_kind(probe);
+                    match kind {
+                        None
+                        | Some(TokenKind::Semicolon)
+                        | Some(TokenKind::Comma) => break,
+                        Some(TokenKind::LParen) => depth_paren += 1,
+                        Some(TokenKind::RParen) => {
+                            depth_paren -= 1;
+                            if depth_paren < 0 { break; }
+                        }
+                        Some(TokenKind::LBracket) => depth_brack += 1,
+                        Some(TokenKind::RBracket) => {
+                            depth_brack -= 1;
+                            if depth_brack < 0 { break; }
+                        }
+                        Some(TokenKind::LBrace) => depth_brace += 1,
+                        Some(TokenKind::RBrace) => {
+                            depth_brace -= 1;
+                            if depth_brace < 0 { break; }
+                        }
+                        Some(TokenKind::EqEq)
+                        | Some(TokenKind::BangEq)
+                        | Some(TokenKind::Lt)
+                        | Some(TokenKind::LtEq)
+                        | Some(TokenKind::Gt)
+                        | Some(TokenKind::GtEq)
+                        | Some(TokenKind::AmpersandAmpersand)
+                        | Some(TokenKind::PipePipe) => {
+                            if depth_paren == 0 && depth_brack == 0 && depth_brace == 0 {
+                                found_binop_at_top = true;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    probe += 1;
+                    // Bound the scan so we don't traverse the entire
+                    // remaining stream on huge tactic expressions.
+                    if probe > 64 { break; }
+                }
+                if found_binop_at_top {
+                    let expr = self.parse_expr()?;
+                    self.stream.consume(&TokenKind::Semicolon);
+                    ProofStepKind::Tactic(TacticExpr::Named {
+                        name: Ident::new(Text::from("_expr"), self.stream.current_span()),
+                        args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
+                    })
+                } else {
+                    let tactic = self.parse_tactic_expr()?;
+                    // Tactic applications don't need the semicolon consumed here
+                    // because the caller (parse_structured_proof_body) already handles optional semicolons
+                    ProofStepKind::Tactic(tactic)
+                }
             }
 
             // Fallback: try to parse as an expression-based proof step
