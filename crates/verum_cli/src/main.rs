@@ -421,6 +421,36 @@ enum Commands {
         file: Text,
     },
 
+    /// Elaborate Verum theorems into kernel-checkable certificates
+    /// (#164).  Walks every theorem/lemma/corollary in `<file.vr>`,
+    /// runs `tactic_elaborator::elaborate_theorem` on each, and emits
+    /// `<theorem-name>.vproof` files into `<output-dir>` (default:
+    /// `<source-dir>/elaborated/`).
+    ///
+    /// **The fundamental closure** — pre-#164 the kernel checker
+    /// (`verum check-proof`, 796 LOC trust base) was theoretically
+    /// trustworthy but practically unused: no real Verum theorem
+    /// produced a `Certificate`.  Post-#164 this command produces
+    /// real `.vproof` files from Verum source that
+    /// `verum check-proof` re-verifies independently.  The de Bruijn
+    /// criterion holds end-to-end.
+    ///
+    /// Phase-1+2 supports `proof { apply <lemma>(args); }` bodies
+    /// (every `kernel_v0/lemmas/` stub + every `@delegate` theorem
+    /// from #146).  Other tactic forms are gracefully skipped with
+    /// a structured `ElabError::UnsupportedTactic(<variant>)`
+    /// diagnostic.  Phase-3 expands coverage to `Seq` / `Intro` /
+    /// `Rewrite`.
+    ElaborateProof {
+        /// Path to the `.vr` source file.
+        #[clap(value_name = "FILE")]
+        file: Text,
+        /// Output directory for emitted `.vproof` files.  Default:
+        /// `<source-dir>/elaborated/`.
+        #[clap(long, value_name = "DIR")]
+        output_dir: Option<Text>,
+    },
+
     /// Format source code
     Fmt {
         #[clap(long)]
@@ -2760,6 +2790,12 @@ fn run_command(cli: Cli) -> Result<()> {
         }
         Commands::CheckProof { file } => {
             commands::check_proof::execute(file.as_str())
+        }
+        Commands::ElaborateProof { file, output_dir } => {
+            commands::elaborate_proof::execute(
+                file.as_str(),
+                output_dir.as_ref().map(|s| s.as_str()),
+            )
         }
         Commands::Fmt {
             check,

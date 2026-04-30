@@ -6,6 +6,7 @@ pub mod build;
 pub mod check;
 pub mod check_proof;
 pub mod clean;
+pub mod elaborate_proof;
 pub mod config;
 pub mod deps;
 pub mod diagnose;
