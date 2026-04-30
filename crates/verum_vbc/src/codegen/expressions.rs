@@ -12565,6 +12565,49 @@ impl VbcCodegen {
                 }
             }
             ExprKind::Paren(inner) => self.infer_expr_type_name(inner),
+            // Suffix-typed literal — `123_u64`, `-1_i32`, `4_usize`, etc.
+            // Without this arm, `18_446_744_073_709_551_615_u64 / 10_u64`
+            // inferred neither operand as `UInt64`, so the
+            // `BinOp::Div` path's unsigned-aware gate
+            // (`is_unsigned_int_type_name`) chose signed `Div` and
+            // `(u64::MAX) / 10` collapsed back to `0` even though the
+            // `BinaryIntOp::UDiv` opcode existed. The real fix is to
+            // surface the suffix at type-inference time.
+            //
+            // Float literals carry the same shape via `FloatLit.suffix`;
+            // Bool / Char / Text are never unsigned-intish, so they
+            // fall through to `None` (no suffix → no narrower type).
+            ExprKind::Literal(lit) => {
+                use verum_ast::literal::{LiteralKind, IntSuffix};
+                match &lit.kind {
+                    LiteralKind::Int(int_lit) => {
+                        match int_lit.suffix.as_ref() {
+                            Some(IntSuffix::I8)    => Some("Int8".to_string()),
+                            Some(IntSuffix::I16)   => Some("Int16".to_string()),
+                            Some(IntSuffix::I32)   => Some("Int32".to_string()),
+                            Some(IntSuffix::I64)   => Some("Int64".to_string()),
+                            Some(IntSuffix::I128)  => Some("Int128".to_string()),
+                            Some(IntSuffix::Isize) => Some("ISize".to_string()),
+                            Some(IntSuffix::U8)    => Some("UInt8".to_string()),
+                            Some(IntSuffix::U16)   => Some("UInt16".to_string()),
+                            Some(IntSuffix::U32)   => Some("UInt32".to_string()),
+                            Some(IntSuffix::U64)   => Some("UInt64".to_string()),
+                            Some(IntSuffix::U128)  => Some("UInt128".to_string()),
+                            Some(IntSuffix::Usize) => Some("USize".to_string()),
+                            // Custom unit suffix (e.g. `5_km`, `100_ms`) —
+                            // not an integer-precision tag; let downstream
+                            // dimensional-typing handle it.
+                            Some(IntSuffix::Custom(_)) => None,
+                            None => None,
+                        }
+                    }
+                    LiteralKind::Float(_) => None,
+                    LiteralKind::Bool(_) => Some("Bool".to_string()),
+                    LiteralKind::Char(_) => Some("Char".to_string()),
+                    LiteralKind::Text(_) => Some("Text".to_string()),
+                    _ => None,
+                }
+            }
             // Field access: look up field type in type_field_type_names
             ExprKind::Field { expr: base, field } => {
                 let base_type = self.infer_expr_type_name(base)?;
