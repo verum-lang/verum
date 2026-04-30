@@ -320,6 +320,28 @@ impl<'ctx> MlirCodegen<'ctx> {
             );
         }
 
+        // Phase-not-realised tracing for `MlirConfig.target_triple`
+        // (Option<Text>, default None). The field has a builder
+        // (`with_target_triple` at line 116) but no production
+        // consumer reads it — neither the GPU pass pipeline
+        // (optimize_gpu) nor the JIT/AOT lowering paths consult
+        // the manifest's triple at this layer. Cross-target GPU
+        // compilation is driven by the `target` enum on
+        // GpuPassConfig (passes/gpu_pipeline.rs), not this Text
+        // field. Surface a debug trace when it's set so embedders
+        // writing `[codegen.mlir] target_triple = "nvptx64-..."`
+        // see the value was observed but not threaded through.
+        if let Some(ref triple) = config.target_triple {
+            tracing::debug!(
+                "MlirConfig.target_triple = {:?} — field is stored on the \
+                 module config but no production reader consults it; the \
+                 active GPU target selection lives on GpuPassConfig.target \
+                 (cuda/rocm/vulkan/metal). Forward-looking knob for a \
+                 future MLIR-target-attribute integration.",
+                triple
+            );
+        }
+
         Ok(Self {
             config,
             mlir_ctx,
