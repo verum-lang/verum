@@ -94,6 +94,14 @@ pub mod proof_checker;
 // trusted base; downstream callers reach it via the explicit
 // `proof_checker::*` path so the namespace boundary stays loud.
 
+pub mod tactic_elaborator;
+// Tactic-to-proof-term elaboration (#164 Phase-1).  The missing link
+// from Verum proof bodies (`ProofBody::Tactic(TacticExpr)`) to
+// kernel-checkable [`proof_checker::Certificate`] values.  Without
+// this module, the kernel checker is a *theoretically* trusted base
+// but *practically* unused — no real Verum theorem reduces to a
+// kernel-readable term.  The de Bruijn criterion lives here.
+
 pub mod proof_tree;
 pub use proof_tree::{KernelProofNode, KernelRule, record_inference};
 
