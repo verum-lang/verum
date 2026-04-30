@@ -160,11 +160,32 @@ impl MetaContext {
     ///
     /// Returns an error if the function exists but the required context
     /// is not enabled. Returns the `BuiltinInfo` (cloned) if successful.
+    ///
+    /// Two gates apply, in order:
+    ///   1. **Reflection sandbox** — `[meta] reflection = false`
+    ///      sets `MetaContext.reflection_disabled = true`, which
+    ///      hard-rejects reflection-tagged contexts
+    ///      (`RequiredContext::is_reflection() == true` covers
+    ///      `MetaTypes` and `CompileDiag`) regardless of any
+    ///      function-level `using [...]` declaration. The user's
+    ///      explicit capability request is OVERRIDDEN by the
+    ///      language-level sandbox.
+    ///   2. **Capability declaration** — the function's
+    ///      `using [...]` clause must include the required
+    ///      context. This is the standard Tier 1 capability gate.
     pub fn get_builtin(&self, name: &Text) -> Result<BuiltinInfo, MetaError> {
         let builtins = self.builtins();
         match builtins.get(name) {
             Some(info) => {
-                // Check if the required context is enabled
+                // Gate 1: reflection sandbox — overrides any
+                // user-supplied capability for reflection contexts.
+                if self.reflection_disabled && info.required_context.is_reflection() {
+                    return Err(MetaError::MissingContext {
+                        function: name.clone(),
+                        required: info.required_context,
+                    });
+                }
+                // Gate 2: standard capability check.
                 if !self.enabled_contexts.is_enabled(info.required_context) {
                     return Err(MetaError::MissingContext {
                         function: name.clone(),
@@ -177,21 +198,37 @@ impl MetaContext {
         }
     }
 
-    /// Check if a builtin can be called with current enabled contexts
+    /// Check if a builtin can be called with current enabled contexts.
+    ///
+    /// Honors both gates that `get_builtin` applies: the reflection
+    /// sandbox (overrides reflection-tagged contexts) and the
+    /// capability declaration. Symmetrical with `get_builtin` so
+    /// `can_call_builtin` ↔ `get_builtin().is_ok()`.
     pub fn can_call_builtin(&self, name: &Text) -> bool {
         let builtins = self.builtins();
         match builtins.get(name) {
-            Some(info) => self.enabled_contexts.is_enabled(info.required_context),
+            Some(info) => {
+                if self.reflection_disabled && info.required_context.is_reflection() {
+                    return false;
+                }
+                self.enabled_contexts.is_enabled(info.required_context)
+            }
             None => false,
         }
     }
 
-    /// Get all builtins available with current enabled contexts
+    /// Get all builtins available with current enabled contexts.
+    /// Honors both `reflection_disabled` and the capability gates.
     pub fn available_builtins(&self) -> Vec<Text> {
         let builtins = self.builtins();
         builtins
             .iter()
-            .filter(|(_, info)| self.enabled_contexts.is_enabled(info.required_context))
+            .filter(|(_, info)| {
+                if self.reflection_disabled && info.required_context.is_reflection() {
+                    return false;
+                }
+                self.enabled_contexts.is_enabled(info.required_context)
+            })
             .map(|(name, _)| name.clone())
             .collect()
     }
@@ -418,5 +455,103 @@ mod tests {
 
         let result = ctx.get_builtin(&Text::from("meta_trace_log"));
         assert!(result.is_ok(), "get_builtin(meta_trace_log) failed: {:?}", result);
+    }
+
+    /// Pin: `[meta] reflection = false` — reflection-tagged contexts
+    /// are hard-rejected even when the function declared the
+    /// capability via `using [...]`.
+    #[test]
+    fn reflection_disabled_rejects_meta_types_even_with_using_clause() {
+        let mut ctx = MetaContext::new();
+        ctx.enabled_contexts.enable(RequiredContext::MetaTypes);
+        // Sanity: with reflection enabled the call goes through.
+        assert!(ctx.can_call_builtin(&Text::from("type_name")));
+
+        // Now seal the sandbox: reflection_disabled overrides the
+        // user's `using [MetaTypes]` capability.
+        ctx.reflection_disabled = true;
+        assert!(
+            !ctx.can_call_builtin(&Text::from("type_name")),
+            "reflection_disabled must override user-supplied MetaTypes capability"
+        );
+        let err = ctx
+            .get_builtin(&Text::from("type_name"))
+            .expect_err("get_builtin must fail under reflection_disabled");
+        // Error is MissingContext (the sandbox rejection reuses the
+        // capability-missing error shape — the diagnostic builder
+        // upstream surfaces the gate name).
+        let msg = format!("{:?}", err);
+        assert!(
+            msg.contains("MetaTypes") || msg.contains("MissingContext"),
+            "diagnostic should mention the missing context (got: {})",
+            msg
+        );
+    }
+
+    /// Pin: `reflection_disabled` rejects `CompileDiag`.
+    #[test]
+    fn reflection_disabled_rejects_compile_diag() {
+        let mut ctx = MetaContext::new();
+        ctx.enabled_contexts.enable(RequiredContext::CompileDiag);
+        assert!(ctx.can_call_builtin(&Text::from("compile_error")));
+        ctx.reflection_disabled = true;
+        assert!(!ctx.can_call_builtin(&Text::from("compile_error")));
+    }
+
+    /// Pin: `reflection_disabled` does NOT affect non-reflection
+    /// Tier 1 contexts (`MetaRuntime`, `BuildAssets`, etc.) — only
+    /// the reflection surface is sealed.
+    #[test]
+    fn reflection_disabled_preserves_non_reflection_capabilities() {
+        let mut ctx = MetaContext::new();
+        ctx.enabled_contexts.enable(RequiredContext::MetaRuntime);
+        ctx.enabled_contexts.enable(RequiredContext::BuildAssets);
+        ctx.reflection_disabled = true;
+        // Non-reflection capabilities survive.
+        assert!(
+            ctx.can_call_builtin(&Text::from("target_os")),
+            "MetaRuntime is NOT reflection — should survive sandbox"
+        );
+        assert!(
+            ctx.can_call_builtin(&Text::from("load_text")),
+            "BuildAssets is NOT reflection — should survive sandbox"
+        );
+    }
+
+    /// Pin: `available_builtins` excludes reflection-tagged
+    /// builtins under `reflection_disabled`, even when the
+    /// capability was granted.
+    #[test]
+    fn available_builtins_excludes_reflection_under_seal() {
+        let mut ctx = MetaContext::new();
+        ctx.enabled_contexts.enable(RequiredContext::MetaTypes);
+        ctx.enabled_contexts.enable(RequiredContext::MetaRuntime);
+        ctx.reflection_disabled = true;
+        let available = ctx.available_builtins();
+        assert!(
+            !available.contains(&Text::from("type_name")),
+            "type_name (MetaTypes) must NOT be in available list under seal"
+        );
+        assert!(
+            available.contains(&Text::from("target_os")),
+            "target_os (MetaRuntime, non-reflection) must remain available"
+        );
+    }
+
+    /// Pin: `RequiredContext::is_reflection()` covers the
+    /// documented reflection set (`MetaTypes` + `CompileDiag`)
+    /// and excludes everything else.
+    #[test]
+    fn is_reflection_covers_meta_types_and_compile_diag_only() {
+        assert!(RequiredContext::MetaTypes.is_reflection());
+        assert!(RequiredContext::CompileDiag.is_reflection());
+        // Non-reflection contexts.
+        assert!(!RequiredContext::None.is_reflection());
+        assert!(!RequiredContext::MetaRuntime.is_reflection());
+        assert!(!RequiredContext::BuildAssets.is_reflection());
+        assert!(!RequiredContext::SourceMap.is_reflection());
+        assert!(!RequiredContext::ProjectInfo.is_reflection());
+        assert!(!RequiredContext::MetaBench.is_reflection());
+        assert!(!RequiredContext::StageInfo.is_reflection());
     }
 }
