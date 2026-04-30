@@ -41,32 +41,13 @@ impl ValidationOptions {
     }
 
     /// Creates fast validation options (skips expensive checks).
+    ///
+    /// Honored only by `deserialize_module_validated_with_options`
+    /// (deserialize.rs) — the legacy `deserialize_module_validated`
+    /// entry point ignores the options and always uses
+    /// `ValidationOptions::strict()`. To actually skip hash
+    /// verification, callers must invoke the `_with_options` variant.
     pub fn fast() -> Self {
-        // Phase-not-realised tracing: `ValidationOptions::fast()`
-        // sets `skip_hash_check = true`, but the actual hash
-        // verification lives in `deserialize::verify_content_hash`
-        // which is called unconditionally from
-        // `deserialize_module_validated` (deserialize.rs:94).
-        // The verification function takes only `(data, expected)`
-        // — no `skip` parameter is plumbed through. The doc on
-        // `verify_content_hash` (deserialize.rs:111) claims
-        // "Bypassed by ValidationOptions::skip_hash_check = true"
-        // but no caller threads the flag through. The flag is
-        // observed at `validate_module_with_options` (sole reader)
-        // but `verify_content_hash` runs before validation,
-        // outside the validator's reach.
-        //
-        // Surface a debug trace at `fast()` so embedders selecting
-        // the preset see the gap rather than silently believing
-        // hash verification was skipped.
-        tracing::debug!(
-            "ValidationOptions::fast() — skip_hash_check=true is set on the \
-             options but `deserialize_module_validated` calls verify_content_hash \
-             unconditionally before reaching the validator. The flag only gates \
-             the validator's bytecode walk via skip_bytecode_validation; hash \
-             verification still runs. Forward-looking knob for a future plumbed \
-             skip-hash entry-point."
-        );
         Self {
             skip_hash_check: true,
             skip_bytecode_validation: true,
