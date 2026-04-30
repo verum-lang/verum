@@ -116,3 +116,11 @@ public mount core.math.frameworks.bounded_arithmetic;
 // classifier + bounded-arithmetic family. CLI wiring (`verum
 // frameworks list / show / validate`) is V1 work.
 public mount core.math.frameworks.registry;
+
+// MSFS (Modular Stratification Framework System) — Convention 1.X /
+// Definition 1.X axiom catalogues across baseline / key_symbols /
+// self_containment / strcat. Pre-fix the sub-tree shipped its own
+// `mod.vr` re-exporting the four child files but the umbrella
+// declaration was missing here, so `mount core.math.frameworks.msfs;`
+// silently failed to resolve through the parent namespace.
+public mount core.math.frameworks.msfs;
