@@ -1,0 +1,30 @@
+// =============================================================================
+// core/security/aead/mod.vr — Authenticated Encryption with Associated Data
+// =============================================================================
+// Layer: Standard Library / Security / AEAD
+// =============================================================================
+//
+// Authenticated Encryption with Associated Data (AEAD) primitives.
+// AEAD provides confidentiality + integrity + authenticity in a
+// single primitive — the standard recommendation for modern
+// symmetric encryption (NIST SP 800-38D, RFC 7539, RFC 8439).
+//
+//   * `aes_gcm.vr`         — AES-128-GCM / AES-256-GCM (NIST SP
+//                            800-38D, RFC 5288). Default choice for
+//                            interop with hardware AES-NI / ARMv8
+//                            crypto extensions.
+//   * `chacha20_poly1305.vr` — ChaCha20-Poly1305 (RFC 7539 / 8439).
+//                              Constant-time on every CPU; preferred
+//                              when AES-NI is unavailable or
+//                              side-channel resistance is paramount.
+//
+// Both ciphers expose the same `aead_encrypt` / `aead_decrypt`
+// surface so callers can swap algorithms via configuration without
+// code changes. Failed decryption surfaces as `AeadError.AuthFailed`
+// — never silent on tag mismatch.
+// =============================================================================
+
+module core.security.aead;
+
+public module aes_gcm;
+public module chacha20_poly1305;

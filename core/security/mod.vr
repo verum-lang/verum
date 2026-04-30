@@ -87,6 +87,36 @@ public module password_hash;
 // Binary Merkle tree + inclusion proofs (RFC 6962 §2.1).
 public module merkle;
 
+// =============================================================================
+// AEAD / cipher / ECC / sig sub-umbrellas
+// =============================================================================
+//
+// Each sub-umbrella ships 1–3 cryptographic primitives. Pre-fix
+// each shipped its `.vr` files but had no `mod.vr` and no
+// declaration here — `mount core.security.aead.aes_gcm;` worked
+// only via direct file lookup, the umbrella tree was invisible
+// to namespace enumeration, and downstream wildcard re-exports
+// (`mount core.security.aead.*;`) silently produced an empty
+// import list. This commit creates the missing `mod.vr` files
+// (4 new files) AND adds the umbrella declarations below.
+
+// AEAD (Authenticated Encryption with Associated Data): AES-GCM,
+// ChaCha20-Poly1305. Default modern symmetric encryption choice.
+public module aead;
+
+// Raw symmetric ciphers (confidentiality only — prefer AEAD for
+// most uses): AES, ChaCha20. Surfaced for callers composing with
+// externally-managed authentication.
+public module cipher;
+
+// Elliptic-curve cryptography: Ed25519 signatures, P-256 (FIPS),
+// X25519 key-agreement.
+public module ecc;
+
+// Non-EC signature schemes: RSA (+ PKCS#1 v1.5 / PSS encodings).
+// Legacy / interop only — prefer Ed25519 for new applications.
+public module sig;
+
 // Cryptographic random token generator (URL-safe / hex / numeric).
 public module token;
 

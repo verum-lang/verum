@@ -1,0 +1,27 @@
+// =============================================================================
+// core/security/sig/mod.vr — Non-elliptic signature schemes
+// =============================================================================
+// Layer: Standard Library / Security / Sig
+// =============================================================================
+//
+// Non-EC signature schemes. Elliptic-curve signature schemes
+// (Ed25519, ECDSA-P256) live under `core.security.ecc`. This
+// umbrella covers the historical RSA family + V1.5 follow-ups
+// (DSA, post-quantum signature schemes once `core.security.pq`
+// stabilises its primitives).
+//
+//   * `rsa.vr` — RSA signatures + PKCS#1 v1.5 / PSS encodings.
+//                Required for X.509 / TLS / SSH interop and for
+//                JWS RS256 / PS256 token signing. Constant-time
+//                blinded modular exponentiation prevents timing
+//                channels through the private key.
+//
+// New users should prefer `core.security.ecc.ed25519` over RSA
+// when both endpoints support it — Ed25519 has smaller keys,
+// faster verification, and no PKCS#1 padding-oracle footguns.
+// RSA stays here for legacy / interop reasons.
+// =============================================================================
+
+module core.security.sig;
+
+public module rsa;
