@@ -1391,6 +1391,44 @@ fn register_ffi_attributes(registry: &mut AttributeRegistry) {
                 .build(),
         )
         .expect("no_mangle registration");
+
+    // @console / @gui — Windows PE subsystem hint applied to `fn main`.
+    //
+    // `@console`: standard CLI app (default), allocates a console
+    // window when launched.  Maps to `/SUBSYSTEM:CONSOLE`.
+    //
+    // `@gui`: Win32 GUI app, no console window allocated.  Maps to
+    // `/SUBSYSTEM:WINDOWS`.  The runtime's `print()` helper
+    // gracefully degrades when the process has no console (returns
+    // count, doesn't block).
+    //
+    // Resolution order with manifest / CLI knobs (highest precedence
+    // first): `--windows-subsystem` CLI flag > `@gui`/`@console`
+    // attribute > `[build].windows_subsystem` manifest > Console.
+    //
+    // Ignored on non-Windows targets.
+    registry
+        .register(
+            AttributeMetadata::new("console")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::None)
+                .category(AttributeCategory::Platform)
+                .doc("Mark fn main as a console app (Windows /SUBSYSTEM:CONSOLE — default)")
+                .builtin()
+                .build(),
+        )
+        .expect("console registration");
+    registry
+        .register(
+            AttributeMetadata::new("gui")
+                .targets(AttributeTarget::Function)
+                .args(ArgSpec::None)
+                .category(AttributeCategory::Platform)
+                .doc("Mark fn main as a Win32 GUI app (Windows /SUBSYSTEM:WINDOWS — no console window)")
+                .builtin()
+                .build(),
+        )
+        .expect("gui registration");
 }
 
 // =============================================================================
