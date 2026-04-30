@@ -641,43 +641,6 @@ impl TestExecutionResult {
 /// Module system: files map to modules (lib.vr = crate root, foo.vr = module foo,
 /// foo/bar.vr = module foo.bar). Visibility defaults to private. Name resolution
 /// is deterministic and unambiguous via hierarchical module paths.
-///
-/// Result of the unified `CompilationPipeline::run()` dispatch.
-///
-/// Each variant corresponds to a distinct compilation tier: `Checked`
-/// is the type-only path (codegen and linking skipped), `Built`
-/// carries the path to a freshly-produced native executable. Future
-/// tiers (Tier-0 interpret, MLIR JIT, MLIR AOT) extend this enum
-/// — by-value matching at the caller side ensures each new variant
-/// is exhaustively handled at every call site.
-#[derive(Debug, Clone)]
-pub enum RunResult {
-    /// `check_only = true` — type-checking succeeded, no output
-    /// produced. Embedders displaying build-completion UI should
-    /// emit a "Check OK" message instead of pointing at a binary.
-    Checked,
-    /// AOT compilation succeeded — the path is the produced
-    /// native executable on disk.
-    Built(PathBuf),
-}
-
-impl RunResult {
-    /// Path to the produced binary, or `None` for the check-only
-    /// variant. Convenience for callers that only want the
-    /// happy-path build artifact.
-    pub fn output_path(&self) -> Option<&Path> {
-        match self {
-            Self::Checked => None,
-            Self::Built(p) => Some(p),
-        }
-    }
-
-    /// Whether the pipeline ran in check-only mode (no codegen).
-    pub fn is_check_only(&self) -> bool {
-        matches!(self, Self::Checked)
-    }
-}
-
 pub struct CompilationPipeline<'s> {
     session: &'s mut Session,
 
@@ -710,21 +673,6 @@ pub struct CompilationPipeline<'s> {
     /// Project modules (sibling .vr files in multi-file projects).
     /// Stored separately so they survive `self.modules.clear()` after type checking.
     project_modules: Map<Text, Arc<Module>>,
-
-    /// On-demand stdlib filter — when set, `load_stdlib_modules` only
-    /// parses + registers the modules in this set. The keystone for the
-    /// "parse user → compute reachable → load only what's needed" flow.
-    ///
-    /// Set by `compile_string` / `run_check_only` after parsing the user
-    /// source and computing reachability via `stdlib_reachability`. Stays
-    /// `None` for callers that want the legacy full-load behaviour
-    /// (stdlib bootstrap mode, REPL, certain integration tests).
-    ///
-    /// Why a field instead of a function parameter: `load_stdlib_modules`
-    /// is invoked from 10+ call sites; threading a parameter through all
-    /// of them would touch every public entry point. The field is set
-    /// once before the load and consulted inside each cache path.
-    reachable_stdlib_filter: Option<std::collections::HashSet<String>>,
 
     /// Current compiler pass
     current_pass: CompilerPass,
@@ -890,7 +838,7 @@ fn should_parse_as_script(
     if bytes.len() >= 2 && &bytes[..2] == b"#!" {
         return true;
     }
-    if bytes.len() >= 5 && bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
+    if bytes.len() >= 5 && &bytes[..3] == [0xEF, 0xBB, 0xBF] && &bytes[3..5] == b"#!" {
         return true;
     }
 
@@ -1057,7 +1005,6 @@ impl<'s> CompilationPipeline<'s> {
             lazy_resolver,
             modules: Map::new(),
             project_modules: Map::new(),
-            reachable_stdlib_filter: None,
             current_pass: CompilerPass::Pass1Registration,
             mode: CompilationMode::Interpret,
             build_mode: BuildMode::Normal,
@@ -1169,8 +1116,6 @@ impl<'s> CompilationPipeline<'s> {
             lazy_resolver,
             modules: Map::new(),
             project_modules: Map::new(),
-            // Stdlib bootstrap inherently needs every module — no filter.
-            reachable_stdlib_filter: None,
             current_pass: CompilerPass::Pass1Registration,
             mode: CompilationMode::Interpret, // VBC interpretation for stdlib
             build_mode: BuildMode::StdlibBootstrap { config },
@@ -1423,10 +1368,7 @@ impl<'s> CompilationPipeline<'s> {
                 methods: List::new(),
                 implements: List::new(),
             };
-            let path_text = Text::from(cached_type.path.as_str());
-            if metadata.types.insert(path_text.clone(), type_desc).is_none() {
-                metadata.type_declaration_order.push(path_text);
-            }
+            metadata.types.insert(Text::from(cached_type.path.as_str()), type_desc);
         }
 
         // Convert functions
@@ -1531,16 +1473,8 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Compiling source string ({} bytes)", source.len());
 
-        // Parse-user-first flow: produce the user AST WITHOUT loading
-        // stdlib (the parser is target-independent and registry-free),
-        // compute reachability, then load stdlib filtered to the
-        // reachable subset. Cold path saves ~7-8s by skipping the parse
-        // of ~2200 modules the user never references.
-        //
-        // Opt-out: `VERUM_NO_LAZY_STDLIB=1` reverts to the legacy
-        // "load full stdlib up front" order — used for stdlib bootstrap
-        // and certain integration tests.
-        let lazy_enabled = std::env::var("VERUM_NO_LAZY_STDLIB").is_err();
+        // Load stdlib modules first (enables std.* imports and type resolution)
+        self.load_stdlib_modules()?;
 
         // Create a temporary file ID for the source
         let temp_path = PathBuf::from("<string>");
@@ -1549,19 +1483,8 @@ impl<'s> CompilationPipeline<'s> {
             .load_source_string(source, temp_path.clone())
             .context("Failed to load source string")?;
 
-        // Parse user source first (no stdlib needed by the parser).
+        // Parse
         let module = self.phase_parse(file_id)?;
-
-        // Arm the reachability filter, then load only the needed subset.
-        if lazy_enabled {
-            self.arm_reachable_stdlib_filter(&module);
-        }
-        self.load_stdlib_modules()?;
-        // Final narrow pass — covers fast-cache paths that loaded the
-        // full registry irrespective of the filter.
-        if lazy_enabled {
-            self.narrow_stdlib_to_user_reachable(&module);
-        }
 
         // Type check
         self.phase_type_check(&module)?;
@@ -1659,30 +1582,6 @@ impl<'s> CompilationPipeline<'s> {
 
         let start = std::time::Instant::now();
         let mut module_times = std::collections::HashMap::new();
-
-        // Surface inert CoreConfig.parallel field. The field
-        // defaults to `true` and is documented as "Parallel
-        // compilation", but the compile_core path is mostly
-        // sequential for stdlib registration-ordering reasons —
-        // the cross-module type-name registration and impl-block
-        // attachment passes need a deterministic order that the
-        // current rayon-free path provides. The lazy-load path
-        // (run_full_compilation, line ~3777) does use
-        // par_iter for I/O-only work; that path has its own
-        // parallelism without consulting CoreConfig.
-        //
-        // Closes the inert-defense pattern by routing the
-        // requested value through tracing so embedders see when
-        // their `parallel = false` setting was observed (and
-        // silently no-op'd because the path is already sequential).
-        tracing::debug!(
-            "compile_core: parallel={}, optimization_level={}, debug_info={}, source_maps={} \
-             — parallel field is forward-looking; this path is sequential",
-            config.parallel,
-            config.optimization_level,
-            config.debug_info,
-            config.source_maps,
-        );
 
         // ====================================================================
         // STEP 1: Discover modules
@@ -3631,107 +3530,6 @@ impl<'s> CompilationPipeline<'s> {
     // STDLIB MODULE LOADING
     // ========================================================================
 
-    /// Pre-compute the reachable-stdlib filter from a user AST and stash
-    /// it on the pipeline so the next `load_stdlib_modules` call only
-    /// parses + registers modules the user actually needs.
-    ///
-    /// This is the "parse-user-first → narrow load" entry point. Cold
-    /// path savings are large: instead of parsing ~2266 stdlib files
-    /// upfront we parse only the ~50–100 reachable ones, plus the user
-    /// source. Warm paths (in-memory + disk cache) still hit their fast
-    /// branches; the same filter is applied when narrowing the cached
-    /// registry post-clone.
-    ///
-    /// Returns the size of the reachable set (diagnostic-only).
-    pub fn arm_reachable_stdlib_filter(&mut self, user_ast: &Module) -> usize {
-        use crate::stdlib_reachability;
-        let Some(reachable) =
-            stdlib_reachability::compute_reachable_stdlib_modules(user_ast)
-        else {
-            self.reachable_stdlib_filter = None;
-            return 0;
-        };
-        if reachable.is_empty() {
-            self.reachable_stdlib_filter = None;
-            return 0;
-        }
-        let count = reachable.len();
-        self.reachable_stdlib_filter = Some(reachable);
-        count
-    }
-
-    /// Narrow the loaded stdlib to the modules transitively reachable from
-    /// `user_ast`'s `mount` declarations.
-    ///
-    /// This is the **on-demand stdlib loader** keystone. It runs AFTER
-    /// `load_stdlib_modules()` populates the session registry (via the
-    /// fast registry cache or the slow disk/parse path) and **before**
-    /// type-checking begins. Every module not transitively referenced
-    /// is dropped from both `self.modules` and the session registry,
-    /// shrinking the surface that downstream type inference, glob
-    /// re-export resolution, and protocol search must walk.
-    ///
-    /// # When this runs
-    ///
-    /// `compile_string` and other top-level entry points wire this in
-    /// after parsing the user source. Stdlib bootstrap mode skips it —
-    /// bootstrapping inherently needs every module.
-    ///
-    /// # Safety
-    ///
-    /// Conservative: any module the reachability pass cannot prove
-    /// unused is kept. If the embedded dep graph is unavailable
-    /// (e.g. minimal builds without `core/`), this is a no-op and the
-    /// full registry is preserved. The lazy resolver in
-    /// `verum_types::infer` continues to back-fill missing modules at
-    /// type-check time as a final safety net.
-    ///
-    /// # Returns
-    ///
-    /// `(kept, dropped)` count. Diagnostics-only — callers don't
-    /// branch on the result.
-    pub fn narrow_stdlib_to_user_reachable(&mut self, user_ast: &Module) -> (usize, usize) {
-        use crate::stdlib_reachability;
-
-        // Compute the reachable set. None means the embedded dep graph
-        // isn't available — leave the registry untouched.
-        let Some(reachable) =
-            stdlib_reachability::compute_reachable_stdlib_modules(user_ast)
-        else {
-            debug!("on-demand loader: dep graph unavailable, full registry retained");
-            return (self.modules.len(), 0);
-        };
-
-        if reachable.is_empty() {
-            // User code has no `mount` statements at all — nothing to
-            // narrow against. Leave the registry as-is; the pipeline's
-            // existing prelude resolution still works.
-            debug!("on-demand loader: user has zero mounts, skipping narrow");
-            return (self.modules.len(), 0);
-        }
-
-        let pre_local = self.modules.len();
-        // Narrow the local self.modules map.
-        self.modules.retain(|path, _| reachable.contains(path.as_str()));
-        let local_dropped = pre_local.saturating_sub(self.modules.len());
-
-        // Narrow the session's module registry. The same `reachable`
-        // set is the canonical filter — both sides must agree or the
-        // type-checker will see local imports that the registry no
-        // longer knows about.
-        let (reg_kept, reg_dropped) = {
-            let registry_shared = self.session.module_registry();
-            let mut registry = registry_shared.write();
-            registry.retain_paths(&reachable)
-        };
-
-        info!(
-            "on-demand stdlib: kept {} modules, dropped {} (local: {} dropped)",
-            reg_kept, reg_dropped, local_dropped
-        );
-        (reg_kept, reg_dropped)
-    }
-
     /// Load and parse all stdlib modules into self.modules.
     ///
     /// This enables cross-file imports from std.* modules.
@@ -4015,23 +3813,6 @@ impl<'s> CompilationPipeline<'s> {
             let mut file_data = file_data;
             file_data.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
 
-            // On-demand pruning: when a reachable filter is set (parse-
-            // user-first flow), drop files we know won't be needed before
-            // we pay the parser cost. Skipping is conservative: a path
-            // missing from the filter is genuinely unreachable per the
-            // build-time dep graph.
-            let pre_filter_count = file_data.len();
-            if let Some(filter) = self.reachable_stdlib_filter.clone() {
-                file_data.retain(|(path, _, _)| filter.contains(path.as_str()));
-                let dropped = pre_filter_count.saturating_sub(file_data.len());
-                if dropped > 0 {
-                    info!(
-                        "stdlib parse: filtered {} → {} modules ({} dropped) before parse",
-                        pre_filter_count, file_data.len(), dropped
-                    );
-                }
-            }
-
             // Phase 2: Parse modules (must be sequential due to shared parser state)
             let mut entries = Vec::with_capacity(file_data.len());
             for (module_path_str, source_text, file_path) in &file_data {
@@ -4045,10 +3826,8 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
 
-            // Cache only when this was a full unfiltered parse — otherwise
-            // a subsequent compilation that needs a different reachable
-            // subset would silently see only the previous run's view.
-            if self.reachable_stdlib_filter.is_none() {
+            // Store in global cache for future pipeline instances
+            {
                 let cache = global_stdlib_cache();
                 let mut guard = cache.write().unwrap_or_else(|poisoned| {
                     tracing::warn!("stdlib cache RwLock poisoned during write, recovering");
@@ -5156,31 +4935,6 @@ impl<'s> CompilationPipeline<'s> {
 
         debug!("Expanding macros in module: {}", path.as_str());
 
-        // Pre-pass: expand @delegate(target) attributes (#146 / MSFS-L4.14).
-        // Synthesizes `proof { apply target(p1, p2, ...); }` for theorems
-        // carrying the attribute and no explicit body, before macro
-        // expansion sees the AST. Running here means the rest of the
-        // pipeline (macro expansion, semantic analysis, contract
-        // verification, audit gates) sees a structurally complete proof
-        // body without distinguishing synthesized-vs-manual forms.
-        let delegate_outcomes = crate::phases::delegate_expansion::expand_delegates_in_module(module);
-        for outcome in &delegate_outcomes {
-            if let crate::phases::delegate_expansion::DelegateExpansion::Rejected {
-                theorem,
-                reason,
-            } = outcome
-            {
-                let diag = DiagnosticBuilder::error()
-                    .message(format!(
-                        "@delegate on `{}` rejected: {}",
-                        theorem.as_str(),
-                        reason.as_str(),
-                    ))
-                    .build();
-                self.session.emit_diagnostic(diag);
-            }
-        }
-
         // Create a macro expander visitor
         let mut expander = MacroExpander {
             registry: &self.meta_registry,
@@ -5407,26 +5161,9 @@ impl<'s> CompilationPipeline<'s> {
                     }
                     loaded_paths.insert(resolved_path.clone());
 
-                    // For stdlib modules we strip the "core." prefix to map
-                    // onto the on-disk layout (`core/` dir = stdlib root), but
-                    // we keep the FULL canonical path for registration so user
-                    // imports `mount core.shell.exec` find these modules under
-                    // the same name.  Without this re-prefixing modules end up
-                    // registered as `shell.exec`, leaving `core.shell.exec`
-                    // references unresolved.
-                    let registration_path = if is_stdlib_import
-                        && !resolved_path.starts_with("core.")
-                        && !resolved_path.starts_with("std.")
-                    {
-                        format!("core.{}", resolved_path)
-                    } else {
-                        resolved_path.clone()
-                    };
-
                     // Convert module path to file path and try to load
-                    let module_path = ModulePath::from_str(&registration_path);
-                    let file_path_module = ModulePath::from_str(&resolved_path);
-                    let file_path = self.module_path_to_file_path(&file_path_module, &base_dir);
+                    let module_path = ModulePath::from_str(&resolved_path);
+                    let file_path = self.module_path_to_file_path(&module_path, &base_dir);
 
                     // Try different file locations (file.vr, file/mod.vr)
                     let candidates = vec![file_path.with_extension("vr"), file_path.join("mod.vr")];
@@ -5565,7 +5302,7 @@ impl<'s> CompilationPipeline<'s> {
                             // project_modules so their items get merged into the main
                             // compilation unit for VBC codegen.
                             if !is_stdlib_import {
-                                let module_key = Text::from(registration_path.as_str());
+                                let module_key = Text::from(resolved_path.as_str());
                                 if !self.project_modules.contains_key(&module_key) {
                                     self.project_modules.insert(
                                         module_key,
@@ -6135,41 +5872,6 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
-    /// Unified compilation entry: select the execution tier from
-    /// `Session::options()` and dispatch.
-    ///
-    /// This is the architectural single-point-of-truth for tier
-    /// selection. Pre-fix every CLI command memorised which
-    /// `run_*` method matched its intent; the `CompilerOptions`
-    /// dispatch flags (`check_only`, future `target_tier`) had no
-    /// production reader because callers always invoked a specific
-    /// tier directly. This method makes those flags load-bearing:
-    /// embedders set `options.check_only = true` and call `run()`,
-    /// and the dispatch routes through the check-only path with
-    /// no further per-caller code.
-    ///
-    /// Tier selection logic (in priority order):
-    ///
-    ///   1. `check_only = true` → `RunResult::Checked` via
-    ///      `run_check_only()`. Skips codegen + linking entirely.
-    ///   2. otherwise → `RunResult::Built(path)` via
-    ///      `run_native_compilation()` (AOT, the production tier).
-    ///
-    /// Future tier additions (interpret, MLIR JIT, MLIR AOT) extend
-    /// this match block — they're intentionally NOT wired yet so
-    /// every caller migration step is a separate observable change.
-    /// Existing `run_*` methods remain `pub` for power users that
-    /// need to bypass the dispatch (e.g. tests pinning a specific
-    /// tier's behaviour).
-    pub fn run(&mut self) -> Result<RunResult> {
-        if self.session.options().check_only {
-            self.run_check_only()?;
-            return Ok(RunResult::Checked);
-        }
-        let path = self.run_native_compilation()?;
-        Ok(RunResult::Built(path))
-    }
-
     /// Run complete compilation (all phases)
     pub fn run_full_compilation(&mut self) -> Result<()> {
         let start = Instant::now();
@@ -6232,13 +5934,6 @@ impl<'s> CompilationPipeline<'s> {
 
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
-
-        // On-demand narrowing: drop stdlib modules not reachable from the
-        // user's `mount` set. Cuts the type-check surface from ~2266 to
-        // typically <100 modules; opt-out via `VERUM_NO_LAZY_STDLIB=1`.
-        if std::env::var("VERUM_NO_LAZY_STDLIB").is_err() {
-            self.narrow_stdlib_to_user_reachable(&module);
-        }
 
         // Get module path for registration and expansion
         let module_path = Text::from(self.session.options().input.display().to_string());
@@ -7544,19 +7239,7 @@ impl<'s> CompilationPipeline<'s> {
         debug!("Running refinement verification");
 
         let start = Instant::now();
-        // Honour `CompilerOptions.slow_verification_threshold_secs`
-        // (default 5s, sourced from `--slow-threshold` / manifest
-        // `[verify].slow_threshold`) so the cost tracker's slow-
-        // verification threshold matches what the user configured.
-        // Pre-fix `CostTracker::new()` hard-coded 5s; the
-        // verification_profiler at verify_cmd.rs:92 already
-        // consults the session option, but the parallel cost
-        // tracker on the pipeline path used the default
-        // regardless. Now both surfaces agree on the threshold.
-        let slow_threshold_secs = self.session.options().slow_verification_threshold_secs;
-        let mut cost_tracker = CostTracker::with_threshold(
-            std::time::Duration::from_secs(slow_threshold_secs),
-        );
+        let mut cost_tracker = CostTracker::new();
         let _smt_ctx = SmtContext::new();
 
         // Framework-hygiene preamble (#190): R1+R2+R3 discipline
@@ -7988,20 +7671,6 @@ impl<'s> CompilationPipeline<'s> {
         register_module_lemmas(module, &mut hints_db);
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
-        // Honour `CompilerOptions.smt_timeout_secs` (default 30s,
-        // sourced from `--smt-timeout` / manifest
-        // `[verify].solver_timeout_ms`) on the proof search engine.
-        // Pre-fix `ProofSearchEngine::with_hints` defaulted to 5s
-        // regardless of what the user configured — the SMT context
-        // got the right timeout (line ~7765), but the proof-search
-        // engine's own internal timeout (consulted at depth-bounded
-        // search entry points) silently used the 5s default. Now
-        // both layers agree on the user's configured value.
-        // The `set_timeout` setter existed at proof_search.rs:2463
-        // but had no production caller — closes the inert-setter
-        // pattern by threading the session value through.
-        proof_engine.set_timeout(timeout);
-
         // Refinement reflection: scan the module for pure,
         // single-expression functions and translate their bodies
         // to SMT-LIB via the Expr→SMT-LIB translator. Successfully
@@ -8057,33 +7726,41 @@ impl<'s> CompilationPipeline<'s> {
             debug!("Verifying {} '{}' ({} requires, {} ensures)",
                 kind_name, thm.name.name, thm.requires.len(), thm.ensures.len());
 
-            // Closure-cache fast path (#79 / #88 / #89).  Compute
-            // fingerprint and probe the cache before invoking the SMT
-            // engine.  On hit we serve the cached verdict; on miss we
-            // run the engine and persist the new verdict.  No-op when
+            // Closure-cache fast path (#79 / #88).  Compute fingerprint
+            // and probe the cache before invoking the SMT engine.
+            // On hit we serve the cached verdict; on miss we run the
+            // engine and persist the new verdict.  No-op when
             // closure_cache is None.
-            //
-            // Payloads use the canonical sorted-keys JSON encoding
-            // from `verum_verification::canonical_repr` — this is
-            // stable across rustc upgrades, unlike `format!("{:?}",
-            // ...)`.  See the schema-stability contract documented
-            // on the `CanonicalRepr` trait.
             let cache_outcome = closure_cache.as_ref().map(|store| {
-                use verum_verification::canonical_repr::{
-                    theorem_body_bytes, theorem_citations, theorem_signature_bytes,
-                };
                 use verum_verification::closure_cache::{
                     cached_check, CachedVerdict, ClosureFingerprint,
                 };
-                let signature_payload = theorem_signature_bytes(thm);
-                let body_payload = theorem_body_bytes(thm);
-                let citations: Vec<String> = theorem_citations(thm);
+                // Signature payload: name + requires + ensures +
+                // proposition rendering.  Stable across runs so long
+                // as the AST `Debug` projection is stable.
+                let signature_payload = format!(
+                    "{}|requires={:?}|ensures={:?}|prop={:?}",
+                    thm.name.name.as_str(),
+                    thm.requires,
+                    thm.ensures,
+                    thm.proposition,
+                );
+                // Body payload: proof body rendering.
+                let body_payload = format!("{:?}", thm.proof);
+                // Citations: every @framework("name", "citation") on
+                // this declaration.  Sorted+deduped inside `compute`.
+                let mut citations: Vec<String> = Vec::new();
+                for a in &thm.attributes {
+                    if a.is_named("framework") {
+                        citations.push(format!("{:?}", a));
+                    }
+                }
                 let cite_refs: Vec<&str> =
                     citations.iter().map(String::as_str).collect();
                 let fp = ClosureFingerprint::compute(
                     verum_verification::closure_cache::KERNEL_VERSION,
-                    &signature_payload,
-                    &body_payload,
+                    signature_payload.as_bytes(),
+                    body_payload.as_bytes(),
                     &cite_refs,
                 );
 
@@ -9123,7 +8800,7 @@ impl<'s> CompilationPipeline<'s> {
                     }
 
                     // Extract @cfg predicates from item attributes and module path
-                    let cfg_preds = crate::cfg_eval::extract_cfg_predicates(&item.attributes, &current_module_path);
+                    let cfg_preds = Self::extract_cfg_predicates(&item.attributes, &current_module_path);
                     if !cfg_preds.is_empty() {
                         entry = entry.with_cfg_predicates(cfg_preds);
                     }
@@ -9219,7 +8896,7 @@ impl<'s> CompilationPipeline<'s> {
                         }
 
                         // Extract @cfg predicates from item attributes and module path
-                        let cfg_preds = crate::cfg_eval::extract_cfg_predicates(&item.attributes, mod_path);
+                        let cfg_preds = Self::extract_cfg_predicates(&item.attributes, mod_path);
                         if !cfg_preds.is_empty() {
                             entry = entry.with_cfg_predicates(cfg_preds);
                         }
@@ -9237,14 +8914,96 @@ impl<'s> CompilationPipeline<'s> {
     /// Returns a list of cfg predicate strings (e.g., `target_os = "linux"`).
     /// Also infers platform cfg from module paths containing platform segments
     /// (e.g., `sys.darwin.io` implies `target_os = "macos"`).
-    // The five cfg-evaluation utilities (`extract_cfg_predicates`,
-    // `target_predicates_satisfied`, `cfg_expr_to_predicate`,
-    // `expr_to_ident_string`, `expr_to_string_literal`) used to live
-    // here as `Self::` associated functions. They were pure
-    // (no `&self`, no `&mut state`) and the audit (#106 crate-split
-    // foundation) flagged them as the cleanest first extraction
-    // out of pipeline.rs. They now live in
-    // `crate::cfg_eval` and are imported at the call sites.
+    fn extract_cfg_predicates(
+        attributes: &[verum_ast::attr::Attribute],
+        module_path: &ModulePath,
+    ) -> List<Text> {
+        let mut predicates = List::new();
+
+        // Extract from @cfg(...) attributes on the item
+        for attr in attributes {
+            if attr.name.as_str() == "cfg" {
+                if let verum_common::Maybe::Some(ref args) = attr.args {
+                    // Extract cfg predicate key=value pairs from expressions
+                    for arg in args.iter() {
+                        if let Some(pred) = Self::cfg_expr_to_predicate(arg) {
+                            predicates.push(pred);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Infer platform cfg from module path segments
+        let path_str = module_path.to_string();
+        if path_str.contains(".darwin.") || path_str.ends_with(".darwin") {
+            predicates.push(Text::from("target_os = \"macos\""));
+        } else if path_str.contains(".linux.") || path_str.ends_with(".linux") {
+            predicates.push(Text::from("target_os = \"linux\""));
+        } else if path_str.contains(".windows.") || path_str.ends_with(".windows") {
+            predicates.push(Text::from("target_os = \"windows\""));
+        }
+
+        predicates
+    }
+
+    /// Convert a @cfg expression argument to a predicate string.
+    ///
+    /// Handles patterns like:
+    /// - `target_os = "linux"` (Binary with Assign op)
+    /// - Simple identifier (e.g., `unix`, `windows`)
+    fn cfg_expr_to_predicate(expr: &verum_ast::Expr) -> Option<Text> {
+        use verum_ast::expr::{ExprKind, BinOp};
+        match &expr.kind {
+            // Handle `key = "value"` as Binary { op: Assign, left, right }
+            ExprKind::Binary { op, left, right } => {
+                if matches!(op, BinOp::Assign) {
+                    let key = Self::expr_to_ident_string(left)?;
+                    let val = Self::expr_to_string_literal(right)?;
+                    Some(Text::from(format!("{} = \"{}\"", key, val)))
+                } else {
+                    None
+                }
+            }
+            // Handle simple identifier like `unix`
+            ExprKind::Path(path) => {
+                use verum_ast::ty::PathSegment;
+                match path.segments.last()? {
+                    PathSegment::Name(ident) => Some(Text::from(ident.as_str())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract identifier name from an expression.
+    fn expr_to_ident_string(expr: &verum_ast::Expr) -> Option<String> {
+        use verum_ast::ty::PathSegment;
+        match &expr.kind {
+            verum_ast::expr::ExprKind::Path(path) => {
+                match path.segments.last()? {
+                    PathSegment::Name(ident) => Some(ident.as_str().to_string()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract string literal value from an expression.
+    fn expr_to_string_literal(expr: &verum_ast::Expr) -> Option<String> {
+        use verum_ast::literal::LiteralKind;
+        match &expr.kind {
+            verum_ast::expr::ExprKind::Literal(lit) => {
+                match &lit.kind {
+                    LiteralKind::Text(string_lit) => Some(string_lit.as_str().to_string()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
 
     /// Profile boundary enforcement (module-level profile checking)
     ///
@@ -11401,28 +11160,6 @@ impl<'s> CompilationPipeline<'s> {
             .as_str()
             .to_string();
 
-        // Surface inert ContextConfig fields. `negative_constraints`
-        // (allow `!using [Foo]`) and `propagation_depth` (max
-        // through-call-chain depth) flow from the manifest but no
-        // current validation path consults them — the
-        // ContextValidationPhase walks the AST without these
-        // policies. Closes the inert-defense pattern by routing
-        // them through tracing so embedders writing
-        // `[context].negative_constraints = false` or
-        // `[context].propagation_depth = 8` see the values
-        // observed at the gate. The gates are forward-looking
-        // until the phase walks deep enough to consult them.
-        let ctx = &self.session.language_features().context;
-        if !ctx.negative_constraints || ctx.propagation_depth != 32 {
-            tracing::debug!(
-                "context_validation: negative_constraints={}, propagation_depth={} \
-                 (these fields land on the policy but no current validation path \
-                 consults them — forward-looking infra)",
-                ctx.negative_constraints,
-                ctx.propagation_depth,
-            );
-        }
-
         let phase = ContextValidationPhase::new();
         match phase.validate_module_public(module) {
             Ok(warnings) => {
@@ -11917,13 +11654,7 @@ impl<'s> CompilationPipeline<'s> {
             module_name: "main".to_string(),
             debug_info: self.session.options().debug_info,
             optimization_level: 0,
-            // Pre-existing stdlib emit bugs (TypeId(515) dangling refs,
-            // function-end-vs-instruction-stream length divergence,
-            // archive-header counts disagreeing with section bodies)
-            // currently fail strict structural validation. Default-off
-            // here matches `CodegenConfig::default()` until the bug
-            // class is closed; CI opts in via `with_validation()`.
-            validate: false,
+            validate: true,
             source_map: false,
             target_config: verum_ast::cfg::TargetConfig::host(),
             // V-LLSI profile configuration
@@ -12209,20 +11940,9 @@ impl<'s> CompilationPipeline<'s> {
         const EXCLUDED_MODULES: &[&str] = &[
             "core.base.maybe",
         ];
-        // Audit-E2: filter platform-specific modules by the COMPILATION
-        // TARGET, not the compiler's host. Pre-fix, the gate read
-        // `cfg!(target_os = "...")` which evaluates the host at compile
-        // time of the COMPILER itself — so cross-compiling from macOS
-        // to Linux silently dropped Linux modules. The new
-        // `target_spec::TargetSpec` derives os/arch/pointer_width/endian
-        // from `CompilerOptions.target_triple` (or host when None) and
-        // gives every gate a single canonical answer.
-        let target = crate::target_spec::TargetSpec::from_triple(
-            self.session.options().target_triple.as_deref(),
-        );
-        let is_macos = target.os.as_str() == "macos";
-        let is_linux = target.os.as_str() == "linux";
-        let is_windows = target.os.as_str() == "windows";
+        // Detect host platform for filtering platform-specific modules.
+        let is_macos = cfg!(target_os = "macos");
+        let is_linux = cfg!(target_os = "linux");
 
         // Sort by path before iterating: `self.modules` is a HashMap and
         // its raw iteration order leaks the per-process random hasher
@@ -12244,19 +11964,12 @@ impl<'s> CompilationPipeline<'s> {
             let is_always = ALWAYS_INCLUDE.iter().any(|m| {
                 path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m))
             });
-            // Audit-E2: skip platform-specific modules that don't match
-            // the TARGET. Each platform sub-tree under `core.sys.*` is
-            // gated on the target_os axis; downstream
-            // `extract_cfg_predicates` walks the same path conventions
-            // when emitting per-item predicates so the policy is
-            // single-sourced.
+            // Skip platform-specific modules that don't match the host OS.
+            // e.g. on macOS, skip core.sys.linux.* and vice versa.
             if !is_linux && (path_str.contains("sys.linux") || path_str.contains("sys/linux")) {
                 continue;
             }
             if !is_macos && (path_str.contains("sys.darwin") || path_str.contains("sys/darwin")) {
-                continue;
-            }
-            if !is_windows && (path_str.contains("sys.windows") || path_str.contains("sys/windows")) {
                 continue;
             }
             if is_always && !is_excluded && !seen_paths.contains(&path_str) {
@@ -13422,18 +13135,10 @@ impl<'s> CompilationPipeline<'s> {
 
         let llvm_ctx = verum_codegen::llvm::verum_llvm::context::Context::create();
 
-        // Forward `CompilerOptions.enable_cbgr_elimination` to the
-        // LLVM lowering config. Closes the inert-defense pattern:
-        // prior to wiring, the documented `enable_cbgr_elimination`
-        // session knob (default `true`) had no effect on AOT-side
-        // CBGR check elimination. The corresponding LoweringConfig
-        // field DID gate the actual codegen behaviour, but the
-        // session-level option never reached it.
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage)
-            .with_cbgr_elimination(self.session.options().enable_cbgr_elimination)
             .with_permission_policy(self.session.aot_permission_policy());
 
         let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
@@ -13470,20 +13175,8 @@ impl<'s> CompilationPipeline<'s> {
         // null Type references (use-after-free from arity collision
         // fixups). Disabled by default to prevent non-deterministic
         // SIGSEGV during normal builds.
-        //
-        // Honour `CompilerOptions.emit_mode == LlvmIr`: when the
-        // CLI passes `--emit llvm-ir`, force the IR dump so the
-        // user gets the .ll file they asked for. Pre-fix the
-        // emit_mode field landed on CompilerOptions (set by
-        // build.rs:221) but no production code path consulted it,
-        // so `verum build --emit llvm-ir` produced no .ll file and
-        // silently fell through to the executable build.
         let emit_ir = self.session.options().emit_ir
-            || std::env::var("VERUM_DUMP_IR").is_ok()
-            || matches!(
-                self.session.options().emit_mode,
-                crate::options::EmitMode::LlvmIr,
-            );
+            || std::env::var("VERUM_DUMP_IR").is_ok();
         if emit_ir && !lowering.has_arity_collisions() && lowering.skip_body_count() == 0 {
             let llvm_ir = lowering.get_ir();
             std::fs::write(&ir_path, llvm_ir.as_str().as_bytes())
@@ -13531,43 +13224,20 @@ impl<'s> CompilationPipeline<'s> {
             _ => verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
         };
 
-        // Honour `CompilerOptions.target_cpu` / `target_features`.
-        // Pre-fix the manifest's `[llvm].target_cpu` and
-        // `[llvm].target_features` were parsed into `LlvmConfig` on the
-        // CLI side but never plumbed to the AOT pipeline — the host's
-        // CPU info was hardcoded for native builds, so a manifest
-        // declaring `target_cpu = "znver3"` (e.g. for reproducible
-        // CI artifacts that target a fixed microarchitecture) had
-        // zero observable effect. Precedence: explicit option (CLI /
-        // manifest) > host-default / "generic" for WASM.
+        // Use host CPU name and features for native targets.
+        // For WASM targets, use "generic" CPU with no features.
         let is_wasm = triple.as_str().to_string_lossy().contains("wasm");
-        let opts = self.session.options();
-        let cpu_override = opts.target_cpu.as_ref().map(|t| t.as_str().to_string());
-        let features_override = opts
-            .target_features
-            .as_ref()
-            .map(|t| t.as_str().to_string());
-        let cpu_default = if is_wasm {
-            "generic".to_string()
+        let (cpu_str, features_str) = if is_wasm {
+            ("generic", "")
         } else {
-            TargetMachine::get_host_cpu_name()
-                .to_str()
-                .unwrap_or("generic")
-                .to_string()
+            // Get host CPU info for native compilation
+            let cpu = TargetMachine::get_host_cpu_name();
+            let features = TargetMachine::get_host_cpu_features();
+            // Leak to static — called once per compilation, acceptable
+            let cpu_s: &'static str = Box::leak(cpu.to_str().unwrap_or("generic").to_string().into_boxed_str());
+            let feat_s: &'static str = Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
+            (cpu_s, feat_s)
         };
-        let features_default = if is_wasm {
-            String::new()
-        } else {
-            TargetMachine::get_host_cpu_features()
-                .to_str()
-                .unwrap_or("")
-                .to_string()
-        };
-        let cpu_owned = cpu_override.unwrap_or(cpu_default);
-        let features_owned = features_override.unwrap_or(features_default);
-        // Leak to static — called once per compilation, acceptable
-        let cpu_str: &'static str = Box::leak(cpu_owned.into_boxed_str());
-        let features_str: &'static str = Box::leak(features_owned.into_boxed_str());
         debug!("LLVM target: cpu={}, features={}", cpu_str, features_str);
 
         let target_machine = target.create_target_machine(
@@ -13702,85 +13372,11 @@ impl<'s> CompilationPipeline<'s> {
         target_machine.write_to_file(lowering.module(), FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
 
-        // Emit LLVM bitcode when LTO is enabled for cross-module
-        // optimization, OR when the user explicitly requested
-        // `--emit bc` via the CLI's emit_mode flag. Pre-fix
-        // `emit_mode == Bitcode` was inert: build.rs:223 set the
-        // field but no production path consulted it, so
-        // `verum build --emit bc` produced no .bc file and
-        // silently fell through to the executable build.
-        let want_bitcode = self.session.options().lto
-            || matches!(
-                self.session.options().emit_mode,
-                crate::options::EmitMode::Bitcode,
-            );
-        if want_bitcode {
+        // Emit LLVM bitcode when LTO is enabled for cross-module optimization
+        if self.session.options().lto {
             let bc_path = obj_path.with_extension("bc");
             lowering.module().write_bitcode_to_path(&bc_path);
-            debug!("  Wrote LLVM bitcode: {}", bc_path.display());
-        }
-
-        // Honour `EmitMode::Assembly` / `EmitMode::Object`: short-circuit
-        // before runtime-stub compilation and linking. Pre-fix
-        // `verum build --emit asm` and `--emit obj` set `emit_mode` on
-        // CompilerOptions (build.rs:218-224) but the pipeline always
-        // proceeded to link an executable, silently ignoring the request.
-        // Companion to the `EmitMode::LlvmIr` / `Bitcode` wiring above —
-        // the LlvmIr/Bitcode variants merely add an artifact alongside
-        // the executable, while Assembly/Object are terminal modes that
-        // replace the executable as the final artifact.
-        match self.session.options().emit_mode {
-            crate::options::EmitMode::Assembly => {
-                let asm_path = if self
-                    .session
-                    .options()
-                    .output
-                    .to_str()
-                    .unwrap_or("")
-                    .is_empty()
-                {
-                    profile_dir.join(format!("{}.s", module_name))
-                } else {
-                    self.session.options().output.clone()
-                };
-                target_machine
-                    .write_to_file(lowering.module(), FileType::Assembly, &asm_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to write assembly file: {}", e))?;
-                let elapsed = start.elapsed();
-                info!(
-                    "Emitted assembly: {} ({:.2}s)",
-                    asm_path.display(),
-                    elapsed.as_secs_f64()
-                );
-                return Ok(asm_path);
-            }
-            crate::options::EmitMode::Object => {
-                let final_obj = if self
-                    .session
-                    .options()
-                    .output
-                    .to_str()
-                    .unwrap_or("")
-                    .is_empty()
-                {
-                    profile_dir.join(format!("{}.o", module_name))
-                } else {
-                    self.session.options().output.clone()
-                };
-                if final_obj != obj_path {
-                    std::fs::copy(&obj_path, &final_obj).with_context(|| {
-                        format!("Failed to copy object to {}", final_obj.display())
-                    })?;
-                }
-                let elapsed = start.elapsed();
-                info!(
-                    "Emitted object: {} ({:.2}s)",
-                    final_obj.display(),
-                    elapsed.as_secs_f64()
-                );
-                return Ok(final_obj);
-            }
-            _ => {}
+            debug!("  Wrote LLVM bitcode for LTO: {}", bc_path.display());
         }
 
         // Runtime compilation: LLVM IR provides core runtime (allocator, text, etc.)
@@ -13805,17 +13401,6 @@ impl<'s> CompilationPipeline<'s> {
             // Enable LLD for LTO support
             linker_config.use_llvm_linker = true;
         }
-
-        // Wire CLI strip / static-link options into linker config.
-        // Pre-fix the `--strip-symbols`, `--strip-debug`, and
-        // `--static-link` CLI flags landed on `CompilerOptions`
-        // but were never propagated to the LinkingConfig that the
-        // linker phase actually consumes — they were silently
-        // dropped between the CLI and the linker. The merge logic
-        // is extracted into a pure helper so it can be unit-tested
-        // without spinning up a full pipeline; mirrors the LTO
-        // precedence at line ~13395 above.
-        apply_cli_link_overrides(self.session.options(), &mut linker_config);
 
         // Add Metal/Foundation frameworks for macOS GPU support (LLD path)
         #[cfg(target_os = "macos")]
@@ -15640,36 +15225,6 @@ impl<'s> CompilationPipeline<'s> {
     }
 }
 
-/// Apply CLI link-related overrides from `CompilerOptions` onto a
-/// `LinkingConfig` produced by the `Verum.toml` loader.
-///
-/// Pure helper extracted from the pipeline so the CLI-override
-/// merge logic can be unit-tested without spinning up a session.
-/// The merge is *additive*: a CLI flag can opt INTO a stricter
-/// stance (strip more, link statically) but cannot turn off a
-/// stance the manifest already enabled. This mirrors the LTO
-/// merge precedence and keeps the manifest authoritative for the
-/// per-project default while letting the CLI tighten further on
-/// a per-invocation basis.
-///
-/// Closes the inert-defense pattern around three CLI options
-/// (`strip_symbols`, `strip_debug`, `static_link`) that landed on
-/// `CompilerOptions` but never reached the linker phase.
-pub(crate) fn apply_cli_link_overrides(
-    options: &crate::options::CompilerOptions,
-    linker_config: &mut LinkingConfig,
-) {
-    if options.strip_symbols {
-        linker_config.strip = true;
-    }
-    if options.strip_debug {
-        linker_config.strip_debug_only = true;
-    }
-    if options.static_link {
-        linker_config.static_link = true;
-    }
-}
-
 // ==================== MACRO EXPANSION ====================
 
 /// Types of macro/meta function arguments
@@ -16005,45 +15560,6 @@ pub fn reset_test_isolation() {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod run_result_tests {
-    //! Pin the public API of `RunResult` — the dispatch contract
-    //! relied on by `commands/build.rs` and any future caller of
-    //! `pipeline.run()`. Any change to variant set or accessor
-    //! signature must update these pins so the breaking change is
-    //! visible at review time.
-    use super::RunResult;
-    use std::path::PathBuf;
-
-    #[test]
-    fn checked_variant_has_no_output_path() {
-        let r = RunResult::Checked;
-        assert!(r.is_check_only(), "Checked must report is_check_only=true");
-        assert!(r.output_path().is_none(), "Checked has no binary path");
-    }
-
-    #[test]
-    fn built_variant_carries_path() {
-        let p = PathBuf::from("/tmp/example.bin");
-        let r = RunResult::Built(p.clone());
-        assert!(!r.is_check_only(), "Built must report is_check_only=false");
-        assert_eq!(r.output_path(), Some(p.as_path()));
-    }
-
-    #[test]
-    fn built_clone_preserves_path() {
-        let p = PathBuf::from("/tmp/example.bin");
-        let r = RunResult::Built(p.clone());
-        let r2 = r.clone();
-        assert_eq!(r.output_path(), r2.output_path());
-        // Pin: variants are byte-equal under match (Debug derived).
-        match (&r, &r2) {
-            (RunResult::Built(a), RunResult::Built(b)) => assert_eq!(a, b),
-            _ => panic!("clone changed variant"),
-        }
-    }
-}
-
-#[cfg(test)]
 mod resolve_super_path_tests {
     use super::CompilationPipeline;
 
@@ -16122,98 +15638,5 @@ mod resolve_super_path_tests {
             resolve("core.sys.time_ops", "super.super.super.x"),
             "super.super.super.x",
         );
-    }
-}
-
-#[cfg(test)]
-mod cli_link_overrides_tests {
-    use super::apply_cli_link_overrides;
-    use crate::options::CompilerOptions;
-    use crate::phases::linking::LinkingConfig;
-    use std::path::PathBuf;
-
-    fn defaults() -> (CompilerOptions, LinkingConfig) {
-        let opts = CompilerOptions::new(
-            PathBuf::from("/dev/null"),
-            PathBuf::from("/dev/null"),
-        );
-        let cfg = LinkingConfig::default();
-        (opts, cfg)
-    }
-
-    #[test]
-    fn defaults_leave_linker_config_unchanged() {
-        // Pin: zero-CLI defaults must leave LinkingConfig identical
-        // to the manifest-loaded shape. Without this guard, a refactor
-        // could accidentally make the wiring force-on a strip / static
-        // stance the manifest didn't request.
-        let (opts, mut cfg) = defaults();
-        let original_strip = cfg.strip;
-        let original_strip_debug = cfg.strip_debug_only;
-        let original_static = cfg.static_link;
-
-        apply_cli_link_overrides(&opts, &mut cfg);
-
-        assert_eq!(cfg.strip, original_strip);
-        assert_eq!(cfg.strip_debug_only, original_strip_debug);
-        assert_eq!(cfg.static_link, original_static);
-    }
-
-    #[test]
-    fn strip_symbols_cli_flag_reaches_linker_config() {
-        // Pin: --strip-symbols on the CLI flips LinkingConfig.strip,
-        // which is the field the linker phase actually consults.
-        let (opts, mut cfg) = defaults();
-        let opts = opts.with_strip_symbols(true);
-        cfg.strip = false;
-        apply_cli_link_overrides(&opts, &mut cfg);
-        assert!(
-            cfg.strip,
-            "strip_symbols=true CLI must set LinkingConfig.strip = true",
-        );
-    }
-
-    #[test]
-    fn strip_debug_cli_flag_reaches_linker_config() {
-        let (opts, mut cfg) = defaults();
-        let opts = opts.with_strip_debug(true);
-        cfg.strip_debug_only = false;
-        apply_cli_link_overrides(&opts, &mut cfg);
-        assert!(
-            cfg.strip_debug_only,
-            "strip_debug=true CLI must set LinkingConfig.strip_debug_only = true",
-        );
-    }
-
-    #[test]
-    fn static_link_cli_flag_reaches_linker_config() {
-        let (opts, mut cfg) = defaults();
-        let opts = opts.with_static_link(true);
-        cfg.static_link = false;
-        apply_cli_link_overrides(&opts, &mut cfg);
-        assert!(
-            cfg.static_link,
-            "static_link=true CLI must set LinkingConfig.static_link = true",
-        );
-    }
-
-    #[test]
-    fn cli_overrides_are_additive_not_subtractive() {
-        // Pin: CLI flags can opt INTO a stricter stance but cannot
-        // turn off a stance the manifest already enabled. This is
-        // load-bearing — the manifest is the per-project default
-        // and the CLI is per-invocation; allowing the CLI to flip
-        // a stance OFF would let `verum build` accidentally undo a
-        // signed manifest's strip / static-link policy.
-        let (opts, mut cfg) = defaults();
-        // Manifest pre-set strip = true.
-        cfg.strip = true;
-        cfg.static_link = true;
-
-        // CLI does NOT pass --strip-symbols / --static-link.
-        // The pre-existing manifest setting must survive.
-        apply_cli_link_overrides(&opts, &mut cfg);
-        assert!(cfg.strip, "manifest strip stance must survive CLI no-op");
-        assert!(cfg.static_link, "manifest static_link stance must survive CLI no-op");
     }
 }

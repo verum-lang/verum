@@ -276,7 +276,12 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     // Deref CBGR references to get the actual value for builtin dispatch.
     // RefMut creates register-based refs for &mut self method calls.
-    let dispatch_receiver = if is_cbgr_ref(&receiver) {
+    //
+    // `mut` because the Shared-deref auto-forwarder below may rebind
+    // `dispatch_receiver` to the inner Value when an unrecognised
+    // method is called on a `Shared<T>` carrier — see the `_ => {}`
+    // arm of the Shared TypeId match.
+    let mut dispatch_receiver = if is_cbgr_ref(&receiver) {
         let (abs_index, _) = decode_cbgr_ref(receiver.as_i64());
         state.registers.get_absolute(abs_index)
     } else {
@@ -364,7 +369,29 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     state.set_reg(dst, receiver);
                     return Ok(DispatchResult::Continue);
                 }
-                _ => {}
+                _ => {
+                    // Auto-deref: any other method on `Shared<T>` is
+                    // forwarded to the inner `T`. Covers
+                    // `Shared<AtomicInt>::load / store / fetch_add`,
+                    // `Shared<AtomicBool>::load / store`, and any
+                    // user-defined `impl T { … }` reached through a
+                    // `Shared<T>` carrier — without monomorphising
+                    // every `Shared<T>` permutation. Mirrors the
+                    // earlier CBGR-ref deref above.
+                    //
+                    // Concrete callers that depend on this:
+                    // `core/net/weft/dst.vr` wraps state in
+                    // `Shared<AtomicInt>` / `Shared<AtomicBool>`
+                    // (SeededRng, WeftSimulator, TestClock); pre-fix
+                    // every `.load()` / `.store()` / `.fetch_add()`
+                    // panicked with "method not found".
+                    let inner = unsafe { *data_ptr.add(1) };
+                    dispatch_receiver = inner;
+                    // `receiver` itself stays as the Shared pointer
+                    // for any code that explicitly checks Shared
+                    // identity. All builtin dispatchers below
+                    // operate on `dispatch_receiver`.
+                }
             }
         }
     }
