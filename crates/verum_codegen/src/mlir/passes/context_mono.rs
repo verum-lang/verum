@@ -839,12 +839,50 @@ impl ContextMonomorphizationPass {
 
     /// Enable or disable value inlining.
     pub fn with_inline_values(mut self, inline: bool) -> Self {
+        // Phase-not-realised tracing: `inline_values` (default true)
+        // is documented as "value inlining" for context arguments —
+        // when set, the pass should fold known-constant context
+        // values directly into specialized clones instead of
+        // threading them through extra parameters. The current
+        // ContextMonomorphizationPass walks `clone_candidates` and
+        // counts at line 889 (`max_total_clones`), but no decision
+        // point gates inline-vs-thread-through on this flag —
+        // every context value is threaded through. Surface a debug
+        // trace when set to non-default (false) so embedders see
+        // the gap.
+        if !inline {
+            tracing::debug!(
+                "ContextMonomorphizationPass::with_inline_values(false) — \
+                 the flag is stored on the pass but the cloning logic does \
+                 not yet gate value-inlining on it; every context value is \
+                 threaded through specialized clones regardless. Forward-\
+                 looking knob for a future inline-vs-thread heuristic."
+            );
+        }
         self.inline_values = inline;
         self
     }
 
     /// Set maximum clones per function.
     pub fn with_max_clones_per_function(mut self, max: usize) -> Self {
+        // Phase-not-realised tracing: `max_clones_per_function`
+        // (default 5) is documented as a per-function clone cap.
+        // The total-clones cap (`max_total_clones`, default 50) IS
+        // consumed at line 889 to truncate `clone_candidates`. The
+        // per-function cap is stored but no decision point applies
+        // it — a single function with high context-arity could
+        // generate more than 5 clones unrestricted. Surface a debug
+        // trace when set to non-default so embedders see the gap.
+        if max != 5 {
+            tracing::debug!(
+                "ContextMonomorphizationPass::with_max_clones_per_function({}) — \
+                 the value is stored on the pass but no decision point applies \
+                 the per-function cap; only the total cap (max_total_clones) \
+                 is enforced at line 889. Forward-looking knob for finer-\
+                 grained clone budgeting.",
+                max
+            );
+        }
         self.max_clones_per_function = max;
         self
     }
