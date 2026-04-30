@@ -143,6 +143,37 @@ pub enum InterpreterError {
     /// Invalid type ID.
     InvalidType(TypeId),
 
+    /// Variant-layout disagreement at typed-variant construction
+    /// (`MakeVariantTyped`, Extended sub-op `0x01` — #146 Phase 3b).
+    ///
+    /// Raised when the operand-supplied `(type_id, tag, field_count)`
+    /// tuple disagrees with the global type table's view of the
+    /// declared variant: the type_id has no registered descriptor,
+    /// the tag is not a declared variant of that type, or the
+    /// field_count does not match the declared variant's arity.
+    ///
+    /// Surfaces a codegen drift between `MakeVariantTyped` emission
+    /// and the type-descriptor population pass — without this gate
+    /// such drift would silently produce a heap object whose field
+    /// layout disagrees with what every consumer (pattern matching,
+    /// `GetVariantData`, `derive(Eq)`) assumes, only erroring much
+    /// later when a misaligned read triggers a type-tag mismatch
+    /// (or worse, returns plausible-looking garbage).
+    LayoutMismatch {
+        /// Type ID supplied in the bytecode operand.
+        type_id: TypeId,
+        /// Variant tag supplied in the bytecode operand.
+        tag: u32,
+        /// Field count supplied in the bytecode operand.
+        got_field_count: u32,
+        /// Field count expected from the declared variant
+        /// (or `None` when the type_id / tag itself was unknown).
+        expected_field_count: Option<u32>,
+        /// Human-readable reason: "unknown type_id", "unknown tag
+        /// for type", "field_count mismatch".
+        reason: &'static str,
+    },
+
     /// CBGR validation failed (use-after-free, etc.).
     CbgrViolation {
         /// Type of violation.
@@ -415,6 +446,26 @@ impl fmt::Display for InterpreterError {
             Self::CbgrViolation { kind, ptr } => {
                 write!(f, "CBGR violation: {:?} at {:#x}", kind, ptr)
             }
+            Self::LayoutMismatch {
+                type_id,
+                tag,
+                got_field_count,
+                expected_field_count,
+                reason,
+            } => match expected_field_count {
+                Some(expected) => write!(
+                    f,
+                    "Variant layout mismatch ({}): type_id={}, tag={}, \
+                     got field_count={}, expected {}",
+                    reason, type_id.0, tag, got_field_count, expected
+                ),
+                None => write!(
+                    f,
+                    "Variant layout mismatch ({}): type_id={}, tag={}, \
+                     got field_count={}",
+                    reason, type_id.0, tag, got_field_count
+                ),
+            },
             Self::AssertionFailed { message, pc } => {
                 write!(f, "Assertion failed at pc {}: {}", pc, message)
             }

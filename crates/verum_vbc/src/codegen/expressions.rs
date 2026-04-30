@@ -11153,8 +11153,40 @@ impl VbcCodegen {
             });
 
         if let Some(tag) = variant_tag {
-            // Record variant: create variant object and set fields as variant data
-            self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: fields.len() as u32 });
+            // Record variant: create variant object and set fields as
+            // variant data.  Prefer `MakeVariantTyped` when the parent
+            // sum-type is registered — encodes the concrete TypeId in
+            // the heap header so `format_variant_for_print_depth`
+            // resolves the variant constructor name correctly when
+            // distinct sum types share variant tags (e.g. `Result.Err`
+            // and `ShellError.SpawnFailed` both tag=1).
+            let parent_type_id = self
+                .ctx
+                .lookup_function(&variant_name)
+                .and_then(|info| info.parent_type_name.clone())
+                .or_else(|| self
+                    .ctx
+                    .lookup_function(&dot_name)
+                    .and_then(|info| info.parent_type_name.clone()))
+                .as_deref()
+                .and_then(|name| self.type_name_to_id.get(name).copied());
+            if let Some(tid) = parent_type_id {
+                // Use the typed IR variant — the encoder writes the
+                // canonical wire format.  Sibling to the call-form
+                // variant constructor path above; both sites prefer
+                // MakeVariantTyped when the parent sum-type id is
+                // known.
+                self.ctx.emit(Instruction::MakeVariantTyped {
+                    dst: result,
+                    type_id: tid.0,
+                    tag,
+                    field_count: fields.len() as u32,
+                });
+            } else {
+                self.ctx.emit(Instruction::MakeVariant {
+                    dst: result, tag, field_count: fields.len() as u32,
+                });
+            }
             // For variant records, disambiguation uses the variant's own payload
             // types; the per-field logic mirrors the plain-record path below.
             let variant_type_name = format!("{}", path);
