@@ -2810,6 +2810,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         Opcode::DivI => decode_binary_i(data, offset, BinaryIntOp::Div),
         Opcode::ModI => decode_binary_i(data, offset, BinaryIntOp::Mod),
         Opcode::PowI => decode_binary_i(data, offset, BinaryIntOp::Pow),
+        Opcode::UDivI => decode_binary_i(data, offset, BinaryIntOp::UDiv),
+        Opcode::UModI => decode_binary_i(data, offset, BinaryIntOp::UMod),
 
         // ====================================================================
         // Float Arithmetic
@@ -5183,6 +5185,8 @@ fn binary_int_op_to_opcode(op: BinaryIntOp) -> Opcode {
         BinaryIntOp::Div => Opcode::DivI,
         BinaryIntOp::Mod => Opcode::ModI,
         BinaryIntOp::Pow => Opcode::PowI,
+        BinaryIntOp::UDiv => Opcode::UDivI,
+        BinaryIntOp::UMod => Opcode::UModI,
     }
 }
 

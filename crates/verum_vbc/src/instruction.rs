@@ -145,10 +145,21 @@ pub enum Opcode {
     /// Dynamic Convert to Int: runtime type dispatch
     /// Handles: Float→Int (truncate), Bool→Int (0/1), Char→Int (codepoint), Int→Int (identity)
     CvtToI = 0x1A,
-    /// Reserved integer arithmetic.
-    IntArith1B = 0x1B,
-    /// Reserved integer arithmetic.
-    IntArith1C = 0x1C,
+    /// Unsigned integer division: `dst = (a as u64) wrapping_div (b as u64)`.
+    ///
+    /// Distinct from `DivI` because signed and unsigned division
+    /// disagree once either operand has the high bit set: e.g.
+    /// `(u64::MAX) / 10 = 1844674407370955161` but `(i64)(-1) / 10 = 0`.
+    /// VBC stores both i64 and u64 in the same NaN-boxed `Value::Int`
+    /// payload; the *operation* carries the signedness, not the value.
+    /// Codegen selects this opcode when both operand inferred types
+    /// are unsigned (`UInt8`/`UInt16`/`UInt32`/`UInt64`/`USize`/
+    /// `Byte`) — same precedent as `Shr` → `Ushr`.
+    UDivI = 0x1B,
+    /// Unsigned integer remainder: `dst = (a as u64) wrapping_rem (b as u64)`.
+    /// See `UDivI` for the rationale; `UModI` is its sister opcode for
+    /// the modulo operation.
+    UModI = 0x1C,
     /// Reserved integer arithmetic.
     IntArith1D = 0x1D,
     /// Reserved integer arithmetic.
@@ -11389,6 +11400,15 @@ pub enum Instruction {
 // ============================================================================
 
 /// Binary integer operations.
+///
+/// Add/Sub/Mul wrap identically under signed and unsigned semantics
+/// at the bit level, so a single opcode covers both. Div/Mod do
+/// NOT — `(u64::MAX)/10 ≠ (i64)(-1)/10` — and the language exposes
+/// `UInt{8,16,32,64}` / `USize` / `Byte` as proper unsigned types.
+/// `UDiv` / `UMod` carry the unsignedness on the operation; the
+/// codegen picks them when the inferred operand type is unsigned
+/// (mirrors the `Shr` → `Ushr` precedent for arithmetic-vs-logical
+/// shifts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BinaryIntOp {
     /// Addition.
@@ -11397,12 +11417,16 @@ pub enum BinaryIntOp {
     Sub,
     /// Multiplication.
     Mul,
-    /// Division.
+    /// Signed division.
     Div,
-    /// Modulo.
+    /// Signed modulo.
     Mod,
     /// Power.
     Pow,
+    /// Unsigned division (operands reinterpreted as `u64`).
+    UDiv,
+    /// Unsigned modulo (operands reinterpreted as `u64`).
+    UMod,
 }
 
 /// Binary float operations.

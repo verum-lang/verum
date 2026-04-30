@@ -1367,8 +1367,22 @@ impl VbcCodegen {
                         b: right_reg,
                     });
                 } else {
+                    // Pick unsigned division when the left-operand type
+                    // is unsigned: signed and unsigned `/` disagree once
+                    // the high bit is set, e.g. `(u64::MAX) / 10 ≠
+                    // (i64)(-1) / 10`. Mirrors the `Shr`→`Ushr` precedent
+                    // a few branches up. `Text.parse_int_radix` and any
+                    // stdlib code with `UInt64` magnitudes ≥ 2^63 depend
+                    // on this — pre-fix it silently emitted signed `/`
+                    // and `(u64::MAX) / radix` collapsed to `0`.
+                    let use_unsigned = self
+                        .infer_expr_type_name(left)
+                        .as_deref()
+                        .map(is_unsigned_int_type_name)
+                        .unwrap_or(false);
+                    let op = if use_unsigned { BinaryIntOp::UDiv } else { BinaryIntOp::Div };
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Div,
+                        op,
                         dst: dest,
                         a: left_reg,
                         b: right_reg,
@@ -1384,8 +1398,16 @@ impl VbcCodegen {
                         b: right_reg,
                     });
                 } else {
+                    // Same unsignedness gate as `BinOp::Div` — `(u64::MAX)
+                    // % 10 = 5` whereas `(i64)(-1) % 10 = -1`.
+                    let use_unsigned = self
+                        .infer_expr_type_name(left)
+                        .as_deref()
+                        .map(is_unsigned_int_type_name)
+                        .unwrap_or(false);
+                    let op = if use_unsigned { BinaryIntOp::UMod } else { BinaryIntOp::Mod };
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mod,
+                        op,
                         dst: dest,
                         a: left_reg,
                         b: right_reg,
