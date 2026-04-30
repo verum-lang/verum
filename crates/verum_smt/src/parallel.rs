@@ -724,6 +724,37 @@ impl Worker {
                 params.set_symbol("phase_selection", "caching");
             }
         }
+
+        // Case splitting strategy: Z3's `smt.case_split` parameter
+        // chooses how the SAT layer picks the next variable to
+        // branch on. Pre-fix, `StrategyParams.case_split` was
+        // populated by `aggressive()` (Dynamic) and
+        // `conservative()` (Sequential) but no consumer routed it
+        // through to the solver — every worker silently used Z3's
+        // default heuristic regardless of what the strategy said.
+        // Z3 accepts integer values: 0 = sat-style decision,
+        // 1 = use a slow but more activity-aware mechanism,
+        // 2 = arithmetic-aware, 3 = activity (default), 5 = relevance.
+        // Map the high-level strategy onto the closest documented
+        // Z3 mode rather than picking a free-form one — keeps the
+        // semantics auditable and survives Z3 docs revisions.
+        match custom.case_split {
+            CaseSplitStrategy::Sequential => {
+                // 0 = pick the first unassigned variable (deterministic).
+                params.set_u32("case_split", 0);
+            }
+            CaseSplitStrategy::Random => {
+                // 5 = relevance-driven (the closest Z3 setting to
+                // a randomised tie-breaker — combined with the
+                // already-wired `random_seed`).
+                params.set_u32("case_split", 5);
+            }
+            CaseSplitStrategy::Dynamic => {
+                // 3 = activity-based VSIDS-like heuristic
+                // (Z3's default; explicit so embedders see it set).
+                params.set_u32("case_split", 3);
+            }
+        }
     }
 
     /// Run worker
