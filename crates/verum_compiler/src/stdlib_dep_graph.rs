@@ -233,9 +233,16 @@ mod tests {
         let seeds = vec!["core.shell.exec".to_string()];
         let reachable = g.reachable_from(&seeds, |_| Vec::new());
         assert!(reachable.contains("core.shell.exec"));
-        // Reachability set should be much smaller than the full graph.
-        assert!(reachable.len() < g.module_count(),
-            "reachable {} should be < total {}", reachable.len(), g.module_count());
+
+        // The BFS visits parent-chain paths and nested-leaf candidates
+        // that don't correspond to real modules (e.g. `core.shell.exec.run`
+        // is the seed but the leaf `run` is an item, not a module).
+        // For the "subset" claim we count only the entries that are
+        // actually present in the embedded graph (real modules).
+        let real_count = reachable.iter().filter(|m| g.edges_of(m).is_some()).count();
+        assert!(real_count > 0, "should reach at least one real module");
+        assert!(real_count < g.module_count(),
+            "real reachable {} should be < total {}", real_count, g.module_count());
     }
 
     #[test]
