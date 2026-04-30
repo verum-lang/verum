@@ -8285,13 +8285,18 @@ impl TypeChecker {
             Type::unit()
         };
 
-        // Unified throws + async wrap via the helper. Multi-type throws
-        // (e.g. `throws(A | B)`) become a `Type::Variant` union that
-        // `.map_err` closures can destructure correctly.
-        let final_return_type = self.wrap_return_type_for_sig(
+        // Unified throws + generator + async wrap via the FULL helper.
+        // Multi-type throws (`throws(A | B)`) become a `Type::Variant`
+        // union that `.map_err` closures can destructure correctly;
+        // `is_generator` produces `Generator<Y, Unit>` between the
+        // throws and async wraps so `async fn*` decls land as
+        // `Future<Generator<Y, Unit>>` matching the function-decl
+        // path's wrap order.
+        let final_return_type = self.wrap_return_type_for_sig_full(
             return_type,
             &func.throws_clause,
             func.is_async,
+            func.is_generator,
         );
 
         // Infer computational properties from the function declaration
@@ -21441,6 +21446,38 @@ impl TypeChecker {
         throws_clause: &verum_common::Maybe<verum_ast::decl::ThrowsClause>,
         is_async: bool,
     ) -> Type {
+        // Backward-compat shim — forwards to the full impl with
+        // `is_generator = false`.  Existing callers that don't yet
+        // distinguish generator-vs-regular functions stay correct
+        // for non-generator decls.  The new
+        // `wrap_return_type_for_sig_full` carries the generator flag
+        // so async generators (`async fn*`) wrap as
+        // `Future<Generator<Yield, Unit>>` instead of being
+        // silently demoted to `Future<Yield>` (commit-level note
+        // for SHELL-5a: this was the load-bearing bug that broke
+        // `for await line in mounted_stream_lines(&t)` everywhere).
+        self.wrap_return_type_for_sig_full(return_type, throws_clause, is_async, false)
+    }
+
+    /// Full version of `wrap_return_type_for_sig` that ALSO honours
+    /// the generator flag.  Order of wrapping (outermost last):
+    ///
+    ///   1. throws-clause → `Result<T, E>` (or pass-through if T
+    ///      already implements Try)
+    ///   2. generator → `Generator<T, Unit>`
+    ///   3. async    → `Future<T>`
+    ///
+    /// So an `async fn* foo() -> Y throws E` decl yields
+    /// `Future<Generator<Result<Y, E>, Unit>>` — matches the
+    /// declaration-time wrap at infer.rs:35117 (the function-decl
+    /// path) so cross-module mounts get the same shape.
+    pub(crate) fn wrap_return_type_for_sig_full(
+        &mut self,
+        return_type: Type,
+        throws_clause: &verum_common::Maybe<verum_ast::decl::ThrowsClause>,
+        is_async: bool,
+        is_generator: bool,
+    ) -> Type {
         let with_throws = if let verum_common::Maybe::Some(tc) = throws_clause {
             if !tc.error_types.is_empty() {
                 // Double-wrap guard: if the body already returns a
@@ -21495,12 +21532,22 @@ impl TypeChecker {
         } else {
             return_type
         };
-        if is_async {
-            Type::Future {
-                output: Box::new(with_throws),
-            }
+        // Generator wrap: `fn*` returning T is `Generator<T, Unit>`.
+        // Applied BEFORE the async wrap so `async fn*` becomes
+        // `Future<Generator<T, Unit>>` (matches the function-decl
+        // path's wrap order at infer.rs:35117 — see SHELL-5a
+        // commit-level note for context).
+        let with_generator = if is_generator {
+            Type::generator(with_throws, Type::unit())
         } else {
             with_throws
+        };
+        if is_async {
+            Type::Future {
+                output: Box::new(with_generator),
+            }
+        } else {
+            with_generator
         }
     }
 
@@ -51737,11 +51784,15 @@ impl TypeChecker {
                                     .unwrap_or(Type::Unit);
 
                                 // CRITICAL FIX: Wrap return type in Future<T> for async static methods
-                                // This enables proper await type checking for Connection.connect().await
-                                let final_return_type = self.wrap_return_type_for_sig(
+                                // (and Generator<Y, Unit> for `fn*` static methods, plus
+                                // Future<Generator<Y, Unit>> for `async fn*`).
+                                // This enables proper await/for-await type checking for
+                                // Connection.connect().await AND Connection.events_stream().
+                                let final_return_type = self.wrap_return_type_for_sig_full(
                                     return_type,
                                     &func.throws_clause,
                                     func.is_async,
+                                    func.is_generator,
                                 );
 
                                 let func_ty = Type::function(param_types, final_return_type);
@@ -51845,11 +51896,15 @@ impl TypeChecker {
                                     .unwrap_or(Type::Unit);
 
                                 // CRITICAL FIX: Wrap return type in Future<T> for async methods
-                                // This enables proper await type checking for inherent impls
-                                let final_return_type = self.wrap_return_type_for_sig(
+                                // (and Generator<Y, Unit> for `fn*` methods, plus
+                                // Future<Generator<Y, Unit>> for `async fn*`).
+                                // This enables proper await/for-await type checking for
+                                // inherent impl methods.
+                                let final_return_type = self.wrap_return_type_for_sig_full(
                                     return_type,
                                     &func.throws_clause,
                                     func.is_async,
+                                    func.is_generator,
                                 );
 
                                 let method_ty = Type::function(param_types, final_return_type);
@@ -52945,13 +53000,19 @@ impl TypeChecker {
             Type::Var(TypeVar::fresh())
         };
 
-        // Unified throws + async wrap via the helper — ensures multi-type
-        // `throws(A | B)` unions are surfaced to callers as a proper
-        // `Type::Variant` instead of silently narrowing to the first type.
-        let return_for_sig = self.wrap_return_type_for_sig(
+        // Unified throws + generator + async wrap via the full helper —
+        // ensures `async fn*` decls registered through this path get
+        // the same `Future<Generator<Y, Unit>>` shape as decls
+        // processed through `infer_function`.  Without `is_generator`
+        // here, mounted async-generator functions silently lost the
+        // Generator wrapper across module boundaries — manifested as
+        // "for await requires AsyncIterator … got Future<Y>" at
+        // every call site (SHELL-5a regression).  Closes that path.
+        let return_for_sig = self.wrap_return_type_for_sig_full(
             return_type,
             &func.throws_clause,
             func.is_async,
+            func.is_generator,
         );
 
         // Build context requirement if present
