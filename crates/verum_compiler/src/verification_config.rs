@@ -148,14 +148,20 @@ impl VerificationConfig {
         Ok(config)
     }
 
-    /// Load from current directory (looks for verum.toml)
+    /// Load from current directory. Per Verum language spec the
+    /// service filename is `Verum.toml` (capitalised); the legacy
+    /// lowercase `verum.toml` is accepted as a fallback so existing
+    /// projects keep loading through the casing migration.
     pub fn load() -> Result<Self> {
-        let path = PathBuf::from("verum.toml");
-        if path.exists() {
-            Self::load_from_file(path)
-        } else {
-            Ok(Self::default())
+        let canonical = PathBuf::from("Verum.toml");
+        if canonical.exists() {
+            return Self::load_from_file(canonical);
         }
+        let legacy = PathBuf::from("verum.toml");
+        if legacy.exists() {
+            return Self::load_from_file(legacy);
+        }
+        Ok(Self::default())
     }
 
     /// Get total budget as Duration
