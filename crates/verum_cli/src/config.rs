@@ -1710,6 +1710,43 @@ impl Manifest {
             );
         }
 
+        // Surface inert `[verify]` section telemetry knobs.
+        // `verify.enable_telemetry` (default true) and
+        // `verify.persist_stats` (default true) are populated from
+        // the manifest and merged via `with_profile` (config.rs:471
+        // -478) but no production code path consults either flag.
+        // The build.rs:411 `persist_stats(&json)` call is gated on
+        // a CLI-only `--smt-stats` flag, NOT on the manifest's
+        // `verify.persist_stats`. Similarly, `verify.fail_on_divergence`
+        // (default true, doc'd to fail builds on cross-validation
+        // mismatch) is parsed but no cross-validation path consults
+        // it — the SmtBackendSwitcher's ValidationConfig.fail_on_mismatch
+        // is wired separately and isn't tied to the manifest's
+        // verify.fail_on_divergence.
+        //
+        // Surface a debug trace when any of these is set to a non-
+        // default value so embedders writing
+        // `[verify] enable_telemetry = false` see the gap rather
+        // than silently believing telemetry was disabled.
+        let verify_has_overrides = !self.verify.enable_telemetry
+            || !self.verify.persist_stats
+            || !self.verify.fail_on_divergence;
+        if verify_has_overrides {
+            tracing::debug!(
+                "manifest [verify] surface: enable_telemetry={}, persist_stats={}, \
+                 fail_on_divergence={} — these fields land on VerifyConfig and are \
+                 mergeable via [verify.profiles.<name>] but no production code path \
+                 consults them. The CLI `--smt-stats` flag controls telemetry \
+                 persistence (build.rs:411), not the manifest setting; the SMT \
+                 cross-validation gate is on SmtBackendSwitcher's \
+                 ValidationConfig.fail_on_mismatch (separately wired). Forward-\
+                 looking knobs.",
+                self.verify.enable_telemetry,
+                self.verify.persist_stats,
+                self.verify.fail_on_divergence,
+            );
+        }
+
         Ok(())
     }
 }
