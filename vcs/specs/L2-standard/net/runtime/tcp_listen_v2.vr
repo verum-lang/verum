@@ -1,0 +1,51 @@
+// @test: run-interpreter
+// @expected-stdout: ipv4 ok\nbad-host -22\nipv6 ok\nlocal-port unknown -1
+// @tier: 0
+// @level: L2
+// @tags: net, tcp, runtime, intrinsic, listen, ipv4, ipv6, errno
+// @description: Tier-0 runtime smoke for the rich-signature
+// __tcp_listen_v2_raw + __tcp_local_port_raw intrinsic family. Pins
+// four contracts that the unified TCP-listen architecture (Route A of
+// the weft-arch-fork closure) depends on:
+//   1. IPv4 literal binds with port=0 produce a positive synthetic fd
+//      and the OS-chosen port can be recovered via __tcp_local_port_raw.
+//   2. Bad host literals return -EINVAL (= -22) — errno preservation,
+//      not the lossy -1 returned by the legacy __tcp_listen_raw.
+//   3. IPv6 loopback "::1" binds successfully (IPv6 path lives in the
+//      interpreter side; AOT support is a follow-up).
+//   4. __tcp_local_port_raw on an unknown fd returns -1 (no panic).
+
+mount core.sys.raw.{
+    __tcp_listen_v2_raw,
+    __tcp_local_port_raw,
+    __tcp_close_raw,
+};
+
+fn main() {
+    let v4 = __tcp_listen_v2_raw("127.0.0.1", 0, 128, 0);
+    if v4 > 0 {
+        let port = __tcp_local_port_raw(v4);
+        if port > 0 && port <= 65535 {
+            print("ipv4 ok");
+        } else {
+            print(f"ipv4 fail: port={port}");
+        }
+        let _ = __tcp_close_raw(v4);
+    } else {
+        print(f"ipv4 fail: fd={v4}");
+    }
+
+    let bad = __tcp_listen_v2_raw("not-an-ip", 0, 128, 0);
+    print(f"bad-host {bad}");
+
+    let v6 = __tcp_listen_v2_raw("::1", 0, 128, 0);
+    if v6 > 0 {
+        let _ = __tcp_close_raw(v6);
+        print("ipv6 ok");
+    } else {
+        print(f"ipv6 fail: fd={v6}");
+    }
+
+    let unknown_fd = __tcp_local_port_raw(999_999);
+    print(f"local-port unknown {unknown_fd}");
+}
