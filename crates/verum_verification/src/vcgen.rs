@@ -1377,6 +1377,26 @@ pub struct VCGenerator {
     pub symbol_table: SymbolTable,
     /// Current function being analyzed
     current_function: Maybe<Text>,
+    /// Precondition of the function currently under VC generation.
+    ///
+    /// Hoare triple: `{P} body {Q}` says "if `P` holds before `body`,
+    /// then `Q` holds after". Concretely, **every** VC generated
+    /// inside the body must be discharged *under the assumption that
+    /// `P` holds*. The main correctness VC is wrapped at line 1442
+    /// (`P => wp(body, Q)`), but intermediate VCs (callee
+    /// preconditions, array bounds checks, division-by-zero,
+    /// invariant preservation, …) were previously pushed directly
+    /// — i.e. the SMT solver received them WITHOUT the caller's `P`
+    /// in scope. Result: `fn caller(x: Int{>0}) { helper(x) }`
+    /// failed verification because the call-site VC asked SMT to
+    /// prove `x > 0` from no premises. Sound (rejects valid code) but
+    /// pessimistic — the master-audit (D-2) ranked this CRITICAL for
+    /// any non-trivial `requires`/`ensures` use.
+    ///
+    /// `push_vc` consults this field and wraps every pushed VC in
+    /// `precondition => vc.formula` whenever it's set. Cleared by
+    /// `generate_vcs` after function processing.
+    current_precondition: Maybe<Formula>,
     /// Next loop ID
     next_loop_id: u64,
     /// Source file for locations
@@ -1390,10 +1410,12 @@ impl VCGenerator {
             vcs: List::new(),
             symbol_table: SymbolTable::new(),
             current_function: Maybe::None,
+            current_precondition: Maybe::None,
             next_loop_id: 0,
             source_file: Text::from("<unknown>"),
         }
     }
+
 
     /// Create with a source file name
     pub fn with_source_file(mut self, file: impl Into<Text>) -> Self {
@@ -1428,6 +1450,14 @@ impl VCGenerator {
         // Get precondition and postcondition (from attributes or defaults)
         let (precondition, postcondition) = self.extract_contract(func);
 
+        // Arm the body-context precondition so every intermediate VC
+        // pushed during wp generation (callee preconditions, bounds
+        // checks, division-by-zero, invariant preservation, …) gets
+        // wrapped in `precondition => vc`. Closes the Hoare triple
+        // properly: the body verifies its obligations *under* the
+        // assumption that the caller honoured the precondition.
+        self.current_precondition = Maybe::Some(precondition.clone());
+
         // Generate VC for function body if present
         if let Some(body) = &func.body {
             let body_wp = match body {
@@ -1439,6 +1469,8 @@ impl VCGenerator {
             };
 
             // Main function VC: Precondition => wp(body, Postcondition)
+            // Pushed with `vcs.push` directly — the implication is
+            // already explicit, no double-wrap needed.
             let main_vc = VerificationCondition::new(
                 Formula::implies(precondition.clone(), body_wp.simplify()),
                 SourceLocation::from_span(func.span, self.source_file.clone()),
@@ -1450,6 +1482,9 @@ impl VCGenerator {
             self.vcs.push(main_vc);
         }
 
+        // Drop the body-context precondition so subsequent functions
+        // don't inherit a stale obligation.
+        self.current_precondition = Maybe::None;
         self.current_function = Maybe::None;
         self.vcs.clone()
     }
@@ -1652,11 +1687,7 @@ impl VCGenerator {
                     VCKind::LoopInvariantPreserve,
                     "Loop invariant preservation",
                 );
-                if let Maybe::Some(func_name) = &self.current_function {
-                    self.vcs.push(preserve_vc.with_function(func_name.clone()));
-                } else {
-                    self.vcs.push(preserve_vc);
-                }
+                self.push_vc(preserve_vc);
 
                 // 3. Exit: I && !b => Q
                 let exit_vc = VerificationCondition::new(
@@ -1668,11 +1699,7 @@ impl VCGenerator {
                     VCKind::LoopInvariantExit,
                     "Loop invariant implies postcondition",
                 );
-                if let Maybe::Some(func_name) = &self.current_function {
-                    self.vcs.push(exit_vc.with_function(func_name.clone()));
-                } else {
-                    self.vcs.push(exit_vc);
-                }
+                self.push_vc(exit_vc);
 
                 // Return invariant as wp
                 invariant
@@ -1862,11 +1889,7 @@ impl VCGenerator {
                     VCKind::LoopInvariantPreserve,
                     "Infinite loop invariant preservation",
                 );
-                if let Maybe::Some(func_name) = &self.current_function {
-                    self.vcs.push(preserve_vc.with_function(func_name.clone()));
-                } else {
-                    self.vcs.push(preserve_vc);
-                }
+                self.push_vc(preserve_vc);
 
                 invariant
             }
@@ -1943,11 +1966,7 @@ impl VCGenerator {
                             VCKind::ArrayBounds,
                             "Slice bounds valid: 0 <= start <= end <= length",
                         );
-                        if let Maybe::Some(func_name) = &self.current_function {
-                            self.vcs.push(bounds_vc.with_function(func_name.clone()));
-                        } else {
-                            self.vcs.push(bounds_vc);
-                        }
+                        self.push_vc(bounds_vc);
                     }
                     _ => {
                         // Simple index access: arr[i]
@@ -1965,11 +1984,7 @@ impl VCGenerator {
                             VCKind::ArrayBounds,
                             "Array index within bounds: 0 <= index < length",
                         );
-                        if let Maybe::Some(func_name) = &self.current_function {
-                            self.vcs.push(bounds_vc.with_function(func_name.clone()));
-                        } else {
-                            self.vcs.push(bounds_vc);
-                        }
+                        self.push_vc(bounds_vc);
                     }
                 }
 
@@ -1994,11 +2009,7 @@ impl VCGenerator {
                     VCKind::DivisionByZero,
                     "Division by non-zero",
                 );
-                if let Maybe::Some(func_name) = &self.current_function {
-                    self.vcs.push(div_vc.with_function(func_name.clone()));
-                } else {
-                    self.vcs.push(div_vc);
-                }
+                self.push_vc(div_vc);
 
                 postcondition.clone()
             }
@@ -2029,11 +2040,12 @@ impl VCGenerator {
                             VCKind::Precondition,
                             format!("Call to '{}' precondition", func_name),
                         );
-                        if let Maybe::Some(curr_func) = &self.current_function {
-                            self.vcs.push(call_vc.with_function(curr_func.clone()));
-                        } else {
-                            self.vcs.push(call_vc);
-                        }
+                        // push_vc applies BOTH the function-name tag AND
+                        // the Hoare-triple precondition wrap (S2). The
+                        // earlier branched form duplicated the
+                        // function-name handling; using push_vc unifies
+                        // both transforms in one place.
+                        self.push_vc(call_vc);
                     }
                 }
                 postcondition.clone()
@@ -2619,8 +2631,26 @@ impl VCGenerator {
         SmtExpr::UnOp(SmtUnOp::Len, Box::new(arr_smt.clone()))
     }
 
-    /// Push a verification condition, associating it with current function if any
-    fn push_vc(&mut self, vc: VerificationCondition) {
+    /// Push a verification condition.
+    ///
+    /// Two transforms apply, in order:
+    ///
+    ///   1. **Precondition wrap (S2 fix).** When a function-scoped
+    ///      precondition is armed via `current_precondition`, the
+    ///      pushed VC is rewritten as `precondition => vc.formula`.
+    ///      This is what makes intermediate VCs (callee preconditions,
+    ///      bounds checks, division-by-zero, invariant preservation,
+    ///      …) honour the Hoare triple — without this wrap a function
+    ///      `fn caller(x: Int{>0}) { helper(x) }` would push a raw
+    ///      `x > 0` obligation that SMT couldn't discharge from no
+    ///      premises, even though the caller's signature already
+    ///      established `x > 0`.
+    ///   2. **Function-name attachment.** Carries the enclosing
+    ///      function name through for diagnostic / dispatch purposes.
+    fn push_vc(&mut self, mut vc: VerificationCondition) {
+        if let Maybe::Some(p) = &self.current_precondition {
+            vc.formula = Formula::implies(p.clone(), vc.formula);
+        }
         if let Maybe::Some(func_name) = &self.current_function {
             self.vcs.push(vc.with_function(func_name.clone()));
         } else {
