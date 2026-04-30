@@ -1,0 +1,34 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: shell, scripts, cancellation, timeout
+// @description: Real-world shell script — run a command with hard timeout.
+//
+// Exercises:
+//   * .run_with_timeout(after) — convenience wrapper over
+//     .run_with_cancel that builds a CancellationToken.with_timeout
+//   * Result destructuring on Cancelled vs SpawnFailed vs success
+//
+// Use case: build-system step that should never block past 5 minutes.
+
+mount core.shell.command.{ShellCommand};
+mount core.shell.result.{ShellResult, ShellError};
+mount core.time.duration.{Duration};
+
+/// Run `script` with a wall-clock cap. Returns:
+///   * Ok(result)              — exited within the budget
+///   * Err(Cancelled { … })    — exceeded the budget; SIGTERM/SIGKILL fired
+///   * Err(SpawnFailed { … })  — couldn't even start
+async fn capped(script: ShellCommand, budget: Duration)
+    -> Result<ShellResult, ShellError>
+{
+    script.run_with_timeout(budget).await
+}
+
+async fn main() -> Int {
+    // Hard-cap a slow command at 30 seconds.
+    let cmd = sh#"sleep 60";
+    match capped(cmd, Duration.from_secs(30)).await {
+        Ok(_)  => 0,
+        Err(_) => 1,
+    }
+}
