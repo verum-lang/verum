@@ -630,40 +630,42 @@ pub fn elaborate_proof_body(
 /// Algorithm:
 ///   1. Verify the theorem has a proof body (else `NoProofBody`).
 ///   2. Elaborate the proof body to a `Term`.
-///   3. Translate the proposition to a kernel `Term` via
-///      [`proposition_to_term`].  Falls back to
-///      [`placeholder_proposition`] when the proposition shape is
-///      Phase-5+ work (so theorems with complex propositions still
-///      produce a *weakly* load-bearing certificate rather than
-///      failing outright).
-///   4. [`close_over_axioms`] to wrap the body in a `Lam`/`Pi` chain
+///   3. Build a [`crate::verification_goal::VerificationGoal`] from
+///      the theorem (#167 unification).  The goal's `to_term()`
+///      method produces a Pi-chain over hypotheses with the
+///      proposition as conclusion — this is the certificate's
+///      claimed type.
+///   4. Falls back to [`placeholder_proposition`] when the
+///      proposition shape is Phase-7+ work (so theorems with
+///      complex propositions still produce a *weakly* load-bearing
+///      certificate rather than failing outright).
+///   5. [`close_over_axioms`] to wrap the body in a `Lam`/`Pi` chain
 ///      over the registered axiom table.
-///   5. [`finalise_certificate`] re-verifies via the kernel checker.
+///   6. [`finalise_certificate`] re-verifies via the kernel checker.
 ///
-/// **Phase-4 status**: when the proposition is a literal `true`,
-/// a path name, or a function call, the certificate's `claimed_type`
-/// reflects the actual proposition.  For richer shapes (equality,
-/// quantifiers, boolean connectives) the elaborator currently falls
-/// back to `placeholder_proposition`, recording the fallback in the
-/// certificate's `proposition_translation` metadata field so callers
-/// can see whether the certificate is *fully* or *weakly*
-/// load-bearing.
+/// **Post-#167**: the claimed type comes from the unified
+/// `VerificationGoal::to_term()` — the same shape that fn-contracts
+/// and refinement-predicates produce.  One verification surface,
+/// many sources.
 pub fn elaborate_theorem(
     theorem: &TheoremDecl,
     ctx: &mut ElabContext,
 ) -> Result<Certificate, ElabError> {
+    use crate::verification_goal::{from_theorem_decl, TheoremKind};
+
     let body = theorem
         .proof
         .as_ref()
         .ok_or(ElabError::NoProofBody)?;
     let body_term = elaborate_proof_body(body, ctx)?;
 
-    // Phase-4: try to translate the actual proposition.  On failure,
-    // fall back to placeholder so the elaborator still produces a
-    // certificate (weakly load-bearing) rather than failing outright.
+    // Phase-6: build a unified VerificationGoal from the theorem.
+    // The goal's to_term() is the certificate's claimed type — a
+    // Pi-chain over hypotheses with the proposition as conclusion.
+    // On translation failure, fall back to placeholder (graceful).
     let (body_type, prop_translation_status) =
-        match proposition_to_term(theorem.proposition.as_ref(), ctx) {
-            Ok(t) => (t, "translated"),
+        match from_theorem_decl(theorem, TheoremKind::Theorem, ctx) {
+            Ok(goal) => (goal.to_term(), "verification_goal"),
             Err(_) => (placeholder_proposition(), "placeholder"),
         };
 
@@ -671,7 +673,7 @@ pub fn elaborate_theorem(
     let mut metadata = BTreeMap::new();
     metadata.insert("theorem_name".to_string(), theorem.name.name.to_string());
     metadata.insert("kernel_version".to_string(), crate::VVA_VERSION.to_string());
-    metadata.insert("elaborator_phase".to_string(), "4".to_string());
+    metadata.insert("elaborator_phase".to_string(), "6".to_string());
     metadata.insert(
         "proposition_translation".to_string(),
         prop_translation_status.to_string(),
@@ -1177,13 +1179,13 @@ mod tests {
         );
         assert_eq!(
             cert.metadata.get("elaborator_phase").map(|s| s.as_str()),
-            Some("4"),
+            Some("6"),
         );
         // Phase-4 records whether the proposition was translated.
         assert_eq!(
             cert.metadata.get("proposition_translation").map(|s| s.as_str()),
-            Some("translated"),
-            "Bool literal proposition should translate (not fall back)",
+            Some("verification_goal"),
+            "Bool literal proposition should translate via VerificationGoal",
         );
     }
 
