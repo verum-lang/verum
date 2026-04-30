@@ -44,6 +44,7 @@
 pub mod autodiff_compilation;
 pub mod cfg_constructor;
 pub mod codegen_tiers;
+pub mod delegate_expansion;
 pub mod context_validation;
 pub mod contract_verification;
 pub mod dependency_analysis;
