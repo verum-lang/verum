@@ -446,6 +446,65 @@ pub fn register_propositional_connectives(ctx: &mut ElabContext) {
     }
 }
 
+/// **Register the kernel_v0 lemma stubs** as axioms in `ctx`.
+///
+/// The five lemma stubs in `core/verify/kernel_v0/lemmas/` carry
+/// `@framework(<system>, "<path>")` citations that pin upstream
+/// proofs of fundamental meta-theorems (substitution lemma,
+/// Church-Rosser confluence, cartesian closure, function-extensionality,
+/// universe cumulativity).  The kernel rules in
+/// `core/verify/kernel_v0/rules/k_*.vr` discharge their soundness
+/// IOUs by `apply`-ing these lemma names.
+///
+/// Registering them up-front lets the elaborator resolve those
+/// `apply` chains without forcing every corpus theorem to register
+/// the lemma names individually.  Each stub carries claimed type
+/// `Universe(0)` — the opaque-axiom encoding (as with the
+/// connectives) — so the kernel checker accepts the structural
+/// shape; the load-bearing semantics is the upstream citation
+/// recorded by the `@framework` attribute.
+pub fn register_kernel_v0_lemmas(ctx: &mut ElabContext) {
+    for name in [
+        "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
+        "core.verify.kernel_v0.lemmas.beta.church_rosser_confluence",
+        "core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi",
+        "core.verify.kernel_v0.lemmas.eta.function_extensionality",
+        "core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion",
+    ] {
+        if ctx.get_axiom(name).is_none() {
+            ctx.register_axiom(name, Term::Universe(0));
+        }
+    }
+}
+
+/// **Register the canonical kernel-bridge dispatcher names** as
+/// axioms in `ctx`.
+///
+/// Kernel rule files in `core/verify/kernel_v0/rules/` carry
+/// `@kernel_discharge("kernel_<rule>_strict")` annotations.  The
+/// proof body of each rule's soundness lemma reduces to
+/// `apply kernel_<rule>_strict` — invoking the bridge to the
+/// dispatcher.  Registering these names lets the elaborator
+/// resolve those calls.
+pub fn register_kernel_bridge_dispatchers(ctx: &mut ElabContext) {
+    for name in [
+        "kernel_var_strict",
+        "kernel_universe_intro_strict",
+        "kernel_forward_axiom_strict",
+        "kernel_positivity_strict",
+        "kernel_pi_form_strict",
+        "kernel_lam_intro_strict",
+        "kernel_app_elim_strict",
+        "kernel_beta_strict",
+        "kernel_eta_strict",
+        "kernel_sub_strict",
+    ] {
+        if ctx.get_axiom(name).is_none() {
+            ctx.register_axiom(name, Term::Universe(0));
+        }
+    }
+}
+
 /// **Close the body and its type over the registered axiom table.**
 ///
 /// Wraps `body` in a `Lam`-chain and `body_type` in a matching
@@ -1566,6 +1625,84 @@ mod tests {
         let depth_after_second = ctx.get_axiom("__verum_kernel_And").is_some();
         assert!(depth_after_first);
         assert!(depth_after_second);
+    }
+
+    #[test]
+    fn register_kernel_v0_lemmas_covers_all_five_iou_stubs() {
+        let mut ctx = ElabContext::new();
+        register_kernel_v0_lemmas(&mut ctx);
+        for name in [
+            "core.verify.kernel_v0.lemmas.subst.subst_preserves_typing",
+            "core.verify.kernel_v0.lemmas.beta.church_rosser_confluence",
+            "core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi",
+            "core.verify.kernel_v0.lemmas.eta.function_extensionality",
+            "core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion",
+        ] {
+            assert!(
+                ctx.get_axiom(name).is_some(),
+                "kernel_v0 lemma stub `{}` must be registered",
+                name,
+            );
+        }
+    }
+
+    #[test]
+    fn register_kernel_bridge_dispatchers_covers_all_ten_rules() {
+        let mut ctx = ElabContext::new();
+        register_kernel_bridge_dispatchers(&mut ctx);
+        for name in [
+            "kernel_var_strict",
+            "kernel_universe_intro_strict",
+            "kernel_forward_axiom_strict",
+            "kernel_positivity_strict",
+            "kernel_pi_form_strict",
+            "kernel_lam_intro_strict",
+            "kernel_app_elim_strict",
+            "kernel_beta_strict",
+            "kernel_eta_strict",
+            "kernel_sub_strict",
+        ] {
+            assert!(
+                ctx.get_axiom(name).is_some(),
+                "kernel bridge dispatcher `{}` must be registered",
+                name,
+            );
+        }
+    }
+
+    #[test]
+    fn elaborate_proof_with_kernel_v0_lemma_apply_succeeds() {
+        // A theorem that applies one of the kernel_v0 lemma stubs
+        // resolves cleanly when register_kernel_v0_lemmas is called.
+        use verum_ast::decl::TheoremDecl;
+        use verum_ast::Literal;
+        let span = Span::dummy();
+        let true_prop = Expr::new(
+            ExprKind::Literal(Literal::bool(true, span)),
+            span,
+        );
+        let mut theorem = TheoremDecl::new(
+            Ident { name: "uses_church_rosser".into(), span },
+            true_prop,
+            span,
+        );
+        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr_dotted(&[
+                "core",
+                "verify",
+                "kernel_v0",
+                "lemmas",
+                "beta",
+                "church_rosser_confluence",
+            ])),
+            args: List::new(),
+        }));
+
+        let mut ctx = ElabContext::new();
+        register_kernel_v0_lemmas(&mut ctx);
+
+        let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
+        cert.verify().unwrap();
     }
 
     #[test]

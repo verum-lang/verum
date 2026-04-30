@@ -33,7 +33,8 @@ use crate::ui;
 use std::path::{Path, PathBuf};
 use verum_ast::decl::ItemKind;
 use verum_kernel::tactic_elaborator::{
-    elaborate_theorem, register_propositional_connectives, ElabContext, ElabError,
+    elaborate_theorem, register_kernel_bridge_dispatchers, register_kernel_v0_lemmas,
+    register_propositional_connectives, ElabContext, ElabError,
 };
 
 /// One row in the elaboration report — what happened for one
@@ -184,11 +185,23 @@ fn walk_and_elaborate(
         };
 
         let mut ctx = ElabContext::new();
-        // Pre-register propositional connectives so theorems with
-        // `Binary` / `Unary` propositions (`a == b`, `a && b`, `!x`)
-        // translate via the connective-axiom encoding rather than
-        // falling back to the placeholder.
+        // Pre-register the canonical axiom families so theorems can
+        // resolve their apply-targets without per-call wiring.
+        //
+        //   - propositional connectives — `a == b`, `a && b`, `!x`
+        //     translate to opaque connective-axiom App chains.
+        //   - kernel_v0 lemma stubs — `apply
+        //     core.verify.kernel_v0.lemmas.beta.church_rosser_confluence`
+        //     and friends resolve to the registered axiom slots
+        //     carrying their `@framework(<system>, "<path>")`
+        //     citations.
+        //   - kernel bridge dispatchers — `apply kernel_<rule>_strict`
+        //     resolves to the registered bridge axiom; the audit
+        //     gate's apply-graph walker classifies the leaf as
+        //     `kernel_strict`.
         register_propositional_connectives(&mut ctx);
+        register_kernel_v0_lemmas(&mut ctx);
+        register_kernel_bridge_dispatchers(&mut ctx);
         let row = match elaborate_theorem(theorem, &mut ctx) {
             Ok(cert) => {
                 let vproof_path = out_dir.join(format!("{}.vproof", name));
