@@ -9123,7 +9123,7 @@ impl<'s> CompilationPipeline<'s> {
                     }
 
                     // Extract @cfg predicates from item attributes and module path
-                    let cfg_preds = Self::extract_cfg_predicates(&item.attributes, &current_module_path);
+                    let cfg_preds = crate::cfg_eval::extract_cfg_predicates(&item.attributes, &current_module_path);
                     if !cfg_preds.is_empty() {
                         entry = entry.with_cfg_predicates(cfg_preds);
                     }
@@ -9219,7 +9219,7 @@ impl<'s> CompilationPipeline<'s> {
                         }
 
                         // Extract @cfg predicates from item attributes and module path
-                        let cfg_preds = Self::extract_cfg_predicates(&item.attributes, mod_path);
+                        let cfg_preds = crate::cfg_eval::extract_cfg_predicates(&item.attributes, mod_path);
                         if !cfg_preds.is_empty() {
                             entry = entry.with_cfg_predicates(cfg_preds);
                         }
@@ -9237,123 +9237,14 @@ impl<'s> CompilationPipeline<'s> {
     /// Returns a list of cfg predicate strings (e.g., `target_os = "linux"`).
     /// Also infers platform cfg from module paths containing platform segments
     /// (e.g., `sys.darwin.io` implies `target_os = "macos"`).
-    fn extract_cfg_predicates(
-        attributes: &[verum_ast::attr::Attribute],
-        module_path: &ModulePath,
-    ) -> List<Text> {
-        let mut predicates = List::new();
-
-        // Extract from @cfg(...) attributes on the item
-        for attr in attributes {
-            if attr.name.as_str() == "cfg" {
-                if let verum_common::Maybe::Some(ref args) = attr.args {
-                    // Extract cfg predicate key=value pairs from expressions
-                    for arg in args.iter() {
-                        if let Some(pred) = Self::cfg_expr_to_predicate(arg) {
-                            predicates.push(pred);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Infer platform cfg from module path segments
-        let path_str = module_path.to_string();
-        if path_str.contains(".darwin.") || path_str.ends_with(".darwin") {
-            predicates.push(Text::from("target_os = \"macos\""));
-        } else if path_str.contains(".linux.") || path_str.ends_with(".linux") {
-            predicates.push(Text::from("target_os = \"linux\""));
-        } else if path_str.contains(".windows.") || path_str.ends_with(".windows") {
-            predicates.push(Text::from("target_os = \"windows\""));
-        }
-
-        predicates
-    }
-
-    /// Audit-E2: evaluate a list of `@cfg(...)` predicates against the
-    /// active compilation target. Returns `true` when every predicate
-    /// either matches the target (target_os / target_arch /
-    /// target_pointer_width / target_endian) or is a non-target-axis
-    /// predicate this evaluator doesn't recognise (kept conservative —
-    /// callers can opt in to a custom evaluator for feature flags via
-    /// `feature = "..."`).
-    ///
-    /// Falls back to the host spec when no target_triple was set —
-    /// preserves the legacy "compile for self" behaviour.
-    pub fn target_predicates_satisfied(
-        predicates: &[Text],
-        target: &crate::target_spec::TargetSpec,
-    ) -> bool {
-        for pred in predicates.iter() {
-            let textual = pred.as_str();
-            if let Some(matched) = target.matches_textual(textual) {
-                if !matched {
-                    return false;
-                }
-            }
-            // Non-target predicates pass through; downstream
-            // feature-flag evaluators can sharpen the decision.
-        }
-        true
-    }
-
-    /// Convert a @cfg expression argument to a predicate string.
-    ///
-    /// Handles patterns like:
-    /// - `target_os = "linux"` (Binary with Assign op)
-    /// - Simple identifier (e.g., `unix`, `windows`)
-    fn cfg_expr_to_predicate(expr: &verum_ast::Expr) -> Option<Text> {
-        use verum_ast::expr::{ExprKind, BinOp};
-        match &expr.kind {
-            // Handle `key = "value"` as Binary { op: Assign, left, right }
-            ExprKind::Binary { op, left, right } => {
-                if matches!(op, BinOp::Assign) {
-                    let key = Self::expr_to_ident_string(left)?;
-                    let val = Self::expr_to_string_literal(right)?;
-                    Some(Text::from(format!("{} = \"{}\"", key, val)))
-                } else {
-                    None
-                }
-            }
-            // Handle simple identifier like `unix`
-            ExprKind::Path(path) => {
-                use verum_ast::ty::PathSegment;
-                match path.segments.last()? {
-                    PathSegment::Name(ident) => Some(Text::from(ident.as_str())),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract identifier name from an expression.
-    fn expr_to_ident_string(expr: &verum_ast::Expr) -> Option<String> {
-        use verum_ast::ty::PathSegment;
-        match &expr.kind {
-            verum_ast::expr::ExprKind::Path(path) => {
-                match path.segments.last()? {
-                    PathSegment::Name(ident) => Some(ident.as_str().to_string()),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract string literal value from an expression.
-    fn expr_to_string_literal(expr: &verum_ast::Expr) -> Option<String> {
-        use verum_ast::literal::LiteralKind;
-        match &expr.kind {
-            verum_ast::expr::ExprKind::Literal(lit) => {
-                match &lit.kind {
-                    LiteralKind::Text(string_lit) => Some(string_lit.as_str().to_string()),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
+    // The five cfg-evaluation utilities (`extract_cfg_predicates`,
+    // `target_predicates_satisfied`, `cfg_expr_to_predicate`,
+    // `expr_to_ident_string`, `expr_to_string_literal`) used to live
+    // here as `Self::` associated functions. They were pure
+    // (no `&self`, no `&mut state`) and the audit (#106 crate-split
+    // foundation) flagged them as the cleanest first extraction
+    // out of pipeline.rs. They now live in
+    // `crate::cfg_eval` and are imported at the call sites.
 
     /// Profile boundary enforcement (module-level profile checking)
     ///
