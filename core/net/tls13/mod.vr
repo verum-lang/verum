@@ -70,6 +70,11 @@ public module keyschedule;
 public module record;
 public module handshake;
 public module session;
+// RFC 8879 TLS Certificate Compression — pre-fix the file shipped
+// (Brotli + Zstd cert-chain compression for the TLS 1.3 record
+// layer) but had no umbrella declaration; reachable via direct
+// file mount only.
+public module cert_compress;
 
 // Re-exports
 public mount .version.{ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,

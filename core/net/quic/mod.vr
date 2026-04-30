@@ -76,6 +76,14 @@ public module pacer;                   // RFC 9002 §7.7 token-bucket send pacer
 public module stats_prometheus;        // Prometheus-format metrics exporter
 public module address_token;           // RFC 9000 §8.1.3 address-validation tokens
 
+// The following 4 sub-modules ship production code but had no
+// `public module` here; pre-fix `mount core.net.quic.<X>;`
+// worked via direct file lookup but the namespace was invisible.
+public module idle_timeout;            // RFC 9000 §10.1 idle-timeout enforcement
+public module lb_cid;                  // QUIC-LB connection-ID encoding (load-balancer routing)
+public module multipath;               // draft-ietf-quic-multipath multi-path extension
+public module path_mtu;                // RFC 9000 §14.3 path MTU discovery (DPLPMTUD)
+
 mount core.*;
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};

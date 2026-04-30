@@ -38,11 +38,19 @@
 // demand. All seven mods re-export the tactics they define so a
 // `mount core.proof.tactics.*` gets the whole library.
 
-mount core.proof.tactics.basic.*;
-mount core.proof.tactics.arithmetic.*;
-mount core.proof.tactics.logical.*;
-mount core.proof.tactics.structural.*;
-mount core.proof.tactics.rewrite.*;
-mount core.proof.tactics.combinators.*;
-mount core.proof.tactics.forward.*;
-mount core.proof.tactics.meta.*;
+// `public mount` so `mount core.proof.tactics.*;` actually drops
+// the whole library into the caller's scope. Pre-fix these were
+// `mount …` (without the `public` qualifier), which made them
+// private to THIS module — every user file had to re-mount each
+// of the 8 sub-files explicitly to access the tactic library, even
+// though the doc comment above advertises "a `mount core.proof.
+// tactics.*` gets the whole library". The intent was always public
+// re-export; the missing qualifier was a regression risk.
+public mount core.proof.tactics.basic.*;
+public mount core.proof.tactics.arithmetic.*;
+public mount core.proof.tactics.logical.*;
+public mount core.proof.tactics.structural.*;
+public mount core.proof.tactics.rewrite.*;
+public mount core.proof.tactics.combinators.*;
+public mount core.proof.tactics.forward.*;
+public mount core.proof.tactics.meta.*;

@@ -53,6 +53,14 @@ public module chain;
 public module trust_store;
 public module server_identity;
 
+// The following 3 sub-modules ship production code (revocation
+// checking primitives required for any real PKI deployment) but
+// had no `public module` here; pre-fix they were reachable via
+// direct file path only.
+public module crl;     // RFC 5280 §5 Certificate Revocation List parsing
+public module ocsp;    // RFC 6960 OCSP request/response (online revocation)
+public module sct;     // RFC 6962 §3 Signed Certificate Timestamp (CT)
+
 // Re-exports — OID
 public mount .oid.Oid;
 
