@@ -47,6 +47,12 @@ pub fn execute(
     emit_bc: bool,
     emit_types: bool,
     emit_vbc: bool,
+    // Windows PE subsystem override (`console` / `gui`).  When
+    // `None`, the manifest `[build].windows_subsystem` value is
+    // used (defaulting to `console`).  The CLI flag has higher
+    // precedence than the manifest, mirroring how `--target` and
+    // `--lto` already shadow their manifest counterparts.
+    windows_subsystem_cli: Option<Text>,
     // Lint options
     deny_warnings: bool,
     strict_intrinsics: bool,
@@ -300,6 +306,36 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
         options.target_triple = Some(verum_common::Text::from(target.as_str()));
     } else if let Some(ref triple) = manifest.llvm.target_triple {
         options.target_triple = Some(triple.clone());
+    }
+
+    // Windows subsystem resolution.  Highest precedence first:
+    //   1. CLI `--windows-subsystem` (windows_subsystem_cli).
+    //   2. Manifest `[build].windows_subsystem`.
+    //   3. Default Console (handled at codegen time when None).
+    //
+    // The source-level `@gui` / `@console` attribute (precedence 2.5
+    // — between CLI and manifest) is resolved later by the compiler
+    // pipeline once the AST is parsed; that path may overwrite
+    // `options.windows_subsystem` if the manifest didn't set it AND
+    // the CLI didn't set it.
+    if let Some(ref s) = windows_subsystem_cli {
+        match crate::config::WindowsSubsystem::parse(s.as_str()) {
+            Some(sub) => {
+                options.windows_subsystem =
+                    Some(verum_common::Text::from(sub.as_link_flag()));
+            }
+            None => {
+                return Err(CliError::InvalidArgument(format!(
+                    "--windows-subsystem expects `console` or `gui`, got `{}`",
+                    s
+                )));
+            }
+        }
+    } else {
+        // Manifest fallback.
+        let manifest_sub = manifest.build.windows_subsystem;
+        options.windows_subsystem =
+            Some(verum_common::Text::from(manifest_sub.as_link_flag()));
     }
 
     // Wire `[llvm].target_cpu` / `[llvm].target_features` from

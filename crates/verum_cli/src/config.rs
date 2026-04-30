@@ -1149,6 +1149,65 @@ pub struct BuildConfig {
     pub codegen_units: Option<usize>,
     #[serde(default)]
     pub panic: PanicStrategy,
+    /// Windows subsystem selection — controls whether the produced
+    /// PE binary allocates a console window when launched.
+    /// `Console` (default): standard CLI / console app, allocates a
+    /// console.  `Gui`: silent app suitable for Win32 GUI programs,
+    /// no console flashes on launch.  Maps to the linker's
+    /// `/SUBSYSTEM:CONSOLE` vs `/SUBSYSTEM:WINDOWS` flag and to
+    /// `LinkConfig::windows()` vs `LinkConfig::windows_gui()` in
+    /// `verum_codegen::link`.  Ignored on non-Windows targets.
+    #[serde(default)]
+    pub windows_subsystem: WindowsSubsystem,
+}
+
+/// Windows PE subsystem selection.  Determines whether the loader
+/// allocates a console window on process start.
+///
+/// **Console** is the default and matches the historical Verum
+/// behaviour (every binary is a CLI app).  **Gui** suppresses the
+/// console allocation — required for Win32 GUI applications, where
+/// a flashing console window on launch is a UX defect.
+///
+/// The runtime's `print()` / stdout helpers gracefully degrade under
+/// `Gui`: `GetStdHandle(STD_OUTPUT_HANDLE)` returns
+/// `INVALID_HANDLE_VALUE` when there's no console, and the
+/// `verum_os_write` IR short-circuits to a no-op rather than
+/// blocking on `WriteFile`.  This means the same Verum source can
+/// be compiled either way without code changes — an important
+/// property for libraries that incidentally `print()` (e.g. tracing
+/// when `RUST_LOG`-style env-var is unset).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowsSubsystem {
+    /// `/SUBSYSTEM:CONSOLE` — standard console app.  Default.
+    #[default]
+    Console,
+    /// `/SUBSYSTEM:WINDOWS` — GUI app, no console window allocated.
+    Gui,
+}
+
+impl WindowsSubsystem {
+    /// Parse a free-form subsystem name (case-insensitive).  Returns
+    /// `None` on unknown values so the caller can produce a friendly
+    /// CLI / manifest diagnostic.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "console" | "cli" | "terminal" => Some(Self::Console),
+            "gui" | "windows" | "window" => Some(Self::Gui),
+            _ => None,
+        }
+    }
+
+    /// The literal `/SUBSYSTEM:` value passed to `link.exe` /
+    /// `lld-link`.  Used by the linker driver to assemble the
+    /// command line.
+    pub fn as_link_flag(self) -> &'static str {
+        match self {
+            Self::Console => "CONSOLE",
+            Self::Gui => "WINDOWS",
+        }
+    }
 }
 
 fn default_target() -> Text {

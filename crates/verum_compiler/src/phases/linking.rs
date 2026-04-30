@@ -290,6 +290,26 @@ impl LinkingConfig {
         self
     }
 
+    /// Configure for no-libc linking on the specified platform with
+    /// an explicit Windows subsystem flag.  On non-Windows platforms
+    /// `subsystem_flag` is ignored.
+    ///
+    /// `subsystem_flag` must be `"CONSOLE"` (default CLI app) or
+    /// `"WINDOWS"` (Win32 GUI app, no console window).  See
+    /// `verum_codegen::link::NoLibcConfig::windows_with_subsystem`.
+    pub fn with_no_libc_subsystem(
+        mut self,
+        platform: Platform,
+        subsystem_flag: &str,
+    ) -> Self {
+        self.no_libc_config = Some(if matches!(platform, Platform::Windows) {
+            NoLibcConfig::windows_with_subsystem(subsystem_flag)
+        } else {
+            NoLibcConfig::for_platform(platform)
+        });
+        self
+    }
+
     /// Configure for no-libc linking on the host platform.
     pub fn with_no_libc_host(mut self) -> Self {
         self.no_libc_config = Some(NoLibcConfig::for_host());
