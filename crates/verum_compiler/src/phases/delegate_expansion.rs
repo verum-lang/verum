@@ -214,7 +214,7 @@ fn synthesise_delegate_body(
 mod tests {
     use super::*;
     use verum_ast::attr::Attribute;
-    use verum_ast::decl::{FunctionParam, ItemKind, TheoremDecl};
+    use verum_ast::decl::{FunctionParam, Item, ItemKind, TheoremDecl};
     use verum_ast::pattern::Pattern;
     use verum_ast::ty::{Type, TypeKind};
     use verum_ast::{Span, Visibility};
