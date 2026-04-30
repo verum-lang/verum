@@ -111,6 +111,40 @@ impl VerificationConfig {
         let config: VerificationConfig = toml::from_str(&content)
             .with_context(|| format!("Failed to parse {}", path.as_ref().display()))?;
 
+        // Phase-not-realised: `verum_compiler::VerificationConfig`
+        // is exposed in `lib.rs` and parses `[verify]` sections from
+        // verum.toml, but no production code path constructs it
+        // from a manifest — the actual `[verify]` settings flow
+        // through verum_cli's own `VerifyConfig` (cli/config.rs)
+        // which is a separate type with overlapping shape. Calling
+        // `load_from_file` parses the file but the resulting
+        // VerificationConfig values do not reach the verification
+        // pipeline.
+        //
+        // Surface a debug trace when the parsed config carries any
+        // non-default value, so embedders see that the file was
+        // read but the settings won't take effect via this surface.
+        let defaults = VerifySection::default();
+        if config.verify.total_budget.is_some()
+            || config.verify.slow_threshold != defaults.slow_threshold
+            || config.verify.cache_dir != defaults.cache_dir
+            || config.verify.cache_max_size != defaults.cache_max_size
+            || config.verify.cache_ttl != defaults.cache_ttl
+            || config.verify.distributed_cache.is_some()
+            || config.verify.distributed_cache_trust != defaults.distributed_cache_trust
+            || config.verify.profile_slow_functions != defaults.profile_slow_functions
+            || config.verify.profile_threshold != defaults.profile_threshold
+        {
+            tracing::debug!(
+                "VerificationConfig::load_from_file({}): parsed [verify] \
+                 section but no production code path consumes \
+                 verum_compiler::VerificationConfig — the active verification \
+                 settings flow through verum_cli's separate VerifyConfig and \
+                 CompilerOptions surfaces. This loader is forward-looking.",
+                path.as_ref().display(),
+            );
+        }
+
         Ok(config)
     }
 

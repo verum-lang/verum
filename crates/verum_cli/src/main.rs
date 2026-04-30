@@ -1226,6 +1226,20 @@ enum Commands {
         #[clap(long = "kernel-soundness")]
         kernel_soundness: bool,
 
+        /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
+        /// Walks every `apply kernel_*_strict(args)` invocation in the
+        /// corpus's proof bodies and replays each literal-arg call
+        /// through `verum_kernel::dispatch_intrinsic`.  Reports
+        /// per-bridge: callsite count, literal vs non-literal split,
+        /// dispatcher decisions, and the count of false discharges
+        /// (cases where the dispatcher rejected the args).  Exits
+        /// non-zero on any false discharge or on bridges cited
+        /// without a dispatcher entry.  This is the observability
+        /// layer for L4 promotion; the elaborator-time wiring that
+        /// makes the verdict load-bearing at compile time is task #135.
+        #[clap(long = "bridge-discharge")]
+        bridge_discharge: bool,
+
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
@@ -3516,6 +3530,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_rules,
             kernel_recheck,
             kernel_soundness,
+            bridge_discharge,
             epsilon,
             coord,
             no_coord,
@@ -3558,6 +3573,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_recheck_with_format(output_format)
             } else if kernel_soundness {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
+            } else if bridge_discharge {
+                commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {

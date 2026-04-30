@@ -104,6 +104,7 @@ pub mod workspace;
 // Cog management commands
 pub mod add;
 pub mod audit;
+pub mod bridge_discharge;
 pub mod export;
 // `verum extract <file.vr>` — walk @extract / @extract_witness /
 // @extract_contract attrs and emit per-target scaffolds at

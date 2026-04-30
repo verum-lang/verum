@@ -1941,6 +1941,181 @@ fn print_kernel_soundness_report_json(
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());
 }
 
+// =============================================================================
+// audit --bridge-discharge — task #134 / MSFS-L4.1 entry point
+// =============================================================================
+
+/// Legacy entry-point for `verum audit --bridge-discharge` with plain output.
+pub fn audit_bridge_discharge() -> Result<()> {
+    audit_bridge_discharge_with_format(AuditFormat::Plain)
+}
+
+/// Entry-point for `verum audit --bridge-discharge [--format FORMAT]`.
+///
+/// Walks every `.vr` module in the manifest project, finds every
+/// `apply kernel_*_strict(args)` invocation in proof bodies, and
+/// invokes [`verum_kernel::dispatch_intrinsic`] against the
+/// literal-arg call sites.  Reports per-bridge:
+///
+///   * **callsites_total**       — total `apply` invocations
+///   * **callsites_literal_args** — invocations whose args reduce to literals
+///   * **callsites_non_literal**  — invocations with non-literal args
+///   * **dispatcher_decisions**  — per-callsite `Decision { holds, reason }`
+///   * **false_discharges**      — count where `holds: false`
+///
+/// **Architecture**: this is the *observability layer* for task #80's
+/// L4 promotion path.  It introduces no per-bridge hardcoding — every
+/// bridge auto-registers through the dispatcher table, and every
+/// literal-arg invocation in the corpus is replayed mechanically.
+/// Adding a new `kernel_<verb>_strict` bridge requires only registering
+/// the dispatcher entry; this audit picks up the discharge automatically.
+///
+/// Exits non-zero when:
+///   * any bridge invocation has `holds: false` (false discharge — the
+///     proof body cited the bridge but the dispatcher's structural
+///     check rejects the args as written)
+///   * any cited bridge has no dispatcher entry (unknown_bridges
+///     non-empty — gap in the bridge table)
+pub fn audit_bridge_discharge_with_format(format: AuditFormat) -> Result<()> {
+    use crate::commands::bridge_discharge::{BridgeReport, finalise_report, walk_module};
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Walking proof bodies for `apply kernel_*_strict(...)` discharge sites");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    let mut aggregator: std::collections::BTreeMap<String, BridgeReport> =
+        std::collections::BTreeMap::new();
+    let mut modules_scanned = 0usize;
+    let mut items_walked = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        modules_scanned += 1;
+        walk_module(&module, &rel_path, &mut aggregator, &mut items_walked);
+    }
+
+    let report = finalise_report(aggregator, modules_scanned, items_walked);
+
+    match format {
+        AuditFormat::Plain => print_bridge_discharge_report_plain(&report),
+        AuditFormat::Json => print_bridge_discharge_report_json(&report),
+    }
+
+    if report.total_false_discharges > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "bridge-discharge audit found {} false-discharge site(s) — \
+             dispatcher rejected the cited bridge args. See report above.",
+            report.total_false_discharges,
+        )));
+    }
+    if !report.unknown_bridges.is_empty() {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "bridge-discharge audit found {} bridge(s) cited in proofs but \
+             missing from the dispatcher table: {}",
+            report.unknown_bridges.len(),
+            report.unknown_bridges.join(", "),
+        )));
+    }
+
+    Ok(())
+}
+
+fn print_bridge_discharge_report_plain(
+    report: &crate::commands::bridge_discharge::DischargeReport,
+) {
+    println!();
+    println!("{}", "Bridge-discharge report".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Walked {} module(s); {} theorem-shaped items examined.",
+        report.modules_scanned, report.items_walked,
+    );
+    println!(
+        "  {} total callsite(s) across {} bridge(s); {} false discharge(s).",
+        report.total_callsites,
+        report.bridges.len(),
+        report.total_false_discharges,
+    );
+    println!();
+
+    if report.bridges.is_empty() {
+        println!(
+            "  {} no `apply kernel_*` callsite found — corpus is bridge-free \
+             at this stage.",
+            "ℹ".cyan(),
+        );
+        return;
+    }
+
+    for b in &report.bridges {
+        let header_color = if b.false_discharges > 0 {
+            "✗".red().to_string()
+        } else {
+            "✓".green().to_string()
+        };
+        println!(
+            "  {} {}  ({} total · {} literal · {} non-literal · {} false)",
+            header_color,
+            b.bridge_name.bold(),
+            b.callsites_total,
+            b.callsites_literal_args,
+            b.callsites_non_literal,
+            b.false_discharges,
+        );
+        for c in &b.callsites {
+            let verdict = match c.holds {
+                Some(true) => "✓".green().to_string(),
+                Some(false) => "✗".red().to_string(),
+                None => "○".dimmed().to_string(),
+            };
+            println!(
+                "    {}  {} :: {} ({})",
+                verdict,
+                c.file.display().to_string().dimmed(),
+                c.item_name,
+                c.args_text.join(", "),
+            );
+            if !c.reason.is_empty() {
+                println!("        {}", c.reason.dimmed());
+            }
+        }
+    }
+
+    if !report.unknown_bridges.is_empty() {
+        println!();
+        println!("  {} bridge(s) cited but missing from dispatcher:", "!".yellow());
+        for n in &report.unknown_bridges {
+            println!("    - {}", n);
+        }
+    }
+}
+
+fn print_bridge_discharge_report_json(
+    report: &crate::commands::bridge_discharge::DischargeReport,
+) {
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "command": "audit-bridge-discharge",
+        "modules_scanned": report.modules_scanned,
+        "items_walked": report.items_walked,
+        "total_callsites": report.total_callsites,
+        "total_false_discharges": report.total_false_discharges,
+        "bridges": report.bridges,
+        "unknown_bridges": report.unknown_bridges,
+    });
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+}
+
 /// Legacy entry-point for `verum audit --epsilon` with plain output.
 pub fn audit_epsilon() -> Result<()> {
     audit_epsilon_with_format(AuditFormat::Plain)
