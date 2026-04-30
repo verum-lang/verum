@@ -1396,6 +1396,69 @@ pub fn verify_proof_body_with_aliases(
         }
     };
 
+    // ----------------------------------------------------------------
+    // Pre-pass: kernel-bridge discharge validation (task #135 / MSFS-L4.2)
+    // ----------------------------------------------------------------
+    //
+    // For every `apply kernel_<verb>_strict(literal_args)` invocation
+    // in the proof body, replay the call through
+    // `verum_kernel::dispatch_intrinsic`.  When the dispatcher returns
+    // `Decision { holds: false }`, the discharge claim is false at
+    // the kernel level — short-circuit with a verification failure
+    // before the SMT engine wastes time on a doomed goal.
+    //
+    // **Architectural significance.**  This is the load-bearing piece
+    // that converts the bridge-discharge audit's *observation* (task
+    // #134) into a *compile-time gate*.  Pre-fix the
+    // `kernel_*_strict` axioms were treated as opaque trusted
+    // assertions — the user's claim "this discharges through the
+    // kernel" was honoured on faith.  Post-fix the dispatcher's
+    // structural check runs at compile time and rejects pathological
+    // arg shapes before they reach SMT.
+    //
+    // **Performance**: pure AST walk + hashmap dispatch — no SMT
+    // invocation, no kernel re-check round-trip.  Microsecond-scale
+    // per proof body, so adding this pre-pass to every theorem is
+    // negligible.
+    let bridge_errors = crate::phases::bridge_discharge_check::validate_proof_body_bridges(
+        proof_body,
+        &theorem_name,
+        // Theorem AST doesn't carry the source path directly; pass an
+        // empty path here.  The pipeline's surrounding diagnostic
+        // surface attaches the actual file context when it surfaces
+        // the verification result.
+        std::path::Path::new(""),
+    );
+    if !bridge_errors.is_empty() {
+        let unproved: List<UnprovedSubgoal> = bridge_errors
+            .into_iter()
+            .map(|e| {
+                let goal_text = format!(
+                    "kernel-bridge discharge `apply {}({})` rejected by dispatcher",
+                    e.bridge_name,
+                    e.args_rendered.join(", "),
+                );
+                let suggestion = format!(
+                    "kernel `{}` reports: {}",
+                    e.bridge_name, e.reason,
+                );
+                UnprovedSubgoal {
+                    goal: Text::from(goal_text),
+                    hypotheses: List::new(),
+                    suggestions: {
+                        let mut s = List::new();
+                        s.push(Text::from(suggestion));
+                        s
+                    },
+                }
+            })
+            .collect();
+        return ProofVerificationResult::Failed {
+            verified_steps: List::new(),
+            unproved,
+        };
+    }
+
     // Build the primary goal from the theorem's proposition and requires clauses.
     //
     // Proof-body semantics for `theorem t(..) -> Bool ensures E proof by …`:
