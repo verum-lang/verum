@@ -41,6 +41,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod coq;
+pub mod corpus_export;
 pub mod lean;
 
 #[cfg(test)]
