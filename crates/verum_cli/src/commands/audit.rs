@@ -2406,6 +2406,18 @@ pub fn audit_cross_format_roundtrip() -> Result<()> {
     audit_cross_format_roundtrip_with_format(AuditFormat::Plain)
 }
 
+/// Backend-aware entry point for `verum audit --cross-format-roundtrip
+/// [--docker]`.  Forwards to [`audit_cross_format_roundtrip_with_format`]
+/// when the default `Native` backend is selected; for `Docker` the
+/// foreign-tool dispatch goes through containers via
+/// [`verum_smt::cross_format_runner::checker_for_backend`].
+pub fn audit_cross_format_roundtrip_with_backend(
+    format: AuditFormat,
+    backend: verum_smt::cross_format_runner::CheckerBackend,
+) -> Result<()> {
+    audit_cross_format_roundtrip_inner(format, backend)
+}
+
 /// Entry-point for `verum audit --cross-format-roundtrip [--format FORMAT]`.
 ///
 /// Walks every `@theorem`/`@lemma`/`@corollary` declaration in the
@@ -2433,8 +2445,18 @@ pub fn audit_cross_format_roundtrip() -> Result<()> {
 /// Exits non-zero only when an AVAILABLE foreign tool reports a real
 /// failure on at least one emitted file.
 pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<()> {
+    audit_cross_format_roundtrip_inner(
+        format,
+        verum_smt::cross_format_runner::CheckerBackend::from_env(),
+    )
+}
+
+fn audit_cross_format_roundtrip_inner(
+    format: AuditFormat,
+    backend: verum_smt::cross_format_runner::CheckerBackend,
+) -> Result<()> {
     use verum_kernel::soundness::corpus_export::{TheoremSpec, all_corpus_backends};
-    use verum_smt::cross_format_runner::{CheckResult, ForeignSystemChecker};
+    use verum_smt::cross_format_runner::{CheckResult, CheckerBackend, ForeignSystemChecker};
 
     if matches!(format, AuditFormat::Plain) {
         ui::step("Cross-format roundtrip — emit + re-check corpus theorems");
@@ -2574,15 +2596,21 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
     let mut roundtrips: Vec<ThmRoundtripPlainRow> = Vec::new();
     let mut foreign_failures = 0usize;
 
-    for backend in &backends {
-        let backend_dir = report_dir.join(backend.id());
+    for backend_iter in &backends {
+        let backend_dir = report_dir.join(backend_iter.id());
         let _ = std::fs::create_dir_all(&backend_dir);
-        let foreign_checker: Option<Box<dyn ForeignSystemChecker>> = match backend.id() {
-            "coq" => verum_smt::cross_format_runner::checker_for(
+        // Backend-aware checker dispatch (#149 / MSFS-L4.15).  When
+        // `--docker` is set or VERUM_FOREIGN_TOOL_BACKEND=docker, the
+        // foreign tool runs inside its canonical container image so
+        // hosts without coqc/lean still get real per-theorem verdicts.
+        let foreign_checker: Option<Box<dyn ForeignSystemChecker>> = match backend_iter.id() {
+            "coq" => verum_smt::cross_format_runner::checker_for_backend(
                 verum_kernel::cross_format_gate::ExportFormat::Coq,
+                backend,
             ),
-            "lean" => verum_smt::cross_format_runner::checker_for(
+            "lean" => verum_smt::cross_format_runner::checker_for_backend(
                 verum_kernel::cross_format_gate::ExportFormat::Lean4,
+                backend,
             ),
             _ => None,
         };
@@ -2592,7 +2620,7 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
             .unwrap_or(false);
 
         for spec in &theorem_specs {
-            let rendered = backend.render_theorem(spec);
+            let rendered = backend_iter.render_theorem(spec);
             let path = backend_dir.join(&rendered.filename);
             let verdict_kind: &'static str;
             let detail: String;
@@ -2630,7 +2658,7 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                 detail = "no foreign-tool checker registered for this backend".to_string();
             }
             roundtrips.push(ThmRoundtripPlainRow {
-                backend_id: backend.id().to_string(),
+                backend_id: backend_iter.id().to_string(),
                 theorem_name: spec.name.clone(),
                 emitted_path: path,
                 verdict_kind,
@@ -2661,6 +2689,10 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                     })
                 })
                 .collect();
+            let backend_label = match backend {
+                CheckerBackend::Native => "native",
+                CheckerBackend::Docker => "docker",
+            };
             let payload = serde_json::json!({
                 "schema_version": 1,
                 "command": "audit-cross-format-roundtrip",
@@ -2669,6 +2701,7 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                 "theorems_walked": theorem_specs.len(),
                 "backend_count": backend_meta.len(),
                 "foreign_failures": foreign_failures,
+                "checker_backend": backend_label,
                 "roundtrips": rows,
             });
             println!("{}", serde_json::to_string_pretty(&payload).unwrap());

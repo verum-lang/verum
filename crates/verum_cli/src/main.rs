@@ -1267,6 +1267,20 @@ enum Commands {
         #[clap(long = "cross-format-roundtrip")]
         cross_format_roundtrip: bool,
 
+        /// Force docker backend for the cross-format gate (#149 / MSFS-L4.15).
+        /// Without this flag the gate uses host PATH-resolved coqc/lean,
+        /// surfacing `tool_missing` if absent.  With `--docker`, foreign
+        /// tools run inside their canonical container images
+        /// (coqorg/coq:8.18.0-flambda, leanprovercommunity/lean4:4.5.0
+        /// by default; override via VERUM_DOCKER_IMAGE_COQ /
+        /// VERUM_DOCKER_IMAGE_LEAN env vars).  Each emitted .v / .lean
+        /// file is mounted read-only into the container, the foreign
+        /// tool runs against it, and the verdict surfaces as
+        /// `passed`/`failed` instead of `tool_missing`.  Equivalent to
+        /// setting `VERUM_FOREIGN_TOOL_BACKEND=docker`.
+        #[clap(long = "docker")]
+        docker: bool,
+
         /// Run the apply-graph transitive bridge-discharge audit
         /// (task #150 / MSFS-L4.13).  Walks every theorem in the
         /// project and classifies its TRANSITIVE apply-chain leaves
@@ -3578,6 +3592,7 @@ fn run_command(cli: Cli) -> Result<()> {
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
+            docker,
             apply_graph,
             epsilon,
             coord,
@@ -3626,7 +3641,14 @@ fn run_command(cli: Cli) -> Result<()> {
             } else if ladder_monotonicity {
                 commands::audit::audit_ladder_monotonicity_with_format(output_format)
             } else if cross_format_roundtrip {
-                commands::audit::audit_cross_format_roundtrip_with_format(output_format)
+                commands::audit::audit_cross_format_roundtrip_with_backend(
+                    output_format,
+                    if docker {
+                        verum_smt::cross_format_runner::CheckerBackend::Docker
+                    } else {
+                        verum_smt::cross_format_runner::CheckerBackend::from_env()
+                    },
+                )
             } else if apply_graph {
                 commands::audit::audit_apply_graph_with_format(output_format)
             } else if framework_axioms {

@@ -341,6 +341,302 @@ pub fn checker_for(format: ExportFormat) -> Option<Box<dyn ForeignSystemChecker>
     }
 }
 
+// =============================================================================
+// Docker backend (#149 / MSFS-L4.15)
+// =============================================================================
+//
+// Turns the cross-format gate from observability (host needs coqc / lean
+// installed) into a load-bearing CI gate (host needs only Docker).  Each
+// foreign tool runs inside its canonical container image, mounted on a
+// host directory of emitted .v / .lean files.
+//
+// The backend is selected via the `--docker` flag on the audit gate and
+// (independently) via the `VERUM_FOREIGN_TOOL_BACKEND` env var (`docker`
+// or `native`; default `native`).  Image names are configurable per-
+// format via env (`VERUM_DOCKER_IMAGE_COQ`, `VERUM_DOCKER_IMAGE_LEAN`,
+// etc.) so CI can pin to a specific tag.
+
+/// Per-format Docker image configuration.  Defaults pin known-good
+/// images for reproducible CI; override via env vars.
+#[derive(Debug, Clone)]
+pub struct DockerCheckerConfig {
+    /// Image name + tag (e.g., `coqorg/coq:8.18.0-flambda`).
+    pub image: String,
+    /// Tool inside the container (e.g., `coqc`, `lean`).
+    pub tool_in_container: String,
+    /// Extra args passed to the tool (e.g., `["-q"]` for coq).
+    pub tool_args: Vec<String>,
+    /// Container mount point for the host directory holding the
+    /// emitted certificate file (default `/work`).
+    pub mount_point: String,
+    /// Per-invocation timeout in seconds (default 120).
+    pub timeout_secs: u64,
+}
+
+impl DockerCheckerConfig {
+    /// Coq config — `coqorg/coq:8.18.0-flambda` runs `coqc` inside
+    /// `/work`.  The image's user is `coq` with HOME at `/home/coq`,
+    /// but `coqc` doesn't need write access outside the mount point.
+    pub fn coq_default() -> Self {
+        Self {
+            image: std::env::var("VERUM_DOCKER_IMAGE_COQ")
+                .unwrap_or_else(|_| "coqorg/coq:8.18.0-flambda".to_string()),
+            tool_in_container: "coqc".to_string(),
+            tool_args: vec!["-q".to_string()],
+            mount_point: "/work".to_string(),
+            timeout_secs: 120,
+        }
+    }
+
+    /// Lean 4 config — `leanprovercommunity/lean4:4.5.0` runs `lean`.
+    /// The image ships an `elan`-managed lean toolchain at the pinned
+    /// version.
+    pub fn lean_default() -> Self {
+        Self {
+            image: std::env::var("VERUM_DOCKER_IMAGE_LEAN")
+                .unwrap_or_else(|_| "leanprovercommunity/lean4:4.5.0".to_string()),
+            tool_in_container: "lean".to_string(),
+            tool_args: Vec::new(),
+            mount_point: "/work".to_string(),
+            timeout_secs: 120,
+        }
+    }
+}
+
+/// Helper: invoke `docker run --rm -v <host_dir>:<mount> <image>
+/// <tool> <args...> <mount>/<filename>`.  Captures exit/stderr/stdout
+/// and lifts to a [`CheckResult`].
+fn run_docker_tool(
+    config: &DockerCheckerConfig,
+    file_path: &Path,
+    excerpt_bytes: usize,
+) -> CheckResult {
+    if !is_tool_on_path("docker") {
+        return CheckResult::ToolMissing {
+            install_hint: "install Docker (https://docs.docker.com/get-docker/) and ensure the daemon is running"
+                .to_string(),
+        };
+    }
+    // Resolve host directory + filename — Docker mounts directories,
+    // not individual files, so we mount the parent dir read-only and
+    // pass the basename to the tool.
+    let host_dir = match file_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => match std::env::current_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                return CheckResult::RunnerError {
+                    reason: format!("cannot resolve cwd for docker mount: {}", e),
+                };
+            }
+        },
+    };
+    let host_dir_str = host_dir.to_string_lossy();
+    let basename = match file_path.file_name() {
+        Some(b) => b.to_string_lossy().into_owned(),
+        None => {
+            return CheckResult::RunnerError {
+                reason: format!("file path has no basename: {:?}", file_path),
+            };
+        }
+    };
+    let mount_arg = format!("{}:{}:ro", host_dir_str, config.mount_point);
+    let in_container_path = format!("{}/{}", config.mount_point, basename);
+    // Build full argv: `docker run --rm -v <mount> <image> <tool> <tool_args...> <file>`.
+    let mut argv: Vec<String> = vec![
+        "run".to_string(),
+        "--rm".to_string(),
+        "--network=none".to_string(), // hermetic; no network access
+        "-v".to_string(),
+        mount_arg,
+        "-w".to_string(),
+        config.mount_point.clone(),
+        config.image.clone(),
+        config.tool_in_container.clone(),
+    ];
+    argv.extend(config.tool_args.iter().cloned());
+    argv.push(in_container_path);
+
+    let started = Instant::now();
+    let argv_refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+    let output = match Command::new("docker").args(&argv_refs).output() {
+        Ok(o) => o,
+        Err(e) => {
+            return CheckResult::RunnerError {
+                reason: format!("docker spawn failed: {}", e),
+            };
+        }
+    };
+    let elapsed = started.elapsed();
+    let stdout_excerpt = excerpt_utf8(&output.stdout, excerpt_bytes);
+    let stderr_excerpt = excerpt_utf8(&output.stderr, excerpt_bytes);
+    if output.status.success() {
+        CheckResult::Passed {
+            tool_version: format!("{} (docker)", config.image),
+            elapsed,
+            stdout_excerpt,
+        }
+    } else {
+        let exit_code = output.status.code().unwrap_or(-1);
+        // Distinguish docker-infrastructure failures from real
+        // foreign-tool failures.  When docker itself errors before the
+        // tool runs (daemon down, image pull failure, etc.) we surface
+        // `ToolMissing` so the gate doesn't conflate "infrastructure
+        // unhealthy" with "the proof was rejected by coqc/lean".
+        if is_docker_infrastructure_error(&stderr_excerpt) {
+            return CheckResult::ToolMissing {
+                install_hint: format!(
+                    "docker invocation failed before the foreign tool ran (image={}). \
+                     Check that the docker daemon is reachable and the image is available. \
+                     Original stderr: {}",
+                    config.image, stderr_excerpt,
+                ),
+            };
+        }
+        CheckResult::Failed {
+            exit_code,
+            stderr_excerpt,
+            stdout_excerpt,
+        }
+    }
+}
+
+/// Recognise stderr substrings that indicate docker itself failed
+/// before invoking the foreign tool — daemon-not-running, image-pull
+/// failure, permission errors on the socket, etc.  Used to surface
+/// these as `ToolMissing` (infrastructure issue) rather than `Failed`
+/// (proof failure).
+fn is_docker_infrastructure_error(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    s.contains("cannot connect to the docker daemon")
+        || s.contains("failed to connect to the docker api")
+        || s.contains("docker daemon")
+        || s.contains("error response from daemon")
+        || s.contains("permission denied while trying to connect to the docker daemon socket")
+        || s.contains("docker.sock")
+        || s.contains("pull access denied")
+        || s.contains("manifest unknown")
+        || s.contains("no such image")
+        || s.contains("image not found")
+}
+
+/// Coq via Docker.
+#[derive(Debug, Clone)]
+pub struct DockerCoqChecker {
+    config: DockerCheckerConfig,
+}
+
+impl DockerCoqChecker {
+    pub fn new() -> Self {
+        Self {
+            config: DockerCheckerConfig::coq_default(),
+        }
+    }
+    pub fn with_config(config: DockerCheckerConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for DockerCoqChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ForeignSystemChecker for DockerCoqChecker {
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Coq
+    }
+    fn is_available(&self) -> bool {
+        is_tool_on_path("docker")
+    }
+    fn install_hint(&self) -> &'static str {
+        "install Docker; the Coq image is pulled on first run"
+    }
+    fn check_file(&self, path: &Path) -> CheckResult {
+        run_docker_tool(&self.config, path, 4096)
+    }
+}
+
+/// Lean 4 via Docker.
+#[derive(Debug, Clone)]
+pub struct DockerLeanChecker {
+    config: DockerCheckerConfig,
+}
+
+impl DockerLeanChecker {
+    pub fn new() -> Self {
+        Self {
+            config: DockerCheckerConfig::lean_default(),
+        }
+    }
+    pub fn with_config(config: DockerCheckerConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for DockerLeanChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ForeignSystemChecker for DockerLeanChecker {
+    fn format(&self) -> ExportFormat {
+        ExportFormat::Lean4
+    }
+    fn is_available(&self) -> bool {
+        is_tool_on_path("docker")
+    }
+    fn install_hint(&self) -> &'static str {
+        "install Docker; the Lean 4 image is pulled on first run"
+    }
+    fn check_file(&self, path: &Path) -> CheckResult {
+        run_docker_tool(&self.config, path, 4096)
+    }
+}
+
+/// Backend selection — native PATH-resolved tool vs Docker container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckerBackend {
+    /// Use the host's PATH-resolved tool.  Default.
+    Native,
+    /// Run the foreign tool inside its canonical Docker image.
+    Docker,
+}
+
+impl CheckerBackend {
+    /// Read backend selection from `VERUM_FOREIGN_TOOL_BACKEND`
+    /// environment variable.  Defaults to `Native`.  Recognises:
+    ///   * `docker` / `Docker` / `DOCKER` → `CheckerBackend::Docker`
+    ///   * anything else (incl. unset) → `CheckerBackend::Native`
+    pub fn from_env() -> Self {
+        match std::env::var("VERUM_FOREIGN_TOOL_BACKEND")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "docker" => CheckerBackend::Docker,
+            _ => CheckerBackend::Native,
+        }
+    }
+}
+
+/// Return the canonical checker for a format under a given backend.
+/// Backend-aware sibling of [`checker_for`].
+pub fn checker_for_backend(
+    format: ExportFormat,
+    backend: CheckerBackend,
+) -> Option<Box<dyn ForeignSystemChecker>> {
+    match (format, backend) {
+        (ExportFormat::Coq, CheckerBackend::Docker) => Some(Box::new(DockerCoqChecker::new())),
+        (ExportFormat::Lean4, CheckerBackend::Docker) => Some(Box::new(DockerLeanChecker::new())),
+        // Isabelle / Dedukti Docker variants left as future work; fall
+        // back to native for now.
+        (format, _) => checker_for(format),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +729,136 @@ mod tests {
         ] {
             let _ = c.is_available();
         }
+    }
+
+    // =========================================================================
+    // Docker backend tests (#149 / MSFS-L4.15)
+    // =========================================================================
+
+    /// Static mutex serialising env-var-mutating tests in this module.
+    /// Cargo runs unit tests in parallel by default; without this the
+    /// VERUM_DOCKER_IMAGE_COQ / VERUM_FOREIGN_TOOL_BACKEND tests
+    /// interleave and observe stale values from other threads.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn docker_coq_default_config_is_pinned() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        // Clear potential override from a prior test before checking
+        // the default-tag invariant.
+        unsafe {
+            std::env::remove_var("VERUM_DOCKER_IMAGE_COQ");
+        }
+        let cfg = DockerCheckerConfig::coq_default();
+        assert!(cfg.image.starts_with("coqorg/coq:"));
+        assert_eq!(cfg.tool_in_container, "coqc");
+        assert!(cfg.tool_args.iter().any(|a| a == "-q"));
+        assert_eq!(cfg.mount_point, "/work");
+    }
+
+    #[test]
+    fn docker_lean_default_config_is_pinned() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::remove_var("VERUM_DOCKER_IMAGE_LEAN");
+        }
+        let cfg = DockerCheckerConfig::lean_default();
+        assert!(cfg.image.contains("lean4"));
+        assert_eq!(cfg.tool_in_container, "lean");
+        assert_eq!(cfg.mount_point, "/work");
+    }
+
+    #[test]
+    fn docker_image_env_override_takes_precedence() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::set_var("VERUM_DOCKER_IMAGE_COQ", "custom/coq:test-tag");
+        }
+        let cfg = DockerCheckerConfig::coq_default();
+        assert_eq!(cfg.image, "custom/coq:test-tag");
+        unsafe {
+            std::env::remove_var("VERUM_DOCKER_IMAGE_COQ");
+        }
+    }
+
+    #[test]
+    fn checker_backend_from_env_default_and_docker() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        unsafe {
+            std::env::remove_var("VERUM_FOREIGN_TOOL_BACKEND");
+        }
+        assert_eq!(CheckerBackend::from_env(), CheckerBackend::Native);
+        unsafe {
+            std::env::set_var("VERUM_FOREIGN_TOOL_BACKEND", "docker");
+        }
+        assert_eq!(CheckerBackend::from_env(), CheckerBackend::Docker);
+        unsafe {
+            std::env::set_var("VERUM_FOREIGN_TOOL_BACKEND", "DOCKER");
+        }
+        assert_eq!(CheckerBackend::from_env(), CheckerBackend::Docker);
+        unsafe {
+            std::env::set_var("VERUM_FOREIGN_TOOL_BACKEND", "garbage_value");
+        }
+        // Unknown value falls back to Native (defensive).
+        assert_eq!(CheckerBackend::from_env(), CheckerBackend::Native);
+        unsafe {
+            std::env::remove_var("VERUM_FOREIGN_TOOL_BACKEND");
+        }
+    }
+
+    #[test]
+    fn checker_for_backend_native_matches_checker_for() {
+        // Backend-aware dispatch under Native should produce the
+        // same checker as the legacy `checker_for` for every format.
+        for f in [
+            ExportFormat::Coq,
+            ExportFormat::Lean4,
+            ExportFormat::Isabelle,
+            ExportFormat::Dedukti,
+        ] {
+            let native_via_legacy = checker_for(f);
+            let native_via_backend = checker_for_backend(f, CheckerBackend::Native);
+            // Both must agree on Some/None — actual format identity is
+            // checked via the checker's format() method.
+            assert_eq!(native_via_legacy.is_some(), native_via_backend.is_some());
+            if let (Some(a), Some(b)) = (native_via_legacy, native_via_backend) {
+                assert_eq!(a.format(), b.format());
+            }
+        }
+    }
+
+    #[test]
+    fn docker_infrastructure_error_detection_covers_common_cases() {
+        // Daemon-down / socket / pull-failure / image-missing patterns
+        // surface as ToolMissing, not Failed (infrastructure ≠ proof
+        // rejection).
+        assert!(is_docker_infrastructure_error(
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+        ));
+        assert!(is_docker_infrastructure_error(
+            "failed to connect to the docker API at unix:///path/docker.sock"
+        ));
+        assert!(is_docker_infrastructure_error(
+            "Error response from daemon: pull access denied for nonexistent/image"
+        ));
+        assert!(is_docker_infrastructure_error("manifest unknown"));
+        assert!(is_docker_infrastructure_error("Unable to find image 'foo:bar' locally\n\nError: No such image: foo:bar"));
+        // Real proof-tool errors must NOT match (false positives would
+        // mis-classify legitimate failures).
+        assert!(!is_docker_infrastructure_error("Error: type mismatch"));
+        assert!(!is_docker_infrastructure_error("syntax error: unexpected token"));
+        assert!(!is_docker_infrastructure_error("Coq < error: definition refused"));
+    }
+
+    #[test]
+    fn checker_for_backend_docker_returns_docker_variants_for_coq_and_lean() {
+        let coq = checker_for_backend(ExportFormat::Coq, CheckerBackend::Docker).unwrap();
+        assert_eq!(coq.format(), ExportFormat::Coq);
+        let lean = checker_for_backend(ExportFormat::Lean4, CheckerBackend::Docker).unwrap();
+        assert_eq!(lean.format(), ExportFormat::Lean4);
+        // Isabelle / Dedukti Docker variants not yet wired — fall back
+        // to native (still some).  Pin the contract.
+        let isa = checker_for_backend(ExportFormat::Isabelle, CheckerBackend::Docker);
+        assert!(isa.is_some());
     }
 }
