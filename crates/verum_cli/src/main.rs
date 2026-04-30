@@ -1267,6 +1267,24 @@ enum Commands {
         #[clap(long = "cross-format-roundtrip")]
         cross_format_roundtrip: bool,
 
+        /// Run the apply-graph transitive bridge-discharge audit
+        /// (task #150 / MSFS-L4.13).  Walks every theorem in the
+        /// project and classifies its TRANSITIVE apply-chain leaves
+        /// — each `apply <symbol>(args)` resolves through the
+        /// workspace symbol table to its body; the recursion
+        /// terminates at axiom leaves classified as
+        /// `kernel_strict` / `framework_axiom` / `placeholder_axiom`
+        /// / `unresolved`.  This is the load-bearing complement to
+        /// `--bridge-discharge` (which only checks the immediate
+        /// apply): `--apply-graph` follows the chain across `_full`
+        /// forms and stdlib delegates so a placeholder leak deep in
+        /// the chain surfaces.  Exits non-zero when any theorem's
+        /// composition has `placeholder_axiom > 0` or
+        /// `unresolved > 0` — those theorems are not yet L4 load-
+        /// bearing.
+        #[clap(long = "apply-graph")]
+        apply_graph: bool,
+
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
@@ -3560,6 +3578,7 @@ fn run_command(cli: Cli) -> Result<()> {
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
+            apply_graph,
             epsilon,
             coord,
             no_coord,
@@ -3608,6 +3627,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_ladder_monotonicity_with_format(output_format)
             } else if cross_format_roundtrip {
                 commands::audit::audit_cross_format_roundtrip_with_format(output_format)
+            } else if apply_graph {
+                commands::audit::audit_apply_graph_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {

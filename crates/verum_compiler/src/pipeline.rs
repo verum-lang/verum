@@ -9245,6 +9245,33 @@ impl<'s> CompilationPipeline<'s> {
         predicates
     }
 
+    /// Audit-E2: evaluate a list of `@cfg(...)` predicates against the
+    /// active compilation target. Returns `true` when every predicate
+    /// either matches the target (target_os / target_arch /
+    /// target_pointer_width / target_endian) or is a non-target-axis
+    /// predicate this evaluator doesn't recognise (kept conservative —
+    /// callers can opt in to a custom evaluator for feature flags via
+    /// `feature = "..."`).
+    ///
+    /// Falls back to the host spec when no target_triple was set —
+    /// preserves the legacy "compile for self" behaviour.
+    pub fn target_predicates_satisfied(
+        predicates: &[Text],
+        target: &crate::target_spec::TargetSpec,
+    ) -> bool {
+        for pred in predicates.iter() {
+            let textual = pred.as_str();
+            if let Some(matched) = target.matches_textual(textual) {
+                if !matched {
+                    return false;
+                }
+            }
+            // Non-target predicates pass through; downstream
+            // feature-flag evaluators can sharpen the decision.
+        }
+        true
+    }
+
     /// Convert a @cfg expression argument to a predicate string.
     ///
     /// Handles patterns like:
@@ -12266,9 +12293,20 @@ impl<'s> CompilationPipeline<'s> {
         const EXCLUDED_MODULES: &[&str] = &[
             "core.base.maybe",
         ];
-        // Detect host platform for filtering platform-specific modules.
-        let is_macos = cfg!(target_os = "macos");
-        let is_linux = cfg!(target_os = "linux");
+        // Audit-E2: filter platform-specific modules by the COMPILATION
+        // TARGET, not the compiler's host. Pre-fix, the gate read
+        // `cfg!(target_os = "...")` which evaluates the host at compile
+        // time of the COMPILER itself — so cross-compiling from macOS
+        // to Linux silently dropped Linux modules. The new
+        // `target_spec::TargetSpec` derives os/arch/pointer_width/endian
+        // from `CompilerOptions.target_triple` (or host when None) and
+        // gives every gate a single canonical answer.
+        let target = crate::target_spec::TargetSpec::from_triple(
+            self.session.options().target_triple.as_deref(),
+        );
+        let is_macos = target.os.as_str() == "macos";
+        let is_linux = target.os.as_str() == "linux";
+        let is_windows = target.os.as_str() == "windows";
 
         // Sort by path before iterating: `self.modules` is a HashMap and
         // its raw iteration order leaks the per-process random hasher
@@ -12290,12 +12328,19 @@ impl<'s> CompilationPipeline<'s> {
             let is_always = ALWAYS_INCLUDE.iter().any(|m| {
                 path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m))
             });
-            // Skip platform-specific modules that don't match the host OS.
-            // e.g. on macOS, skip core.sys.linux.* and vice versa.
+            // Audit-E2: skip platform-specific modules that don't match
+            // the TARGET. Each platform sub-tree under `core.sys.*` is
+            // gated on the target_os axis; downstream
+            // `extract_cfg_predicates` walks the same path conventions
+            // when emitting per-item predicates so the policy is
+            // single-sourced.
             if !is_linux && (path_str.contains("sys.linux") || path_str.contains("sys/linux")) {
                 continue;
             }
             if !is_macos && (path_str.contains("sys.darwin") || path_str.contains("sys/darwin")) {
+                continue;
+            }
+            if !is_windows && (path_str.contains("sys.windows") || path_str.contains("sys/windows")) {
                 continue;
             }
             if is_always && !is_excluded && !seen_paths.contains(&path_str) {

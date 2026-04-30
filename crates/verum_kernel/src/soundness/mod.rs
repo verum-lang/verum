@@ -40,6 +40,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod apply_graph;
 pub mod coq;
 pub mod corpus_export;
 pub mod expr_translate;
