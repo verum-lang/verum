@@ -430,7 +430,7 @@ impl Session {
         }
 
         // Phase-not-realised tracing for inert codegen knobs.
-        // The `[codegen]` manifest section parses four fields. Two
+        // The `[codegen]` manifest section parses four fields. Three
         // are wired:
         //   - `monomorphization_cache` flows through pipeline.rs:
         //     10630 / 12161 to `VbcMonomorphizationPhase::without_
@@ -442,26 +442,23 @@ impl Session {
         //     `lower_vbc_function`, which emits
         //     `disable-tail-calls=true` LLVM string attribute on
         //     every function when manifest sets it `false`.
-        // Two remain inert:
-        //   - `vectorize`: loop vectorization is controlled by
-        //     LLVM's loop-vectorize pass (driven by opt_level +
-        //     per-loop attribute hints, not the global feature
-        //     flag).
+        //   - `vectorize` flows the same path; emits
+        //     `no-loop-vectorize` + `no-slp-vectorize` LLVM string
+        //     attributes when manifest sets it `false`.
+        // One remains inert:
         //   - `inline_depth`: the LLVM inliner consults its own
         //     threshold heuristic.
         //
-        // Surface a warning when any of these two is set to a
-        // non-default value so a `[codegen] vectorize = false`
-        // setting in Verum.toml doesn't silently produce
-        // identically-vectorised output.
+        // Surface a warning when this one is set to a non-default
+        // value so an explicit override doesn't silently fall
+        // through.
         let cg = &opts.language_features.codegen;
-        if !cg.vectorize || cg.inline_depth != 3 {
+        if cg.inline_depth != 3 {
             tracing::warn!(
-                "manifest [codegen] surface: vectorize={}, inline_depth={} (these \
-                 fields land on LanguageFeatures.codegen but no production codegen \
-                 path consults them — LLVM's own pass pipeline is driven by \
-                 opt_level)",
-                cg.vectorize,
+                "manifest [codegen] surface: inline_depth={} (this field lands \
+                 on LanguageFeatures.codegen but no production codegen path \
+                 consults it — LLVM's inliner uses its own threshold heuristic \
+                 driven by opt_level)",
                 cg.inline_depth,
             );
         }

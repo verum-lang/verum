@@ -163,6 +163,25 @@ pub struct LoweringConfig {
     /// Verum.toml.  Default `true` (TCO enabled — matches the
     /// documented manifest default).
     pub tail_call_optimization: bool,
+    /// Whether LLVM is allowed to autovectorize loops in emitted
+    /// functions.  When `false`, every emitted function receives
+    /// the `no-loop-vectorize` + `no-slp-vectorize` LLVM string
+    /// attributes, which suppresses both LLVM's loop-vectorize
+    /// and SLP-vectorize passes for the function regardless of
+    /// opt level.
+    ///
+    /// Matters for projects that want predictable codegen — a
+    /// loop that LLVM autovectorises at -O2 produces different
+    /// generated code than the same loop at -O0 / -Os, which
+    /// can shift instruction-count budgets, affect timing-side-
+    /// channel resistance, and complicate review of emitted
+    /// assembly for security-sensitive paths.
+    ///
+    /// Threaded from `[codegen].vectorize` in Verum.toml.
+    /// Default `true` (vectorization enabled — matches the
+    /// documented manifest default + LLVM's own default at
+    /// `-O2+`).
+    pub vectorize: bool,
 }
 
 impl Default for LoweringConfig {
@@ -179,6 +198,7 @@ impl Default for LoweringConfig {
             permission_policy: None,
             panic_strategy: PanicStrategy::default(),
             tail_call_optimization: true,
+            vectorize: true,
         }
     }
 }
@@ -255,6 +275,16 @@ impl LoweringConfig {
     /// the `disable-tail-calls=true` string attribute.
     pub fn with_tail_call_optimization(mut self, enabled: bool) -> Self {
         self.tail_call_optimization = enabled;
+        self
+    }
+
+    /// Set whether LLVM autovectorization runs on emitted
+    /// functions.  Threaded from `[codegen].vectorize` in
+    /// Verum.toml.  When false, every emitted function receives
+    /// the `no-loop-vectorize` + `no-slp-vectorize` string
+    /// attributes.
+    pub fn with_vectorize(mut self, enabled: bool) -> Self {
+        self.vectorize = enabled;
         self
     }
 
@@ -1691,6 +1721,36 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 .context
                 .create_string_attribute("disable-tail-calls", "true");
             llvm_fn.add_attribute(AttributeLoc::Function, attr);
+        }
+
+        // Honour `[codegen].vectorize = false` from Verum.toml.
+        // Emit BOTH `no-loop-vectorize` (suppresses LLVM's main
+        // loop-vectorize pass) and `no-slp-vectorize` (suppresses
+        // the superword-level-parallelism vectorizer that catches
+        // straight-line sequences of similar ops) so the function
+        // emits scalar-only code regardless of opt level.
+        // Pre-fix the manifest field was tracing-only at
+        // session.rs:432; setting it false had zero effect on
+        // generated code.  When the default `true` is in effect,
+        // no attributes are emitted and LLVM's autovectorizer
+        // runs normally (the `-O2+` default).
+        //
+        // Performance: zero overhead in the default path (no
+        // attribute emission, no extra IR).  When disabled,
+        // LLVM's pass manager still runs the vectorizer on
+        // OTHER functions in the module — only this function is
+        // gated, which is the correct granularity (function-
+        // local scalar mode for security-sensitive paths) until
+        // a per-call-site override lands.
+        if !self.config.vectorize {
+            let no_loop = self
+                .context
+                .create_string_attribute("no-loop-vectorize", "true");
+            llvm_fn.add_attribute(AttributeLoc::Function, no_loop);
+            let no_slp = self
+                .context
+                .create_string_attribute("no-slp-vectorize", "true");
+            llvm_fn.add_attribute(AttributeLoc::Function, no_slp);
         }
 
         let func_name = vbc_module
