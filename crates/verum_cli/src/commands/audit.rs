@@ -1339,6 +1339,75 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Locate the verum stdlib's `core/` tree and return every `.vr` file
+/// under it.  Used by audits that need workspace-wide symbol resolution
+/// to reach stdlib declarations (apply-graph transitive walker, future
+/// dependency-graph audits).
+///
+/// Discovery order:
+///   1. `VERUM_STDLIB_ROOT` env var — explicit override.
+///   2. `core/` directory adjacent to the verum binary.
+///   3. `../core/` from the manifest dir's parent (cargo-workspace dev
+///      builds where the corpus is a sibling of the verum source tree).
+///   4. Hardcoded development locations (`~/projects/oldman/verum-lang/
+///      verum/core/`) for repeatable demos.
+///
+/// Returns an empty vector if no stdlib root is found — the caller
+/// then operates on the corpus alone, with stdlib symbols surfacing
+/// as `unresolved` per the apply-graph fallback contract.
+pub(crate) fn discover_stdlib_vr_files() -> Vec<PathBuf> {
+    let candidates: Vec<PathBuf> = stdlib_root_candidates();
+    for root in candidates {
+        if root.is_dir() {
+            let files = discover_vr_files(&root);
+            if !files.is_empty() {
+                return files;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn stdlib_root_candidates() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    // The audit only needs `core/math/` (where MSFS-related axioms
+    // and `_full` form theorems live).  Walking the whole stdlib
+    // (2000+ files) would slow the audit significantly without
+    // adding apply-graph resolution value.
+    if let Ok(env_root) = std::env::var("VERUM_STDLIB_ROOT") {
+        let env_path = PathBuf::from(env_root);
+        out.push(env_path.join("math"));
+        out.push(env_path);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let mut cur = dir.to_path_buf();
+            for _ in 0..6 {
+                let candidate = cur.join("core").join("math");
+                if candidate.is_dir() {
+                    out.push(candidate);
+                }
+                if !cur.pop() {
+                    break;
+                }
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = cwd;
+        for _ in 0..8 {
+            let candidate = cur.join("core").join("math");
+            if candidate.is_dir() {
+                out.push(candidate);
+            }
+            if !cur.pop() {
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// Parse a single `.vr` file without running semantic analysis. We only need
 /// the top-level item list + attributes.
 ///
@@ -2651,14 +2720,28 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
     }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
-    let vr_files = discover_vr_files(&manifest_dir);
+    let mut vr_files = discover_vr_files(&manifest_dir);
+    // Extend the scan with the verum stdlib's `core/` tree when it can
+    // be located (#150 follow-up). Without this step every apply-target
+    // resolving into stdlib symbols (e.g., `msfs_lemma_3_4_*`,
+    // `msfs_id_x_violates_pi_4`) surfaces as `unresolved`, blocking the
+    // L4 verdict on chains that legitimately reach paper-cited stdlib
+    // declarations.  Discovery: VERUM_STDLIB_ROOT env override, then
+    // a small walk from the verum binary location, then the cargo
+    // workspace root (for dev builds).
+    let stdlib_files = discover_stdlib_vr_files();
+    let stdlib_count = stdlib_files.len();
+    vr_files.extend(stdlib_files);
 
     // Pass 1: build the workspace-wide symbol table.  Every theorem
     // gets its proof-body's apply-targets pre-extracted; every axiom
     // gets classified as kernel-bridge / framework / placeholder.
     let mut graph = ApplyGraph::new();
     // Track which theorems exist and their source path so the report
-    // can pinpoint the file location of any leaking chain.
+    // can pinpoint the file location of any leaking chain.  Only
+    // CORPUS-side theorems (not stdlib delegates) are tracked here so
+    // the report focuses on the audit subject; stdlib theorems still
+    // populate the symbol table for transitive resolution.
     let mut theorem_sources: std::collections::BTreeMap<String, std::path::PathBuf> =
         std::collections::BTreeMap::new();
     let mut parsed_files = 0usize;
@@ -2689,7 +2772,13 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
                                 name.clone(),
                                 SymbolEntry::Theorem { apply_targets },
                             );
-                            theorem_sources.insert(name, abs_path.clone());
+                            // Only track corpus-side theorems for the
+                            // per-theorem report; stdlib theorems
+                            // populate the symbol table for transitive
+                            // resolution but aren't audit subjects.
+                            if abs_path.starts_with(&manifest_dir) {
+                                theorem_sources.insert(name, abs_path.clone());
+                            }
                         }
                         verum_common::Maybe::None => {
                             // Theorem-shaped axiom — classify as a

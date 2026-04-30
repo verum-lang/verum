@@ -441,6 +441,8 @@ pub fn lower_instruction<'ctx>(
                     // we use a loop: result = 1; while (exp > 0) { if (exp & 1) result *= base; base *= base; exp >>= 1; }
                     lower_int_pow(ctx, lhs, rhs)?
                 }
+                BinaryIntOp::UDiv => safe_int_div(ctx, lhs, rhs, "udiv")?,
+                BinaryIntOp::UMod => safe_int_rem(ctx, lhs, rhs, "urem")?,
             };
 
             ctx.set_register(dst.0, result.into());
