@@ -33,3 +33,16 @@ public mount super.net.weft.timeout.*;
 public mount super.net.weft.tracing.*;
 public mount super.net.weft.metrics.*;
 public mount super.net.weft.health.*;
+
+// The following 5 files shipped production code but had no
+// `public mount` here. `mount core.net.weft.<X>.*;` worked via
+// direct file lookup but the umbrella's wildcard re-export
+// (`mount core.net.weft.*;`) silently skipped them — handlers
+// using `Json<T>` had to import the extractor by full path despite
+// the umbrella convention of "import core.net.weft.* and get
+// everything". Adding the missing forwards completes the surface.
+public mount super.net.weft.h3.*;              // HTTP/3 server adapter
+public mount super.net.weft.h3_priority.*;     // RFC 9218 priority extractor
+public mount super.net.weft.json_extractor.*;  // Json<T> handler-arg extractor
+public mount super.net.weft.metrics_otlp.*;    // OTLP/HTTP push exporter
+public mount super.net.weft.zero_rtt_gate.*;   // 0-RTT replay-defence gate

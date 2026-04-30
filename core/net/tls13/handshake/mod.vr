@@ -130,3 +130,9 @@ public mount .sni_resolver.{
     ServerNameResolver, ServerIdentity, SniResolveError,
     ExactMatchResolver,
 };
+
+// Re-exports — RFC 8701 GREASE (Generate Random Extensions And
+// Sustain Extensibility) values. Pre-fix the file shipped but had
+// no `public mount` here, so callers using GREASE helpers had to
+// import via direct file path despite the umbrella convention.
+public mount .grease.*;
