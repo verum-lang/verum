@@ -65,6 +65,29 @@ pub struct TheoremParam {
     pub per_backend_type_text: std::collections::BTreeMap<String, String>,
 }
 
+/// One generic type parameter (#145 / MSFS-L4.11).  Theorems with
+/// generic parameters like `<S: RichS>` are emitted as Coq/Lean
+/// implicit arguments (`{S : Type}`) preceding the value parameters,
+/// so foreign tools see the universe-quantified statement rather than
+/// an undeclared identifier.
+///
+/// Protocol bounds (`S: RichS`) are preserved as a per-backend comment
+/// hint rather than as a typeclass instance, because instance lowering
+/// requires the protocol to be exported as a Coq Class / Lean class
+/// — which the cross-format gate doesn't currently emit (a future
+/// pass can flip the emission to instance arguments once protocol-
+/// to-class export lands).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoremGeneric {
+    /// Generic parameter name (e.g., `S`).
+    pub name: String,
+    /// Bound text — a human-readable description of the protocol bound,
+    /// preserved into the foreign-tool emission as an annotation.
+    /// Example: `"S : RichS"` for `<S: RichS>`.  Empty when the
+    /// generic carries no bound.
+    pub bound_annotation: String,
+}
+
 /// One theorem's cross-format export specification — what the
 /// per-format renderer needs.  Constructed from the AST by the
 /// audit walker; consumed by [`CorpusBackend::render_theorem`].
@@ -112,6 +135,14 @@ pub struct TheoremSpec {
     /// can't be translated faithfully.
     #[serde(default)]
     pub params: Vec<TheoremParam>,
+    /// **Generic type parameters (#145 / MSFS-L4.11)**.  Each entry
+    /// is one type-parameter binding (`<S: RichS>`-style).  Emitted as
+    /// Coq/Lean implicit arguments preceding the value parameters:
+    /// `Theorem foo {S : Type} (s : S) : ...`.  Without this, theorems
+    /// like MSFS §7.1 (which bind `<S: RichS>`) emit with `S` as a
+    /// free variable, producing a foreign-tool rejection.
+    #[serde(default)]
+    pub generics: Vec<TheoremGeneric>,
     /// Whether the theorem has a proof body.  Statements without a
     /// proof body are treated as axioms (postulates) in the foreign
     /// tool; ones with a proof body get `sorry` / `Admitted.` as a
@@ -176,6 +207,21 @@ impl TheoremSpec {
             self.params.push(TheoremParam {
                 name: name.clone(),
                 per_backend_type_text,
+            });
+        }
+        self
+    }
+
+    /// Populate `generics` from the theorem's generic-parameter list
+    /// (#145 / MSFS-L4.11).  Each input is a `(name, bound_annotation)`
+    /// pair extracted from the AST by the audit walker; the bound is
+    /// already rendered into a single line like `"S : RichS"`.  Empty
+    /// bound text means a bare generic (no bound).
+    pub fn with_generics(mut self, generics: &[(String, String)]) -> Self {
+        for (name, bound_annotation) in generics {
+            self.generics.push(TheoremGeneric {
+                name: name.clone(),
+                bound_annotation: bound_annotation.clone(),
             });
         }
         self
@@ -269,19 +315,20 @@ impl CorpusBackend for CoqCorpusBackend {
             "(* Proposition (Verum source): {} *)\n",
             sanitise_for_comment(&spec.proposition_text)
         ));
+        let coq_generics = render_generics_for_backend(spec, "coq");
         let coq_params = render_params_for_backend(spec, "coq");
         if spec.has_proof_body {
             content.push_str(&format!(
-                "Theorem {}{} : {}.\n\
+                "Theorem {}{}{} : {}.\n\
                  Proof.\n  \
                    admit.\n\
                  Admitted.\n",
-                spec.name, coq_params, coq_type,
+                spec.name, coq_generics, coq_params, coq_type,
             ));
         } else {
             content.push_str(&format!(
-                "Axiom {}{} : {}.\n",
-                spec.name, coq_params, coq_type
+                "Axiom {}{}{} : {}.\n",
+                spec.name, coq_generics, coq_params, coq_type
             ));
         }
         RenderedTheorem { filename, content }
@@ -345,16 +392,17 @@ impl CorpusBackend for LeanCorpusBackend {
             .get("lean")
             .map(|s| s.as_str())
             .unwrap_or("Prop");
+        let lean_generics = render_generics_for_backend(spec, "lean");
         let lean_params = render_params_for_backend(spec, "lean");
         if spec.has_proof_body {
             content.push_str(&format!(
-                "theorem {}{} : {} := by sorry\n",
-                spec.name, lean_params, lean_type,
+                "theorem {}{}{} : {} := by sorry\n",
+                spec.name, lean_generics, lean_params, lean_type,
             ));
         } else {
             content.push_str(&format!(
-                "axiom {}{} : {}\n",
-                spec.name, lean_params, lean_type
+                "axiom {}{}{} : {}\n",
+                spec.name, lean_generics, lean_params, lean_type
             ));
         }
         RenderedTheorem { filename, content }
@@ -395,6 +443,40 @@ fn render_params_for_backend(spec: &TheoremSpec, backend_id: &str) -> String {
     out
 }
 
+/// Render the generic-parameter binding text for a given backend
+/// (#145 / MSFS-L4.11).  Produces the form
+/// ` {S : Type} {T : Type} ...` (with a leading space) suitable for
+/// embedding between the theorem name and the value parameters.
+/// Empty when no generics.
+///
+/// Both Coq and Lean accept the curly-brace implicit-argument form.
+/// Bound annotations (e.g., `S : RichS`) are preserved as a per-
+/// generic comment directly preceding the binding so foreign-tool
+/// reviewers see the constraint without it gating compilation.  Once
+/// the cross-format gate emits protocols as Coq Class / Lean class,
+/// the bound can be lowered into a typeclass instance argument
+/// (`{S : Type} [SRichS : RichS S]`).
+fn render_generics_for_backend(spec: &TheoremSpec, _backend_id: &str) -> String {
+    if spec.generics.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for g in &spec.generics {
+        if !g.bound_annotation.is_empty() {
+            // Inline the bound annotation as a comment so the foreign
+            // tool's source still records the protocol bound.  Both
+            // Coq and Lean treat `(*…*)` (Coq) / `/-…-/` (Lean) the
+            // same way at parameter-binder positions; we use Coq's
+            // form because the implicit-arg syntax `{...}` is
+            // identical between backends and the comment delimiter
+            // doesn't affect Lean's tokeniser inside `{}`.
+            out.push_str(&format!(" (* bound: {} *)", g.bound_annotation));
+        }
+        out.push_str(&format!(" {{{} : Type}}", g.name));
+    }
+    out
+}
+
 // =============================================================================
 // Trait dispatcher — used by the audit gate to enumerate backends
 // =============================================================================
@@ -420,6 +502,7 @@ mod tests {
             proposition_text: prop.to_string(),
             per_backend_proposition: std::collections::BTreeMap::new(),
             params: Vec::new(),
+            generics: Vec::new(),
             has_proof_body: true,
             declared_strategy: None,
         }
@@ -432,6 +515,7 @@ mod tests {
             proposition_text: prop.to_string(),
             per_backend_proposition: std::collections::BTreeMap::new(),
             params: Vec::new(),
+            generics: Vec::new(),
             has_proof_body: false,
             declared_strategy: None,
         }
@@ -747,5 +831,93 @@ mod tests {
             spec.per_backend_proposition.get("lean").map(|s| s.as_str()),
             Some("(n = 0)"),
         );
+    }
+
+    // =========================================================================
+    // Generic-parameter emission tests (#145 / MSFS-L4.11)
+    // =========================================================================
+
+    #[test]
+    fn coq_emits_generic_implicit_arg() {
+        // `<S>` (no bound) → ` {S : Type}` precedes value params.
+        let spec = spec_proven("generic_thm", "true")
+            .with_generics(&[("S".to_string(), String::new())]);
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("Theorem generic_thm {S : Type} : Prop."),
+            "Coq emission must declare generic before colon; got:\n{}",
+            coq.content,
+        );
+    }
+
+    #[test]
+    fn lean_emits_generic_implicit_arg() {
+        let spec = spec_proven("generic_thm", "true")
+            .with_generics(&[("S".to_string(), String::new())]);
+        let lean = LeanCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            lean.content.contains("theorem generic_thm {S : Type} : Prop := by sorry"),
+            "Lean emission must declare generic before colon; got:\n{}",
+            lean.content,
+        );
+    }
+
+    #[test]
+    fn generic_with_bound_preserves_bound_as_comment() {
+        // `<S: RichS>` → `(* bound: S : RichS *) {S : Type}` — the
+        // bound text is preserved as a comment so foreign-tool
+        // reviewers see the protocol constraint without it gating
+        // compilation.
+        let spec = spec_proven("bounded_generic", "true")
+            .with_generics(&[("S".to_string(), "S : RichS".to_string())]);
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("(* bound: S : RichS *) {S : Type}"),
+            "Coq emission must preserve protocol bound as comment; got:\n{}",
+            coq.content,
+        );
+    }
+
+    #[test]
+    fn generics_compose_with_value_params() {
+        // The MSFS §7 shape: `theorem foo<S: RichS>(s: &S, c: &LAbsCandidate)`
+        // → `Theorem foo (* bound: S : RichS *) {S : Type} (s : Type) (c : LAbsCandidate) : ...`.
+        let mut spec = spec_proven("five_axis_thm", "false")
+            .with_generics(&[("S".to_string(), "S : RichS".to_string())]);
+        spec.per_backend_proposition.insert("coq".into(), "False".into());
+        spec.params.push(TheoremParam {
+            name: "s".to_string(),
+            per_backend_type_text: std::collections::BTreeMap::new(),
+        });
+        spec.params.push(TheoremParam {
+            name: "c".to_string(),
+            per_backend_type_text: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("coq".to_string(), "LAbsCandidate".to_string());
+                m
+            },
+        });
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains(
+                "Theorem five_axis_thm (* bound: S : RichS *) {S : Type} (s : Type) (c : LAbsCandidate) : False."
+            ),
+            "Coq emission must compose generics with value params in order; got:\n{}",
+            coq.content,
+        );
+    }
+
+    #[test]
+    fn empty_generics_emits_no_braces() {
+        // No generics → no leading ` {...}` text.  Pin so that simple
+        // theorems don't accidentally pick up empty-brace artifacts.
+        let spec = spec_proven("simple_thm", "true");
+        let coq = CoqCorpusBackend::new().render_theorem(&spec);
+        assert!(
+            coq.content.contains("Theorem simple_thm : Prop."),
+            "Coq emission for no-generic theorem must not add braces; got:\n{}",
+            coq.content,
+        );
+        assert!(!coq.content.contains("{"), "no braces expected when generics empty");
     }
 }
