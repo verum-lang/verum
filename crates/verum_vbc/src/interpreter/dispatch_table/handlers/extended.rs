@@ -34,6 +34,37 @@ pub(in super::super) fn handle_extended(
             // older interpreters.
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::MakeVariantTyped) => {
+            // Wire format: `reg:dst + varint:type_id + varint:tag +
+            // varint:field_count`.  Pre-fix this was the #146 Phase
+            // 3a "parse-and-skip" stub that DROPPED the type_id and
+            // delegated to the legacy `alloc_variant_into` path
+            // (which fabricates a `TypeId(0x8000+tag)` sentinel) —
+            // so even when codegen knew the concrete parent sum-type
+            // id and emitted MakeVariantTyped, the runtime threw
+            // away the information and `format_variant_for_print_depth`
+            // could not disambiguate variant tags across types.
+            // Now the operand-supplied type_id is honoured: the heap
+            // header carries the real sum-type id, and the
+            // type-scoped variant-name lookup at line ~321 of
+            // `debug.rs::format_variant_for_print_depth` finds the
+            // constructor name on the first try.
+            //
+            // Performance: O(1) operand read, single heap allocation
+            // — identical footprint to legacy `MakeVariant`.
+            let dst_reg = super::bytecode_io::read_reg(state)?;
+            let type_id_raw = super::bytecode_io::read_varint(state)? as u32;
+            let tag = super::bytecode_io::read_varint(state)? as u32;
+            let field_count = super::bytecode_io::read_varint(state)? as u32;
+            super::pattern_matching::alloc_variant_into_with_type_id(
+                state,
+                dst_reg,
+                tag,
+                field_count,
+                crate::types::TypeId(type_id_raw),
+            )?;
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::ProcessExit) => {
             // Format: `[0x1F][0x10][reg:u16]`. Read the register holding
             // the exit code and raise a `ProcessExit` control-flow

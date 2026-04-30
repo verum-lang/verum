@@ -2989,7 +2989,42 @@ impl VbcCodegen {
                     .unwrap_or(tag)
             };
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::MakeVariant { dst: result, tag: final_tag, field_count: args.len() as u32 });
+            // Prefer the typed `MakeVariantTyped` (Extended sub-op
+            // 0x01) when the parent sum-type id is known — encodes
+            // the concrete TypeId in the heap header so the runtime
+            // can resolve the variant constructor name correctly
+            // when distinct sum types share variant tags (e.g.
+            // `Result.Err` and `ShellError.SpawnFailed` both have
+            // tag=1).  Falls back to legacy `MakeVariant` (synthetic
+            // `0x8000+tag` type_id sentinel) when the parent name
+            // doesn't resolve to a registered TypeId — preserves
+            // bit-equivalent runtime state for any historical caller
+            // that lacked the type-name plumbing.
+            let parent_type_id = func_info
+                .parent_type_name
+                .as_deref()
+                .and_then(|name| self.type_name_to_id.get(name).copied());
+            if let Some(tid) = parent_type_id {
+                // Use the typed IR variant — the encoder writes the
+                // canonical wire format (`[0x1F][0x01][reg:dst]
+                // [varint:type_id][varint:tag][varint:field_count]`)
+                // and the validator + disassembler get a structural
+                // view (Phase 3a #146).  Cleaner than the previous
+                // manual operand-blob encoding which bypassed the
+                // typed IR layer.
+                self.ctx.emit(Instruction::MakeVariantTyped {
+                    dst: result,
+                    type_id: tid.0,
+                    tag: final_tag,
+                    field_count: args.len() as u32,
+                });
+            } else {
+                self.ctx.emit(Instruction::MakeVariant {
+                    dst: result,
+                    tag: final_tag,
+                    field_count: args.len() as u32,
+                });
+            }
             for (i, arg) in args.iter().enumerate() {
                 let arg_val = self
                     .compile_expr(arg)?
