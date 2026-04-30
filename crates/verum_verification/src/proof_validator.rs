@@ -4297,12 +4297,30 @@ impl ProofValidator {
         self.expr_eq_with_binding(e1, e2, bound_var)
     }
 
-    /// Expression equality with variable binding consideration
-    fn expr_eq_with_binding(&self, e1: &Expr, e2: &Expr, _bound_var: &Text) -> bool {
-        // Use the standard expr_eq which handles structural equality
-        // In a full implementation, this would track the bound variable
-        // for proper alpha-equivalence checking
-        self.expr_eq(e1, e2)
+    /// Expression equality with one variable bound on both sides.
+    ///
+    /// Reuses [`expr_eq_impl`]'s binding-map machinery: we pre-populate
+    /// each side's binding map with `bound_var ↦ depth 0`, so a Path
+    /// referring to `bound_var` matches the corresponding Path on the
+    /// other side as a bound-at-same-depth occurrence rather than a
+    /// free variable.
+    ///
+    /// Pre-fix this just delegated to `expr_eq` and ignored the
+    /// `bound_var` argument entirely — α-equivalence checking did not
+    /// happen, so a `bound_var` Path appearing inside two different
+    /// scopes would be wrongly equated even when only one of them was
+    /// the actual bound occurrence.
+    ///
+    /// This single-binder variant covers the immediate caller in
+    /// `validate_lambda`; multi-binder generalisation (different
+    /// names on each side) would need a renaming map and is tracked
+    /// separately.
+    fn expr_eq_with_binding(&self, e1: &Expr, e2: &Expr, bound_var: &Text) -> bool {
+        let mut left_bindings: HashMap<Text, usize> = HashMap::new();
+        let mut right_bindings: HashMap<Text, usize> = HashMap::new();
+        left_bindings.insert(bound_var.clone(), 0);
+        right_bindings.insert(bound_var.clone(), 0);
+        self.expr_eq_impl(e1, e2, &mut left_bindings, &mut right_bindings, 1)
     }
 
     /// Validate proof by cases
@@ -7667,6 +7685,13 @@ impl ProofValidator {
     /// This exposes the internal SMT re-checking function for unit tests.
     pub fn recheck_with_smt_for_test(&self, solver: &str, formula: &Expr) -> ValidationResult<()> {
         self.recheck_with_smt(solver, formula)
+    }
+
+    /// Public wrapper for `expr_eq_with_binding` so regression tests
+    /// can exercise the α-equivalence path directly without
+    /// constructing a full proof term.
+    pub fn expr_eq_with_binding_for_test(&self, e1: &Expr, e2: &Expr, bound_var: &Text) -> bool {
+        self.expr_eq_with_binding(e1, e2, bound_var)
     }
 
     /// Register a hypothesis for testing
