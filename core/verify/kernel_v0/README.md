@@ -134,17 +134,36 @@ are ~5K LOC C++.  Verum's target: 500 LOC Verum + 100 LOC shim.
 
 (Tracked under #173 / Phase 3 / #154 in the parent task system.)
 
-1. Define `CoreTerm` inductive in `core_term.vr` matching
-   `proof_checker::Term` 1-to-1.
-2. Define `Context` and `Judgment` in their respective files.
-3. Encode each of the 10 inference rules as a separate file under
-   `rules/` with the rule shape + the soundness lemma (proved or
-   admitted).
-4. Compose into top-level kernel_soundness theorem in `soundness.vr`.
-5. Wire `verum check kernel_v0/mod.vr` as a CI gate — kernel_v0
-   must type-check on every commit.
-6. Phase 3 close: replace `verum_kernel::proof_checker` Rust impl
-   with code generated from this directory.
+| Step | Status | File |
+|:-----|:-------|:-----|
+| 1. Define `CoreTerm` inductive matching `proof_checker::Term` 1-to-1 | ✓ Done | `core_term.vr` |
+| 2. Define `Context` (de Bruijn type stack)                            | ✓ Done | `context.vr` |
+| 3. Define `Judgment` + 10-case `Derivation` + `DefinitionalEquality`  | ✓ Done | `judgment.vr` |
+| 4. Encode 10 inference rules under `rules/`                           | ✓ Done | `rules/k_*.vr` |
+| 5. Compose per-rule lemmas into top-level `kernel_soundness` theorem  | ✓ Done | `soundness.vr` |
+| 6. Wire `verum check kernel_v0/mod.vr` as a CI gate                   | Pending | (compiler-stable target) |
+| 7. Phase-1 trust-base reduction — discharge 6 admitted IOUs           | Pending | `lemmas/` (future) |
+| 8. Phase-3 close — generate Rust `proof_checker` from this directory  | Pending | (#154) |
 
-The full closure is multi-month research work, but this directory
-establishes the architectural commitment and discovery surface NOW.
+**Status as of 2026-04-30**: scaffolding complete.  The 10-rule
+roster, per-rule soundness lemmas (4 proved + 6 admitted with named
+IOUs), the master soundness theorem (`kernel_soundness`), and the
+audit roster (`soundness_roster()` mirroring the Rust-side
+`canonical_rules`) all land in this directory.  The 6 admitted IOUs
+are concretely identified:
+
+  - T-Pi-Form    → substitution-lemma
+  - T-Lam-Intro  → cartesian-closure
+  - T-App-Elim   → substitution + Church-Rosser
+  - T-Beta       → Church-Rosser confluence
+  - T-Eta        → function-extensionality
+  - T-Sub        → κ-tower well-foundedness
+
+Each is discharge-targetable in `lemmas/` (Phase-1 work, can proceed
+in parallel with the Verum compiler hardening) and tracked
+machine-readably by `verum audit --soundness-iou`.
+
+**Trust-base shape post-#173**:
+  ~1100 LOC Verum (kernel_v0/) + ~100 LOC bootstrap shim
+  + ZFC + 2-inacc.  Smallest verified-kernel answer in the
+  proof-assistant world once Phase 3 closes.
