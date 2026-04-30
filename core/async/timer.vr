@@ -80,8 +80,21 @@ implement Future for Sleep {
         if Instant.now() >= deadline {
             Poll.Ready(())
         } else {
-            // Register waker so executor re-polls us
-            cx.waker().wake_by_ref();
+            // Park until the deadline.  Register the waker on the
+            // runtime's timer queue so we're polled exactly once at
+            // the deadline (no busy-spin).  When the runtime isn't
+            // visible — e.g. during synchronous test polling —
+            // fall back to the historical wake_by_ref pattern so
+            // existing call sites still progress (with the busy-spin
+            // cost).  Closes #243 for the canonical sleep primitive.
+            match core.async.executor.current_runtime() {
+                Some(rt) => {
+                    rt.register_timer(deadline.as_nanos() as UInt64, cx.waker().clone());
+                }
+                None => {
+                    cx.waker().wake_by_ref();
+                }
+            }
             Poll.Pending
         }
     }
@@ -128,7 +141,22 @@ implement Future for SleepUntil {
         if Instant.now() >= self.deadline {
             Poll.Ready(())
         } else {
-            cx.waker().wake_by_ref();
+            // Park until the deadline via the runtime's timer queue
+            // when one is in scope.  Synchronous test contexts fall
+            // back to the busy-spin wake_by_ref so the existing API
+            // surface stays compatible.  See Sleep::poll for the
+            // rationale (closes #243).
+            match core.async.executor.current_runtime() {
+                Some(rt) => {
+                    rt.register_timer(self.deadline.as_nanos() as UInt64, cx.waker().clone());
+                    // ^ SleepUntil takes the absolute Instant; cast
+                    // to UInt64 nanoseconds for the timer queue's
+                    // deadline-keyed insertion.
+                }
+                None => {
+                    cx.waker().wake_by_ref();
+                }
+            }
             Poll.Pending
         }
     }

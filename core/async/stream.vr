@@ -2008,9 +2008,34 @@ implement<S: Stream> Stream for ThrottledStream<S> {
                 Poll.Pending => Poll.Pending,
             }
         } else {
-            // Rate limited - schedule wakeup when tokens available
-            // For now, return Pending and rely on external scheduling
-            cx.waker().wake_by_ref();  // Re-poll to check for token refill
+            // Rate limited.  Compute the precise deadline at which
+            // the next integer token becomes available and park
+            // ourselves on the runtime's timer queue.  Closes
+            // task #243 — pre-fix this branch did
+            // `cx.waker().wake_by_ref()` which immediately re-armed
+            // the task, so the runtime re-polled at every brief
+            // sleep tick (~1ms cadence on the IO path,
+            // ~100µs without I/O), burning wakeups while the token
+            // bucket was still empty.  With the timer queue the
+            // runtime parks for exactly the remaining duration.
+            //
+            // Fallback: if no runtime is in scope (e.g. synchronous
+            // test polling) the historical wake_by_ref pattern is
+            // preserved so existing call sites still progress.
+            let time_per_token_ns = if self.count > 0 {
+                self.per.as_nanos() / self.count
+            } else {
+                self.per.as_nanos()
+            };
+            let next_token_at_ns = (self.last_refill.as_nanos() + time_per_token_ns) as UInt64;
+            match core.async.executor.current_runtime() {
+                Some(rt) => {
+                    rt.register_timer(next_token_at_ns, cx.waker().clone());
+                }
+                None => {
+                    cx.waker().wake_by_ref();
+                }
+            }
             Poll.Pending
         }
     }

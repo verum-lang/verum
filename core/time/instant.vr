@@ -162,6 +162,19 @@ implement Instant {
         }
     }
 
+    /// Raw nanoseconds since the monotonic clock's arbitrary epoch.
+    ///
+    /// Public read-only accessor — exposes the underlying counter
+    /// for callers that need to interface with deadline-based APIs
+    /// (e.g. `AsyncRuntime::register_timer(deadline_ns: UInt64,
+    /// waker: Waker)` or platform-specific timer wheels).
+    /// The returned value is monotonic but not absolute (no Unix
+    /// epoch alignment); use only for ordering and duration
+    /// arithmetic, not as a wall-clock timestamp.
+    public fn as_nanos(&self) -> Int {
+        self.nanos
+    }
+
     /// Subtract a duration from this instant.
     ///
     /// Returns None if the result would be before the epoch.
