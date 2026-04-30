@@ -16,6 +16,11 @@ mount sync.*;
 mount .poll.*;
 mount .waker.*;
 mount .future.*;
+// `spawn_blocking` routes through the dedicated blocking thread
+// pool (`core.runtime.pool::ThreadPool`) rather than the async
+// executor's worker pool — see the BlockingState/BlockingFuture
+// section below for the architectural rationale.
+mount core.runtime.pool.{ThreadPool};
 
 // =============================================================================
 // Task State
@@ -220,10 +225,150 @@ where F.Output: Send
     JoinHandle { task: task }
 }
 
+// =============================================================================
+// Blocking Task Coordination — closes #242 architectural stub
+// =============================================================================
+//
+// `spawn_blocking` runs CPU-intensive or blocking I/O work on a
+// **dedicated** thread pool (`core.runtime.pool::ThreadPool`),
+// distinct from the async executor's worker pool. Pre-fix the
+// implementation was `spawn(lazy(f))` — the work ran on the async
+// pool and consumed a worker thread for its full duration,
+// starving other futures. Now the work runs on the dedicated
+// blocking pool and the async future polls a completion flag,
+// freeing async workers between polls.
+//
+// **Coordination state**: `BlockingState<T>` carries the
+// completion flag (`AtomicBool`) and the result slot
+// (`Mutex<Maybe<T>>`). The pool task writes the result and sets
+// `done` with Release ordering; the Future reads `done` with
+// Acquire ordering, then takes the result under the mutex. This
+// is the canonical write-once / read-once cross-thread handoff.
+//
+// **Closure marshalling**: the closure `f` and the state slot
+// are heap-boxed together and the pointer is passed as the pool
+// task's `arg`. The pool's `func: fn(Int) -> Int` recovers the
+// box via `Heap.from_raw` (taking ownership), runs the closure,
+// writes the result, and is dropped — the same type-erasure
+// pattern that `AsyncRuntime::spawn` uses for its `poll_fn`
+// (executor.vr:465 + :468).
+
+// Cross-thread coordination state for blocking work.
+public type BlockingState<T> is {
+    // Completion flag — set by pool task with Release ordering
+    // when the result has been written; read by the polling
+    // future with Acquire ordering.
+    done: AtomicBool,
+    // Result slot — populated by the pool task before setting
+    // `done`. The Future takes the result on first Poll.Ready.
+    result: Mutex<Maybe<T>>,
+};
+
+// Future that polls a `BlockingState` for completion.
+//
+// Returned by `spawn_blocking`. On `poll`:
+//   * If `done` is set, take the result under the mutex and
+//     return `Poll.Ready(value)`.
+//   * Otherwise, schedule a re-poll via `cx.waker().wake_by_ref()`
+//     and return `Poll.Pending`. This keeps the async worker
+//     free for other futures between polls — the wake_by_ref
+//     enqueues this task back onto the executor's ready queue
+//     so the next executor tick will re-poll.
+public type BlockingFuture<T> is {
+    state: Shared<BlockingState<T>>,
+};
+
+implement<T: Send> Future for BlockingFuture<T> {
+    type Output = T;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<T> {
+        if self.state.done.load(MemoryOrdering.Acquire) {
+            // Result is ready — take it from the mutex.
+            // Poisoned mutex recovery via `into_inner`: the pool
+            // task has no panic-sensitive invariant on the
+            // result slot, so a poisoned/Ok lock is operationally
+            // identical here.
+            let mut g = match self.state.result.lock() {
+                Ok(g)  => g,
+                Err(p) => p.into_inner(),
+            };
+            match g.take() {
+                Maybe.Some(v) => Poll.Ready(v),
+                Maybe.None    => panic("BlockingFuture polled after completion"),
+            }
+        } else {
+            // Re-arm the waker so the executor re-polls us. This
+            // is the standard "polled-completion" idiom — the
+            // pool task will eventually flip `done` and on the
+            // next executor tick this poll will see the flag.
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}
+
+// Boxed argument passed to the pool's `fn(Int) -> Int` callback.
+// Pairs the shared completion state with the user-supplied
+// closure so a single heap pointer carries everything the
+// pool task needs.
+type BlockingArg<F, T> is {
+    state: Shared<BlockingState<T>>,
+    f: F,
+};
+
 // Spawn a blocking operation on a dedicated thread pool.
-public fn spawn_blocking<F: fn() -> T, T: Send>(f: F) -> JoinHandle<T> {
-    // Simplified: just treat as regular spawn
-    spawn(lazy(f))
+//
+// The closure runs on `core.runtime.pool::ThreadPool`'s global
+// pool (distinct from the async executor's worker pool). The
+// returned `JoinHandle` polls a completion flag set by the
+// pool task — the async executor's workers stay free for other
+// futures between polls.
+public fn spawn_blocking<F: fn() -> T + Send, T: Send>(f: F) -> JoinHandle<T> {
+    // Allocate the cross-thread coordination state.
+    let state: Shared<BlockingState<T>> = Shared.new(BlockingState {
+        done:   AtomicBool.new(false),
+        result: Mutex.new(Maybe.None),
+    });
+
+    // Box the (state, closure) tuple onto the heap and pass the
+    // pointer as the pool task's argument. The pool's
+    // `fn(Int) -> Int` callback reconstructs the box, runs the
+    // closure, writes the result, sets `done`, and the box is
+    // dropped at end of callback. Same pattern as
+    // `AsyncRuntime::spawn`'s poll_fn type-erasure (executor.vr:465).
+    let arg_box = Heap.new(BlockingArg {
+        state: state.clone(),
+        f:     f,
+    });
+    let arg_ptr = Heap.into_raw(arg_box) as Int;
+
+    // Pool callback — runs on a dedicated blocking-pool thread.
+    let pool_fn: fn(Int) -> Int = |arg: Int| -> Int {
+        // Reconstruct the box (takes ownership).
+        let boxed = unsafe {
+            Heap.from_raw(arg as &mut BlockingArg<F, T>)
+        };
+        let result = (boxed.f)();
+        // Acquire mutex, write result, release.
+        let mut g = match boxed.state.result.lock() {
+            Ok(g)  => g,
+            Err(p) => p.into_inner(),
+        };
+        *g = Maybe.Some(result);
+        // Release-ordered store so the polling Future sees the
+        // result write before the flag flip.
+        boxed.state.done.store(true, MemoryOrdering.Release);
+        // boxed is dropped here — Heap deallocation reclaims memory.
+        0
+    };
+
+    let _pool_handle = ThreadPool.global_submit(pool_fn, arg_ptr);
+
+    // Return a JoinHandle wrapping the polling future. The
+    // future will be enqueued on the async executor and polled
+    // periodically until the pool task completes.
+    let future = BlockingFuture { state: state };
+    spawn(future)
 }
 
 // Spawn a future as a detached task (fire-and-forget).
