@@ -516,26 +516,29 @@ impl Session {
         }
 
         // Phase-not-realised tracing for inert safety knobs.
-        // The `[safety]` manifest section parses 6 fields. Four
-        // are wired (unsafe_allowed / ffi / capability_required /
-        // forbid_stdlib_extern at pipeline.rs:6391-6393 gate FFI
-        // emission). Two are inert: `ffi_boundary` (default
-        // "strict"; validate() restricts to strict|lenient but
-        // no codegen reader) and `mls_level` (default "public";
+        // The `[safety]` manifest section parses 6 fields. Five
+        // are wired:
+        //   - unsafe_allowed / ffi / capability_required /
+        //     forbid_stdlib_extern at pipeline.rs:6391-6393 gate
+        //     FFI emission;
+        //   - ffi_boundary at phases/safety_gate.rs:197-229 emits
+        //     the "extern fn should be marked `unsafe` under
+        //     `[safety].ffi_boundary = strict`" warning, threaded
+        //     from manifest via SafetyPolicy::from_features.
+        // One remains inert: `mls_level` (default "public";
         // validate() restricts to public|secret|top_secret but
         // no information-flow analysis pass currently consults
         // it). Surface non-default values so a `[safety]
         // mls_level = "secret"` setting doesn't silently fall
         // through.
         let sf = &opts.language_features.safety;
-        if sf.ffi_boundary.as_str() != "strict" || sf.mls_level.as_str() != "public" {
+        if sf.mls_level.as_str() != "public" {
             tracing::warn!(
-                "manifest [safety] surface: ffi_boundary={:?}, mls_level={:?} \
-                 (these fields land on LanguageFeatures.safety and validate() restricts \
-                 them to legal values, but no codegen / information-flow pass currently \
-                 consults them — FFI boundary checks are at the unsafe_allowed/ffi gate, \
+                "manifest [safety] surface: mls_level={:?} \
+                 (this field lands on LanguageFeatures.safety and validate() \
+                 restricts it to public|secret|top_secret, but no \
+                 information-flow analysis pass currently consults it — \
                  MLS classification has no production analysis path yet)",
-                sf.ffi_boundary,
                 sf.mls_level,
             );
         }
