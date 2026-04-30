@@ -21,8 +21,9 @@
 
 module permissions;
 
-mount core.{Maybe, Result, List, Text, Bool, Int};
+mount core.{Maybe, Result, List, Text, Byte, Bool, Int};
 mount core.base.glob.{GlobPattern, compile as glob_compile};
+mount core.intrinsics.bitwise.{bitand, bitor, shl};
 mount core.io.path.{Path, PathBuf};
 mount core.io.fs.{current_dir as fs_current_dir};
 mount core.shell.context.{PermissionSet};
@@ -122,10 +123,18 @@ fn path_matches(pattern: &Text, path: &Text) -> Bool {
 
 fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     // pattern forms:
-    //   "example.com"       — exact host, any port
-    //   "example.com:443"   — exact host + port
-    //   "*.example.com"     — suffix wildcard
-    //   "10.0.0.0/8"        — CIDR (TODO: full IP arithmetic)
+    //   "example.com"        — exact host, any port
+    //   "example.com:443"    — exact host + port
+    //   "*.example.com"      — suffix wildcard
+    //   "10.0.0.0/8"         — CIDR (any port)
+    //   "10.0.0.0/8:443"     — CIDR + port
+    //
+    // CIDR is checked first so the literal-host parse can't interpret
+    // the prefix ("/8") as part of the hostname. For non-CIDR patterns
+    // the legacy parse-on-first-colon path runs unchanged.
+    if let Some(slash_idx) = pattern.find('/') {
+        return cidr_host_matches(pattern, slash_idx, host, port);
+    }
     let (pat_host, pat_port): (Text, Int) = match pattern.find(':') {
         Some(idx) => {
             let h: Text = pattern.slice(0, idx).into();
@@ -145,6 +154,76 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
     } else {
         host == &pat_host
     }
+}
+
+// Match "<addr>/<prefix>[:port]" against (host, port).
+// `slash_idx` is the byte offset of the '/' in `pattern`.  The address
+// portion before the slash MUST be a dotted-decimal IPv4; the host
+// argument MUST also parse as IPv4 — otherwise the rule does not match
+// (a hostname like "example.com" never matches an IP-arithmetic CIDR
+// rule, and vice versa).  Prefix length must be in 0..=32.
+fn cidr_host_matches(pattern: &Text, slash_idx: Int, host: &Text, port: Int) -> Bool {
+    let addr_text: Text = pattern.slice(0, slash_idx).into();
+    let rest:      Text = pattern.slice(slash_idx + 1, pattern.len()).into();
+    let (prefix_text, pat_port): (Text, Int) = match rest.find(':') {
+        Some(idx) => {
+            let pre: Text = rest.slice(0, idx).into();
+            let p_str: Text = rest.slice(idx + 1, rest.len()).into();
+            let p: Int = p_str.parse_int().unwrap_or(0);
+            (pre, p)
+        }
+        None => (rest, 0),
+    };
+    if pat_port != 0 && port != 0 && pat_port != port { return false; }
+    let prefix: Int = match prefix_text.parse_int() {
+        Ok(n)  => n,
+        Err(_) => return false,
+    };
+    if prefix < 0 || prefix > 32 { return false; }
+    let pat_addr  = match parse_ipv4(&addr_text) { Some(a) => a, None => return false };
+    let host_addr = match parse_ipv4(host)       { Some(a) => a, None => return false };
+    // mask = top `prefix` bits of a 32-bit word.  prefix == 0 → mask = 0
+    // (matches everything); prefix == 32 → mask = 0xFFFFFFFF (exact).
+    let mask: Int = if prefix == 0 {
+        0
+    } else {
+        bitand(shl(0xFFFFFFFF, 32 - prefix), 0xFFFFFFFF)
+    };
+    bitand(pat_addr, mask) == bitand(host_addr, mask)
+}
+
+// Parse a dotted-decimal IPv4 address into its 32-bit big-endian
+// numeric form (low 32 bits of the returned Int).  Returns None on
+// any parse failure: wrong number of octets, non-numeric octets,
+// out-of-range octets (>255), leading-zero octets are accepted.
+fn parse_ipv4(text: &Text) -> Maybe<Int> {
+    let mut octets: List<Int> = List.new();
+    let mut start: Int = 0;
+    let len = text.len();
+    let mut i: Int = 0;
+    while i < len {
+        if text.byte_at(i) == ('.' as Byte) {
+            let part: Text = text.slice(start, i).into();
+            match part.parse_int() {
+                Ok(n) if n >= 0 && n <= 255 => octets.push(n),
+                _ => return None,
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    let last: Text = text.slice(start, len).into();
+    match last.parse_int() {
+        Ok(n) if n >= 0 && n <= 255 => octets.push(n),
+        _ => return None,
+    }
+    if octets.len() != 4 { return None; }
+    Some(
+        bitor(
+            bitor(shl(octets[0], 24), shl(octets[1], 16)),
+            bitor(shl(octets[2], 8),  octets[3]),
+        ),
+    )
 }
 
 // =============================================================================
