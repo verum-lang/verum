@@ -1330,6 +1330,45 @@ impl<'a> RecursiveParser<'a> {
                         generic_args: List::new(),
                     })
                 } else {
+                    // Optional type annotation (`let x: Type = expr` form).
+                    // Mirrors the regular `let_stmt` parser at
+                    // `stmt.rs::parse_let_stmt` (line ~348). Pre-fix
+                    // proof-block lets had to be untyped — the parser
+                    // saw the `:` and immediately demanded `=`, which
+                    // surfaced as a "unexpected `:`, expected operator
+                    // `=`" error for any `let X: T = e` inside `proof`.
+                    // The pre-existing stdlib worked around this by
+                    // emitting `let X = e` (no annotation) AND swallowed
+                    // warnings for files like core/action/monads/{pure,
+                    // probability, state}.vr that DID write annotations
+                    // (those produced parse cascades that
+                    // lenient-skip-codegen absorbed). This restores the
+                    // documented `[ ':' , type_expr ]` slot from
+                    // `grammar/verum.ebnf::let_stmt`. The annotation is
+                    // currently discarded — `ProofStepKind::Let` carries
+                    // only `{ pattern, value }`, so the type annotation
+                    // is informational. Adding a `ty` field is a
+                    // ripple-through AST change tracked separately.
+                    if self.stream.consume(&TokenKind::Colon).is_some() {
+                        // Mirror E043 from stmt.rs: catch missing-type
+                        // and literal-as-type before they cascade.
+                        if self.stream.check(&TokenKind::Eq) {
+                            return Err(ParseError::let_invalid_type_or_pattern(
+                                "missing type after ':'",
+                                self.stream.current_span(),
+                            ));
+                        }
+                        if matches!(
+                            self.stream.peek_kind(),
+                            Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
+                        ) {
+                            return Err(ParseError::let_invalid_type_or_pattern(
+                                "literals cannot be used as types",
+                                self.stream.current_span(),
+                            ));
+                        }
+                        let _ty = self.parse_type()?;
+                    }
                     self.stream.expect(TokenKind::Eq)?;
                     let value = self.parse_expr()?;
                     ProofStepKind::Let {

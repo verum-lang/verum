@@ -1065,3 +1065,98 @@ fn test_rank2_fn_type_as_parameter() {
         }
     "#);
 }
+
+// ============================================================================
+// Proof-block `let` with type annotation (regression for stdlib monad-law
+// theorems in core/action/monads/{pure, state, probability, …}.vr).
+//
+// Pre-fix the proof_step parser only accepted untyped `let pattern = expr`
+// inside `proof { ... }` blocks. The `:` of `let X: T = expr` triggered an
+// "unexpected `:`, expected operator `=`" cascade. The standard let_stmt
+// grammar (grammar/verum.ebnf) documents the optional type slot — proof
+// blocks should honour the same syntax. The pre-existing stdlib was
+// silently emitting parse warnings (lenient-skip codegen swallowed them);
+// post-fix the warnings are gone and the type-annotated lets parse cleanly.
+// ============================================================================
+
+#[test]
+fn proof_block_let_with_type_annotation_parses() {
+    assert_parses(r#"
+        theorem my_thm() -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                let x: Bool = true;
+                let y: Int = 42;
+                x
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_let_with_generic_type_parses() {
+    assert_parses(r#"
+        type MyList<T> is { value: T };
+
+        theorem generic_let_thm() -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                let lhs: MyList<Int> = MyList { value: 1 };
+                let rhs: MyList<Bool> = MyList { value: true };
+                true
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_untyped_let_still_parses() {
+    // Pin: the type annotation is OPTIONAL — pre-existing untyped form
+    // must still work.
+    assert_parses(r#"
+        theorem untyped_thm() -> Bool
+            requires true
+            ensures  true
+        {
+            proof {
+                let x = 1;
+                let y = 2;
+                true
+            }
+        }
+    "#);
+}
+
+#[test]
+fn proof_block_let_missing_type_after_colon_fails() {
+    // Mirror of stmt.rs E043: `let x: = expr` should error rather than
+    // silently consuming weird input. The fix included this guardrail
+    // for the proof-block path.
+    assert!(assert_fails(r#"
+        theorem bad_thm() -> Bool
+        {
+            proof {
+                let x: = 1;
+                true
+            }
+        }
+    "#));
+}
+
+#[test]
+fn proof_block_let_literal_as_type_fails() {
+    // Mirror of stmt.rs E043: `let x: 123 = expr` should error.
+    assert!(assert_fails(r#"
+        theorem bad_thm() -> Bool
+        {
+            proof {
+                let x: 123 = 1;
+                true
+            }
+        }
+    "#));
+}
