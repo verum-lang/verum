@@ -1,0 +1,186 @@
+// =============================================================================
+// core.action.monads.nondeterm — non-deterministic-choice monad
+// =============================================================================
+//
+// `Nondeterm<A>` — finite non-deterministic computation: a value of
+// `Nondeterm<A>` represents a SET OF possible `A` values, any of which
+// the computation could "have" produced. Backed by `List<A>` for
+// finite, deterministic enumeration of the possibility space.
+//
+// Conventionally called the "List monad" in Haskell-derived literature
+// (Theorem 17.T1 catalogue entry `List<A>` — commutative, ε ω). The
+// `nondeterm_` prefix avoids the type-name clash with `core.collections.
+// list.List` (the storage container); the SEMANTICS here are the
+// non-determinism algebra, not the collection.
+//
+// **Commutative** under cartesian product per Theorem 17.T1: parallel
+// composition of two non-deterministic computations preserves the
+// `@verify(coherent_concurrent)` verdict (Corollary 17.C2). The two
+// orders `bind(m1, |a| bind(m2, |b| pure((a, b))))` and `bind(m2,
+// |b| bind(m1, |a| pure((a, b))))` produce the same multiset of
+// pairs (under cartesian-product equivalence). Sits at ε-coordinate
+// ω alongside `Reader`, `Writer`, `Probability`.
+//
+// MonadPlus: `Nondeterm<A>` is also a monad with a zero element
+// (failure / empty enumeration) and a binary alternation operator
+// (concatenation of possibility spaces). The MonadPlus laws (zero
+// is identity for combine, combine is associative, zero short-
+// circuits bind) make `Nondeterm` the canonical structure for
+// backtracking search and constraint-satisfaction enumeration.
+//
+// Closes the second of three V1.5 monad gaps in `core.action.monads.
+// mod.vr` (`Exception` was the first; `Io` remains).
+// =============================================================================
+
+/// `Nondeterm<A>` — a finite non-deterministic enumeration over
+/// values of type `A`. Backed by `List<A>`; the SEMANTICS are
+/// "any of these values is a possible outcome", not "this ordered
+/// sequence of values".
+@derive(Clone)
+public type Nondeterm<A> is {
+    /// The possibility space: every element is a candidate outcome
+    /// of the computation. Order is operationally significant for
+    /// backtracking-style enumeration (left-most-first) but not
+    /// semantically significant for the monad laws — those hold
+    /// up to multiset equivalence.
+    candidates: List<A>,
+};
+
+/// `pure : A -> Nondeterm<A>` — a deterministic outcome. Singleton
+/// possibility space.
+public fn nondeterm_unit<A>(a: A) -> Nondeterm<A> {
+    let mut cs: List<A> = List.new();
+    cs.push(a);
+    Nondeterm { candidates: cs }
+}
+
+/// `zero : Nondeterm<A>` — the failure / empty-enumeration element.
+/// Identity for `combine`; left-and-right zero for `bind` (any chain
+/// containing a zero short-circuits to zero).
+public fn nondeterm_zero<A>() -> Nondeterm<A> {
+    Nondeterm { candidates: List.new() }
+}
+
+/// `bind : Nondeterm<A> -> (A -> Nondeterm<B>) -> Nondeterm<B>` —
+/// flat-map: for each candidate outcome of `m`, run `f` and
+/// concatenate the resulting enumerations. The Kleisli composition
+/// for non-determinism.
+public fn nondeterm_bind<A, B>(
+    m: Nondeterm<A>,
+    f: fn(A) -> Nondeterm<B>,
+) -> Nondeterm<B> {
+    let mut joined: List<B> = List.new();
+    let mut i: Int = 0;
+    while i < m.candidates.len() as Int {
+        let a = (*m.candidates.get(i as Int).unwrap()).clone();
+        let inner: Nondeterm<B> = f(a);
+        let mut j: Int = 0;
+        while j < inner.candidates.len() as Int {
+            joined.push((*inner.candidates.get(j as Int).unwrap()).clone());
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Nondeterm { candidates: joined }
+}
+
+/// `strength : A -> Nondeterm<B> -> Nondeterm<(A, B)>` — tensor a
+/// pure value alongside a non-deterministic one. Each outcome `b`
+/// becomes `(a, b)`.
+public fn nondeterm_strength<A, B>(a: A, mb: Nondeterm<B>) -> Nondeterm<(A, B)> {
+    let mut paired: List<(A, B)> = List.new();
+    let mut i: Int = 0;
+    while i < mb.candidates.len() as Int {
+        let b = (*mb.candidates.get(i as Int).unwrap()).clone();
+        paired.push((a.clone(), b));
+        i = i + 1;
+    }
+    Nondeterm { candidates: paired }
+}
+
+/// `combine : Nondeterm<A> -> Nondeterm<A> -> Nondeterm<A>` —
+/// alternation: union the possibility spaces. The MonadPlus
+/// `mplus` operator. Associative; `zero` is identity on both sides.
+/// Used to express "or-elseiteratively try `m1` first, then `m2`".
+public fn nondeterm_combine<A>(
+    m1: Nondeterm<A>,
+    m2: Nondeterm<A>,
+) -> Nondeterm<A> {
+    let mut joined: List<A> = List.new();
+    let mut i: Int = 0;
+    while i < m1.candidates.len() as Int {
+        joined.push((*m1.candidates.get(i as Int).unwrap()).clone());
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < m2.candidates.len() as Int {
+        joined.push((*m2.candidates.get(j as Int).unwrap()).clone());
+        j = j + 1;
+    }
+    Nondeterm { candidates: joined }
+}
+
+/// `from_list : List<A> -> Nondeterm<A>` — wrap an explicit list of
+/// candidates as a non-deterministic computation. Bridge between
+/// the collection layer and the monad layer.
+public fn nondeterm_from_list<A>(xs: List<A>) -> Nondeterm<A> {
+    Nondeterm { candidates: xs }
+}
+
+/// `to_list : Nondeterm<A> -> List<A>` — extract the underlying
+/// possibility space as a concrete list. Inverse of `from_list`
+/// at the type level (the round-trip is the identity on values).
+public fn nondeterm_to_list<A>(m: Nondeterm<A>) -> List<A> {
+    m.candidates
+}
+
+/// `count : Nondeterm<A> -> Int` — number of distinct candidate
+/// outcomes. Cheap discriminator: 0 = failure, 1 = deterministic
+/// (lifted via `nondeterm_unit`), > 1 = genuinely non-deterministic.
+public fn nondeterm_count<A>(m: &Nondeterm<A>) -> Int {
+    m.candidates.len() as Int
+}
+
+/// `is_empty : Nondeterm<A> -> Bool` — true iff the computation
+/// has no possible outcomes (i.e. equals `nondeterm_zero()`).
+/// Equivalent to `count(&m) == 0` but spelled out for callers
+/// branching on the failure case.
+public fn nondeterm_is_empty<A>(m: &Nondeterm<A>) -> Bool {
+    m.candidates.len() == 0
+}
+
+/// `guard : Bool -> Nondeterm<()>` — the standard `MonadPlus.guard`
+/// combinator. Returns `unit(())` when the predicate holds (one
+/// candidate outcome: continue) and `zero()` when it fails (no
+/// candidates: prune this branch). Used to encode constraints in
+/// non-deterministic search:
+///
+/// ```verum
+/// // Find pairs (x, y) with x < y from {1, 2, 3} × {1, 2, 3}
+/// nondeterm_bind(xs, |x|
+///   nondeterm_bind(ys, |y|
+///     nondeterm_bind(nondeterm_guard(x < y), |_|
+///       nondeterm_unit((x, y)))))
+/// ```
+public fn nondeterm_guard(condition: Bool) -> Nondeterm<()> {
+    if condition {
+        nondeterm_unit(())
+    } else {
+        nondeterm_zero()
+    }
+}
+
+/// `map : Nondeterm<A> -> (A -> B) -> Nondeterm<B>` — apply a pure
+/// function to every candidate. Equivalent to
+/// `bind(m, |a| unit(f(a)))` but spelled out for the common case
+/// where the transformation introduces no further non-determinism.
+public fn nondeterm_map<A, B>(m: Nondeterm<A>, f: fn(A) -> B) -> Nondeterm<B> {
+    let mut mapped: List<B> = List.new();
+    let mut i: Int = 0;
+    while i < m.candidates.len() as Int {
+        let a = (*m.candidates.get(i as Int).unwrap()).clone();
+        mapped.push(f(a));
+        i = i + 1;
+    }
+    Nondeterm { candidates: mapped }
+}
