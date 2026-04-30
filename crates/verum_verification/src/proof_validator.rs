@@ -6504,12 +6504,34 @@ impl ProofValidator {
     /// Pull quantifier outward: e.g., (forall x. P) & Q -> forall x. (P & Q) when x not free in Q.
     fn validate_pull_quantifier(
         &self,
-        _formula: &Expr,
+        formula: &Expr,
         _quantifier_type: &Text,
         result: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
-        // Check result matches expected
+        // Soundness gate: pull-quantifier requires the input to be
+        // a Binary connective where at least one operand is a
+        // quantifier — it has no shape to "pull from" otherwise.
+        // Pre-fix `formula` was `_`-bound and ignored; any input
+        // would pass as long as `result == expected` matched
+        // syntactically.
+        let is_pullable = match &formula.kind {
+            ExprKind::Binary { left, right, .. } => {
+                matches!(left.kind, ExprKind::Forall { .. } | ExprKind::Exists { .. })
+                    || matches!(right.kind, ExprKind::Forall { .. } | ExprKind::Exists { .. })
+            }
+            _ => false,
+        };
+        if !is_pullable {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "pull_quantifier: input {} has no quantified subterm to pull",
+                    self.expr_to_text(formula)
+                )
+                .into(),
+            });
+        }
+
         if !self.expr_eq(result, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
@@ -6528,12 +6550,31 @@ impl ProofValidator {
     /// Push quantifier inward: e.g., forall x. (P & Q) -> (forall x. P) & (forall x. Q).
     fn validate_push_quantifier(
         &self,
-        _formula: &Expr,
+        formula: &Expr,
         _quantifier_type: &Text,
         result: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
-        // Check result matches expected
+        // Soundness gate: push-quantifier requires the input to be
+        // a Forall or Exists whose BODY is a Binary connective —
+        // it has no inner structure to push the quantifier into
+        // otherwise.
+        let is_pushable = match &formula.kind {
+            ExprKind::Forall { body, .. } | ExprKind::Exists { body, .. } => {
+                matches!(body.kind, ExprKind::Binary { .. })
+            }
+            _ => false,
+        };
+        if !is_pushable {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "push_quantifier: input {} is not a quantifier with a Binary body",
+                    self.expr_to_text(formula)
+                )
+                .into(),
+            });
+        }
+
         if !self.expr_eq(result, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
@@ -6553,11 +6594,26 @@ impl ProofValidator {
     /// Eliminate unused quantified variables: forall x. P -> P when x not in P.
     fn validate_elim_unused_vars(
         &self,
-        _formula: &Expr,
+        formula: &Expr,
         result: &Expr,
         expected: &Expr,
     ) -> ValidationResult<()> {
-        // Check result matches expected
+        // Soundness gate: eliminate-unused-vars requires the input
+        // to be a quantifier — there are no quantified bindings to
+        // eliminate from a non-quantified formula. Full
+        // free-variable check (verifying the bound variable is
+        // actually unused in the body) is tracked separately.
+        if !matches!(formula.kind, ExprKind::Forall { .. } | ExprKind::Exists { .. }) {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "elim_unused_vars: input {} is not a quantifier — \
+                     nothing to eliminate",
+                    self.expr_to_text(formula)
+                )
+                .into(),
+            });
+        }
+
         if !self.expr_eq(result, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
@@ -9454,72 +9510,171 @@ mod tests {
         );
     }
 
+    /// Helper for the quantifier-rewrite tests below: build a
+    /// `Forall(x: Int) body` shape.
+    fn make_forall_x(body: Expr) -> Expr {
+        let pat = verum_ast::Pattern {
+            kind: verum_ast::pattern::PatternKind::Ident {
+                by_ref: false,
+                mutable: false,
+                name: verum_ast::Ident::new("x", Span::dummy()),
+                subpattern: Maybe::None,
+            },
+            span: Span::dummy(),
+        };
+        let mut bindings: List<verum_ast::expr::QuantifierBinding> = List::new();
+        bindings.push(verum_ast::expr::QuantifierBinding {
+            pattern: pat,
+            ty: Maybe::None,
+            domain: Maybe::None,
+            guard: Maybe::None,
+            span: Span::dummy(),
+        });
+        Expr::new(
+            ExprKind::Forall {
+                bindings,
+                body: Heap::new(body),
+            },
+            Span::dummy(),
+        )
+    }
+
     #[test]
     fn test_validate_pull_quantifier() {
         let mut validator = ProofValidator::new();
 
+        // Build (∀x. P) ∧ Q — a Binary whose left operand is a Forall.
+        let p = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
+            Span::dummy(),
+        );
+        let q = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("Q", Span::dummy()))),
+            Span::dummy(),
+        );
         let formula = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            ExprKind::Binary {
+                op: BinOp::And,
+                left: Heap::new(make_forall_x(p)),
+                right: Heap::new(q),
+            },
             Span::dummy(),
         );
-        let result_expr = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
-            Span::dummy(),
-        );
+        let result_expr = formula.clone();
 
         let proof = ProofTerm::PullQuantifier {
-            formula: formula.clone(),
+            formula,
             quantifier_type: "forall".into(),
             result: result_expr.clone(),
         };
 
         let result = validator.validate(&proof, &result_expr);
-        assert!(result.is_ok(), "PullQuantifier should validate correctly");
+        assert!(result.is_ok(), "PullQuantifier with quantified subterm should validate: {:?}", result);
+    }
+
+    #[test]
+    fn test_validate_pull_quantifier_rejects_non_quantified_input() {
+        // Soundness regression for #40: literal `true` has no
+        // quantifier to pull. Pre-fix this passed because `formula`
+        // was `_`-bound.
+        let mut validator = ProofValidator::new();
+        let bool_true = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let proof = ProofTerm::PullQuantifier {
+            formula: bool_true.clone(),
+            quantifier_type: "forall".into(),
+            result: bool_true.clone(),
+        };
+        let result = validator.validate(&proof, &bool_true);
+        assert!(result.is_err(), "non-quantified pull-input must reject");
     }
 
     #[test]
     fn test_validate_push_quantifier() {
         let mut validator = ProofValidator::new();
 
-        let formula = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+        // Build ∀x. (P ∧ Q) — a Forall whose body is a Binary.
+        let p = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
             Span::dummy(),
         );
-        let result_expr = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+        let q = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("Q", Span::dummy()))),
             Span::dummy(),
         );
+        let body = Expr::new(
+            ExprKind::Binary {
+                op: BinOp::And,
+                left: Heap::new(p),
+                right: Heap::new(q),
+            },
+            Span::dummy(),
+        );
+        let formula = make_forall_x(body);
+        let result_expr = formula.clone();
 
         let proof = ProofTerm::PushQuantifier {
-            formula: formula.clone(),
-            quantifier_type: "exists".into(),
+            formula,
+            quantifier_type: "forall".into(),
             result: result_expr.clone(),
         };
 
         let result = validator.validate(&proof, &result_expr);
-        assert!(result.is_ok(), "PushQuantifier should validate correctly");
+        assert!(result.is_ok(), "PushQuantifier with binary body should validate: {:?}", result);
+    }
+
+    #[test]
+    fn test_validate_push_quantifier_rejects_non_pushable_input() {
+        let mut validator = ProofValidator::new();
+        let bool_true = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let proof = ProofTerm::PushQuantifier {
+            formula: bool_true.clone(),
+            quantifier_type: "forall".into(),
+            result: bool_true.clone(),
+        };
+        let result = validator.validate(&proof, &bool_true);
+        assert!(result.is_err(), "non-quantifier push-input must reject");
     }
 
     #[test]
     fn test_validate_elim_unused_vars() {
         let mut validator = ProofValidator::new();
 
-        let formula = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+        // Build ∀x. P — quantifier with body that doesn't mention x.
+        let p = Expr::new(
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
             Span::dummy(),
         );
-        let result_expr = Expr::new(
-            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
-            Span::dummy(),
-        );
+        let formula = make_forall_x(p.clone());
+        let result_expr = p;
 
         let proof = ProofTerm::ElimUnusedVars {
-            formula: formula.clone(),
+            formula,
             result: result_expr.clone(),
         };
 
         let result = validator.validate(&proof, &result_expr);
-        assert!(result.is_ok(), "ElimUnusedVars should validate correctly");
+        assert!(result.is_ok(), "ElimUnusedVars from quantifier should validate: {:?}", result);
+    }
+
+    #[test]
+    fn test_validate_elim_unused_vars_rejects_non_quantifier_input() {
+        let mut validator = ProofValidator::new();
+        let bool_true = Expr::new(
+            ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
+            Span::dummy(),
+        );
+        let proof = ProofTerm::ElimUnusedVars {
+            formula: bool_true.clone(),
+            result: bool_true.clone(),
+        };
+        let result = validator.validate(&proof, &bool_true);
+        assert!(result.is_err(), "non-quantifier elim-input must reject");
     }
 
     #[test]
