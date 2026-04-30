@@ -9624,46 +9624,67 @@ impl<'s> CompilationPipeline<'s> {
             timeout_ms: 5000,
         };
 
-        // Track statistics across all functions
-        let mut global_stats = TierStatistics::new();
+        // Process each function in the module.
+        //
+        // #118 follow-up — per-function tier analysis is embarrassingly
+        // parallel: each `TierAnalyzer` runs its 9-phase escape /
+        // dominance / ownership / concurrency / lifetime / NLL /
+        // tier-determination / cross-fn / final passes over an
+        // independent CFG, with no shared mutable state.  Statistics
+        // and cache writes both go through `&self` Session methods
+        // (`cache_tier_analysis` uses an internal RwLock, statistics
+        // merge is sequential under one Mutex).
+        //
+        // Opt-out via `VERUM_NO_PARALLEL_CBGR=1` for diagnostic
+        // ordering and parallel-only regression triage.
+        let parallel_cbgr = std::env::var("VERUM_NO_PARALLEL_CBGR").is_err();
 
-        // Process each function in the module
-        for item in module.items.iter() {
-            if let ItemKind::Function(func) = &item.kind {
-                // Skip meta functions (compile-time only)
-                if func.is_meta {
-                    continue;
+        let funcs: Vec<&verum_ast::decl::FunctionDecl> = module
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let ItemKind::Function(func) = &item.kind {
+                    if func.is_meta { None } else { Some(func) }
+                } else {
+                    None
                 }
+            })
+            .collect();
 
-                // Build CFG from function body
-                let cfg = self.build_function_cfg(func);
+        let stats_mu = std::sync::Mutex::new(TierStatistics::new());
+        let analyse_one = |func: &verum_ast::decl::FunctionDecl| {
+            let cfg = self.build_function_cfg(func);
+            let function_id = FunctionId(Self::hash_function_name(&func.name.name));
+            let analyzer = TierAnalyzer::with_config(cfg, config.clone());
+            let result = analyzer.analyze();
 
-                // Create function ID from name hash
-                let function_id = FunctionId(Self::hash_function_name(&func.name.name));
+            if result.stats.total_refs > 0 {
+                debug!(
+                    "  Function '{}': {} refs, {} T1, {} T0 ({:.1}% promoted)",
+                    func.name.name,
+                    result.stats.total_refs,
+                    result.stats.tier1_count,
+                    result.stats.tier0_count,
+                    result.stats.promotion_rate() * 100.0
+                );
+            }
+            // Merge statistics under a single short-held Mutex.
+            stats_mu.lock().unwrap().merge(&result.stats);
+            // Cache for codegen phase. `cache_tier_analysis` is `&self`
+            // with internal RwLock — safe under concurrent writes.
+            self.session.cache_tier_analysis(function_id, result);
+        };
 
-                // Run tier analysis
-                let analyzer = TierAnalyzer::with_config(cfg, config.clone());
-                let result = analyzer.analyze();
-
-                // Log per-function results at debug level
-                if result.stats.total_refs > 0 {
-                    debug!(
-                        "  Function '{}': {} refs, {} T1, {} T0 ({:.1}% promoted)",
-                        func.name.name,
-                        result.stats.total_refs,
-                        result.stats.tier1_count,
-                        result.stats.tier0_count,
-                        result.stats.promotion_rate() * 100.0
-                    );
-                }
-
-                // Merge statistics
-                global_stats.merge(&result.stats);
-
-                // Cache result for codegen phase
-                self.session.cache_tier_analysis(function_id, result);
+        if parallel_cbgr && funcs.len() > 1 {
+            use rayon::prelude::*;
+            funcs.par_iter().copied().for_each(analyse_one);
+        } else {
+            for func in &funcs {
+                analyse_one(func);
             }
         }
+
+        let global_stats = stats_mu.into_inner().unwrap();
 
         let elapsed = start.elapsed();
 
