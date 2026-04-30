@@ -39,3 +39,18 @@ module core.verify.kernel_v0.mod;
 mount super.core_term.{CoreTerm, type_universe};
 mount super.context.{Context, empty as context_empty, extend, lookup, depth};
 mount super.judgment.{Judgment, Derivation, DefinitionalEquality, term_of, type_of};
+
+// 10 kernel rules (4 proved + 6 admitted with IOUs).
+mount super.rules.k_var.{introduce_var, k_var_sound};
+mount super.rules.k_univ.{introduce_univ, k_univ_sound};
+mount super.rules.k_fwax.{ForwardAxiomWitness, introduce_fwax, k_fwax_sound};
+mount super.rules.k_pos.{is_strictly_positive, occurs_in, introduce_pos, k_pos_sound};
+mount super.rules.k_pi_form.{introduce_pi_form, k_pi_form_sound};
+mount super.rules.k_lam_intro.{introduce_lam, k_lam_intro_sound};
+mount super.rules.k_app_elim.{introduce_app, k_app_elim_sound};
+mount super.rules.k_beta.{introduce_beta, k_beta_sound};
+mount super.rules.k_eta.{introduce_eta, k_eta_sound};
+mount super.rules.k_sub.{introduce_sub, k_sub_sound};
+
+// Master soundness theorem + audit roster.
+mount super.soundness.{LemmaStatus, RuleSoundnessRecord, kernel_soundness, soundness_roster};
