@@ -363,7 +363,7 @@ implement InotifyBackend {
         let mut buf: List<Byte> = List.with_capacity(4096);
         let mut i = 0;
         while i < 4096 { buf.push(0); i = i + 1; }
-        let n = match sys_read(FileDesc::from_raw(self.fd), &mut buf) {
+        let n = match sys_read(FileDesc.from_raw(self.fd), &mut buf) {
             Ok(v)  => v,
             Err(_) => return Err("inotify read failed".into()),
         };
@@ -398,7 +398,7 @@ implement InotifyBackend {
 @cfg(target_os = "linux")
 implement Drop for InotifyBackend {
     fn drop(&mut self) {
-        let _ = sys_close(FileDesc::from_raw(self.fd));
+        let _ = sys_close(FileDesc.from_raw(self.fd));
     }
 }
 

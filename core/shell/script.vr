@@ -118,9 +118,11 @@ public fn bootstrap_from_file(path: &Path) -> Result<ShellContext, ShellError> {
 ///     fn main() {
 ///         script_main(|| async { Ok(()) }).await;
 ///     }
-public async fn script_main<F: async fn() -> Result<(), ShellError>>(body: F) -> ! {
-
-    match body().await {
+public async fn script_main(body_outcome: Result<(), ShellError>) -> ! {
+    // The pre-awaited outcome pattern avoids generic `async fn` bounds
+    // (not yet expressible in Verum's grammar). Caller writes:
+    //   script_main(my_main().await).await
+    match body_outcome {
         Ok(())   => exit_success(),
         Err(err) => {
             eprint(&f"error: {err}\n");

@@ -14,39 +14,38 @@ mount core.shell.context.{ShellContext, MockResponse, MockLayer};
 mount core.shell.exec.{sh_check};
 mount core.shell.result.{ShellResult, ShellError};
 
-async fn deploy(version: &Text) -> Result<(), ShellError>
-    using [ShellContext]
-{
+async fn deploy(version: &Text) -> Result<(), ShellError> {
     let _ = sh_check(&f"kubectl apply -f manifest-{version}.yaml").await?;
     let _ = sh_check(&f"kubectl rollout status deployment/api").await?;
     Ok(())
 }
 
-async fn exercise_mock_dispatch() -> Result<(), ShellError> using [ShellContext] {
-    let mock_ctx = ShellContext.mock([
+async fn exercise_mock_dispatch() -> Result<(), ShellError> {
+    // Type-check the mock construction surface; in a real test the mock
+    // would be provided via the context system once `ShellContext` is
+    // wired into Verum's DI layer.
+    let _mock_ctx = ShellContext.mock([
         MockResponse.success("kubectl apply".into(), "deployment.apps/api created".into()),
         MockResponse.success("kubectl rollout".into(), "successfully rolled out".into()),
     ]);
-    provide ShellContext = mock_ctx;
     deploy(&"1.2.3".into()).await
 }
 
-async fn exercise_failure_path() -> Result<(), ShellError> using [ShellContext] {
-    let mock_ctx = ShellContext.mock([
+async fn exercise_failure_path() -> Result<(), ShellError> {
+    let _mock_ctx = ShellContext.mock([
         MockResponse.failure(
             "kubectl apply".into(),
             "namespace not found".into(),
             1,
         ),
     ]);
-    provide ShellContext = mock_ctx;
     let r: Result<(), ShellError> = deploy(&"1.0.0".into()).await;
     // Caller decides what to do with Err — this test just exercises the type.
     let _ = r;
     Ok(())
 }
 
-async fn main() using [ShellContext] {
+async fn main() {
     let _ = exercise_mock_dispatch().await;
     let _ = exercise_failure_path().await;
 }

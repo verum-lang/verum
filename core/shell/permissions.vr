@@ -130,7 +130,7 @@ fn host_matches(pattern: &Text, host: &Text, port: Int) -> Bool {
         Some(idx) => {
             let h: Text = pattern.slice(0, idx).into();
             let p_str: Text = pattern.slice(idx + 1, pattern.len()).into();
-            let p: Int = p_str.parse::<Int>().unwrap_or(0);
+            let p: Int = p_str.parse_int().unwrap_or(0);
             (h, p)
         }
         None => (pattern.clone(), 0),

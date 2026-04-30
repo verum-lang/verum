@@ -25,14 +25,14 @@ fn exercise_grep() {
 
 fn exercise_grep_re() {
     let lines: List<Text> = ["foo".into(), "bar123".into()];
-    let rx = Regex.compile(r"\d+").unwrap();
+    let rx = Regex.new("""\\d+""").unwrap();
     let _: List<Text> = grep_re(&rx, &lines);
     let _: List<Text> = grep_capture(&rx, &lines);
 }
 
 fn exercise_sed() {
     let _: Text = sed_replace(&"hello world".into(), &"world".into(), &"verum".into());
-    let rx = Regex.compile(r"\d+").unwrap();
+    let rx = Regex.new("""\\d+""").unwrap();
     let _: Text = sed_replace_re(&"abc 123 def 456".into(), &rx, &"NUM".into());
     let lines: List<Text> = ["a 1".into(), "b 2".into()];
     let _: List<Text> = sed_each_line(&lines, &"a".into(), &"A".into());

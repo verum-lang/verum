@@ -136,7 +136,7 @@ implement Executor {
     /// cancel. Returns the final outcome — successful result or the last
     /// error after retries are exhausted.
     public async fn sh(&self, cmd_text: &Text) -> Result<ShellResult, ShellError>
-        using [ShellContext]
+
     {
         let token = self.acquire_token();
         // Inline retry loop — generic dispatch closure can't be expressed
@@ -168,7 +168,7 @@ implement Executor {
     /// / cancel semantics as `sh()`.
     public async fn run(&self, program: &Text, args: List<Text>)
         -> Result<ShellResult, ShellError>
-        using [ShellContext]
+
     {
         let token = self.acquire_token();
         let mut outcome = run_with_cancel(program, args.clone(), &token, self.grace).await;
@@ -201,7 +201,7 @@ implement Executor {
     /// the same retry policy as `run`.
     public async fn run_idempotent(&self, program: &Text, args: List<Text>)
         -> Result<ShellResult, ShellError>
-        using [ShellContext]
+
     {
         self.run(program, args).await
     }

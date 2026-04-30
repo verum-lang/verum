@@ -12,19 +12,19 @@ mount core.shell.result.{ShellResult, ShellError};
 mount core.async.{CancellationToken};
 mount core.time.{Duration};
 
-async fn exercise_run() using [ShellContext] {
+async fn exercise_run() {
     let r1: Result<ShellResult, ShellError> = run(&"echo".into(), ["hello".into()]).await;
     let _ = r1;
 }
 
-async fn exercise_sh() using [ShellContext] {
+async fn exercise_sh() {
     let r2: ShellResult = sh(&"true".into()).await;
     let _ = r2;
     let r3: Result<ShellResult, ShellError> = sh_check(&"true".into()).await;
     let _ = r3;
 }
 
-async fn exercise_executor() using [ShellContext] {
+async fn exercise_executor() {
     let exec = Executor.new()
         .with_timeout(Duration.from_millis(5000))
         .with_retry(RetryPolicy.simple(3));
@@ -32,12 +32,12 @@ async fn exercise_executor() using [ShellContext] {
     let _: Result<ShellResult, ShellError> = exec.run(&"echo".into(), ["x".into()]).await;
 }
 
-async fn exercise_retry_policy_variants() using [ShellContext] {
+async fn exercise_retry_policy_variants() {
     let _: RetryPolicy = RetryPolicy.simple(5);
     let _: RetryPolicy = RetryPolicy.on_exit_codes(3, [1, 2, 5]);
 }
 
-async fn exercise_cancel() using [ShellContext] {
+async fn exercise_cancel() {
     let token = CancellationToken.new();
     let exec = Executor.new()
         .with_cancel(token)
@@ -45,7 +45,7 @@ async fn exercise_cancel() using [ShellContext] {
     let _: Result<ShellResult, ShellError> = exec.sh(&"true".into()).await;
 }
 
-async fn main() using [ShellContext] {
+async fn main() {
     exercise_run().await;
     exercise_sh().await;
     exercise_executor().await;

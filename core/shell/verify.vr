@@ -102,7 +102,7 @@ public type EnvName is (Text);
 
 implement EnvName {
     public fn parse(s: Text) -> Result<EnvName, ShellError> {
-        let r = Regex.compile(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
+        let r = Regex.new("""^[A-Za-z_][A-Za-z0-9_]*$""").unwrap();
         if r.is_match(&s) { Ok(EnvName(s)) }
         else { Err(ShellError.SpawnFailed {
             command: "<EnvName::parse>".into(),
@@ -144,7 +144,7 @@ public type SemVerRef is (Text);
 
 implement SemVerRef {
     public fn parse(s: Text) -> Result<SemVerRef, ShellError> {
-        let r = Regex.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.\-]+)?(\+[a-zA-Z0-9.\-]+)?$").unwrap();
+        let r = Regex.new("""^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.\\-]+)?(\\+[a-zA-Z0-9.\\-]+)?$""").unwrap();
         if r.is_match(&s) { Ok(SemVerRef(s)) }
         else { Err(ShellError.SpawnFailed {
             command: "<SemVerRef::parse>".into(),
@@ -189,7 +189,7 @@ implement HostName {
                 reason:  f"hostname too long: {s.len()}",
             });
         }
-        let r = Regex.compile(r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$").unwrap();
+        let r = Regex.new("""^([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$""").unwrap();
         if r.is_match(&s) { Ok(HostName(s)) }
         else { Err(ShellError.SpawnFailed {
             command: "<HostName::parse>".into(),
@@ -263,7 +263,7 @@ implement S3Bucket {
                 reason:  f"length {n} out of [3, 63]",
             });
         }
-        let r = Regex.compile(r"^[a-z0-9][a-z0-9.\-]+[a-z0-9]$").unwrap();
+        let r = Regex.new("""^[a-z0-9][a-z0-9.\\-]+[a-z0-9]$""").unwrap();
         if !r.is_match(&s) {
             return Err(ShellError.SpawnFailed {
                 command: "<S3Bucket::parse>".into(),

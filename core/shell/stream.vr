@@ -181,7 +181,7 @@ implement LineStream {
 
 public async fn* stream_lines(cmd_text: &Text)
     -> Result<Text, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();
@@ -249,7 +249,7 @@ pub async fn stream_lines_bounded(
     cmd_text: &Text,
     config: StreamConfig,
 ) -> Result<LineStream, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     let shell_prog = ctx.resolve_shell();
@@ -272,7 +272,7 @@ pub async fn stream_lines_bounded(
         reason:  "stdout fd not piped".into(),
     })?;
 
-    let (tx, rx) = bounded::<Result<Text, ShellError>>(config.buffer);
+    let (tx, rx): (Sender<Result<Text, ShellError>>, Receiver<Result<Text, ShellError>>) = bounded(config.buffer);
     let cancel = CancellationTokenSource.new();
     let token = cancel.token();
     let cmd_for_producer = cmd_text.clone();

@@ -137,7 +137,7 @@ implement WatchHandle {
 /// streaming `WatchEvent`. Default poll interval = 200 ms.
 pub async fn watch(pattern: &Text)
     -> Result<WatchHandle, ShellError>
-    using [ShellContext]
+
 {
     watch_with(pattern, Duration.from_millis(200), WatchFilter.default()).await
 }
@@ -148,7 +148,7 @@ pub async fn watch(pattern: &Text)
 /// available (currently Windows).
 pub async fn watch_native(pattern: &Text)
     -> Result<WatchHandle, ShellError>
-    using [ShellContext]
+
 {
     @cfg(any(target_os = "linux", target_os = "macos"))
     {
@@ -163,7 +163,7 @@ pub async fn watch_native(pattern: &Text)
             Err(e) => return Err(e),
         };
 
-        let (tx, rx) = bounded::<WatchEvent>(64);
+        let (tx, rx): (Sender<WatchEvent>, Receiver<WatchEvent>) = bounded(64);
         let cancel = CancellationTokenSource.new();
         let token = cancel.token();
         let pattern_owned = pattern.clone();
@@ -233,7 +233,7 @@ pub async fn watch_with(
     interval: Duration,
     filter: WatchFilter,
 ) -> Result<WatchHandle, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     let base = match ctx.effective_cwd() {
@@ -241,7 +241,7 @@ pub async fn watch_with(
         None    => PathBuf.from("."),
     };
 
-    let (tx, rx) = bounded::<WatchEvent>(64);
+    let (tx, rx): (Sender<WatchEvent>, Receiver<WatchEvent>) = bounded(64);
     let cancel = CancellationTokenSource.new();
     let token = cancel.token();
     let pattern_owned = pattern.clone();

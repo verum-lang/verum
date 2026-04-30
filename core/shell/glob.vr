@@ -40,14 +40,14 @@ mount core.shell.result.{ShellError};
 /// with `.`) are excluded by default — use `glob_with_hidden` to include.
 public fn glob(pattern: &Text)
     -> Result<List<PathBuf>, ShellError>
-    using [ShellContext]
+
 {
     glob_with_hidden(pattern, false)
 }
 
 public fn glob_with_hidden(pattern: &Text, include_hidden: Bool)
     -> Result<List<PathBuf>, ShellError>
-    using [ShellContext]
+
 {
     let ctx = ShellContext.default();
     let base = match ctx.effective_cwd() {
@@ -74,7 +74,7 @@ public fn glob_in(base: &PathBuf, pattern: &Text, include_hidden: Bool)
 /// Glob filtered to files only.
 public fn glob_files(pattern: &Text)
     -> Result<List<PathBuf>, ShellError>
-    using [ShellContext]
+
 {
     let all = glob(pattern)?;
     Ok(filter_paths(all, |p| {
@@ -85,7 +85,7 @@ public fn glob_files(pattern: &Text)
 /// Glob filtered to directories only.
 public fn glob_dirs(pattern: &Text)
     -> Result<List<PathBuf>, ShellError>
-    using [ShellContext]
+
 {
     let all = glob(pattern)?;
     Ok(filter_paths(all, |p| {

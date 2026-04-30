@@ -109,7 +109,7 @@ public mount .builtins.{
     mkdir, mkdir_p,
     cat, cat_bytes,
     write, write_str, append,
-    exists, is_file, is_dir,
+    path_exists, is_file, is_dir,
     which, command_exists,
     temp_dir, temp_file,
 };

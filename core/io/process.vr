@@ -519,7 +519,7 @@ fn read_all_from_fd(fd: Int) -> List<Byte> {
 
 @cfg(target_os = "linux")
 fn close_fd(fd: Int) {
-    let _ = core.sys.linux.syscall.close(core.sys.common.FileDesc::from_raw(fd as Int32));
+    let _ = core.sys.linux.syscall.close(core.sys.common.FileDesc.from_raw(fd as Int32));
 }
 
 @cfg(target_os = "macos")

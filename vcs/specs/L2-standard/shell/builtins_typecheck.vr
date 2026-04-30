@@ -10,7 +10,7 @@ mount core.shell.builtins.{
     mkdir, mkdir_p,
     cat, cat_bytes,
     write, write_str, append,
-    exists, is_file, is_dir,
+    path_exists, is_file, is_dir,
     which, command_exists,
     temp_dir,
 };
@@ -22,9 +22,13 @@ mount core.shell.result.{ShellError};
 
 fn exercise_fs_predicates() {
     let p = PathBuf.from("/tmp/verum-test");
-    let _: Bool = exists(p.as_path());
-    let _: Bool = is_file(p.as_path());
-    let _: Bool = is_dir(p.as_path());
+    let pa = p.as_path();
+    let b1: Bool = path_exists(pa);
+    let b2: Bool = is_file(pa);
+    let b3: Bool = is_dir(pa);
+    let _ = b1;
+    let _ = b2;
+    let _ = b3;
 }
 
 fn exercise_path_writers() {
