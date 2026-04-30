@@ -79,6 +79,136 @@ pub fn tcp_listen(port: i64) -> i64 {
     }
 }
 
+/// Flags accepted by [`tcp_listen_v2`] (matches the `flags` argument
+/// of `__tcp_listen_v2_raw` declared in `core/sys/raw.vr`).
+///
+/// Bit 0 (`TCP_LISTEN_FLAG_REUSEPORT`): set SO_REUSEPORT on the
+/// listener — multiple listeners on the same `host:port` load-balance
+/// in the kernel. Linux ≥3.9 / macOS ≥10.7. Best-effort: silently
+/// ignored if the platform lacks the option (Windows).
+///
+/// Higher bits are reserved.
+pub const TCP_LISTEN_FLAG_REUSEPORT: i64 = 1 << 0;
+
+/// Rich-signature TCP listen intrinsic.
+///
+/// `host` parses as an IP literal (`"0.0.0.0"`, `"127.0.0.1"`,
+/// `"::"`, `"::1"`, …). DNS resolution is intentionally out of scope —
+/// the high-level `core.net.tcp.TcpListener.bind` already iterates a
+/// resolved address list and calls into us with one literal at a time.
+///
+/// `port = 0` asks the kernel to choose. Use [`tcp_local_port`] to
+/// retrieve the actual port afterwards.
+///
+/// `backlog` is forwarded to `listen(2)`. Kernels typically silently
+/// cap large values at `/proc/sys/net/core/somaxconn` (or similar).
+///
+/// Returns:
+/// * `fd > 0` on success — the synthetic FD that other intrinsics
+///   accept (NOT a kernel fd; see module-level docs).
+/// * `-errno` on bind/listen failure — caller maps to IoErrorKind via
+///   `core/io/protocols.vr::from_raw_os_error`.
+/// * `-EINVAL` (`-22` Linux / `-22` macOS) for argument-validation
+///   failures (bad host, port out of range, negative backlog).
+///
+/// The errno-preservation contract is the architectural promise that
+/// distinguishes v2 from v1 (which collapses everything to `-1`).
+pub fn tcp_listen_v2(host: &str, port: i64, backlog: i64, flags: i64) -> i64 {
+    if !(0..=65535).contains(&port) {
+        return -(libc::EINVAL as i64);
+    }
+    if !(0..=65535).contains(&backlog) {
+        return -(libc::EINVAL as i64);
+    }
+
+    let parsed: std::net::IpAddr = match host.parse() {
+        Ok(ip) => ip,
+        Err(_) => return -(libc::EINVAL as i64),
+    };
+    let addr = std::net::SocketAddr::new(parsed, port as u16);
+
+    // We pin the socket through `std::net::TcpListener::bind` (which
+    // does socket+bind+listen with default backlog=128) and then layer
+    // the customisations on top via `setsockopt` against the raw fd.
+    // Going through `std::net` rather than re-implementing the C
+    // sequence keeps interpreter-mode behaviour identical to AOT for
+    // the common path (default flags) and limits the failure surface.
+    //
+    // SO_REUSEADDR is ALWAYS set — same default as the AOT
+    // `verum_tcp_listen` helper and the user-facing `core.net.tcp`
+    // surface. Quick rebind after process restart is the universally
+    // expected behaviour.
+    let listener = match TcpListener::bind(addr) {
+        Ok(l) => l,
+        Err(e) => return -(e.raw_os_error().unwrap_or(libc::EINVAL) as i64),
+    };
+
+    // Apply flags. Failures here are non-fatal — listener is already
+    // bound; we degrade gracefully and return the fd. If the user
+    // demanded SO_REUSEPORT and the kernel rejects it (e.g. older
+    // FreeBSD with no LB variant), they get a working listener
+    // without load-balancing, which is the sensible degradation.
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = listener.as_raw_fd();
+        if flags & TCP_LISTEN_FLAG_REUSEPORT != 0 {
+            let on: libc::c_int = 1;
+            // SAFETY: fd is owned by `listener` (still alive in this
+            // scope); pointer/length pair targets a stack i32.
+            unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEPORT,
+                    &on as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+        }
+    }
+
+    // The std::net listener already calls listen() with backlog=128
+    // internally. To honour an explicit caller-provided backlog we
+    // re-invoke listen(2) on the raw fd. Failures here, like the flag
+    // path above, are non-fatal — caller still gets a working listener
+    // with the std default.
+    #[cfg(unix)]
+    if backlog != 128 {
+        use std::os::fd::AsRawFd;
+        let fd = listener.as_raw_fd();
+        // SAFETY: fd is owned by listener; backlog is bounded
+        // [0, 65535] by the validation above.
+        unsafe {
+            libc::listen(fd, backlog as libc::c_int);
+        }
+    }
+
+    register(NetResource::Listener(listener))
+}
+
+/// Returns the OS-assigned local port of a registered TCP listener (or
+/// connected stream). Used to recover the kernel-chosen port after
+/// `tcp_listen_v2(_, 0, _, _)`. Returns `-1` for unknown fd or if the
+/// underlying `getsockname(2)` fails.
+pub fn tcp_local_port(fd: i64) -> i64 {
+    REGISTRY.with(|r| {
+        let map = r.borrow();
+        match map.get(&fd) {
+            Some(NetResource::Listener(l)) => {
+                l.local_addr().map(|a| a.port() as i64).unwrap_or(-1)
+            }
+            Some(NetResource::Stream(s)) => {
+                s.local_addr().map(|a| a.port() as i64).unwrap_or(-1)
+            }
+            Some(NetResource::Udp(s)) => {
+                s.local_addr().map(|a| a.port() as i64).unwrap_or(-1)
+            }
+            None => -1,
+        }
+    })
+}
+
 pub fn tcp_accept(listen_fd: i64) -> i64 {
     // Pull the listener out of the registry briefly so we don't hold
     // a RefCell borrow across the (potentially blocking) accept call.
@@ -265,5 +395,55 @@ mod tests {
         assert_eq!(tcp_listen(-1), -1);
         assert_eq!(tcp_listen(70000), -1);
         assert_eq!(udp_bind(-1), -1);
+    }
+
+    #[test]
+    fn tcp_listen_v2_default_flags_round_trip() {
+        let fd = tcp_listen_v2("127.0.0.1", 0, 128, 0);
+        assert!(fd > 0, "expected fd > 0, got {fd}");
+        let port = tcp_local_port(fd);
+        assert!(port > 0 && port <= 65535, "expected valid port, got {port}");
+        assert_eq!(tcp_close(fd), 0);
+    }
+
+    #[test]
+    fn tcp_listen_v2_ipv6_loopback() {
+        let fd = tcp_listen_v2("::1", 0, 64, 0);
+        assert!(fd > 0, "expected fd > 0, got {fd}");
+        assert!(tcp_local_port(fd) > 0);
+        assert_eq!(tcp_close(fd), 0);
+    }
+
+    #[test]
+    fn tcp_listen_v2_invalid_host_returns_einval() {
+        let r = tcp_listen_v2("not-an-ip", 0, 128, 0);
+        assert_eq!(r, -(libc::EINVAL as i64));
+    }
+
+    #[test]
+    fn tcp_listen_v2_invalid_port_returns_einval() {
+        assert_eq!(tcp_listen_v2("0.0.0.0", -1, 128, 0), -(libc::EINVAL as i64));
+        assert_eq!(tcp_listen_v2("0.0.0.0", 70_000, 128, 0), -(libc::EINVAL as i64));
+    }
+
+    #[test]
+    fn tcp_listen_v2_invalid_backlog_returns_einval() {
+        assert_eq!(tcp_listen_v2("0.0.0.0", 0, -1, 0), -(libc::EINVAL as i64));
+        assert_eq!(tcp_listen_v2("0.0.0.0", 0, 70_000, 0), -(libc::EINVAL as i64));
+    }
+
+    #[test]
+    fn tcp_listen_v2_reuseport_flag_does_not_break_bind() {
+        // SO_REUSEPORT is best-effort; the listener should bind whether
+        // or not the kernel honours the option.
+        let fd = tcp_listen_v2("127.0.0.1", 0, 128, TCP_LISTEN_FLAG_REUSEPORT);
+        assert!(fd > 0, "expected fd > 0, got {fd}");
+        assert!(tcp_local_port(fd) > 0);
+        assert_eq!(tcp_close(fd), 0);
+    }
+
+    #[test]
+    fn tcp_local_port_unknown_fd_returns_minus_one() {
+        assert_eq!(tcp_local_port(999_999), -1);
     }
 }
