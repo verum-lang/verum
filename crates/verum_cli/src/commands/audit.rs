@@ -3364,6 +3364,22 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
+    // 5. Signature verification — each emitted file carries a
+    //    `verum_signature` header pinning it to a kernel version +
+    //    spec hash; this gate recomputes and matches.  Mismatches
+    //    surface drift between the emit step and the signature
+    //    expectation (#174).
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "signatures",
+        report_dir.join("signatures.json"),
+        || audit_signatures_with_format(AuditFormat::Json),
+    );
+    if summary.get("signatures") == Some(&"failed") {
+        overall_l4 = false;
+    }
+
     let bundle_path = report_dir.join("bundle.json");
     let payload = serde_json::json!({
         "schema_version": 1,
