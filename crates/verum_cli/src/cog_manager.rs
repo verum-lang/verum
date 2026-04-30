@@ -5,6 +5,7 @@
 use crate::config::Manifest;
 use crate::error::{CliError, Result};
 use crate::registry::*;
+use crate::registry::enterprise::AuditLevel;
 use crate::ui;
 use colored::Colorize;
 use semver::{Version, VersionReq};
@@ -35,16 +36,21 @@ impl CogManager {
         let registry = RegistryClient::from_manifest()?;
         let cache_dir = CacheManager::default_cache_dir()?;
         let cache = CacheManager::new(cache_dir)?;
-        let security = SecurityScanner::new();
 
-        // Load enterprise config if available
+        // Load enterprise config if available — and capture
+        // `[audit] log_level` BEFORE constructing the scanner so
+        // the audit-level filter is wired into `log_action`. Pre-fix
+        // the scanner was constructed with the default `All` level
+        // and the manifest's choice was inert.
         let enterprise_config_path = work_dir.join(".verum").join("enterprise.toml");
-        let enterprise = if enterprise_config_path.exists() {
+        let (enterprise, audit_level) = if enterprise_config_path.exists() {
             let config = EnterpriseClient::load_config(&enterprise_config_path)?;
-            Some(EnterpriseClient::new(config)?)
+            let level = config.audit.log_level.clone();
+            (Some(EnterpriseClient::new(config)?), level)
         } else {
-            None
+            (None, AuditLevel::default())
         };
+        let security = SecurityScanner::new().with_audit_level(audit_level);
 
         Ok(Self {
             registry,

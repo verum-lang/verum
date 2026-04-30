@@ -16,6 +16,14 @@ pub struct SecurityScanner {
 
     /// Audit log
     pub audit_log: List<AuditEntry>,
+
+    /// Audit log-level filter — sourced from
+    /// `[audit] log_level` in the manifest via
+    /// `SecurityScanner::with_audit_level`. When `Changes` or
+    /// `Security`, `log_action` skips entries that don't match the
+    /// level so the audit log carries only the requested subset of
+    /// events. Default `AuditLevel::All` (record everything).
+    pub audit_level: super::enterprise::AuditLevel,
 }
 
 /// Vulnerability database
@@ -107,7 +115,8 @@ pub enum RiskType {
 }
 
 impl SecurityScanner {
-    /// Create new security scanner
+    /// Create new security scanner with the default `AuditLevel::All`.
+    /// Use `with_audit_level` to install a more restrictive filter.
     pub fn new() -> Self {
         Self {
             vulnerability_db: VulnerabilityDatabase {
@@ -115,7 +124,24 @@ impl SecurityScanner {
                 last_updated: 0,
             },
             audit_log: List::new(),
+            audit_level: super::enterprise::AuditLevel::All,
         }
+    }
+
+    /// Install the audit log-level filter.
+    ///
+    /// Wired from `EnterpriseConfig.audit.log_level` —
+    /// `SecurityScanner::log_action` consults this to skip recording
+    /// entries that don't match the configured level. Closes the
+    /// inert-defense gap traced in `enterprise.rs:213` (pre-fix the
+    /// level landed on the manifest but `log_action` recorded every
+    /// action regardless).
+    pub fn with_audit_level(
+        mut self,
+        level: super::enterprise::AuditLevel,
+    ) -> Self {
+        self.audit_level = level;
+        self
     }
 
     /// Load vulnerability database
@@ -206,16 +232,18 @@ impl SecurityScanner {
             .supply_chain_risks
             .extend(self.check_supply_chain_risks(metadata));
 
-        // Log audit entry
+        // Log audit entry. Routed through `log_action` so the
+        // `audit_level` filter is honoured here too — a manifest
+        // with `[audit] log_level = "changes"` won't record
+        // VulnerabilityFound entries (which are security-flavoured
+        // and belong to the `Security` level only).
         if !result.vulnerabilities.is_empty() {
-            self.audit_log.push(AuditEntry {
-                timestamp: chrono::Utc::now().timestamp(),
-                action: AuditAction::VulnerabilityFound,
-                package: Some(metadata.name.clone()),
-                version: Some(metadata.version.clone()),
-                user: None,
-                details: format!("Found {} vulnerabilities", result.vulnerabilities.len()).into(),
-            });
+            self.log_action(
+                AuditAction::VulnerabilityFound,
+                Some(metadata.name.clone()),
+                Some(metadata.version.clone()),
+                format!("Found {} vulnerabilities", result.vulnerabilities.len()).into(),
+            );
         }
 
         Ok(result)
@@ -319,7 +347,13 @@ impl SecurityScanner {
         risks
     }
 
-    /// Add audit log entry
+    /// Add audit log entry, honouring the configured `audit_level`
+    /// filter. Actions that don't match the level are silently
+    /// skipped — `AuditLevel::Changes` records only state-changing
+    /// package operations, `AuditLevel::Security` records only
+    /// security-flavoured actions, `AuditLevel::All` records every
+    /// call. Pre-fix every action was recorded regardless of the
+    /// configured level.
     pub fn log_action(
         &mut self,
         action: AuditAction,
@@ -327,6 +361,9 @@ impl SecurityScanner {
         version: Option<Text>,
         details: Text,
     ) {
+        if !self.audit_level.includes(&action) {
+            return;
+        }
         self.audit_log.push(AuditEntry {
             timestamp: chrono::Utc::now().timestamp(),
             action,
@@ -476,5 +513,84 @@ impl<'de> serde::Deserialize<'de> for VulnerabilityDatabase {
             vulnerabilities: helper.vulnerabilities,
             last_updated: helper.last_updated,
         })
+    }
+}
+
+#[cfg(test)]
+mod audit_level_filter_tests {
+    //! Pin tests for the `[audit] log_level` filter wiring.
+    //! Pre-fix `log_action` recorded every call regardless of the
+    //! configured level; these tests pin the load-bearing filter
+    //! installed via `SecurityScanner::with_audit_level`.
+    use super::*;
+    use super::super::enterprise::AuditLevel;
+
+    fn count_entries(s: &SecurityScanner) -> usize {
+        s.audit_log.iter().count()
+    }
+
+    #[test]
+    fn default_records_every_action() {
+        let mut s = SecurityScanner::new();
+        s.log_action(AuditAction::Install, None, None, "x".into());
+        s.log_action(AuditAction::SecurityScan, None, None, "y".into());
+        s.log_action(AuditAction::VulnerabilityFound, None, None, "z".into());
+        assert_eq!(count_entries(&s), 3);
+    }
+
+    #[test]
+    fn changes_level_records_only_state_changing_actions() {
+        let mut s = SecurityScanner::new()
+            .with_audit_level(AuditLevel::Changes);
+        s.log_action(AuditAction::Install, None, None, "a".into());
+        s.log_action(AuditAction::Update, None, None, "b".into());
+        s.log_action(AuditAction::Remove, None, None, "c".into());
+        s.log_action(AuditAction::Publish, None, None, "d".into());
+        s.log_action(AuditAction::Yank, None, None, "e".into());
+        // Security-flavoured actions are filtered out.
+        s.log_action(AuditAction::SecurityScan, None, None, "f".into());
+        s.log_action(AuditAction::VulnerabilityFound, None, None, "g".into());
+        assert_eq!(count_entries(&s), 5, "5 change actions recorded; 2 security actions filtered");
+    }
+
+    #[test]
+    fn security_level_records_only_security_flavoured_actions() {
+        let mut s = SecurityScanner::new()
+            .with_audit_level(AuditLevel::Security);
+        s.log_action(AuditAction::Install, None, None, "a".into());
+        s.log_action(AuditAction::Update, None, None, "b".into());
+        // Security actions kept.
+        s.log_action(AuditAction::SecurityScan, None, None, "c".into());
+        s.log_action(AuditAction::VulnerabilityFound, None, None, "d".into());
+        assert_eq!(count_entries(&s), 2, "2 security actions recorded; 2 changes filtered");
+    }
+
+    #[test]
+    fn audit_level_includes_membership_predicate_is_exhaustive() {
+        // Every AuditAction variant must be classified by AT LEAST
+        // one non-`All` level so the filter is exhaustive — no
+        // action falls through both `Changes` and `Security`.
+        for action in [
+            AuditAction::Install,
+            AuditAction::Update,
+            AuditAction::Remove,
+            AuditAction::Publish,
+            AuditAction::Yank,
+            AuditAction::SecurityScan,
+            AuditAction::VulnerabilityFound,
+        ] {
+            let in_changes = AuditLevel::Changes.includes(&action);
+            let in_security = AuditLevel::Security.includes(&action);
+            assert!(
+                in_changes || in_security,
+                "Action {:?} matches neither Changes nor Security — unclassified action",
+                action,
+            );
+            assert!(
+                AuditLevel::All.includes(&action),
+                "Action {:?} must always match the All level",
+                action,
+            );
+        }
     }
 }
