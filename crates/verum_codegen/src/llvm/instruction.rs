@@ -1741,6 +1741,36 @@ pub fn lower_instruction<'ctx>(
             Ok(())
         }
 
+        // #146 Phase 3d — typed variant construction.
+        //
+        // Release builds (AOT): lowers to byte-identical IR as
+        // legacy `MakeVariant`.  The `type_id` operand is consumed
+        // and discarded — Phase 3a/3b/3c have already proved the
+        // (type_id, tag, field_count) tuple consistent at codegen
+        // time, so the LLVM-side layout check would be redundant
+        // and pure overhead.  This is the documented zero-cost
+        // contract: typed-variant emission costs the same as the
+        // legacy form in release.
+        //
+        // Debug builds: a future follow-up will emit a call to
+        // `verum_runtime_variant_layout_check(type_id, tag,
+        // field_count)` before the alloc, which traps via
+        // `verum_panic` on mismatch.  Until that runtime helper
+        // lands, the interpreter's Phase-3b validator covers the
+        // same gap on the Tier-0 path.
+        Instruction::MakeVariantTyped { dst, type_id: _, tag, field_count } => {
+            let runtime = RuntimeLowering::new(ctx.llvm_context());
+            let variant_ptr = runtime.lower_make_variant(
+                ctx.builder(),
+                ctx.get_module(),
+                *tag,
+                *field_count,
+            )?;
+            ctx.set_register(dst.0, variant_ptr.into());
+            ctx.mark_variant_register(dst.0);
+            Ok(())
+        }
+
         // ====================================================================
         // Dependent-type runtime packaging (T1-H, FIPS-equivalent in spirit):
         //   MakePi (0x8D) — Π function value: {param, return_type_id}
