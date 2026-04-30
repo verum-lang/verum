@@ -87,6 +87,30 @@ impl<'s> ProfileCommand<'s> {
 
     /// Run CBGR profiling
     pub fn run(&mut self, output: Option<&Path>, suggest: bool) -> Result<()> {
+        // Phase-not-realised: `CompilerOptions.profile_memory`
+        // (default false) is set by `verum profile --memory <file>`
+        // at commands/file.rs:1466 but neither `run_static` nor
+        // `run_runtime` consults `session.options().profile_memory`.
+        // The CLI also routes `--memory` through a separate
+        // post-collection path (`commands/profile.rs::profile_memory`,
+        // line 729) that operates on already-collected ProfileData,
+        // so the per-session flag never enters the profile_module
+        // walk. Surface the gap when the embedder sets
+        // `profile_memory = true` so they see that no memory-
+        // specific instrumentation runs in this path. The CBGR
+        // profile (allocation counts via reference-tier walk) runs
+        // unconditionally as part of profile_module regardless.
+        if self.session.options().profile_memory {
+            tracing::warn!(
+                "ProfileCommand::run: profile_memory=true is set on the session \
+                 but neither the Static nor Runtime profiling path consults it. \
+                 Memory-specific instrumentation (allocation counts, peak RSS) \
+                 is not yet plumbed through profile_module — only the CBGR \
+                 reference-tier walk runs. The `verum profile --memory` flag \
+                 currently routes through a separate post-collection path. \
+                 Forward-looking knob."
+            );
+        }
         match self.mode {
             ProfilingMode::Static => self.run_static(output, suggest),
             ProfilingMode::Runtime => self.run_runtime(output, suggest),
