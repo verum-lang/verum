@@ -3871,8 +3871,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     /// verum_time_monotonic_nanos() -> i64
-    /// Returns monotonic clock time in nanoseconds.
-    /// Uses clock_gettime with platform-appropriate clock ID.
+    ///
+    /// Returns monotonic clock time in nanoseconds.  Per-platform
+    /// dispatch (libc-free per the user's 2026-05-01 directive):
+    ///
+    ///   * **Linux**: direct `clock_gettime(CLOCK_MONOTONIC, &ts)`
+    ///     syscall via inline assembly.  No glibc/musl link
+    ///     dependency.  syscall numbers: x86_64=228, aarch64=113.
+    ///   * **macOS**: libSystem `clock_gettime(CLOCK_MONOTONIC=6, &ts)`.
+    ///     Acceptable per user directive — libsystem IS the macOS OS
+    ///     interface, there's no separate "libc" on macOS.
+    ///   * **other**: libc fallback (FreeBSD/OpenBSD).
+    ///
+    /// Both paths produce the same `tv_sec * 1e9 + tv_nsec` result.
     fn emit_verum_time_monotonic_nanos(&self, module: &Module<'ctx>) -> Result<()> {
         if let Some(f) = module.get_function("verum_time_monotonic_nanos") {
             if f.count_basic_blocks() > 0 { return Ok(()); }
@@ -3880,6 +3891,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();
+        let _ = i32_type; // used only on the libSystem/libc fallback paths
         let fn_type = i64_type.fn_type(&[], false);
         let func = module.get_function("verum_time_monotonic_nanos").unwrap_or_else(|| module.add_function("verum_time_monotonic_nanos", fn_type, None));
         let entry = self.context.append_basic_block(func, "entry");
@@ -3890,13 +3902,64 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let timespec_type = self.context.struct_type(&[i64_type.into(), i64_type.into()], false);
         let ts = builder.build_alloca(timespec_type, "ts").or_llvm_err()?;
 
-        let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
+        // Issue clock_gettime via the platform-appropriate path.
+        #[cfg(target_os = "linux")]
+        {
+            // Direct syscall — libc-free.  CLOCK_MONOTONIC = 1 on Linux.
+            #[cfg(target_arch = "x86_64")]
+            let (asm_str, constraints, sys_num) = (
+                "syscall",
+                "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}",
+                228_u64, // SYS_clock_gettime x86_64
+            );
+            #[cfg(target_arch = "aarch64")]
+            let (asm_str, constraints, sys_num) = (
+                "svc #0",
+                "={x0},{x8},{x0},{x1},~{memory}",
+                113_u64, // SYS_clock_gettime aarch64
+            );
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+            let (asm_str, constraints, sys_num): (&str, &str, u64) = ("", "=r,r,r,r", 0);
 
-        // CLOCK_MONOTONIC: macOS=6, Linux=1
-        let clock_id: u64 = if cfg!(target_os = "macos") { 6 } else { 1 };
-        let clock_id_val = i32_type.const_int(clock_id, false);
-
-        self.build_libc_call_void(&builder, clock_gettime_fn, &[clock_id_val.into(), ts.into()], "ret")?;
+            let syscall_fn_type = i64_type.fn_type(
+                &[i64_type.into(), i64_type.into(), i64_type.into()],
+                false,
+            );
+            let asm_fn = self.context.create_inline_asm(
+                syscall_fn_type,
+                asm_str.to_string(),
+                constraints.to_string(),
+                true, true,
+                Some(verum_llvm::InlineAsmDialect::ATT),
+                false,
+            );
+            let num_const = i64_type.const_int(sys_num, false);
+            let clock_id_val = i64_type.const_int(1, false); // CLOCK_MONOTONIC
+            let ts_addr = builder
+                .build_ptr_to_int(ts, i64_type, "ts_addr")
+                .or_llvm_err()?;
+            let _ = builder
+                .build_indirect_call(
+                    syscall_fn_type,
+                    asm_fn,
+                    &[num_const.into(), clock_id_val.into(), ts_addr.into()],
+                    "rc",
+                )
+                .or_llvm_err()?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
+            // CLOCK_MONOTONIC: macOS=6 (libSystem), other-Unix=1.
+            let clock_id: u64 = if cfg!(target_os = "macos") { 6 } else { 1 };
+            let clock_id_val = i32_type.const_int(clock_id, false);
+            self.build_libc_call_void(
+                &builder,
+                clock_gettime_fn,
+                &[clock_id_val.into(), ts.into()],
+                "ret",
+            )?;
+        }
 
         let sec_ptr = builder.build_struct_gep(timespec_type, ts, 0, "sec_ptr").or_llvm_err()?;
         let nsec_ptr = builder.build_struct_gep(timespec_type, ts, 1, "nsec_ptr").or_llvm_err()?;
