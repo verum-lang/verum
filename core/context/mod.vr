@@ -74,6 +74,12 @@ public mount super.context.error.*;
 public mount super.context.provider.*;
 public mount super.context.layer.*;
 
+// Standard contexts library — pre-fix the file shipped (Logger,
+// Database, Auth, Tracer + canonical context-group definitions
+// like WebCtx) but had no re-export here, so user code had to
+// import via direct file path despite the umbrella convention.
+public mount super.context.standard.*;
+
 // Re-export key types for convenience
 public mount super.context.provider.{Provider, ScopedProvider, LazyProvider, get_context, has_context};
 public mount super.context.scope.{Scope, ContextScope};

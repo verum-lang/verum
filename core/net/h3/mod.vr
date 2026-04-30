@@ -93,3 +93,12 @@ public mount .priority.{
     DEFAULT_URGENCY, MAX_URGENCY,
     PRIORITY_UPDATE_REQUEST, PRIORITY_UPDATE_PUSH,
 };
+
+// The following 3 sub-modules ship production code but had no
+// `public mount` here, so the umbrella's wildcard re-export
+// (`mount core.net.h3.*;`) silently skipped them. Callers using
+// server-push / streaming bodies / WebTransport had to import via
+// direct file path despite the umbrella convention.
+public mount .push.*;          // RFC 9114 §4.4 server-initiated push
+public mount .streaming.*;     // Streaming request/response body adapters
+public mount .webtransport.*;  // WebTransport-over-HTTP/3 surface
