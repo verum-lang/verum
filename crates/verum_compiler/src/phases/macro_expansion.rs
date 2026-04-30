@@ -1715,9 +1715,36 @@ impl CompilationPhase for MacroExpansionPhase {
             duration.as_secs_f64() * 1000.0
         );
 
+        // Drain user-facing warnings into PhaseOutput.warnings so
+        // the api.rs:762 path extends them onto the session
+        // diagnostic stream. Two sources contribute:
+        //
+        //   1. `phase.lint_warnings` — accumulated by the meta-fn
+        //      linter (`MetaLinter::lint_function`) on @unsafe meta
+        //      functions and unannotated meta functions with unsafe
+        //      patterns. Pre-fix these were collected on the phase
+        //      but discarded at the boundary.
+        //
+        //   2. `phase.meta_context.diagnostics` — accumulated by
+        //      `recheck_post_splice_hygiene` (M4xx hygiene
+        //      violations after splice substitution). Pre-fix
+        //      violations only reached `tracing::warn!` so user
+        //      macros with capture issues silently produced wrong
+        //      code.
+        //
+        // Both sets land in `PhaseOutput.warnings` — the consumer
+        // (`api.rs::run_pipeline`) extends `all_diagnostics` with
+        // them and the session emitter then routes them to
+        // `cargo build` output, IDE diagnostic streams, and the
+        // hard-error count for compilation pass/fail decisions.
+        let mut warnings: List<Diagnostic> = phase.lint_warnings.clone();
+        for d in phase.meta_context.diagnostics.iter() {
+            warnings.push(d.clone());
+        }
+
         Ok(PhaseOutput {
             data: PhaseData::AstModules(expanded_modules),
-            warnings: List::new(),
+            warnings,
             metrics,
         })
     }
