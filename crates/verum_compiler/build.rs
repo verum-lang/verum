@@ -82,6 +82,30 @@ fn main() {
         dep_archive.len() as f64 / 1024.0,
     );
 
+    // === Symbol manifest (#102) ============================================
+    //
+    // Per-module table of top-level declarations: `type X`, `public fn Y`,
+    // `public const Z`, `public theorem W`. Target-independent (no AST,
+    // no platform-specific lowering) — just a textual scan that records
+    // {kind, name, visibility} triples. Lets the type-checker resolve
+    // `mount core.shell.{exec}` → list of items in `core.shell.exec`
+    // WITHOUT actually parsing the file. Critical for the on-demand
+    // loader's late-resolution path.
+    //
+    // Build-time cost: ~50-100ms textual scan, ~80KB compressed archive.
+    // Runtime cost: ~1ms decompress + O(1) HashMap lookup per symbol.
+    let manifest_archive = build_symbol_manifest(&files);
+    let manifest_compressed = zstd::encode_all(manifest_archive.as_slice(), 19).unwrap();
+    let manifest_path = Path::new(&out_dir).join("stdlib_symbol_manifest.zst");
+    fs::write(&manifest_path, &manifest_compressed).unwrap();
+    println!("cargo:rustc-env=STDLIB_SYMBOL_MANIFEST_PATH={}", manifest_path.display());
+    println!(
+        "cargo:warning=Stdlib symbol manifest: {} symbols, {:.1}KB compressed (from {:.1}KB)",
+        symbol_count(&files),
+        manifest_compressed.len() as f64 / 1024.0,
+        manifest_archive.len() as f64 / 1024.0,
+    );
+
     // Rerun if any .vr file changes
     println!("cargo:rerun-if-changed={}", core_dir.display());
     for (path, _) in &files {
@@ -478,4 +502,179 @@ fn build_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     archive.extend_from_slice(&index_section);
     archive.extend_from_slice(&data_section);
     archive
+}
+
+// =============================================================================
+// Symbol manifest extraction (#102)
+// =============================================================================
+//
+// Archive layout:
+//   [module_count: u32]
+//   per module:
+//     [path_len: u16] [path: utf8]
+//     [symbol_count: u16]
+//     per symbol:
+//       [kind: u8]            // 0=type, 1=fn, 2=const, 3=theorem, 4=axiom, 5=lemma, 6=protocol
+//       [visibility: u8]      // 0=private, 1=public
+//       [name_len: u16] [name: utf8]
+//
+// Consumed at runtime by `verum_compiler::stdlib_symbol_manifest`.
+
+const SYM_TYPE: u8 = 0;
+const SYM_FN: u8 = 1;
+const SYM_CONST: u8 = 2;
+const SYM_THEOREM: u8 = 3;
+const SYM_AXIOM: u8 = 4;
+const SYM_LEMMA: u8 = 5;
+const SYM_PROTOCOL: u8 = 6;
+
+const VIS_PRIVATE: u8 = 0;
+const VIS_PUBLIC: u8 = 1;
+
+#[derive(Debug, Clone)]
+struct Symbol {
+    kind: u8,
+    visibility: u8,
+    name: String,
+}
+
+/// Scan a stdlib source for top-level declarations.
+///
+/// Recognises the seven canonical declaration shapes in the Verum
+/// grammar: `type X is`, `fn Y`, `const Z`, `theorem W`, `axiom A`,
+/// `lemma L`, `protocol P` (the last via `type X is protocol`).
+/// Visibility is taken from the leading `public ` modifier.
+///
+/// Comment-aware (line + block comments stripped). String-literal-aware
+/// (skips `"..."` content). Multi-line declarations handled by reading
+/// only the first line of each declaration — sufficient because the
+/// declaration head (kind + name) always appears in the first line of
+/// a Verum top-level item.
+fn extract_symbols(src: &str) -> Vec<Symbol> {
+    let stripped = strip_comments(src);
+    let mut out = Vec::new();
+    for line in stripped.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() { continue; }
+
+        let (rest, vis) = if let Some(r) = trimmed.strip_prefix("public ") {
+            (r.trim_start(), VIS_PUBLIC)
+        } else {
+            (trimmed, VIS_PRIVATE)
+        };
+
+        // Recognise each declaration head. Order matters because
+        // `theorem` and `type` start with `t` — we match the longer
+        // keyword first.
+        if let Some(name) = parse_decl_head(rest, "protocol") {
+            out.push(Symbol { kind: SYM_PROTOCOL, visibility: vis, name });
+        } else if let Some(name) = parse_type_decl_head(rest) {
+            // `type X is protocol { ... }` is the canonical Verum
+            // protocol-declaration shape (the bare `protocol X` form is
+            // rare). When we detect it, emit BOTH a Type and a
+            // Protocol symbol — the type-checker treats protocols as
+            // bound type names too, so dual-classification matches the
+            // language semantics.
+            let is_protocol = rest
+                .strip_prefix("type ")
+                .map(|tail| {
+                    let after_name = tail.trim_start_matches(|c: char| {
+                        c.is_alphanumeric() || c == '_'
+                    });
+                    after_name
+                        .trim_start()
+                        .strip_prefix("is")
+                        .map(|after_is| after_is.trim_start().starts_with("protocol"))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if is_protocol {
+                out.push(Symbol { kind: SYM_PROTOCOL, visibility: vis, name: name.clone() });
+            }
+            out.push(Symbol { kind: SYM_TYPE, visibility: vis, name });
+        } else if let Some(name) = parse_decl_head(rest, "theorem") {
+            out.push(Symbol { kind: SYM_THEOREM, visibility: vis, name });
+        } else if let Some(name) = parse_decl_head(rest, "axiom") {
+            out.push(Symbol { kind: SYM_AXIOM, visibility: vis, name });
+        } else if let Some(name) = parse_decl_head(rest, "lemma") {
+            out.push(Symbol { kind: SYM_LEMMA, visibility: vis, name });
+        } else if let Some(name) = parse_decl_head(rest, "fn") {
+            out.push(Symbol { kind: SYM_FN, visibility: vis, name });
+        } else if let Some(name) = parse_decl_head(rest, "async fn") {
+            out.push(Symbol { kind: SYM_FN, visibility: vis, name });
+        } else if let Some(name) = parse_decl_head(rest, "const") {
+            out.push(Symbol { kind: SYM_CONST, visibility: vis, name });
+        }
+    }
+    out
+}
+
+/// `type X is { ... }` — `type` head, then `X` name, then `is`.
+/// Distinguishes from `typedef` style by requiring whitespace after
+/// `type`. Special-cases `type X is protocol` to also surface as a
+/// `Protocol` symbol — this is a single-statement two-symbol case.
+fn parse_type_decl_head(line: &str) -> Option<String> {
+    let after = line.strip_prefix("type ")?;
+    extract_ident(after)
+}
+
+/// Generic decl head parser: `<keyword> <name>...` returns the name.
+fn parse_decl_head(line: &str, keyword: &str) -> Option<String> {
+    let after = line.strip_prefix(keyword)?;
+    if !after.starts_with(' ') && !after.starts_with('\t') {
+        return None;
+    }
+    extract_ident(after.trim_start())
+}
+
+fn extract_ident(s: &str) -> Option<String> {
+    let mut end = 0usize;
+    for (i, ch) in s.char_indices() {
+        if ch.is_alphanumeric() || ch == '_' {
+            end = i + ch.len_utf8();
+        } else if i == 0 {
+            return None;
+        } else {
+            break;
+        }
+    }
+    if end == 0 { return None; }
+    let name = &s[..end];
+    if name.is_empty() { None } else { Some(name.to_string()) }
+}
+
+fn build_symbol_manifest(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut entries: Vec<(String, Vec<Symbol>)> = Vec::with_capacity(files.len());
+    for (rel, bytes) in files {
+        let module = file_to_module(rel);
+        let src = std::str::from_utf8(bytes).unwrap_or("");
+        let syms = extract_symbols(src);
+        entries.push((module, syms));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut out = Vec::with_capacity(64 * 1024);
+    let module_count: u32 = entries.len().try_into().expect("too many modules for u32");
+    out.extend_from_slice(&module_count.to_le_bytes());
+
+    for (module, syms) in &entries {
+        write_str(&mut out, module);
+        let count: u16 = syms.len().try_into().expect("module has too many symbols");
+        out.extend_from_slice(&count.to_le_bytes());
+        for s in syms {
+            out.push(s.kind);
+            out.push(s.visibility);
+            write_str(&mut out, &s.name);
+        }
+    }
+    out
+}
+
+fn symbol_count(files: &[(String, Vec<u8>)]) -> usize {
+    let mut total = 0;
+    for (_, bytes) in files {
+        let src = std::str::from_utf8(bytes).unwrap_or("");
+        total += extract_symbols(src).len();
+    }
+    total
 }
