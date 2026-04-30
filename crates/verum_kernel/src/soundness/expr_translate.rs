@@ -613,6 +613,23 @@ fn render_type_coq(ty: &Type) -> Option<String> {
             // statement-level type-checking.
             render_type_coq(inner)
         }
+        TypeKind::Refined { base, predicate } => {
+            // `T{predicate}` / `T where pred` → Coq subset type
+            // `{ binder : T | predicate }`. Verum's surface forms:
+            //   * Inline `Int{> 0}` — implicit `it` binder.
+            //   * Lambda `Int where |x| x > 0` — explicit `x`.
+            //   * Sigma `x: Int where x > 0` — explicit `x`.
+            //   * Named `Text where is_email` — implicit `it`; the
+            //     predicate text is emitted verbatim (caller
+            //     resolves applicability).
+            let base_text = render_type_coq(base)?;
+            let pred_text = render_expr_coq(&predicate.expr)?;
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(i) => i.as_str().to_string(),
+                verum_common::Maybe::None => "it".to_string(),
+            };
+            Some(format!("{{ {} : {} | {} }}", binder, base_text, pred_text))
+        }
         _ => None,
     }
 }
@@ -723,6 +740,18 @@ fn render_type_lean(ty: &Type) -> Option<String> {
         TypeKind::Reference { inner, .. }
         | TypeKind::CheckedReference { inner, .. }
         | TypeKind::UnsafeReference { inner, .. } => render_type_lean(inner),
+        TypeKind::Refined { base, predicate } => {
+            // `T{predicate}` / `T where pred` → Lean Subtype
+            // `{ binder : T // predicate }`. Same binding semantics
+            // as the Coq side.
+            let base_text = render_type_lean(base)?;
+            let pred_text = render_expr_lean(&predicate.expr)?;
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(i) => i.as_str().to_string(),
+                verum_common::Maybe::None => "it".to_string(),
+            };
+            Some(format!("{{ {} : {} // {} }}", binder, base_text, pred_text))
+        }
         _ => None,
     }
 }
@@ -738,7 +767,6 @@ fn generic_arg_to_lean_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
 /// Diagnostic classifier for unrenderable type shapes.
 fn classify_unrenderable_type(ty: &Type) -> &'static str {
     match &ty.kind {
-        TypeKind::Refined { .. } => "refinement type",
         TypeKind::Function { .. } => "function type",
         TypeKind::Rank2Function { .. } => "rank-2 function type",
         TypeKind::PathType { .. } => "path-equality type",
@@ -1412,6 +1440,113 @@ mod tests {
             TranslatedType::Fallback { reason, .. } => {
                 assert_eq!(reason, "never type");
             }
+            other => panic!("expected Fallback, got {:?}", other),
+        }
+    }
+
+    // =========================================================================
+    // Refined-type translator tests (#144 / MSFS-L4.10)
+    // =========================================================================
+
+    fn refined(base: TypeKind, predicate_expr: Expr, binding_name: Option<&str>) -> Type {
+        let binding = match binding_name {
+            Some(name) => verum_common::Maybe::Some(Ident::new(name, Span::dummy())),
+            None => verum_common::Maybe::None,
+        };
+        let pred = verum_ast::ty::RefinementPredicate {
+            expr: predicate_expr,
+            binding,
+            span: Span::dummy(),
+        };
+        ty(TypeKind::Refined {
+            base: verum_common::Heap::new(ty(base)),
+            predicate: verum_common::Heap::new(pred),
+        })
+    }
+
+    #[test]
+    fn coq_translates_refined_int_with_implicit_binder() {
+        // `Int{> 0}` (binding=None, predicate uses `it`) — Coq subset
+        // type with `it` as binder.
+        let pred = binop(BinOp::Gt, ident_expr("it"), int_lit(0));
+        let t = refined(TypeKind::Int, pred, None);
+        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        assert_eq!(text, "{ it : Z | (it > 0) }");
+    }
+
+    #[test]
+    fn lean_translates_refined_int_with_implicit_binder() {
+        let pred = binop(BinOp::Gt, ident_expr("it"), int_lit(0));
+        let t = refined(TypeKind::Int, pred, None);
+        let text = LeanTypeRenderer::new().render(&t).text().unwrap().to_string();
+        assert_eq!(text, "{ it : Int // (it > 0) }");
+    }
+
+    #[test]
+    fn coq_translates_refined_with_explicit_binder() {
+        // `Int where |x| x >= 0` (binding=Some("x")).
+        let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
+        let t = refined(TypeKind::Int, pred, Some("x"));
+        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        assert_eq!(text, "{ x : Z | (x >= 0) }");
+    }
+
+    #[test]
+    fn lean_translates_refined_with_explicit_binder() {
+        let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
+        let t = refined(TypeKind::Int, pred, Some("x"));
+        let text = LeanTypeRenderer::new().render(&t).text().unwrap().to_string();
+        // Lean's `>=` renders as `≥` per the comparison-op map.
+        assert_eq!(text, "{ x : Int // (x ≥ 0) }");
+    }
+
+    #[test]
+    fn coq_translates_refined_named_predicate() {
+        // `Text where is_email` (binding=None, predicate is bare path).
+        // Caller is responsible for resolving applicability — the
+        // emitted form is the predicate text verbatim.
+        let pred = ident_expr("is_email");
+        let t = refined(TypeKind::Text, pred, None);
+        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        assert_eq!(text, "{ it : string | is_email }");
+    }
+
+    #[test]
+    fn coq_translates_nested_refined_inside_generic() {
+        // `List<Int{>= 0}>` → `(list { x : Z | x >= 0 })`. Pin that
+        // recursive descent through `Generic` reaches the refined
+        // base.  This is the MSFS surface shape — `List<CategoricalLevel>`.
+        let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
+        let inner = refined(TypeKind::Int, pred, Some("x"));
+        let mut args: verum_common::List<verum_ast::ty::GenericArg> =
+            verum_common::List::new();
+        args.push(verum_ast::ty::GenericArg::Type(inner));
+        let t = ty(TypeKind::Generic {
+            base: verum_common::Heap::new(path_ty("List")),
+            args,
+        });
+        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        assert_eq!(text, "(list { x : Z | (x >= 0) })");
+    }
+
+    #[test]
+    fn refined_falls_back_when_predicate_unrenderable() {
+        // If the predicate expression contains an untranslatable shape
+        // (a tuple expression here), the entire refined type must
+        // surface as a fallback so the diagnostic still flags the
+        // unrenderable component.
+        let unrenderable_pred = Expr::new(
+            ExprKind::Tuple({
+                let mut elems = verum_common::List::new();
+                elems.push(ident_expr("a"));
+                elems.push(ident_expr("b"));
+                elems
+            }),
+            Span::dummy(),
+        );
+        let t = refined(TypeKind::Int, unrenderable_pred, None);
+        match CoqTypeRenderer::new().render(&t) {
+            TranslatedType::Fallback { .. } => { /* expected */ }
             other => panic!("expected Fallback, got {:?}", other),
         }
     }
