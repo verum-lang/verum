@@ -1178,6 +1178,26 @@ fn try_dispatch_intrinsic_by_name(
             let fd = get_i64_arg(state, 0);
             Ok(Some(Value::from_i64(super::net_runtime::tcp_close(fd))))
         }
+        // Rich-signature listen — backs `core.net.tcp.TcpListener.bind`
+        // by way of the unified intrinsic (Route A of the weft TCP-bind
+        // architectural-fork closure). Failures return `-errno` so the
+        // Verum-side `IoError.from_raw_os_error` mapping is lossless.
+        "__tcp_listen_v2_raw" | "tcp_listen_v2" => {
+            let host = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            let port = get_i64_arg(state, 1);
+            let backlog = get_i64_arg(state, 2);
+            let flags = get_i64_arg(state, 3);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::tcp_listen_v2(&host, port, backlog, flags),
+            )))
+        }
+        // Companion to `__tcp_listen_v2_raw`: retrieves the OS-assigned
+        // local port after `port=0` binds. Also works for connected
+        // streams and UDP sockets.
+        "__tcp_local_port_raw" | "tcp_local_port" => {
+            let fd = get_i64_arg(state, 0);
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_local_port(fd))))
+        }
         "__udp_bind_raw" | "udp_bind" => {
             let port = get_i64_arg(state, 0);
             Ok(Some(Value::from_i64(super::net_runtime::udp_bind(port))))

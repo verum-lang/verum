@@ -75,6 +75,39 @@ public fn __tcp_connect_raw(host: Text, port: Int) -> Int;
 @intrinsic("tcp_listen")
 public fn __tcp_listen_raw(port: Int) -> Int;
 
+/// Rich-signature TCP listen intrinsic. Replaces `__tcp_listen_raw`
+/// for the user-facing `core.net.tcp.TcpListener` surface — the older
+/// arity-1 form is preserved for the legacy `RawTcpListener` shim.
+///
+/// Parameters:
+///   * `host`    — IP literal (`"0.0.0.0"`, `"127.0.0.1"`, `"::"`, `"::1"`).
+///                 No DNS; resolution is the caller's job.
+///   * `port`    — `0..65535`. `0` asks the kernel to assign — pair with
+///                 `__tcp_local_port_raw(fd)` to recover the bound port.
+///   * `backlog` — forwarded to `listen(2)` (kernel may cap to `somaxconn`).
+///   * `flags`   — bit-packed options:
+///                 * bit 0: `TCP_LISTEN_FLAG_REUSEPORT` (best-effort
+///                          per-platform; ignored on platforms without
+///                          SO_REUSEPORT).
+///
+/// Returns `fd > 0` on success, or a negative `errno` on failure
+/// (e.g. `-EADDRINUSE`, `-EACCES`). Negative-errno encoding lets the
+/// `core/io/protocols.vr::from_raw_os_error` mapper produce a precise
+/// `IoErrorKind` instead of the lossy `Other` that the older `-1`
+/// failure code forces.
+@intrinsic("tcp_listen_v2")
+public fn __tcp_listen_v2_raw(host: Text, port: Int, backlog: Int, flags: Int) -> Int;
+
+/// Bit-packed flag constants for [`__tcp_listen_v2_raw`].
+public const TCP_LISTEN_FLAG_REUSEPORT: Int = 1;
+
+/// Recover the OS-assigned local port of a listening / connected fd
+/// (typically used after `__tcp_listen_v2_raw(host, 0, ...)`).
+///
+/// Returns the port (`1..65535`) or `-1` for unknown fd / not bound.
+@intrinsic("tcp_local_port")
+public fn __tcp_local_port_raw(fd: Int) -> Int;
+
 /// Accept incoming connection. Returns new fd or -1.
 @intrinsic("tcp_accept")
 public fn __tcp_accept_raw(listen_fd: Int) -> Int;

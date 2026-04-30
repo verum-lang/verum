@@ -4070,7 +4070,8 @@ impl VbcCodegen {
             // instructions that the LLVM lowering intercepts.
             "file_write" | "file_read" | "file_append" | "file_delete" | "file_exists"
             | "file_read_all" | "file_write_all" | "file_open" | "file_close"
-            | "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_send" | "tcp_recv"
+            | "tcp_connect" | "tcp_listen" | "tcp_listen_v2" | "tcp_local_port"
+            | "tcp_accept" | "tcp_send" | "tcp_recv"
             | "tcp_close" | "udp_bind" | "udp_send" | "udp_recv" | "udp_close" => {
                 let func_id = self.ctx.lookup_function(name)
                     .map(|f| f.id.0)

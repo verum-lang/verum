@@ -4112,6 +4112,8 @@ impl VbcCodegen {
             ("file_close", 1),
             ("tcp_connect", 2),
             ("tcp_listen", 2),
+            ("tcp_listen_v2", 4),
+            ("tcp_local_port", 1),
             ("tcp_accept", 1),
             ("tcp_send", 2),
             ("tcp_recv", 2),

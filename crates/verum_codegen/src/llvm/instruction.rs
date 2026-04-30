@@ -7876,6 +7876,8 @@ if func_name == "file_open"
     || func_name == "time_now_ms"
     || func_name == "tcp_connect"
     || func_name == "tcp_listen"
+    || func_name == "tcp_listen_v2"
+    || func_name == "tcp_local_port"
     || func_name == "tcp_accept"
     || func_name == "tcp_send"
     || func_name == "tcp_recv"
@@ -8247,6 +8249,60 @@ if func_name == "file_open"
             });
             let result = ctx.builder()
                 .build_call(accept_fn, &[fd_val.into()], "ta_client")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst.0, result);
+            return Ok(());
+        }
+
+        "tcp_listen_v2" => {
+            // tcp_listen_v2(host: Text, port: Int, backlog: Int, flags: Int) -> Int
+            //
+            // Map @intrinsic("tcp_listen_v2") → verum_tcp_listen_v2 runtime
+            // helper, the impeccable-architecture replacement for the older
+            // arity-2 verum_tcp_listen. The body is emitted by
+            // `runtime.rs::emit_tcp_listen_v2_body` alongside the other
+            // network helpers.
+            let host_i64 = as_i64(ctx, ctx.get_register(args.start.0)?, "tlv2_host")?;
+            let host_ptr = ctx.builder()
+                .build_call(text_get_ptr_fn, &[host_i64.into()], "tlv2_cptr")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .ok_or_else(|| LlvmLoweringError::internal("text_get_ptr: no value"))?
+                .into_pointer_value();
+            let port_val = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "tlv2_port")?;
+            let backlog_val = as_i64(ctx, ctx.get_register(args.start.0 + 2)?, "tlv2_backlog")?;
+            let flags_val = as_i64(ctx, ctx.get_register(args.start.0 + 3)?, "tlv2_flags")?;
+            let listen_fn = module.get_function("verum_tcp_listen_v2").unwrap_or_else(|| {
+                let fn_type = i64_type.fn_type(
+                    &[ptr_type.into(), i64_type.into(), i64_type.into(), i64_type.into()],
+                    false,
+                );
+                module.add_function("verum_tcp_listen_v2", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(
+                    listen_fn,
+                    &[host_ptr.into(), port_val.into(), backlog_val.into(), flags_val.into()],
+                    "tlv2_fd",
+                )
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value().basic()
+                .unwrap_or_else(|| i64_type.const_int(0, false).into());
+            ctx.set_register(dst.0, result);
+            return Ok(());
+        }
+
+        "tcp_local_port" => {
+            // tcp_local_port(fd: Int) -> Int — recover OS-chosen port.
+            let fd_val = as_i64(ctx, ctx.get_register(args.start.0)?, "tlp_fd")?;
+            let lp_fn = module.get_function("verum_tcp_local_port").unwrap_or_else(|| {
+                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+                module.add_function("verum_tcp_local_port", fn_type, None)
+            });
+            let result = ctx.builder()
+                .build_call(lp_fn, &[fd_val.into()], "tlp_port")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
                 .try_as_basic_value().basic()
                 .unwrap_or_else(|| i64_type.const_int(0, false).into());
