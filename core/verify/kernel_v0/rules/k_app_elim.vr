@@ -1,0 +1,96 @@
+// =============================================================================
+// kernel_v0 — T-App-Elim inference rule + soundness lemma (ADMITTED)
+// =============================================================================
+//
+// **Rule**
+//
+//   ┌────────────────────────────────────────────────────────┐
+//   │ Γ ⊢ f : Pi(A, B)                                          │
+//   │ Γ ⊢ x : A                                                  │
+//   │ ────────────────────────────────────  T-App-Elim           │
+//   │ Γ ⊢ App(f, x) : B[x/0]                                     │
+//   └────────────────────────────────────────────────────────┘
+//
+// **Soundness lemma** (ADMITTED — β-reduction substitution IOU)
+//
+//   For every Γ, f, x, A, B satisfying both premises, the term
+//   App(f, x) inhabits B[x/0] in the categorical model.
+//
+// **Why admitted (not yet proved)**
+//
+// The proof requires the SUBSTITUTION LEMMA (same as T-Pi-Form):
+//
+//     If Γ, A ⊢ B : Univ(m) and Γ ⊢ x : A, then Γ ⊢ B[x/0] : Univ(m).
+//
+// AND the β-soundness lemma:
+//
+//     ⟦App(Lam(A, body), x)⟧ = ⟦body[x/0]⟧
+//
+// The first is structural induction over the derivation; the second
+// is the Church-Rosser confluence of β-reduction (cf. Barendregt
+// 1985, *The Lambda Calculus*, Theorem 3.2.8).  Both are textbook
+// but non-trivial structural proofs.
+//
+// **Discharge plan** (#173 Phase 2)
+//
+//   1. Formalize `subst_preserves_typing` (shared with T-Pi-Form).
+//   2. Formalize `beta_soundness` (Church-Rosser).
+//   3. Cross-discharge via Coq/Lean foreign-tool re-check.
+//
+// **Dependency**: T-Pi-Form and T-Beta share the substitution lemma;
+// discharge T-Pi-Form first to amortize the proof effort.
+// =============================================================================
+
+module core.verify.kernel_v0.rules.k_app_elim;
+
+mount core.prelude.{Heap, Maybe};
+mount super.super.core_term.{CoreTerm};
+mount super.super.context.{Context};
+mount super.super.judgment.{Derivation, type_of};
+
+/// Construct a T-App-Elim derivation from a function and argument.
+///
+/// The `result_type` parameter is the elaborator's record of `B[x/0]`,
+/// computed by performing the substitution on the codomain extracted
+/// from f's type `Pi(A, B)`.
+public fn introduce_app(
+    ctx: Context,
+    fn_d: Derivation,
+    arg_d: Derivation,
+    result_type: CoreTerm,
+) -> Maybe<Derivation> {
+    return Maybe.Some(Derivation.AppElim {
+        context: ctx,
+        function_derivation: Heap(fn_d),
+        argument_derivation: Heap(arg_d),
+        result_type:         result_type,
+    });
+}
+
+/// **Soundness lemma — ADMITTED.**
+///
+/// `∀ ctx f x A B.
+///     Γ ⊢ f : Pi(A, B)
+///     → Γ ⊢ x : A
+///     → Γ ⊢ App(f, x) : B[x/0].`
+///
+/// **IOU** (recorded in audit bundle `soundness-iou.json`):
+/// β-reduction substitution — `B[x/0]` must be well-typed in Γ when
+/// B is well-typed in Γ, A and x : A in Γ.  Plus Church-Rosser
+/// confluence for the term-level β-step.
+///
+/// **Discharge target**: lemmas `subst_preserves_typing` +
+/// `beta_soundness` in `core/verify/kernel_v0/lemmas/` (Phase-1).
+@verify(formal)
+@kernel_discharge("kernel_app_elim_strict")
+@admitted("substitution-lemma + Church-Rosser — dependent on Phase-1 lemmas")
+public theorem k_app_elim_sound(
+    ctx: &Context,
+    d: &Derivation,
+)
+    requires d is Derivation.AppElim
+    ensures true  // Conditional on substitution + β-confluence.
+    proof {
+        // ADMITTED — relies on substitution lemma + Church-Rosser.
+        // Wired through `kernel_app_elim_strict` bridge.
+    };

@@ -1,0 +1,121 @@
+// =============================================================================
+// kernel_v0 — T-Sub (universe cumulativity) inference rule + soundness (ADMITTED)
+// =============================================================================
+//
+// **Rule**
+//
+//   ┌─────────────────────────────────────────────────────────┐
+//   │ Γ ⊢ t : Universe(n)                                        │
+//   │ n ≤ m                                                       │
+//   │ ────────────────────────────────────────  T-Sub             │
+//   │ Γ ⊢ t : Universe(m)                                        │
+//   └─────────────────────────────────────────────────────────┘
+//
+// **What this captures**
+//
+// Universe cumulativity: any element of `Univ(n)` is also an element
+// of `Univ(m)` whenever `n ≤ m`.  Without cumulativity, every
+// type-level construction would be parametrised by a fixed level,
+// making polymorphism impossibly verbose.  With it, the user writes
+// `Universe` and lets the elaborator pick a level satisfying all
+// constraints.
+//
+// **Soundness lemma** (ADMITTED — κ-tower well-foundedness IOU)
+//
+//   For every Γ, t, n, m with n ≤ m, if Γ ⊢ t : Univ(n) then
+//   Γ ⊢ t : Univ(m).
+//
+// **Why admitted (not yet proved)**
+//
+// The denotational picture: `⟦Univ(n)⟧` is the Grothendieck universe
+// at the inaccessible cardinal κ_n.  Cumulativity is the inclusion
+// `V_{κ_n} ⊆ V_{κ_m}` whenever n ≤ m, which holds because the
+// universe tower is well-founded (κ_0 < κ_1 < κ_2 < ... is a strict
+// linear order).
+//
+// Soundness reduces to:
+//
+//     ZFC + 2-inacc ⊢ ∀ n m. n ≤ m → V_{κ_n} ⊆ V_{κ_m}
+//
+// This is provable in ZFC + 2-inacc but the proof requires set-
+// theoretic machinery (cumulative hierarchy, transfinite induction)
+// that the bootstrap kernel does not yet formalize.
+//
+// **Discharge plan** (#173 Phase 2)
+//
+//   1. Formalize the `cumulative_hierarchy` ZFC schema as a Verum
+//      theorem (or import from mathlib once #155 lands).
+//   2. Cross-discharge via Coq's `Universe` polymorphism.
+//
+// **Position in the bootstrap chain**
+//
+// T-Sub is the LAST admitted rule because:
+//   - It's not a destructor — it doesn't unpack any term.
+//   - It's not a constructor — it doesn't build a new term.
+//   - It's a TRANSPORT — moving an inhabitant between two views of
+//     the same universe.  Sound iff the universe tower is sound.
+//
+// Once ZFC + 2-inacc is taken as foundational, T-Sub is automatic.
+// =============================================================================
+
+module core.verify.kernel_v0.rules.k_sub;
+
+mount core.prelude.{Heap, Maybe};
+mount super.super.core_term.{CoreTerm};
+mount super.super.context.{Context};
+mount super.super.judgment.{Derivation};
+
+/// Construct a T-Sub derivation, lifting an inhabitant from
+/// `Univ(from_level)` to `Univ(to_level)` when `from_level ≤ to_level`.
+///
+/// Returns `Maybe::None` when the level inequality fails (the
+/// elaborator rejects).
+public fn introduce_sub(
+    ctx: Context,
+    original: Derivation,
+    from_level: Int{>= 0},
+    to_level: Int{>= 0},
+) -> Maybe<Derivation>
+    ensures (result is Maybe.Some) <=> (from_level <= to_level)
+{
+    if from_level > to_level {
+        return Maybe.None;
+    }
+    return Maybe.Some(Derivation.Sub {
+        context: ctx,
+        original:   Heap(original),
+        from_level: from_level,
+        to_level:   to_level,
+        new_type:   CoreTerm.Universe { level: to_level },
+    });
+}
+
+/// **Soundness lemma — ADMITTED.**
+///
+/// `∀ ctx t n m.
+///     n ≤ m
+///     → Γ ⊢ t : Univ(n)
+///     → Γ ⊢ t : Univ(m).`
+///
+/// **IOU** (recorded in audit bundle `soundness-iou.json`):
+/// κ-tower well-foundedness — the inaccessible-cardinal sequence
+/// κ_0 < κ_1 < κ_2 < ... is a strict linear order, so the cumulative
+/// hierarchy V_{κ_n} ⊆ V_{κ_m} whenever n ≤ m.  Provable in
+/// ZFC + 2-inacc but not yet formalized in the kernel.
+///
+/// **Discharge target**: lemma `cumulative_universe_inclusion` in
+/// `core/verify/kernel_v0/lemmas/sub.vr` (Phase-1 work, after
+/// mathlib import in #155).
+@verify(formal)
+@kernel_discharge("kernel_sub_strict")
+@admitted("κ-tower well-foundedness — Phase-1 sub.vr after mathlib import")
+public theorem k_sub_sound(
+    ctx: &Context,
+    d: &Derivation,
+)
+    requires d is Derivation.Sub
+    ensures true  // Conditional on κ-tower well-foundedness.
+    proof {
+        // ADMITTED — relies on ZFC + 2-inacc + cumulative-hierarchy.
+        // Wired through `kernel_sub_strict` bridge.
+    };
