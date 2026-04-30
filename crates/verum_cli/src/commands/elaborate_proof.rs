@@ -36,6 +36,7 @@ use verum_kernel::tactic_elaborator::{
     elaborate_theorem, register_kernel_bridge_dispatchers, register_kernel_v0_lemmas,
     register_propositional_connectives, ElabContext, ElabError,
 };
+use verum_kernel::verification_goal::{from_theorem_decl, TheoremKind};
 
 /// One row in the elaboration report — what happened for one
 /// theorem.
@@ -50,9 +51,18 @@ pub struct ElaborationRow {
 /// Per-theorem outcome of elaboration.
 #[derive(Debug, Clone)]
 pub enum ElaborationStatus {
-    /// Certificate produced + re-verified.  Path to the emitted
-    /// `.vproof` file.
-    Verified { vproof_path: PathBuf },
+    /// Certificate produced + re-verified.  Paths to the emitted
+    /// `.vproof` certificate and the `.vgoal` unified
+    /// VerificationGoal export (when goal translation succeeded;
+    /// `None` when the proposition fell back to placeholder).
+    Verified {
+        /// Path to the emitted `.vproof` certificate.
+        vproof_path: PathBuf,
+        /// Path to the emitted `.vgoal` JSON when the proposition
+        /// translated successfully via VerificationGoal; `None` on
+        /// the placeholder fallback path.
+        vgoal_path: Option<PathBuf>,
+    },
     /// Tactic form not yet supported by the elaborator (graceful
     /// skip — `UnsupportedTactic`, `UndeclaredApplyTarget`, or
     /// `UnsupportedExpression`).  Reason carries the diagnostic.
@@ -111,12 +121,20 @@ pub fn execute(path: &str, output_dir: Option<&str>) -> Result<()> {
     let mut total_failed = 0usize;
     for row in &rows {
         match &row.status {
-            ElaborationStatus::Verified { vproof_path } => {
+            ElaborationStatus::Verified {
+                vproof_path,
+                vgoal_path,
+            } => {
                 total_verified += 1;
+                let goal_suffix = match vgoal_path {
+                    Some(p) => format!(" + goal {}", p.display()),
+                    None => String::new(),
+                };
                 ui::success(&format!(
-                    "{}: certificate verified → {}",
+                    "{}: certificate verified → {}{}",
                     row.name,
                     vproof_path.display(),
+                    goal_suffix,
                 ));
             }
             ElaborationStatus::Skipped { reason } => {
@@ -215,9 +233,42 @@ fn walk_and_elaborate(
                         e,
                     ))
                 })?;
+                // Also emit the unified VerificationGoal alongside
+                // the certificate so audit-gate dashboards and
+                // downstream verification pipelines have access to
+                // the source-agnostic verification surface.  This is
+                // best-effort: the goal export is `None` when the
+                // theorem's proposition shape isn't yet supported by
+                // proposition_to_term (the matching certificate
+                // metadata records `claimed_type_source: placeholder`).
+                let vgoal_path =
+                    match from_theorem_decl(theorem, TheoremKind::Theorem, &ctx) {
+                        Ok(goal) => {
+                            let path = out_dir.join(format!("{}.vgoal", name));
+                            let goal_json = serde_json::to_string_pretty(&goal)
+                                .map_err(|e| {
+                                    CliError::custom(format!(
+                                        "serialise goal: {}",
+                                        e,
+                                    ))
+                                })?;
+                            std::fs::write(&path, goal_json).map_err(|e| {
+                                CliError::custom(format!(
+                                    "write {}: {}",
+                                    path.display(),
+                                    e,
+                                ))
+                            })?;
+                            Some(path)
+                        }
+                        Err(_) => None,
+                    };
                 ElaborationRow {
                     name,
-                    status: ElaborationStatus::Verified { vproof_path },
+                    status: ElaborationStatus::Verified {
+                        vproof_path,
+                        vgoal_path,
+                    },
                 }
             }
             Err(ElabError::KernelRejection(reason)) => ElaborationRow {
@@ -285,6 +336,47 @@ mod tests {
             }
             other => panic!("expected InvalidArgument, got {:?}", other),
         }
+    }
+
+    /// Pin: a verifiable theorem produces both a .vproof certificate
+    /// and a .vgoal VerificationGoal export.  Round-trip verifies the
+    /// .vgoal JSON parses back into a VerificationGoal.
+    #[test]
+    fn elaborate_proof_emits_vproof_and_vgoal_for_verifiable_theorem() {
+        use verum_kernel::verification_goal::VerificationGoal;
+        // A theorem applying a kernel_v0 lemma stub elaborates cleanly
+        // because the corpus walker pre-registers those names.
+        let source = "module test_elab;\n\
+                      \n\
+                      public theorem witness()\n\
+                          ensures true\n\
+                      {\n\
+                          proof { apply core.verify.kernel_v0.lemmas.beta.church_rosser_confluence; };\n\
+                      }\n";
+        let mut src = tempfile::NamedTempFile::new().expect("tempfile");
+        src.write_all(source.as_bytes()).expect("write");
+        let vr_path = src.path().with_extension("vr");
+        std::fs::copy(src.path(), &vr_path).expect("copy to .vr");
+
+        let out_dir = tempfile::tempdir().expect("tempdir");
+        execute(
+            vr_path.to_string_lossy().as_ref(),
+            Some(out_dir.path().to_string_lossy().as_ref()),
+        )
+        .expect("verifiable theorem should elaborate");
+
+        // Both files should exist.
+        let vproof = out_dir.path().join("witness.vproof");
+        let vgoal = out_dir.path().join("witness.vgoal");
+        assert!(vproof.exists(), ".vproof must be emitted");
+        assert!(vgoal.exists(), ".vgoal must be emitted");
+
+        // .vgoal round-trips through serde.
+        let goal_text = std::fs::read_to_string(&vgoal).expect("read vgoal");
+        let _goal: VerificationGoal =
+            serde_json::from_str(&goal_text).expect(".vgoal must parse as VerificationGoal");
+
+        std::fs::remove_file(&vr_path).ok();
     }
 
     /// Pin: non-.vr extension is rejected.
