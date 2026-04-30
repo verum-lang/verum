@@ -3903,55 +3903,27 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ts = builder.build_alloca(timespec_type, "ts").or_llvm_err()?;
 
         // Issue clock_gettime via the platform-appropriate path.
-        #[cfg(target_os = "linux")]
-        {
+        // Cross-compilation-correct: dispatch on the LLVM module's
+        // *target* triple, not the compile host's `target_os` cfg.
+        if Self::target_is_linux(module) {
             // Direct syscall — libc-free.  CLOCK_MONOTONIC = 1 on Linux.
-            #[cfg(target_arch = "x86_64")]
-            let (asm_str, constraints, sys_num) = (
-                "syscall",
-                "={rax},{rax},{rdi},{rsi},~{rcx},~{r11},~{memory}",
-                228_u64, // SYS_clock_gettime x86_64
-            );
-            #[cfg(target_arch = "aarch64")]
-            let (asm_str, constraints, sys_num) = (
-                "svc #0",
-                "={x0},{x8},{x0},{x1},~{memory}",
-                113_u64, // SYS_clock_gettime aarch64
-            );
-            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-            let (asm_str, constraints, sys_num): (&str, &str, u64) = ("", "=r,r,r,r", 0);
-
-            let syscall_fn_type = i64_type.fn_type(
-                &[i64_type.into(), i64_type.into(), i64_type.into()],
-                false,
-            );
-            let asm_fn = self.context.create_inline_asm(
-                syscall_fn_type,
-                asm_str.to_string(),
-                constraints.to_string(),
-                true, true,
-                Some(verum_llvm::InlineAsmDialect::ATT),
-                false,
-            );
-            let num_const = i64_type.const_int(sys_num, false);
+            // Syscall numbers are arch-specific.
+            let sys_num: u64 = if Self::target_is_aarch64(module) {
+                113 // SYS_clock_gettime aarch64
+            } else {
+                228 // SYS_clock_gettime x86_64
+            };
             let clock_id_val = i64_type.const_int(1, false); // CLOCK_MONOTONIC
             let ts_addr = builder
                 .build_ptr_to_int(ts, i64_type, "ts_addr")
                 .or_llvm_err()?;
-            let _ = builder
-                .build_indirect_call(
-                    syscall_fn_type,
-                    asm_fn,
-                    &[num_const.into(), clock_id_val.into(), ts_addr.into()],
-                    "rc",
-                )
-                .or_llvm_err()?;
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
+            let _ = self.emit_linux_syscall(
+                &builder, module, sys_num, &[clock_id_val, ts_addr],
+            )?;
+        } else {
             let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
             // CLOCK_MONOTONIC: macOS=6 (libSystem), other-Unix=1.
-            let clock_id: u64 = if cfg!(target_os = "macos") { 6 } else { 1 };
+            let clock_id: u64 = if Self::target_is_darwin(module) { 6 } else { 1 };
             let clock_id_val = i32_type.const_int(clock_id, false);
             self.build_libc_call_void(
                 &builder,
@@ -3983,6 +3955,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();
+        let _ = i32_type; // used only on the libSystem fallback path
         let fn_type = i64_type.fn_type(&[], false);
         let func = module.get_function("verum_time_realtime_nanos").unwrap_or_else(|| module.add_function("verum_time_realtime_nanos", fn_type, None));
         let entry = self.context.append_basic_block(func, "entry");
@@ -3992,12 +3965,34 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let timespec_type = self.context.struct_type(&[i64_type.into(), i64_type.into()], false);
         let ts = builder.build_alloca(timespec_type, "ts").or_llvm_err()?;
 
-        let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
-
-        // CLOCK_REALTIME = 0 on both macOS and Linux
-        let clock_id_val = i32_type.const_int(0, false);
-
-        self.build_libc_call_void(&builder, clock_gettime_fn, &[clock_id_val.into(), ts.into()], "ret")?;
+        // Per-platform `clock_gettime(CLOCK_REALTIME=0, &ts)` dispatch
+        // (libc-free per user 2026-05-01 directive).  Same shape as
+        // monotonic_nanos but with CLOCK_REALTIME=0 instead of 1.
+        // Cross-compilation-correct: TARGET-triple dispatch via
+        // `Self::target_is_linux`, never host `#[cfg]`.
+        if Self::target_is_linux(module) {
+            let sys_num: u64 = if Self::target_is_aarch64(module) {
+                113 // SYS_clock_gettime aarch64
+            } else {
+                228 // SYS_clock_gettime x86_64
+            };
+            let clock_id = i64_type.const_int(0, false); // CLOCK_REALTIME
+            let ts_addr = builder
+                .build_ptr_to_int(ts, i64_type, "ts_addr")
+                .or_llvm_err()?;
+            let _ = self.emit_linux_syscall(
+                &builder, module, sys_num, &[clock_id, ts_addr],
+            )?;
+        } else {
+            let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
+            let clock_id_val = i32_type.const_int(0, false);
+            self.build_libc_call_void(
+                &builder,
+                clock_gettime_fn,
+                &[clock_id_val.into(), ts.into()],
+                "ret",
+            )?;
+        }
 
         let sec_ptr = builder.build_struct_gep(timespec_type, ts, 0, "sec_ptr").or_llvm_err()?;
         let nsec_ptr = builder.build_struct_gep(timespec_type, ts, 1, "nsec_ptr").or_llvm_err()?;
@@ -4051,10 +4046,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.build_store(sec_ptr, sec).or_llvm_err()?;
         builder.build_store(nsec_ptr, nsec).or_llvm_err()?;
 
-        let nanosleep_fn = self.get_or_declare_nanosleep(module);
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let null_ptr = ptr_type.const_null();
-        builder.build_call(nanosleep_fn, &[ts.into(), null_ptr.into()], "").or_llvm_err()?;
+        // Per-platform `nanosleep(&ts, NULL)` dispatch (libc-free).
+        // Cross-compilation-correct: TARGET-triple dispatch.
+        //   * Linux: direct SYS_nanosleep syscall.  x86_64=35, aarch64=101.
+        //     Args: (&req_ts, &rem_ts NULL).  Return value ignored —
+        //     interrupted sleeps just complete early; the semantics
+        //     of `verum_time_sleep_nanos` don't promise full duration
+        //     under signals.
+        //   * macOS / other Unix: libSystem nanosleep (acceptable).
+        if Self::target_is_linux(module) {
+            let sys_num: u64 = if Self::target_is_aarch64(module) {
+                101 // SYS_nanosleep aarch64
+            } else {
+                35 // SYS_nanosleep x86_64
+            };
+            let ts_addr = builder
+                .build_ptr_to_int(ts, i64_type, "ts_addr")
+                .or_llvm_err()?;
+            let null_addr = i64_type.const_zero();
+            let _ = self.emit_linux_syscall(
+                &builder, module, sys_num, &[ts_addr, null_addr],
+            )?;
+        } else {
+            let nanosleep_fn = self.get_or_declare_nanosleep(module);
+            let ptr_type = self.context.ptr_type(AddressSpace::default());
+            let null_ptr = ptr_type.const_null();
+            builder.build_call(nanosleep_fn, &[ts.into(), null_ptr.into()], "").or_llvm_err()?;
+        }
         builder.build_unconditional_branch(done).or_llvm_err()?;
 
         builder.position_at_end(done);
@@ -4410,6 +4428,39 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let adapted = self.adapt_libc_args(builder, func, args)?;
         builder.build_call(func, &adapted, name).or_llvm_err()?;
         Ok(())
+    }
+
+    /// Returns true when the LLVM module's TARGET triple denotes Linux.
+    ///
+    /// Used by every per-platform AOT helper to select between the
+    /// direct-syscall path (Linux) and libSystem / kernel32 paths
+    /// (macOS, Windows).  Inspecting `module.get_triple()` is the only
+    /// cross-compilation-correct dispatch — `#[cfg(target_os = "...")]`
+    /// would silently bind to the *compile host* and miscompile every
+    /// cross build (e.g. `cargo run` on macOS targeting Linux/aarch64
+    /// would emit libSystem clock_gettime against a Linux binary).
+    fn target_is_linux(module: &Module<'ctx>) -> bool {
+        let triple = module.get_triple();
+        triple.as_str().to_string_lossy().contains("linux")
+    }
+
+    /// Returns true when the LLVM module's TARGET triple denotes macOS
+    /// / Darwin (iOS, tvOS, watchOS variants all match — they share
+    /// the libSystem ABI).
+    fn target_is_darwin(module: &Module<'ctx>) -> bool {
+        let t = module.get_triple();
+        let s = t.as_str().to_string_lossy().to_string();
+        s.contains("darwin") || s.contains("apple")
+    }
+
+    /// Returns true when the LLVM module's TARGET triple denotes
+    /// aarch64 / arm64.  Used at syscall-number selection time —
+    /// SYS_clock_gettime, SYS_getpid, SYS_nanosleep all have different
+    /// numbers on x86_64 vs arm64 Linux.
+    fn target_is_aarch64(module: &Module<'ctx>) -> bool {
+        let t = module.get_triple();
+        let s = t.as_str().to_string_lossy().to_string();
+        s.contains("aarch64") || s.contains("arm64")
     }
 
     /// **Linux direct syscall** — libc-free emission of the kernel
@@ -5614,19 +5665,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let builder = self.context.create_builder();
                 builder.position_at_end(entry);
 
-                #[cfg(target_os = "linux")]
-                {
-                    #[cfg(target_arch = "x86_64")]
-                    let sys_num = 39_u64;
-                    #[cfg(target_arch = "aarch64")]
-                    let sys_num = 172_u64;
-                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                    let sys_num = 0_u64;
+                // Cross-compilation-correct: TARGET-triple dispatch.
+                if Self::target_is_linux(module) {
+                    let sys_num: u64 = if Self::target_is_aarch64(module) {
+                        172 // SYS_getpid aarch64
+                    } else {
+                        39 // SYS_getpid x86_64
+                    };
                     let pid = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
                     builder.build_return(Some(&pid)).or_llvm_err()?;
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
+                } else {
                     let pid = builder.build_call(getpid_fn, &[], "pid")
                         .or_llvm_err()?.try_as_basic_value().basic().or_internal("call returned void")?.into_int_value();
                     let result = builder.build_int_s_extend(pid, i64_type, "ext").or_llvm_err()?;
@@ -5664,8 +5712,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let builder = self.context.create_builder();
                 builder.position_at_end(entry);
 
-                #[cfg(target_os = "macos")]
-                {
+                // Cross-compilation-correct dispatch: inspect the LLVM
+                // module's TARGET triple.  Three platform arms share
+                // the same compiled function — selection happens at
+                // codegen-time, not host compile-time.
+                if Self::target_is_darwin(module) {
                     // Declare `int pthread_threadid_np(pthread_t, uint64_t *)`.
                     // First arg `pthread_t` is a pointer-sized opaque
                     // value; `0` (NULL) means "the calling thread".
@@ -5699,73 +5750,28 @@ impl<'ctx> RuntimeLowering<'ctx> {
                         .or_llvm_err()?
                         .into_int_value();
                     builder.build_return(Some(&tid)).or_llvm_err()?;
-                }
-
-                #[cfg(target_os = "linux")]
-                {
+                } else if Self::target_is_linux(module) {
                     // **Direct syscall — libc-free** (per user 2026-05-01
                     // directive: "for AOT we don't use libc on any
                     // platform").  Pre-fix this path called `gettid`
                     // through libc which forced a glibc/musl link
-                    // dependency for the AOT binary.  Post-fix we emit
-                    // the kernel trap inline — same shape as
-                    // `Opcode::SyscallLinux` lowering at instruction.rs.
+                    // dependency for the AOT binary.  Post-fix we route
+                    // through `emit_linux_syscall` which selects the
+                    // arch-correct trap from the TARGET triple
+                    // (cross-compilation-safe).
                     //
-                    // Per-architecture trap encoding:
-                    //   * x86_64: `syscall` instruction; rax = SYS_gettid,
-                    //     no args; return in rax.  SYS_gettid x86_64 = 186.
-                    //   * aarch64: `svc #0` instruction; x8 = SYS_gettid,
-                    //     no args; return in x0.  SYS_gettid arm64 = 178.
-                    let _ = (ptr_type, getpid_fn); // silence unused warnings on linux path
-
-                    #[cfg(target_arch = "x86_64")]
-                    let (asm_str, constraints, sys_num) = (
-                        "syscall",
-                        "={rax},{rax},~{rcx},~{r11},~{memory}",
-                        186_u64,
-                    );
-                    #[cfg(target_arch = "aarch64")]
-                    let (asm_str, constraints, sys_num) = (
-                        "svc #0",
-                        "={x0},{x8},~{memory}",
-                        178_u64,
-                    );
-                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                    let (asm_str, constraints, sys_num): (&str, &str, u64) =
-                        ("", "=r,r", 0);
-
-                    let syscall_fn_type = i64_type.fn_type(&[i64_type.into()], false);
-                    let asm_fn = self.context.create_inline_asm(
-                        syscall_fn_type,
-                        asm_str.to_string(),
-                        constraints.to_string(),
-                        true,  // has side effects
-                        true,  // align stack
-                        Some(verum_llvm::InlineAsmDialect::ATT),
-                        false, // can't throw
-                    );
-                    let num_const = i64_type.const_int(sys_num, false);
-                    let tid = builder
-                        .build_indirect_call(
-                            syscall_fn_type,
-                            asm_fn,
-                            &[num_const.into()],
-                            "tid",
-                        )
-                        .or_llvm_err()?
-                        .try_as_basic_value()
-                        .basic()
-                        .or_internal("syscall returned void")?
-                        .into_int_value();
+                    // SYS_gettid: x86_64=186, aarch64=178.
+                    let sys_num: u64 = if Self::target_is_aarch64(module) {
+                        178
+                    } else {
+                        186
+                    };
+                    let tid = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
                     builder.build_return(Some(&tid)).or_llvm_err()?;
-                }
-
-                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-                {
+                } else {
                     // Fallback to getpid() for unsupported platforms —
                     // matches the interpreter's non-macos non-windows
                     // arm semantics.
-                    let _ = ptr_type;
                     let pid = builder
                         .build_call(getpid_fn, &[], "tid")
                         .or_llvm_err()?
