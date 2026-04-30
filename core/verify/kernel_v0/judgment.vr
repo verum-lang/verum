@@ -29,11 +29,11 @@
 
 module core.verify.kernel_v0.judgment;
 
-mount core.prelude.{Heap, Maybe};
+mount core.prelude.{Heap, Maybe, Text};
 mount super.core_term.{CoreTerm};
 mount super.context.{Context};
 
-/// **Judgment** — `Γ ⊢ t : T` formed by the 7 inference rules.
+/// **Judgment** — `Γ ⊢ t : T` formed by the 10 inference rules.
 ///
 /// A value of `Judgment` is a STATEMENT.  The proof of it is a
 /// `Derivation` (separate type), constructed by the rules.
@@ -45,11 +45,27 @@ public type Judgment is {
 
 /// **Derivation** — a constructive proof of a Judgment.
 ///
-/// The seven cases mirror the seven inference rules in `rules/`:
-/// each case carries the sub-derivations the rule consumes.
-/// Building a derivation IS proving the corresponding judgment;
-/// the soundness theorem peels off cases inductively to show the
-/// term denotes a value of the claimed type.
+/// The ten cases mirror the ten inference rules in `rules/`: each
+/// case carries the sub-derivations the rule consumes.  Building a
+/// derivation IS proving the corresponding judgment; the soundness
+/// theorem peels off cases inductively to show the term denotes a
+/// value of the claimed type.
+///
+/// **The 10-rule roster** (mirrors `verum_kernel::soundness::canonical_rules`):
+///
+///   Proved structurally (foundation):
+///     T-Var       — variable lookup
+///     T-Univ      — universe stratification
+///     T-FwAx      — forward-axiom witness (escape hatch)
+///     T-Pos      — positivity check (Berardi 1998)
+///
+///   Admitted (await Phase-1 trust-base reduction):
+///     T-Pi-Form   — Π-formation (substitution-lemma IOU)
+///     T-Lam-Intro — λ-introduction
+///     T-App-Elim  — application (β-reduction IOU)
+///     T-Beta      — β-conversion
+///     T-Eta       — η-conversion
+///     T-Sub       — universe cumulativity (κ-tower IOU)
 public type Derivation is
     /// **T-Var**: `Γ ⊢ Var(i) : T` when `Γ.lookup(i) = T`.
     | Var {
@@ -61,6 +77,23 @@ public type Derivation is
     | Univ {
         context: Context,
         level: Int{>= 0},
+    }
+    /// **T-FwAx**: `Γ ⊢ axiom_witness(A) : T` when `A` is on the
+    /// trusted-axiom roster and `T` is a sort under Γ.  The kernel's
+    /// only mechanism for admitting unverified content; each occurrence
+    /// is logged in the audit bundle's IOU dashboard.
+    | FwAx {
+        context: Context,
+        axiom_name: Text,
+        result_type: CoreTerm,
+    }
+    /// **T-Pos**: positivity of an inductive declaration.  Berardi 1998
+    /// style structural analysis: the recursive occurrences appear only
+    /// in strictly-positive position in the constructor types.
+    | Pos {
+        context: Context,
+        constructor_types: Heap<CoreTerm>,
+        result_type: CoreTerm,
     }
     /// **T-Pi-Form**: from `Γ ⊢ A : Univ(n)` and `Γ, A ⊢ B : Univ(m)`,
     /// derive `Γ ⊢ Pi(A, B) : Univ(max(n, m))`.
@@ -101,6 +134,16 @@ public type Derivation is
         context: Context,
         original: Heap<Derivation>,
         equality_witness: Heap<DefinitionalEquality>,
+        new_type: CoreTerm,
+    }
+    /// **T-Sub** (universe cumulativity): if `Γ ⊢ t : Univ(n)` and
+    /// `n ≤ m`, then `Γ ⊢ t : Univ(m)`.  Embeds smaller universes
+    /// into larger ones via the κ-tower well-foundedness axiom.
+    | Sub {
+        context: Context,
+        original: Heap<Derivation>,
+        from_level: Int{>= 0},
+        to_level: Int{>= 0},
         new_type: CoreTerm,
     };
 
@@ -147,10 +190,13 @@ public fn type_of(d: &Derivation) -> CoreTerm {
     match d {
         Derivation.Var { result_type, .. } => result_type.clone(),
         Derivation.Univ { level, .. } => CoreTerm.Universe { level: level + 1 },
+        Derivation.FwAx { result_type, .. } => result_type.clone(),
+        Derivation.Pos { result_type, .. } => result_type.clone(),
         Derivation.PiForm { result_type, .. } => result_type.clone(),
         Derivation.LamIntro { result_type, .. } => result_type.clone(),
         Derivation.AppElim { result_type, .. } => result_type.clone(),
         Derivation.BetaConv { new_type, .. } => new_type.clone(),
         Derivation.EtaConv { new_type, .. } => new_type.clone(),
+        Derivation.Sub { new_type, .. } => new_type.clone(),
     };
 }
