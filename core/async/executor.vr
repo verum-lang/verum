@@ -103,6 +103,16 @@ public type AsyncRuntimeConfig is {
     enable_work_stealing: Bool,
     /// Stack size for spawned tasks in bytes
     task_stack_size: Int,
+    /// Number of OS worker threads in the work-stealing scheduler.
+    /// 0 = auto-detect via `num_cpus::get()` (the documented
+    /// default).  >0 = manifest-pinned override from
+    /// `[runtime].async_worker_threads` in Verum.toml.  Currently
+    /// the executor is single-threaded cooperative — this field
+    /// becomes load-bearing when the multi-threaded scheduler
+    /// lands (#258 follow-up).  The bridge to read the manifest
+    /// value already exists (#261); only the consumer is
+    /// forward-looking.
+    async_worker_threads: Int,
     /// Enable I/O driver for async file/network operations
     enable_io: Bool,
     /// Enable timer driver for sleep/timeout operations
@@ -113,13 +123,47 @@ public type AsyncRuntimeConfig is {
     poll_budget: Int,
 };
 
+// Manifest→runtime bridge (#261).  Each getter loads from a
+// const-initialised LLVM global emitted by
+// `platform_ir.rs::emit_runtime_globals` whose initial value flows
+// from `LanguageFeatures.runtime` in Verum.toml at codegen time.
+// Returning 0 means "use stdlib auto-detect" (num_cpus, platform
+// stack size); >0 overrides the historical default.
+//
+// The functions are emitted with internal linkage; LTO folds the
+// loads to constants at every call site after global-DCE — zero
+// runtime overhead vs hardcoded defaults.
+extern {
+    /// Manifest-driven `[runtime].async_worker_threads`.  0 ≡
+    /// auto-detect via `num_cpus::get()`; >0 overrides.
+    fn verum_get_runtime_async_worker_threads() -> Int;
+    /// Manifest-driven `[runtime].task_stack_size` (bytes).  0 ≡
+    /// platform default (~8 MiB on Unix, 1 MiB on Windows); >0
+    /// overrides per-spawned-task stack size.
+    fn verum_get_runtime_task_stack_size() -> Int;
+}
+
 implement AsyncRuntimeConfig {
     /// Create default configuration optimized for general use.
+    ///
+    /// Honours the manifest-driven runtime bridge: when
+    /// `[runtime].task_stack_size` in Verum.toml is non-zero the
+    /// override flows through `verum_get_runtime_task_stack_size`
+    /// → this constructor → every spawned task.  Default 0 keeps
+    /// the historical 1 MiB stack.  Closes the manifest-side gap
+    /// in #259.
     public fn default() -> AsyncRuntimeConfig {
+        let manifest_stack = verum_get_runtime_task_stack_size();
+        let stack = if manifest_stack > 0 { manifest_stack } else { 1024 * 1024 };
+        // Read manifest worker-threads override.  0 stays in the
+        // config field as "auto-detect"; the future multi-threaded
+        // scheduler resolves 0 via `num_cpus::get()` at startup.
+        let workers = verum_get_runtime_async_worker_threads();
         AsyncRuntimeConfig {
             max_tasks: 10000,
             enable_work_stealing: true,
-            task_stack_size: 1024 * 1024,  // 1MB default
+            task_stack_size: stack,
+            async_worker_threads: workers,
             enable_io: true,
             enable_time: true,
             io_sq_entries: DEFAULT_SQ_ENTRIES,
@@ -128,11 +172,23 @@ implement AsyncRuntimeConfig {
     }
 
     /// Create configuration for CPU-bound workloads.
+    ///
+    /// Honours the manifest-driven runtime bridge for both
+    /// `task_stack_size` and `async_worker_threads` — explicit
+    /// overrides take precedence over the cpu-bound preset
+    /// (512 KiB stack), so a CPU-bound deployment that needs a
+    /// larger stack for deep recursion can still pin it via
+    /// Verum.toml without losing the rest of the cpu-bound
+    /// tuning.
     public fn cpu_bound() -> AsyncRuntimeConfig {
+        let manifest_stack = verum_get_runtime_task_stack_size();
+        let stack = if manifest_stack > 0 { manifest_stack } else { 512 * 1024 };
+        let workers = verum_get_runtime_async_worker_threads();
         AsyncRuntimeConfig {
             max_tasks: 1000,
             enable_work_stealing: true,
-            task_stack_size: 512 * 1024,  // 512KB
+            task_stack_size: stack,
+            async_worker_threads: workers,
             enable_io: false,
             enable_time: false,
             io_sq_entries: 64,  // Minimal I/O
@@ -141,11 +197,20 @@ implement AsyncRuntimeConfig {
     }
 
     /// Create configuration for I/O-bound workloads.
+    ///
+    /// Same manifest-bridge consultation as `cpu_bound` /
+    /// `default` — explicit `[runtime].task_stack_size` /
+    /// `async_worker_threads` overrides take precedence over
+    /// the io-bound preset (256 KiB stack).
     public fn io_bound() -> AsyncRuntimeConfig {
+        let manifest_stack = verum_get_runtime_task_stack_size();
+        let stack = if manifest_stack > 0 { manifest_stack } else { 256 * 1024 };
+        let workers = verum_get_runtime_async_worker_threads();
         AsyncRuntimeConfig {
             max_tasks: 100000,
             enable_work_stealing: true,
-            task_stack_size: 256 * 1024,  // 256KB
+            task_stack_size: stack,
+            async_worker_threads: workers,
             enable_io: true,
             enable_time: true,
             io_sq_entries: 1024,  // More I/O capacity
