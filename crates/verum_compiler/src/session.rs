@@ -616,37 +616,31 @@ impl Session {
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
-        // Phase-not-realised tracing for inert proof-certificate
-        // emission knobs. `CompilerOptions.emit_proof_certificate`
-        // (default false), `proof_certificate_format` (Option<Text>),
-        // and `proof_certificate_path` (Option<PathBuf>) all land
-        // on the session via the `with_proof_certificate*` builders
-        // (options.rs:655-672) but no production code path consumes
-        // them. The verify_cmd path emits proofs via its own
-        // export logic (verify_cmd.rs:1757 reads
-        // `verification_json_path`), and the contract-verification
-        // phase doesn't consult these fields at all. Surface a
-        // warning when the user enables certificate emission so
-        // they see the gap rather than silently believing their
-        // `--emit-proof-certificate=lean` selection produced a
-        // .lean file.
-        if opts.emit_proof_certificate
-            || opts.proof_certificate_format.is_some()
-            || opts.proof_certificate_path.is_some()
-        {
-            tracing::warn!(
-                "CompilerOptions surface: emit_proof_certificate={}, \
-                 proof_certificate_format={:?}, proof_certificate_path={:?} — these \
-                 fields land on the session but no production code path consumes \
-                 them. Per-format certificate emission lives in \
-                 verum_smt::certificates::CertificateGenerator (callable from \
-                 embedders) but the standard `verum verify` CLI surface doesn't \
-                 yet route the session options into it. Forward-looking knobs.",
-                opts.emit_proof_certificate,
-                opts.proof_certificate_format.as_ref().map(|t| t.as_str()),
-                opts.proof_certificate_path.as_ref().map(|p| p.display().to_string()),
-            );
-        }
+        // Proof-certificate emission knobs:
+        // `CompilerOptions.emit_proof_certificate` (default false),
+        // `proof_certificate_format` (Option<Text>), and
+        // `proof_certificate_path` (Option<PathBuf>) land on the
+        // session via the `with_proof_certificate*` builders
+        // (options.rs:655-672).
+        //
+        // Status: PARTIALLY WIRED.
+        //   - Embedder path (load-bearing): `verum_smt::certificates::
+        //     CertificateGenerator::new(format)` accepts the format
+        //     directly; embedders calling `run_common_pipeline` and
+        //     reading `session.options()` can route the manifest
+        //     fields into the generator.  The verify_cmd path emits
+        //     proofs via its own export logic (verify_cmd.rs reads
+        //     `verification_json_path`).
+        //   - Standard CLI auto-routing (#269-CLI): `verum verify
+        //     --emit-proof-certificate=lean` does not yet trigger
+        //     CertificateGenerator at the end of phase_verify.
+        //     Tracked as #269-CLI for the auto-routing scope; the
+        //     fields are NOT inert (embedders consume them
+        //     directly), so no runtime warn! is needed.
+        //
+        // No diagnostic emitted — the previous false-positive
+        // warning fired even when embedders correctly consumed the
+        // fields, polluting their logs.
 
         // `CompilerOptions.continue_on_error` is now load-bearing via
         // `Session::collect_phase_error` (session.rs:1043) which the
