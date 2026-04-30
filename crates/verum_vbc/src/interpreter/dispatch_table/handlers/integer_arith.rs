@@ -113,6 +113,44 @@ pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> Interpreter
     Ok(DispatchResult::Continue)
 }
 
+/// Unsigned integer division: `dst = (a as u64) / (b as u64)`.
+///
+/// Reinterprets the i64 register payloads as `u64` for the division,
+/// then stores the u64 result back as the same bit pattern. Required
+/// because `(u64::MAX) / 10 = 1844674407370955161` whereas
+/// `(i64)(-1) / 10 = 0` — same bit pattern, different operations.
+/// `Text.parse_int` and any other stdlib path that operates on
+/// `UInt64` magnitudes ≥ 2^63 depends on this.
+pub(in super::super) fn handle_udivi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let a = read_reg(state)?;
+    let b = read_reg(state)?;
+    let divisor = state.get_reg(b).as_integer_compatible() as u64;
+    if divisor == 0 {
+        return Err(InterpreterError::DivisionByZero);
+    }
+    let dividend = state.get_reg(a).as_integer_compatible() as u64;
+    let result = dividend.wrapping_div(divisor) as i64;
+    state.set_reg(dst, Value::from_i64(result));
+    Ok(DispatchResult::Continue)
+}
+
+/// Unsigned integer remainder: `dst = (a as u64) % (b as u64)`.
+/// Sister handler to `handle_udivi` — same justification.
+pub(in super::super) fn handle_umodi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let a = read_reg(state)?;
+    let b = read_reg(state)?;
+    let divisor = state.get_reg(b).as_integer_compatible() as u64;
+    if divisor == 0 {
+        return Err(InterpreterError::DivisionByZero);
+    }
+    let dividend = state.get_reg(a).as_integer_compatible() as u64;
+    let result = dividend.wrapping_rem(divisor) as i64;
+    state.set_reg(dst, Value::from_i64(result));
+    Ok(DispatchResult::Continue)
+}
+
 // ============================================================================
 // Handler Implementations - Unary Integer Operations
 // ============================================================================

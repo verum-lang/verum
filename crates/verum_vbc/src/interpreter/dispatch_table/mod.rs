@@ -45,6 +45,7 @@ use handlers::data_movement::{
 use handlers::integer_arith::{
     handle_addi, handle_subi, handle_muli, handle_divi, handle_modi,
     handle_negi, handle_powi, handle_absi, handle_inc, handle_dec,
+    handle_udivi, handle_umodi,
 };
 use handlers::float_arith::{
     handle_addf, handle_subf, handle_mulf, handle_divf,
@@ -254,7 +255,9 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0x18] = handle_inc;         // Inc = 0x18
     table[0x19] = handle_dec;         // Dec = 0x19
     table[0x1A] = handle_cvt_toi;     // CvtToI = 0x1A (dynamic int conversion)
-    // 0x1B-0x1E: Reserved integer arithmetic
+    table[0x1B] = handle_udivi;       // UDivI = 0x1B (unsigned i64-as-u64 division)
+    table[0x1C] = handle_umodi;       // UModI = 0x1C (unsigned i64-as-u64 modulo)
+    // 0x1D-0x1E: Reserved integer arithmetic
     table[0x1F] = handle_extended;    // Extended = 0x1F (#167 Part A)
 
     // ========================================================================
