@@ -54,8 +54,14 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     let receiver = state.get_reg(receiver_reg);
 
-    // Resolve method name from string table
-    let method_name = state.module.strings.get(StringId(method_id))
+    // Resolve method name from string table.
+    //
+    // `mut` because the Shared-deref auto-forwarder below
+    // (`_ => {}` arm of the Shared TypeId match) re-qualifies
+    // a `"Shared.foo"` name to `"AtomicInt.foo"` (or whatever
+    // the inner type is) so the qualified-lookup walker finds
+    // the user-compiled body on the inner type.
+    let mut method_name = state.module.strings.get(StringId(method_id))
         .unwrap_or("")
         .to_string();
     // Extract bare method name by stripping type prefix (e.g., "List.pop" -> "pop").
@@ -391,6 +397,42 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     // for any code that explicitly checks Shared
                     // identity. All builtin dispatchers below
                     // operate on `dispatch_receiver`.
+                    //
+                    // Re-qualify method_name with the inner type's
+                    // name so the qualified-lookup walker at
+                    // ~line 1014 finds e.g. `"AtomicInt.load"`
+                    // instead of the original `"Shared.load"`. The
+                    // codegen emits the receiver-type-prefixed form
+                    // for `self.x.method()` calls, so without this
+                    // rewrite we'd hit the catch-all panic even
+                    // though the user-compiled body is registered
+                    // for the inner type.
+                    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
+                        let inner_ptr = dispatch_receiver.as_ptr::<u8>();
+                        if !inner_ptr.is_null()
+                            && (inner_ptr as usize)
+                                .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                        {
+                            // SAFETY: alignment verified; heap
+                            // objects begin with an ObjectHeader.
+                            let inner_header =
+                                unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
+                            if let Some(td) =
+                                state.module.get_type(inner_header.type_id)
+                                && let Some(inner_type_name) =
+                                    state.module.strings.get(td.name)
+                                && !inner_type_name.is_empty()
+                            {
+                                method_name = format!(
+                                    "{}.{}",
+                                    inner_type_name, base_method
+                                );
+                                // `bare_method_name` already equals
+                                // `base_method`, so no recompute
+                                // needed.
+                            }
+                        }
+                    }
                 }
             }
         }
