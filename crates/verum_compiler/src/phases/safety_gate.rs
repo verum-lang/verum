@@ -18,7 +18,7 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// Policy for the safety-gate walker.
 ///
-/// Each flag maps 1:1 to a `[safety]` field in `verum.toml`. When a
+/// Each flag maps 1:1 to a `[safety]` field in `Verum.toml`. When a
 /// flag is `true`, the corresponding construct is allowed; when
 /// `false`, the walker emits a clean diagnostic pointing at the
 /// config key and the `-Z` override.
@@ -171,7 +171,7 @@ fn check_function_decl(
                 .span(super::ast_span_to_diagnostic_span(func.span, None))
                 .help(
                     "set `unsafe_allowed = true` under `[safety]` in \
-                     verum.toml, or remove the `unsafe` modifier",
+                     Verum.toml, or remove the `unsafe` modifier",
                 )
                 .build(),
         );
@@ -188,7 +188,7 @@ fn check_function_decl(
                     ))
                     .span(super::ast_span_to_diagnostic_span(func.span, None))
                     .help(
-                        "set `ffi = true` under `[safety]` in verum.toml, \
+                        "set `ffi = true` under `[safety]` in Verum.toml, \
                          or remove `-Z safety.ffi=false`",
                     )
                     .build(),
@@ -224,7 +224,7 @@ fn check_function_decl(
                         .help(
                             "add the `unsafe` modifier to the declaration, or \
                              relax `[safety].ffi_boundary` to `\"lenient\"` in \
-                             verum.toml",
+                             Verum.toml",
                         )
                         .build(),
                 );
@@ -274,7 +274,7 @@ fn walk_expr(expr: &Expr, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
                         .span(super::ast_span_to_diagnostic_span(expr.span, None))
                         .help(
                             "set `unsafe_allowed = true` under `[safety]` in \
-                             verum.toml, or remove `-Z safety.unsafe_allowed=false`",
+                             Verum.toml, or remove `-Z safety.unsafe_allowed=false`",
                         )
                         .build(),
                 );

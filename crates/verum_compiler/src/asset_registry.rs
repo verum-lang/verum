@@ -502,7 +502,7 @@ impl AssetRegistry {
                     max_size,
                     format
                 ))
-                .help("Reduce file size or increase limit in verum.toml [meta.assets.limits]")
+                .help("Reduce file size or increase limit in Verum.toml [meta.assets.limits]")
                 .build());
         }
 
