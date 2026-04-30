@@ -233,6 +233,54 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             Ok(DispatchResult::Continue)
         }
 
+        Some(FfiSubOpcode::CSecureZero) => {
+            // Format: dst_ptr:reg, size:reg
+            //
+            // Volatile zero of `size` bytes at `dst_ptr`.  In the
+            // interpreter the volatile property is moot — there's no
+            // optimiser pass that could elide writes — so we just
+            // perform `write_volatile` on each byte to mirror the
+            // ABI contract that the AOT path enforces.
+            //
+            // Audit: `internal/specs/tls-quic-security-audit.md` §2
+            // Action #2.
+            let dst_reg = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let dst_val = state.get_reg(dst_reg);
+            let dst_ptr = dst_val.as_ptr::<u8>();
+            let size_raw = state.get_reg(size_reg).as_i64();
+
+            // SECURITY: same bounds discipline as `CMemset`.
+            if size_raw < 0 || (size_raw as u64) > MAX_FFI_ALLOCATION_SIZE as u64 {
+                return Err(InterpreterError::InvalidOperand {
+                    message: format!(
+                        "CSecureZero: size {} exceeds maximum {} or is negative",
+                        size_raw, MAX_FFI_ALLOCATION_SIZE
+                    ),
+                });
+            }
+            let size = size_raw as usize;
+
+            if !dst_ptr.is_null() && size > 0 {
+                // SAFETY: size is bounded to <= MAX_FFI_ALLOCATION_SIZE and
+                // dst_ptr has been null-checked.  Volatile writes
+                // ensure the compiler doesn't elide the loop on the
+                // host side either (defence-in-depth — the
+                // interpreter's runtime ABI ought to be observable
+                // even though Rust optimisers shouldn't see across
+                // this fn boundary).
+                unsafe {
+                    let mut p = dst_ptr;
+                    let end = dst_ptr.add(size);
+                    while p < end {
+                        std::ptr::write_volatile(p, 0u8);
+                        p = p.add(1);
+                    }
+                }
+            }
+            Ok(DispatchResult::Continue)
+        }
+
         Some(FfiSubOpcode::CMemmove) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             let dst_reg = read_reg(state)?;

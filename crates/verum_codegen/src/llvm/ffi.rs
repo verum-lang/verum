@@ -197,6 +197,51 @@ impl<'ctx> FfiLowering<'ctx> {
         Ok(())
     }
 
+    /// Lower secure-zero to a *volatile* `llvm.memset` intrinsic.
+    ///
+    /// Generates: `llvm.memset.p0.i64(dst, 0, size, isvolatile=true)`
+    ///
+    /// The `i1 true` volatile flag is the load-bearing security
+    /// property: LLVM's optimiser proves the buffer is dead
+    /// immediately after the memset (we always call this just before
+    /// the buffer leaves scope), and a non-volatile memset would be
+    /// dead-code-eliminated by `MemCpyOptPass` /
+    /// `DeadStoreEliminationPass`.  Volatile memsets are treated as
+    /// observable side-effects and survive every optimisation pass —
+    /// including `-O3` with full LTO.
+    ///
+    /// Audit: `internal/specs/tls-quic-security-audit.md` §2 (zeroise
+    /// on drop) Action #2.  The corresponding regression harness in
+    /// `crates/verum_codegen/tests/secure_zero_preservation.rs`
+    /// compiles a tiny Verum program using this opcode at -O3 and
+    /// asserts the volatile memset survives in the optimised IR.
+    pub fn lower_secure_zero(
+        &mut self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        dst: PointerValue<'ctx>,
+        size: IntValue<'ctx>,
+    ) -> Result<()> {
+        self.stats.memory_intrinsics += 1;
+
+        let memset_fn = self.get_or_declare_memset(module)?;
+
+        let i8_type = self.context.i8_type();
+        let zero_i8 = i8_type.const_zero();
+        // **Volatile = true** — the security-critical bit.
+        let is_volatile = self.context.bool_type().const_int(1, false);
+
+        builder
+            .build_call(
+                memset_fn,
+                &[dst.into(), zero_i8.into(), size.into(), is_volatile.into()],
+                "secure_zero",
+            )
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+        Ok(())
+    }
+
     /// Lower memcmp to libc call.
     ///
     /// Returns: negative if ptr1 < ptr2, 0 if equal, positive otherwise

@@ -251,6 +251,11 @@ pub enum InlineSequenceId {
     Memmove,
     /// memset: optimized set loop
     Memset,
+    /// secure_zero: volatile memset(0) that survives optimisation —
+    /// the cryptographic-zeroise primitive used to wipe key material
+    /// before storage leaves scope.  See
+    /// `internal/specs/tls-quic-security-audit.md` §2 Action #2.
+    SecureZero,
     /// memcmp: compare with early exit
     Memcmp,
     /// fetch_add: CAS loop for atomic add
@@ -1220,6 +1225,23 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Memset),
         mlir_op: Some("llvm.intr.memset"),
         doc: "Fill memory with a byte value",
+    },
+    Intrinsic {
+        name: "secure_zero",
+        category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect],
+        param_count: 2, // dst, len
+        return_count: 0,
+        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SecureZero),
+        // MLIR side currently reuses the memset op — when MLIR codegen
+        // grows a volatile-memset surface (`llvm.intr.memset` carries
+        // an `is_volatile` attribute on the LLVM dialect side, but
+        // the upper MLIR types we emit don't expose it yet) we'll
+        // route through that path.  For now, the AOT (LLVM) path is
+        // the security-critical one — GPU codegen never sees secret
+        // bytes.
+        mlir_op: Some("llvm.intr.memset"),
+        doc: "Volatile memset(0) — survives -O3 DCE.  Use for wiping secret material before scope exit.",
     },
     Intrinsic {
         name: "memcmp",

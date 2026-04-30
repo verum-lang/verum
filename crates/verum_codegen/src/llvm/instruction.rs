@@ -16631,6 +16631,37 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        Some(FfiSubOpcode::CSecureZero) => {
+            // Format: dst_ptr:reg, size:reg
+            //
+            // Volatile memset to 0 — survives every LLVM optimisation
+            // pass.  Used to zeroise secret material (key schedules,
+            // AEAD tags, PSK binders) right before the storage leaves
+            // scope.  The ordinary `CMemset` opcode emits a
+            // non-volatile call which `MemCpyOptPass` /
+            // `DeadStoreEliminationPass` would elide; that's a
+            // catastrophic security bug, so we route the
+            // security-critical zero through a separate opcode.
+            //
+            // Audit: `internal/specs/tls-quic-security-audit.md` §2
+            // Action #2 ("LLVM-IR audit of zeroise memset
+            // preservation").
+            if operands.len() < 2 {
+                return Err(LlvmLoweringError::internal(
+                    "CSecureZero: insufficient operands",
+                ));
+            }
+            let dst_reg = operands[0] as u16;
+            let size_reg = operands[1] as u16;
+
+            let dst_ptr = as_ptr(ctx, ctx.get_register(dst_reg)?, "dst_ptr")?;
+            let size = as_i64(ctx, ctx.get_register(size_reg)?, "size")?;
+
+            let module = ctx.get_module();
+            ffi.lower_secure_zero(ctx.builder(), &module, dst_ptr, size)?;
+            Ok(())
+        }
+
         Some(FfiSubOpcode::CMemmove) => {
             // Format: dst_ptr:reg, src_ptr:reg, size:reg
             if operands.len() < 3 {

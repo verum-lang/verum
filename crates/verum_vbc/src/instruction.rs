@@ -4620,6 +4620,30 @@ pub enum FfiSubOpcode {
     /// Format: `dst:reg, ptr:reg, size:reg, align:reg`
     /// Returns: Result unit or AllocError.
     CbgrDealloc = 0xA2,
+
+    /// Cryptographically-secure zero — volatile memset(0) that
+    /// survives every LLVM optimization pass.
+    ///
+    /// Format: `dst:reg, size:reg`
+    /// Returns: nothing (the destination buffer is zeroed in-place).
+    ///
+    /// AOT lowering: `llvm.memset.p0.i64(dst, 0, size, isvolatile=true)`.
+    /// The `i1 true` volatile flag prevents DCE elimination of the
+    /// memset even when the LLVM optimiser proves the buffer is dead
+    /// immediately after — which is the *exact* situation we use this
+    /// op for: zeroising secret bytes (key material, AEAD tags, PSK
+    /// binders) right before they leave scope.
+    ///
+    /// Interpreter lowering: writes zeros to the dst slice; volatile
+    /// is moot in the interpreter since there is no optimiser pass
+    /// that could elide the writes.
+    ///
+    /// Distinct from `CMemset` (0x44) because LLVM's non-volatile
+    /// memset is dead-code-eliminated when the buffer is dead — a
+    /// catastrophic security property.  See audit
+    /// `internal/specs/tls-quic-security-audit.md` §2 (zeroise on
+    /// drop) Action #2.
+    CSecureZero = 0xA3,
 }
 
 impl FfiSubOpcode {
@@ -4710,6 +4734,7 @@ impl FfiSubOpcode {
             0xA0 => Some(Self::CbgrAlloc),
             0xA1 => Some(Self::CbgrAllocZeroed),
             0xA2 => Some(Self::CbgrDealloc),
+            0xA3 => Some(Self::CSecureZero),
             _ => None,
         }
     }
@@ -4795,6 +4820,7 @@ impl FfiSubOpcode {
             Self::CbgrAlloc => "CBGR_ALLOC",
             Self::CbgrAllocZeroed => "CBGR_ALLOC_ZEROED",
             Self::CbgrDealloc => "CBGR_DEALLOC",
+            Self::CSecureZero => "FFI_C_SECURE_ZERO",
         }
     }
 
