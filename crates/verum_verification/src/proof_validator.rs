@@ -4941,12 +4941,33 @@ impl ProofValidator {
                         message: "forall_elim requires at least 1 premise".into(),
                     });
                 }
-                if !matches!(premises[0].kind, ExprKind::Forall { .. }) {
+                let body = match &premises[0].kind {
+                    ExprKind::Forall { body, .. } => body,
+                    _ => {
+                        return Err(ValidationError::ValidationFailed {
+                            message: format!(
+                                "forall_elim requires a universally-quantified premise (∀x. P(x)); \
+                                 got {:?}",
+                                std::mem::discriminant(&premises[0].kind)
+                            )
+                            .into(),
+                        });
+                    }
+                };
+                // Stronger gate: the expected (instantiation `P(t)`) must
+                // share the body's outermost discriminant. A body shaped
+                // `Binary(And, …)` instantiates to a Binary And — never
+                // to a bare Path or Literal. This catches "called
+                // forall_elim on `∀x. P(x) ∧ Q(x)` and claimed `42`"
+                // misuse without requiring a unifier. Documented as
+                // an extension of the prior structural gate (80f43418).
+                if std::mem::discriminant(&body.kind) != std::mem::discriminant(&expected.kind) {
                     return Err(ValidationError::ValidationFailed {
                         message: format!(
-                            "forall_elim requires a universally-quantified premise (∀x. P(x)); \
-                             got {:?}",
-                            std::mem::discriminant(&premises[0].kind)
+                            "forall_elim: expected instantiation must share the body's \
+                             outermost shape — body is {:?}, expected is {:?}",
+                            std::mem::discriminant(&body.kind),
+                            std::mem::discriminant(&expected.kind)
                         )
                         .into(),
                     });
@@ -4966,12 +4987,31 @@ impl ProofValidator {
                         message: "exists_intro requires at least 1 premise".into(),
                     });
                 }
-                if !matches!(expected.kind, ExprKind::Exists { .. }) {
+                let body = match &expected.kind {
+                    ExprKind::Exists { body, .. } => body,
+                    _ => {
+                        return Err(ValidationError::ValidationFailed {
+                            message: format!(
+                                "exists_intro requires an existentially-quantified expected (∃x. P(x)); \
+                                 got {:?}",
+                                std::mem::discriminant(&expected.kind)
+                            )
+                            .into(),
+                        });
+                    }
+                };
+                // Stronger symmetric gate: the premise (witness `P(t)`)
+                // must share the body's outermost discriminant. Same
+                // rationale as the forall_elim body-vs-expected gate
+                // above — catches `∃x. P(x) ∧ Q(x)` introduced from a
+                // bare-Path premise without a unifier.
+                if std::mem::discriminant(&body.kind) != std::mem::discriminant(&premises[0].kind) {
                     return Err(ValidationError::ValidationFailed {
                         message: format!(
-                            "exists_intro requires an existentially-quantified expected (∃x. P(x)); \
-                             got {:?}",
-                            std::mem::discriminant(&expected.kind)
+                            "exists_intro: premise (witness) must share the body's outermost \
+                             shape — body is {:?}, premise is {:?}",
+                            std::mem::discriminant(&body.kind),
+                            std::mem::discriminant(&premises[0].kind)
                         )
                         .into(),
                     });

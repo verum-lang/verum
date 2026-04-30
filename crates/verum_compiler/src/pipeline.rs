@@ -5188,9 +5188,26 @@ impl<'s> CompilationPipeline<'s> {
                     }
                     loaded_paths.insert(resolved_path.clone());
 
+                    // For stdlib modules we strip the "core." prefix to map
+                    // onto the on-disk layout (`core/` dir = stdlib root), but
+                    // we keep the FULL canonical path for registration so user
+                    // imports `mount core.shell.exec` find these modules under
+                    // the same name.  Without this re-prefixing modules end up
+                    // registered as `shell.exec`, leaving `core.shell.exec`
+                    // references unresolved.
+                    let registration_path = if is_stdlib_import
+                        && !resolved_path.starts_with("core.")
+                        && !resolved_path.starts_with("std.")
+                    {
+                        format!("core.{}", resolved_path)
+                    } else {
+                        resolved_path.clone()
+                    };
+
                     // Convert module path to file path and try to load
-                    let module_path = ModulePath::from_str(&resolved_path);
-                    let file_path = self.module_path_to_file_path(&module_path, &base_dir);
+                    let module_path = ModulePath::from_str(&registration_path);
+                    let file_path_module = ModulePath::from_str(&resolved_path);
+                    let file_path = self.module_path_to_file_path(&file_path_module, &base_dir);
 
                     // Try different file locations (file.vr, file/mod.vr)
                     let candidates = vec![file_path.with_extension("vr"), file_path.join("mod.vr")];
@@ -5329,7 +5346,7 @@ impl<'s> CompilationPipeline<'s> {
                             // project_modules so their items get merged into the main
                             // compilation unit for VBC codegen.
                             if !is_stdlib_import {
-                                let module_key = Text::from(resolved_path.as_str());
+                                let module_key = Text::from(registration_path.as_str());
                                 if !self.project_modules.contains_key(&module_key) {
                                     self.project_modules.insert(
                                         module_key,

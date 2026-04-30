@@ -459,12 +459,32 @@ impl ModuleRegistry {
     /// Get a module by path. Accepts either the absolute form
     /// (`core.foo.bar`) or the cog-relative form (`foo.bar`) —
     /// both canonicalise to the same key.
+    ///
+    /// Stdlib modules are registered from `core/` with their bare paths
+    /// (`shell.exec`, `io.process`); user code addresses them via either
+    /// the bare form or the `core.` prefix.  This method probes both —
+    /// canonical form first, then strips the `core.` prefix on miss to
+    /// catch the bare-key registration, then tries adding the `core.`
+    /// prefix in the reverse direction.
     pub fn get_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         let canonical = self.canonical_key(path);
-        match self.path_to_id.get(&Text::from(canonical)) {
-            Some(id) => self.modules.get(id).cloned(),
-            None => Maybe::None,
+        if let Some(id) = self.path_to_id.get(&Text::from(canonical.clone())) {
+            return self.modules.get(id).cloned();
         }
+        // Try stripping the canonical "core." prefix.
+        if let Some(stripped) = canonical.strip_prefix("core.") {
+            if let Some(id) = self.path_to_id.get(&Text::from(stripped.to_string())) {
+                return self.modules.get(id).cloned();
+            }
+        }
+        // Try adding the canonical "core." prefix.
+        if !canonical.starts_with("core.") && !canonical.starts_with("std.") {
+            let with_core = format!("core.{}", canonical);
+            if let Some(id) = self.path_to_id.get(&Text::from(with_core)) {
+                return self.modules.get(id).cloned();
+            }
+        }
+        Maybe::None
     }
 
     /// Alias-aware variant of [`Self::get_by_path`]. Probes the direct
