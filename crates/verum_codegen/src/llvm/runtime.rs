@@ -6308,6 +6308,15 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("inet_pton", fn_type, None)
     }
 
+    fn get_or_declare_getsockname(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+        if let Some(f) = module.get_function("getsockname") { return f; }
+        let i32_type = self.context.i32_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        // int getsockname(int sockfd, sockaddr *addr, socklen_t *addrlen)
+        let fn_type = i32_type.fn_type(&[i32_type.into(), ptr_type.into(), ptr_type.into()], false);
+        module.add_function("getsockname", fn_type, None)
+    }
+
     fn get_or_declare_sendto(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         if let Some(f) = module.get_function("sendto") { return f; }
         let i32_type = self.context.i32_type();
@@ -6507,6 +6516,259 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 b.position_at_end(listen_ok);
                 b.build_return(Some(&fd)).or_llvm_err()?;
+            }
+        }
+
+        // ============================================================
+        // verum_tcp_listen_v2(host: ptr, port: i64, backlog: i64,
+        //                    flags: i64) -> i64
+        //
+        // Rich-signature replacement for `verum_tcp_listen` — the
+        // sibling of the interpreter's `tcp_listen_v2` in
+        // `verum_vbc/src/interpreter/dispatch_table/handlers/net_runtime.rs`.
+        // Both implementations honour the same contract:
+        //   * `host`    — IPv4 or IPv6 literal. inet_pton is the
+        //                 source of truth for parse success.
+        //   * `port=0`  — the kernel chooses; recover via
+        //                 `verum_tcp_local_port` (below).
+        //   * `backlog` — passed through to listen(2).
+        //   * `flags`   — bit 0 = SO_REUSEPORT (best-effort).
+        //
+        // Failure semantics: `-EINVAL` (= -22) for parse / argument
+        // failures, `-1` for socket / bind / listen failures (matches
+        // the lossy semantics of the legacy `verum_tcp_listen`; the
+        // interpreter side returns precise -errno, AOT side will gain
+        // errno fidelity in a follow-up via __error / __errno_location).
+        // ============================================================
+        {
+            let getsockname_fn = self.get_or_declare_getsockname(module);
+            let _ = getsockname_fn; // referenced by verum_tcp_local_port below
+
+            let fn_type = i64_type.fn_type(
+                &[ptr_type.into(), i64_type.into(), i64_type.into(), i64_type.into()],
+                false,
+            );
+            let func = module.get_function("verum_tcp_listen_v2")
+                .unwrap_or_else(|| module.add_function("verum_tcp_listen_v2", fn_type, None));
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
+                let entry = self.context.append_basic_block(func, "entry");
+                let parsed_v4 = self.context.append_basic_block(func, "parsed_v4");
+                let parse_fail = self.context.append_basic_block(func, "parse_fail");
+                let sock_ok = self.context.append_basic_block(func, "sock_ok");
+                let do_reuseport = self.context.append_basic_block(func, "do_reuseport");
+                let after_reuseport = self.context.append_basic_block(func, "after_reuseport");
+                let bind_ok = self.context.append_basic_block(func, "bind_ok");
+                let listen_ok = self.context.append_basic_block(func, "listen_ok");
+                let bind_fail = self.context.append_basic_block(func, "bind_fail");
+                let listen_fail = self.context.append_basic_block(func, "listen_fail");
+                let sock_fail = self.context.append_basic_block(func, "sock_fail");
+
+                let b = self.context.create_builder();
+                b.position_at_end(entry);
+
+                let host = func.get_nth_param(0).or_internal("missing param 0")?.into_pointer_value();
+                let port = func.get_nth_param(1).or_internal("missing param 1")?.into_int_value();
+                let backlog = func.get_nth_param(2).or_internal("missing param 2")?.into_int_value();
+                let flags = func.get_nth_param(3).or_internal("missing param 3")?.into_int_value();
+
+                // Try IPv4 parse first. inet_pton(AF_INET=2, host, &v4_buf)
+                // returns 1 on success, 0 if input wasn't a valid v4
+                // literal, -1 on EAFNOSUPPORT (won't happen for AF_INET).
+                let v4_buf = b.build_alloca(i32_type, "v4_buf").or_llvm_err()?;
+                b.build_store(v4_buf, i32_type.const_zero()).or_llvm_err()?;
+                let v4_rc = self.build_libc_call(&b, inet_pton_fn, &[
+                    i32_type.const_int(2, false).into(),
+                    host.into(),
+                    v4_buf.into(),
+                ], "v4_rc")?;
+                let v4_ok = b.build_int_compare(
+                    verum_llvm::IntPredicate::EQ,
+                    v4_rc,
+                    i64_type.const_int(1, false),
+                    "v4_ok",
+                ).or_llvm_err()?;
+                b.build_conditional_branch(v4_ok, parsed_v4, parse_fail).or_llvm_err()?;
+
+                b.position_at_end(parse_fail);
+                // -EINVAL = -22 across Linux + macOS. We deliberately
+                // collapse "not a v4 literal" into EINVAL rather than
+                // attempting an IPv6 parse here — IPv6 AOT support
+                // is the next layer of the architectural fork closure
+                // and lands in a follow-up commit. Until then, IPv6
+                // hosts in AOT mode produce a clean -EINVAL that the
+                // Verum-side `from_raw_os_error` maps to InvalidInput.
+                b.build_return(Some(&i64_type.const_int(
+                    (-22_i64) as u64, true,
+                ))).or_llvm_err()?;
+
+                b.position_at_end(parsed_v4);
+                let addr_be = b.build_load(i32_type, v4_buf, "addr_be").or_llvm_err()?
+                    .into_int_value();
+
+                let fd = self.build_libc_call(&b, socket_fn, &[
+                    i32_type.const_int(2, false).into(),
+                    i32_type.const_int(1, false).into(),
+                    i32_type.const_zero().into(),
+                ], "fd")?;
+                let fd_neg = b.build_int_compare(
+                    verum_llvm::IntPredicate::SLT,
+                    fd,
+                    i64_type.const_zero(),
+                    "fd_neg",
+                ).or_llvm_err()?;
+                b.build_conditional_branch(fd_neg, sock_fail, sock_ok).or_llvm_err()?;
+
+                b.position_at_end(sock_fail);
+                b.build_return(Some(&neg1)).or_llvm_err()?;
+
+                b.position_at_end(sock_ok);
+                let fd32 = b.build_int_truncate(fd, i32_type, "fd32").or_llvm_err()?;
+                // SO_REUSEADDR — always-on, matches existing
+                // verum_tcp_listen behaviour and Verum's net policy.
+                let opt = b.build_alloca(i32_type, "opt").or_llvm_err()?;
+                b.build_store(opt, i32_type.const_int(1, false)).or_llvm_err()?;
+                self.build_libc_call_void(&b, setsockopt_fn, &[
+                    fd32.into(),
+                    i32_type.const_int(sol_socket, false).into(),
+                    i32_type.const_int(so_reuseaddr, false).into(),
+                    opt.into(),
+                    i32_type.const_int(4, false).into(),
+                ], "")?;
+                // Optional SO_REUSEPORT via flags bit 0.
+                let reuseport_bit = b.build_and(flags, i64_type.const_int(1, false), "rpb").or_llvm_err()?;
+                let reuseport_set = b.build_int_compare(
+                    verum_llvm::IntPredicate::NE,
+                    reuseport_bit,
+                    i64_type.const_zero(),
+                    "rps",
+                ).or_llvm_err()?;
+                b.build_conditional_branch(reuseport_set, do_reuseport, after_reuseport).or_llvm_err()?;
+
+                b.position_at_end(do_reuseport);
+                #[cfg(target_os = "macos")]
+                let so_reuseport: u64 = 0x0200; // = 512
+                #[cfg(not(target_os = "macos"))]
+                let so_reuseport: u64 = 15;
+                self.build_libc_call_void(&b, setsockopt_fn, &[
+                    fd32.into(),
+                    i32_type.const_int(sol_socket, false).into(),
+                    i32_type.const_int(so_reuseport, false).into(),
+                    opt.into(),
+                    i32_type.const_int(4, false).into(),
+                ], "")?;
+                b.build_unconditional_branch(after_reuseport).or_llvm_err()?;
+
+                b.position_at_end(after_reuseport);
+                let sa = self.build_sockaddr_in(&b, memset_fn, port, addr_be)?;
+                let br_ = self.build_libc_call(&b, bind_fn, &[
+                    fd32.into(),
+                    sa.into(),
+                    i32_type.const_int(16, false).into(),
+                ], "br")?;
+                let bn = b.build_int_compare(
+                    verum_llvm::IntPredicate::SLT,
+                    br_,
+                    i64_type.const_zero(),
+                    "bn",
+                ).or_llvm_err()?;
+                b.build_conditional_branch(bn, bind_fail, bind_ok).or_llvm_err()?;
+
+                b.position_at_end(bind_fail);
+                self.build_libc_call_void(&b, close_fn, &[fd32.into()], "")?;
+                b.build_return(Some(&neg1)).or_llvm_err()?;
+
+                b.position_at_end(bind_ok);
+                // backlog must fit in i32 — clamp via truncate (caller
+                // validation already enforces 0..=65535 at the Verum
+                // side via __tcp_listen_v2_raw declaration).
+                let backlog32 = b.build_int_truncate(backlog, i32_type, "backlog32").or_llvm_err()?;
+                let lr = self.build_libc_call(&b, listen_fn_libc, &[
+                    fd32.into(),
+                    backlog32.into(),
+                ], "lr")?;
+                let ln = b.build_int_compare(
+                    verum_llvm::IntPredicate::SLT,
+                    lr,
+                    i64_type.const_zero(),
+                    "ln",
+                ).or_llvm_err()?;
+                b.build_conditional_branch(ln, listen_fail, listen_ok).or_llvm_err()?;
+
+                b.position_at_end(listen_fail);
+                self.build_libc_call_void(&b, close_fn, &[fd32.into()], "")?;
+                b.build_return(Some(&neg1)).or_llvm_err()?;
+
+                b.position_at_end(listen_ok);
+                b.build_return(Some(&fd)).or_llvm_err()?;
+            }
+        }
+
+        // ============================================================
+        // verum_tcp_local_port(fd: i64) -> i64
+        //
+        // getsockname(2) into a 28-byte buffer (sockaddr_in6 size, big
+        // enough for v4 too), then read sin_port at offset 2 and ntohs
+        // it. Returns the port as i64, or -1 on failure.
+        // ============================================================
+        {
+            let getsockname_fn = self.get_or_declare_getsockname(module);
+            let fn_type = i64_type.fn_type(&[i64_type.into()], false);
+            let func = module.get_function("verum_tcp_local_port")
+                .unwrap_or_else(|| module.add_function("verum_tcp_local_port", fn_type, None));
+            if func.count_params() == fn_type.count_param_types()
+                && func.count_basic_blocks() == 0 {
+                let entry = self.context.append_basic_block(func, "entry");
+                let ok_bb = self.context.append_basic_block(func, "ok");
+                let fail_bb = self.context.append_basic_block(func, "fail");
+
+                let b = self.context.create_builder();
+                b.position_at_end(entry);
+
+                let fd = func.get_nth_param(0).or_internal("missing param 0")?.into_int_value();
+                let fd32 = b.build_int_truncate(fd, i32_type, "fd32").or_llvm_err()?;
+
+                // 28-byte buffer covers sockaddr_in (16) and sockaddr_in6 (28).
+                let sa = b.build_alloca(i8_type.array_type(28), "sa").or_llvm_err()?;
+                let sa_len = b.build_alloca(i32_type, "sa_len").or_llvm_err()?;
+                b.build_store(sa_len, i32_type.const_int(28, false)).or_llvm_err()?;
+
+                let rc = self.build_libc_call(&b, getsockname_fn, &[
+                    fd32.into(),
+                    sa.into(),
+                    sa_len.into(),
+                ], "rc")?;
+                let rc_neg = b.build_int_compare(
+                    verum_llvm::IntPredicate::SLT,
+                    rc,
+                    i64_type.const_zero(),
+                    "rc_neg",
+                ).or_llvm_err()?;
+                b.build_conditional_branch(rc_neg, fail_bb, ok_bb).or_llvm_err()?;
+
+                b.position_at_end(fail_bb);
+                b.build_return(Some(&neg1)).or_llvm_err()?;
+
+                b.position_at_end(ok_bb);
+                // sin_port lies at offset 2 in both sockaddr_in and
+                // sockaddr_in6 — the family-bytes layout is identical
+                // for the first 4 bytes across v4/v6.
+                // SAFETY: GEP into the just-written 28-byte sockaddr buffer
+                // at the architectural sin_port offset (2).
+                let port_ptr = unsafe { b.build_gep(
+                    i8_type, sa, &[i32_type.const_int(2, false)], "pp",
+                ).or_llvm_err()? };
+                let port_be16 = b.build_load(self.context.i16_type(), port_ptr, "port_be16").or_llvm_err()?
+                    .into_int_value();
+                // ntohs (byte swap u16). Mirror of build_htons.
+                let p32 = b.build_int_z_extend(port_be16, i32_type, "p32").or_llvm_err()?;
+                let lo = b.build_and(p32, i32_type.const_int(0xFF, false), "lo").or_llvm_err()?;
+                let lo_shifted = b.build_left_shift(lo, i32_type.const_int(8, false), "lo_s").or_llvm_err()?;
+                let hi = b.build_right_shift(p32, i32_type.const_int(8, false), false, "hi").or_llvm_err()?;
+                let hi_masked = b.build_and(hi, i32_type.const_int(0xFF, false), "hi_m").or_llvm_err()?;
+                let port_he = b.build_or(lo_shifted, hi_masked, "port_he").or_llvm_err()?;
+                let port_i64 = b.build_int_z_extend(port_he, i64_type, "port_i64").or_llvm_err()?;
+                b.build_return(Some(&port_i64)).or_llvm_err()?;
             }
         }
 
