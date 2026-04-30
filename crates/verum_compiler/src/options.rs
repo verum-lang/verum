@@ -290,6 +290,21 @@ pub struct CompilerOptions {
     /// Enable test mode (sets `test` cfg flag)
     pub test_mode: bool,
 
+    /// Manifest-side override for the `debug_assertions` cfg flag.
+    ///
+    /// When `Some(b)`, the session's `TargetConfig.debug_assertions`
+    /// is forced to `b` regardless of `optimization_level`. When
+    /// `None`, the auto-derive `optimization_level == 0` rule wins.
+    ///
+    /// Carries the user's `[profile.<name>].debug_assertions` setting
+    /// from `Verum.toml` through the build path; pre-fix the manifest
+    /// value was tracing-only at `commands/build.rs`, so writing
+    /// `[profile.dev].debug_assertions = false` (turn the flag OFF
+    /// despite opt-level=0) had no observable effect — every
+    /// `@cfg(debug_assertions)` gate evaluated as if the auto-derive
+    /// were authoritative.
+    pub debug_assertions_override: Option<bool>,
+
     // Lint Options
     /// Lint configuration for intrinsic diagnostics and warnings
     pub lint_config: LintConfig,
@@ -414,6 +429,7 @@ impl Default for CompilerOptions {
             cfg_features: List::new(),
             cfg_custom: List::new(),
             test_mode: false,
+            debug_assertions_override: None,
             lint_config: LintConfig::default(),
             // Gradual verification defaults
             enable_bounds_elimination: true,  // Enable by default for performance
