@@ -382,15 +382,72 @@ impl VbcCodegen {
         field_count: u32,
         parent_type_name: Option<&str>,
     ) {
+        // The typed `MakeVariantTyped` form only makes sense when
+        // the resolved TypeId ALSO has a TypeDescriptor that will be
+        // present in the final VBC module — the runtime validator
+        // (`validate_make_variant_typed`) rejects with `LayoutMismatch
+        // { reason: "unknown type_id" }` otherwise.  `type_name_to_id`
+        // can carry pre-allocated IDs that never get a descriptor
+        // (Pass 1.5 allocates speculatively; descriptor population
+        // happens in `compile_item`/`collect_declarations` and may be
+        // skipped under `[lenient]` for unresolved cross-module
+        // references).  Cross-check `self.types` for an actual
+        // descriptor with this id BEFORE committing to the typed form;
+        // fall back to legacy `MakeVariant` (synthetic `0x8000+tag`
+        // sentinel id, no validation) when no descriptor backs the id.
+        // Cross-validation is also done for (tag, field_count)
+        // against the descriptor's variants — codegen and runtime
+        // must agree on layout, so any mismatch demotes to the
+        // legacy form rather than letting bytecode that the runtime
+        // would reject leak out.
         let parent_type_id = parent_type_name
             .and_then(|name| self.type_name_to_id.get(name).copied());
-        if std::env::var("VERUM_TRACE_VARIANT_EMIT").is_ok() {
-            eprintln!(
-                "[variant-emit] parent={:?} tag={} fc={} tid={:?}",
-                parent_type_name, tag, field_count, parent_type_id,
-            );
-        }
-        if let Some(tid) = parent_type_id {
+        let typed_ok = parent_type_id.and_then(|tid| {
+            let desc = self.types.iter().find(|d| d.id == tid)?;
+            // **MakeVariantTyped survival check** (#168 / TypeId(148)
+            // regression close).  The codegen-side `self.types` snapshot
+            // can briefly hold a placeholder descriptor (id reserved
+            // via Pass 1.5 speculative allocation) whose `variants`
+            // list is empty pending compile_item population.  Emitting
+            // `MakeVariantTyped { type_id: <placeholder>, tag, ... }`
+            // produces bytecode that the runtime's
+            // `validate_make_variant_typed` then rejects with
+            // `LayoutMismatch { reason: "unknown type_id" }` because
+            // the FINAL module (which the runtime sees) carries only
+            // fully-populated descriptors.
+            //
+            // Three-step gate makes the typed form survive to runtime:
+            //   1. Descriptor with this id exists in `self.types`.
+            //   2. The descriptor's variants list is non-empty —
+            //      placeholder descriptors slip through the previous
+            //      `find()` because their id is set but variants
+            //      haven't landed yet.  This guard catches them and
+            //      defers the typed-form decision until a real
+            //      descriptor lands.
+            //   3. The specific (tag, field_count) pair matches one of
+            //      the variants in the descriptor.
+            //
+            // When any step fails, we emit the legacy `MakeVariant`
+            // form (synthetic `0x8000+tag` sentinel id, no runtime
+            // validation) — the runtime's
+            // `format_variant_for_print_depth` falls back to its
+            // O(N_types) tag scan, slower but correct.  The typed
+            // form's win is the constructor-name disambiguation when
+            // distinct sum types share a tag; emitting it
+            // half-populated would TRADE that win for correctness
+            // bugs.  Correctness first.
+            if desc.variants.is_empty() {
+                return None;
+            }
+            let variant = desc.variants.iter().find(|v| v.tag == tag)?;
+            let expected = match variant.kind {
+                crate::types::VariantKind::Unit => 0u32,
+                crate::types::VariantKind::Tuple => variant.arity as u32,
+                crate::types::VariantKind::Record => variant.fields.len() as u32,
+            };
+            if expected == field_count { Some(tid) } else { None }
+        });
+        if let Some(tid) = typed_ok {
             self.ctx.emit(Instruction::MakeVariantTyped {
                 dst,
                 type_id: tid.0,
@@ -399,6 +456,36 @@ impl VbcCodegen {
             });
         } else {
             self.ctx.emit(Instruction::MakeVariant { dst, tag, field_count });
+        }
+    }
+
+    /// Best-effort parent-type extraction from a path / dotted-name
+    /// like "ShellError.SpawnFailed" or "Result::Err".  Returns the
+    /// LEFT side of the rightmost separator, when that side is a
+    /// registered TypeId in `type_name_to_id`.  This is the
+    /// architectural complement to `emit_make_variant_for_function`:
+    /// when the variant's FunctionInfo lacks `parent_type_name`
+    /// (common for cross-module imported sum types whose
+    /// constructors get registered through different paths), the
+    /// parent is right there in the user's syntactic path
+    /// (`Type . Variant`) and we can recover it without any cross-
+    /// table consultation.  Falls through to None when the path is
+    /// a single segment (bare variant name with no qualifier) — the
+    /// caller's other lookup avenues then take over.
+    pub(super) fn parent_type_from_qualified_name(&self, name: &str) -> Option<String> {
+        let last_dot = name.rfind('.');
+        let last_colon = name.rfind("::");
+        let split_at = match (last_dot, last_colon) {
+            (Some(d), Some(c)) => Some(d.max(c)),
+            (Some(d), None)    => Some(d),
+            (None, Some(c))    => Some(c),
+            (None, None)       => None,
+        }?;
+        let parent = &name[..split_at];
+        if self.type_name_to_id.contains_key(parent) {
+            Some(parent.to_string())
+        } else {
+            None
         }
     }
 
@@ -11260,22 +11347,26 @@ impl VbcCodegen {
             });
 
         if let Some(tag) = variant_tag {
-            // Record variant: dispatch through the unified
-            // typed-or-legacy emit helper.  The `MakeVariantTyped`
-            // form encodes the concrete sum-type id in the heap
-            // header so the runtime can resolve the variant
-            // constructor name correctly when distinct sum types
-            // share variant tags (e.g. `Result.Err` and
-            // `ShellError.SpawnFailed` both tag=1).  Routes through
-            // the named-lookup helper since the parent name comes
-            // from the variant constructor's FunctionInfo.
-            self.emit_make_variant_for_function(
-                result,
-                tag,
-                fields.len() as u32,
-                &variant_name,
-                Some(&dot_name),
-            );
+            // Record variant: prefer the path-derived parent type
+            // (the LEFT side of `Type . Variant`) — it's right there
+            // in the user's syntax and survives cross-module imports
+            // where the FunctionInfo lookup loses `parent_type_name`.
+            // Fall through to the FunctionInfo lookup as a backup
+            // (covers bare-variant-name uses inside the defining
+            // module, where the path is just `Variant` with no Type
+            // qualifier).
+            let path_parent = self.parent_type_from_qualified_name(&dot_name);
+            if let Some(parent) = path_parent {
+                self.emit_make_variant(result, tag, fields.len() as u32, Some(&parent));
+            } else {
+                self.emit_make_variant_for_function(
+                    result,
+                    tag,
+                    fields.len() as u32,
+                    &variant_name,
+                    Some(&dot_name),
+                );
+            }
             // For variant records, disambiguation uses the variant's own payload
             // types; the per-field logic mirrors the plain-record path below.
             let variant_type_name = format!("{}", path);
