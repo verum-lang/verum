@@ -115,6 +115,33 @@ impl<'ctx> Codegen<'ctx> {
         module.set_target_triple(&config.target.triple.0);
         module.set_data_layout_from_target(&target_machine);
 
+        // Phase-not-realised tracing: `CodegenConfig.debug_info`
+        // and `CodegenConfig.strip` are set by `debug()` /
+        // `release()` / `aggressive()` presets plus builders
+        // `with_debug_info` / `with_strip`, but no production
+        // code path here consults either field. `optimize()` (line
+        // 142) consults only `config.optimization` (the
+        // OptimizationConfig sub-struct). The actual DWARF emission
+        // lives one layer up in verum_codegen's
+        // `LoweringConfig.debug_info`, and symbol stripping lives
+        // downstream in the linker phase.
+        //
+        // Surface a debug trace when both flags are set true
+        // simultaneously — that's the contradictory configuration
+        // (DWARF requested AND symbols stripped) which signals an
+        // embedder mistake, while `release()` (debug_info=false,
+        // strip=true) and `debug()` (debug_info=true, strip=false)
+        // remain quiet.
+        if config.debug_info && config.strip {
+            tracing::debug!(
+                "verum_llvm::CodegenConfig: debug_info=true AND strip=true — \
+                 contradictory pair. Neither flag is consumed at this layer; \
+                 DWARF emission lives upstream in verum_codegen's \
+                 LoweringConfig.debug_info, symbol stripping lives downstream \
+                 in the linker phase. Forward-looking knobs."
+            );
+        }
+
         Ok(Self {
             module,
             target_machine,
