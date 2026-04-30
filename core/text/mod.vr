@@ -74,6 +74,12 @@ public mount .format.format_debug;
 public mount .format.format_display;
 public mount .format.dbg;
 
+// `TextBuilder` — efficient string construction (O(n) amortised
+// append vs O(n²) for naive `Text + Text` concat). Pre-fix the
+// file shipped but had no umbrella declaration; reachable via
+// direct file mount only.
+public mount .builder.TextBuilder;
+
 // =============================================================================
 // Prelude exports (commonly used items)
 // =============================================================================
