@@ -178,6 +178,16 @@ mount sys.common.{FileDesc, OSError};
 // Import I/O engine for async operations
 mount sys.io_engine.{IOEngine, IOInterest, IoError};
 
+// Unified TCP-listen intrinsic family (#25 cascade).  These dispatch
+// through the same opcode in interpreter and AOT mode — the
+// interpreter side calls `std::net::TcpListener::bind` and returns a
+// real kernel fd via `into_raw_fd()`; the AOT side lowers to the
+// `verum_tcp_listen_v2` LLVM helper which emits inet_pton +
+// socket+setsockopt+bind+listen IR directly.  Both paths produce a
+// real kernel fd, so the rest of `core.net.tcp` (`accept` / `close` /
+// `setsockopt` / `getsockname`) works uniformly across modes.
+mount sys.raw.{__tcp_listen_v2_raw, __tcp_local_port_raw};
+
 // =============================================================================
 // AsyncIoReady - Future for async I/O readiness
 // =============================================================================
@@ -953,119 +963,97 @@ implement TcpListener {
     }
 
     /// Internal: bind to specific address with given backlog.
+    /// Internal: bind via the unified `__tcp_listen_v2_raw` intrinsic
+    /// family.  Replaces the previous socket+setsockopt+bind+listen
+    /// chain that was dispatched through libsystem in interpreter
+    /// mode.  Both interpreter and AOT mode now converge on the same
+    /// intrinsic — the interpreter calls `std::net::TcpListener::bind`
+    /// (returning a real kernel fd via `into_raw_fd()`), AOT lowers to
+    /// the `verum_tcp_listen_v2` LLVM helper that emits
+    /// inet_pton+socket+setsockopt+bind+listen IR directly.  The
+    /// resulting fd is a real kernel fd in both modes — subsequent
+    /// `accept`/`close`/`setsockopt` continue through libsystem
+    /// uniformly.  See `internal/specs/net-framework.md` for the L1
+    /// transport-layer architectural commitment.
     fn bind_addr_with_backlog(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
-        let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
+        // Stringify the host once; the intrinsic parses via inet_pton
+        // for the v4/v6 form selection (no DNS).
+        let host = f"{addr.ip()}";
+        let port = addr.port();
 
-        // Create socket - use statement-level @cfg to ensure fd is in function scope
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let fd = socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0)
-            .map_err(IoError.from_os)?;
-
-        @cfg(target_os = "macos")
-        let fd = sys_socket(domain, SOCK_STREAM, 0)
-            .map_err(IoError.from_os)?;
-
-        // Set SO_REUSEADDR for quick restart
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let _ = set_reuseaddr(fd, true);
-
-        @cfg(target_os = "macos")
-        let _ = safe_set_reuseaddr(fd, true);
-
-        // Bind to address
-        let addr_bytes = serialize_socket_addr(addr);
-
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        if let Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
-            let _ = close(fd);
-            return Err(IoError.from_os(e));
+        let result = __tcp_listen_v2_raw(host, port, backlog, 0);
+        if result < 0 {
+            // v2 returns negative errno on failure (e.g. -EADDRINUSE,
+            // -EACCES) — negate to recover the positive errno that
+            // `IoError.from_raw_os_error` expects.  This errno
+            // fidelity is the architectural promise that distinguishes
+            // v2 from the legacy v1 (`__tcp_listen_raw`) which
+            // collapsed every failure to `-1`.
+            return Err(IoError.from_raw_os_error(-result));
         }
 
-        @cfg(target_os = "macos")
-        if let Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
-            let _ = sys_close(fd);
-            return Err(IoError.from_os(e));
-        }
+        // Recover the OS-assigned port when the caller passed `port=0`.
+        // Otherwise the caller-provided port is authoritative — it
+        // matches the bound port unless the kernel re-randomised it
+        // (which it doesn't for non-zero binds).
+        let actual_port = if port == 0 {
+            let p = __tcp_local_port_raw(result);
+            if p > 0 { p } else { port }
+        } else {
+            port
+        };
 
-        // Start listening
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        if let Err(e) = listen(fd, backlog) {
-            let _ = close(fd);
-            return Err(IoError.from_os(e));
-        }
-
-        @cfg(target_os = "macos")
-        if let Err(e) = sys_listen(fd, backlog) {
-            let _ = sys_close(fd);
-            return Err(IoError.from_os(e));
-        }
+        // Reconstruct the SocketAddr with the resolved port.  Preserve
+        // the v4/v6 family of the caller's address — `__tcp_listen_v2_raw`
+        // already enforced the family at bind time via inet_pton.
+        let actual_addr = match *addr {
+            V4(v4) => SocketAddr.new_v4(*v4.ip(), actual_port),
+            V6(v6) => SocketAddr.new_v6(*v6.ip(), actual_port),
+        };
 
         Ok(TcpListener {
-            fd: fd,
-            local_addr: *addr,
+            fd: FileDesc(result),
+            local_addr: actual_addr,
         })
     }
 
-    /// Internal: bind with SO_REUSEPORT for load-balanced multi-threaded accept.
+    /// Internal: bind with SO_REUSEPORT for load-balanced multi-threaded
+    /// accept.  Same architectural commitment as `bind_addr_with_backlog`
+    /// (#25 cascade) — dispatches through the unified
+    /// `__tcp_listen_v2_raw` intrinsic with `flags=TCP_LISTEN_FLAG_REUSEPORT`.
+    /// Both interpreter and AOT mode honour the SO_REUSEPORT bit
+    /// per-platform: Linux SO_REUSEPORT=15, macOS SO_REUSEPORT=0x0200,
+    /// Windows currently best-effort (the reuseport flag is silently
+    /// degraded if the kernel rejects it — see net_runtime.rs comment
+    /// at the flag application site).
     fn bind_addr_reuseport(addr: &SocketAddr, backlog: Int) -> Result<TcpListener, IoError> {
-        let domain = if addr.is_ipv4() { AF_INET } else { AF_INET6 };
+        let host = f"{addr.ip()}";
+        let port = addr.port();
 
-        // Create socket - use statement-level @cfg to ensure fd is in function scope
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let fd = socket(domain, SOCK_STREAM | SOCK_CLOEXEC, 0)
-            .map_err(IoError.from_os)?;
+        // TCP_LISTEN_FLAG_REUSEPORT = 1 (bit 0).  Defined in
+        // `core/sys/raw.vr` alongside the intrinsic declaration.
+        let flags: Int = 1;
 
-        @cfg(target_os = "macos")
-        let fd = sys_socket(domain, SOCK_STREAM, 0)
-            .map_err(IoError.from_os)?;
-
-        // Set SO_REUSEADDR and SO_REUSEPORT
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let _ = set_reuseaddr(fd, true);
-
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        let _ = set_reuseport(fd, true);
-
-        @cfg(target_os = "macos")
-        let _ = safe_set_reuseaddr(fd, true);
-
-        // macOS: SO_REUSEPORT value is 0x0200
-        @cfg(target_os = "macos")
-        const SO_REUSEPORT: Int = 0x0200;
-
-        @cfg(target_os = "macos")
-        let _ = safe_setsockopt_int(fd, SOL_SOCKET, SO_REUSEPORT, 1);
-
-        // Bind and listen
-        let addr_bytes = serialize_socket_addr(addr);
-
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        if let Err(e) = bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
-            let _ = close(fd);
-            return Err(IoError.from_os(e));
+        let result = __tcp_listen_v2_raw(host, port, backlog, flags);
+        if result < 0 {
+            return Err(IoError.from_raw_os_error(-result));
         }
 
-        @cfg(any(target_os = "linux", target_os = "windows"))
-        if let Err(e) = listen(fd, backlog) {
-            let _ = close(fd);
-            return Err(IoError.from_os(e));
-        }
+        let actual_port = if port == 0 {
+            let p = __tcp_local_port_raw(result);
+            if p > 0 { p } else { port }
+        } else {
+            port
+        };
 
-        @cfg(target_os = "macos")
-        if let Err(e) = sys_bind(fd, addr_bytes.as_ptr() as &unsafe Byte, addr_bytes.len() as Int) {
-            let _ = sys_close(fd);
-            return Err(IoError.from_os(e));
-        }
-
-        @cfg(target_os = "macos")
-        if let Err(e) = sys_listen(fd, backlog) {
-            let _ = sys_close(fd);
-            return Err(IoError.from_os(e));
-        }
+        let actual_addr = match *addr {
+            V4(v4) => SocketAddr.new_v4(*v4.ip(), actual_port),
+            V6(v6) => SocketAddr.new_v6(*v6.ip(), actual_port),
+        };
 
         Ok(TcpListener {
-            fd: fd,
-            local_addr: *addr,
+            fd: FileDesc(result),
+            local_addr: actual_addr,
         })
     }
 
