@@ -461,12 +461,56 @@ impl StaticVerifier {
     pub fn new(config: StaticVerificationConfig) -> Self {
         let cache = Arc::new(RwLock::new(ProofCache::new(config.max_cache_size)));
 
+        // Recipe #8 (forward-looking tracing surface): the
+        // `enable_parallel` / `num_workers` config fields are set in
+        // defaults / parsed from manifest but the actual parallel
+        // execution path is BLOCKED on Z3 — `with_z3_config` is a
+        // process-wide swap (`Z3_global_param_set`) so two threads
+        // submitting different configs would race. Until the verifier
+        // gains per-thread Z3 contexts (planned post-z3-rs API
+        // refactor), enabling parallel mode silently runs sequentially.
+        // Surface a single tracing line at construction time when the
+        // operator opted in, so a `verum.toml` setting of
+        // `[smt.static] enable_parallel = true` doesn't appear to
+        // succeed without explanation.
+        if config.enable_parallel {
+            tracing::warn!(
+                target: "verum_smt::static_verification",
+                num_workers = config.num_workers,
+                "StaticVerificationConfig: enable_parallel = true and \
+                 num_workers = {} requested, but parallel verification \
+                 is not yet wired (Z3 process-wide config blocks shared-\
+                 context parallelism). Verification will run sequentially. \
+                 Track planned implementation under the verifier-thread-\
+                 isolation roadmap.",
+                config.num_workers,
+            );
+        }
+
         Self {
             config,
             cache,
             stats: Arc::new(RwLock::new(VerificationStats::default())),
             context_stack: vec![VerificationContext::default()].into(),
         }
+    }
+
+    /// Whether the verifier was constructed with parallel mode
+    /// requested by the operator, regardless of whether the actual
+    /// parallel execution path has been wired yet. Public read so
+    /// downstream telemetry / status surfaces (e.g. `verum doctor`)
+    /// can show "requested vs. effective" parallelism without
+    /// re-reading `StaticVerificationConfig`.
+    pub fn parallel_requested(&self) -> bool {
+        self.config.enable_parallel
+    }
+
+    /// Number of workers the operator configured for parallel
+    /// verification. Read mirror of `StaticVerificationConfig.
+    /// num_workers` — surfaced so embedders comparing requested vs.
+    /// active parallelism don't need to re-read the config.
+    pub fn configured_workers(&self) -> usize {
+        self.config.num_workers
     }
 
     /// Create with default configuration
@@ -1220,3 +1264,47 @@ impl std::fmt::Display for CbgrEliminationStats {
 }
 
 // ==================== Tests ====================
+
+#[cfg(test)]
+mod inert_field_pin_tests {
+    use super::*;
+
+    /// Pin: `parallel_requested` mirrors the
+    /// `enable_parallel` field verbatim. Documents the
+    /// requested-vs-effective-parallelism split — the verifier
+    /// reports what was REQUESTED via the configured manifest
+    /// even when the actual parallel execution path isn't yet
+    /// wired (Z3 process-wide config blocker).
+    #[test]
+    fn parallel_requested_mirrors_config() {
+        let cfg_off = StaticVerificationConfig::default();
+        assert!(!cfg_off.enable_parallel, "default is sequential");
+        let v = StaticVerifier::new(cfg_off);
+        assert!(!v.parallel_requested());
+
+        let cfg_on = StaticVerificationConfig {
+            enable_parallel: true,
+            num_workers: 8,
+            ..StaticVerificationConfig::default()
+        };
+        let v = StaticVerifier::new(cfg_on);
+        assert!(v.parallel_requested());
+        assert_eq!(v.configured_workers(), 8);
+    }
+
+    /// Pin: even with `enable_parallel = true` the construction
+    /// succeeds (the tracing surface is informational, not blocking).
+    /// This guards against a future regression that promotes the
+    /// recipe-#8 surface to a hard error before the underlying
+    /// Z3 thread-isolation work lands.
+    #[test]
+    fn enable_parallel_does_not_block_construction() {
+        let cfg = StaticVerificationConfig {
+            enable_parallel: true,
+            num_workers: 16,
+            ..StaticVerificationConfig::default()
+        };
+        // Just constructing — must not panic and must not error.
+        let _v = StaticVerifier::new(cfg);
+    }
+}
