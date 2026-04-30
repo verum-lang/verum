@@ -1580,27 +1580,24 @@ const RUNTIME_WAKER_VTABLE: RawWakerVTable = RawWakerVTable {
 };
 
 // =============================================================================
-// AsyncExecutionEnv Integration (Native Context System)
+// Current-Runtime Accessor (Native Context System)
 // =============================================================================
-
-/// AsyncExecutionEnv represents the runtime execution environment.
-/// Now implemented via native TLS context slots instead of FFI.
-public type AsyncExecutionEnv is {
-    /// Environment ID
-    id: Int,
-    /// Parent environment
-    parent_id: Maybe<Int>,
-};
-
-/// Get the current AsyncExecutionEnv.
-///
-/// Returns None if no environment is set (unlikely in normal operation).
-public fn current_env() -> Maybe<&AsyncExecutionEnv> {
-    match ctx_get(SLOT_RUNTIME) {
-        Some(ptr) => Some(unsafe { &*(ptr as &AsyncExecutionEnv) }),
-        None => None,
-    }
-}
+//
+// Removed (2026-04-30): the `pub type AsyncExecutionEnv { id: Int,
+// parent_id: Maybe<Int> }` + its sibling `pub fn current_env() ->
+// Maybe<&AsyncExecutionEnv>` carried a latent UB landmine — the
+// SLOT_RUNTIME TLS slot is populated at `block_on` (line 537) with
+// `&AsyncRuntime` (a 13-field struct), but `current_env()` cast it
+// to `&AsyncExecutionEnv` (a 2-field unrelated struct).  Reading
+// any field of the result returned garbage memory.
+//
+// Verified zero production callers via grep across `core/` +
+// `crates/` before removal.  The actually-used environment
+// accessor lives in `core/runtime/mod.rs::current_env() ->
+// &ExecutionEnv` (different namespace, different type — that's
+// the one `core/runtime/spawn.vr:823` consumes).  Async-side
+// callers that need the runtime should use `current_runtime()`
+// below, which projects the correct type.
 
 /// Get the current `AsyncRuntime` from the TLS context slot.
 ///
