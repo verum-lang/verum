@@ -229,6 +229,121 @@ impl FoundationProfile {
         }
     }
 
+    /// **Bridge to existing `@framework(<tag>, "...")` citations** in
+    /// `core/math/`.  Maps a citation tag (as written in the
+    /// `@framework` attribute argument) to its foundation profile.
+    ///
+    /// Recognised tags from the existing corpus:
+    ///
+    ///   - `"hott"` → `FoundationProfile::Hott`
+    ///   - `"cubical"` → `FoundationProfile::Cubical`
+    ///   - `"zfc"` → `FoundationProfile::Zfc` (default — no inaccessibles)
+    ///   - `"zfc_one_inaccessible"` / `"htt"` (Lurie HTT requires
+    ///     ZFC + 1 inaccessible) → `FoundationProfile::ZfcOneInaccessible`
+    ///   - `"zfc_two_inaccessibles"` / `"msfs"` (MSFS requires ZFC + 2
+    ///     inaccessibles) → `FoundationProfile::ZfcTwoInaccessibles`
+    ///   - `"mltt"` → `FoundationProfile::Mltt`
+    ///   - `"mltt_uip"` / `"uip"` → `FoundationProfile::MlttUip`
+    ///   - `"cic"` / `"coq"` → `FoundationProfile::Cic`
+    ///   - `"predicative_mltt"` / `"predicative"` → `FoundationProfile::PredicativeMltt`
+    ///
+    /// Tags not in this list (e.g., framework names like
+    /// `"lurie_htt"`, `"schreiber_dcct"`, `"baez_dolan"`) are
+    /// FRAMEWORKS WITHIN a foundation — they cite specific results
+    /// in the foundation's literature, not the foundation itself.
+    /// `from_framework_tag` returns `None` for those; the consumer
+    /// classifies via the framework's known foundation separately.
+    pub fn from_framework_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "hott" => Some(FoundationProfile::Hott),
+            "cubical" => Some(FoundationProfile::Cubical),
+            "zfc" => Some(FoundationProfile::Zfc),
+            "zfc_one_inaccessible" | "htt" => Some(FoundationProfile::ZfcOneInaccessible),
+            "zfc_two_inaccessibles" | "msfs" => Some(FoundationProfile::ZfcTwoInaccessibles),
+            "zfc_three_inaccessibles" => Some(FoundationProfile::ZfcThreeInaccessibles),
+            "mltt" => Some(FoundationProfile::Mltt),
+            "mltt_uip" | "uip" => Some(FoundationProfile::MlttUip),
+            "cic" | "coq" => Some(FoundationProfile::Cic),
+            "predicative_mltt" | "predicative" => Some(FoundationProfile::PredicativeMltt),
+            _ => None,
+        }
+    }
+
+    /// **Framework → foundation map** for citations naming a
+    /// specific body of mathematical literature.  Where
+    /// [`from_framework_tag`](Self::from_framework_tag) recognises
+    /// foundation-level tags (`"hott"`, `"cubical"`, `"zfc"`),
+    /// this method recognises FRAMEWORK-level tags (specific
+    /// corpora WITHIN a foundation: `"lurie_htt"`,
+    /// `"schreiber_dcct"`, `"baez_dolan"`, …) and returns the
+    /// foundation each framework lives in.
+    ///
+    /// **Recognised frameworks** (drawn from the actual `core/math/`
+    /// corpus inventory — `verum audit --framework-axioms` lists every
+    /// citation):
+    ///
+    /// ZFC + 2 inaccessibles family:
+    ///   - `"msfs"` (107 uses) — Moduli Space of Formal Systems.
+    ///   - `"diakrisis"` (53 uses) — Yanofsky-style self-reference
+    ///     paradox-blocking.
+    ///   - `"connes_reconstruction"` (8) — non-commutative geometry.
+    ///   - `"baez_dolan"` (4) — n-category cobordism hypothesis.
+    ///   - `"schreiber_dcct"` (5) — differential cohesive ∞-topos.
+    ///   - `"petz_classification"` (4) — quantum-information ordering.
+    ///   - `"adamek_rosicky"` (3) — locally-presentable categories.
+    ///   - `"lair_makkai_pare"` — accessibility theory.
+    ///   - `"lambek_scott"` — cartesian-closed categories ↔ STLC.
+    ///
+    /// ZFC + 1 inaccessible:
+    ///   - `"lurie_htt"` (11 uses) — Higher Topos Theory.
+    ///
+    /// ZFC (no inaccessibles needed):
+    ///   - `"arnold_catastrophe"` (8) — singularity theory.
+    ///   - `"bounded_arithmetic_*"` (~10 uses) — proof-complexity
+    ///     fragments (I_Δ_0 / S_2^1 / V_0 / V_1 / V_NP / V_PH).
+    ///
+    /// Domain-specific (return `None` — not foundations):
+    ///   - `"owl2_fs"` (66 uses) — OWL 2 functional syntax (DL fragment).
+    ///
+    /// Unknown tags return `None`.
+    pub fn from_known_framework(framework: &str) -> Option<Self> {
+        match framework {
+            // ZFC + 2 inaccessibles (Verum's default meta-theory).
+            "msfs"
+            | "diakrisis"
+            | "connes_reconstruction"
+            | "baez_dolan"
+            | "schreiber_dcct"
+            | "petz_classification"
+            | "adamek_rosicky"
+            | "lair_makkai_pare"
+            | "lambek_scott" => Some(FoundationProfile::ZfcTwoInaccessibles),
+            // ZFC + 1 inaccessible (HTT lives here).
+            "lurie_htt" => Some(FoundationProfile::ZfcOneInaccessible),
+            // Pure ZFC (elementary mathematics, no Grothendieck universes).
+            "arnold_catastrophe"
+            | "bounded_arithmetic_i_delta_0"
+            | "bounded_arithmetic_s_2_1"
+            | "bounded_arithmetic_v_0"
+            | "bounded_arithmetic_v_1"
+            | "bounded_arithmetic_v_np"
+            | "bounded_arithmetic_v_ph" => Some(FoundationProfile::Zfc),
+            _ => None,
+        }
+    }
+
+    /// **Comprehensive resolver**: try the foundation-tag bridge first
+    /// ([`from_framework_tag`](Self::from_framework_tag)), fall back
+    /// to the framework-name bridge
+    /// ([`from_known_framework`](Self::from_known_framework)).
+    /// Returns `None` only when neither recognises the tag.
+    ///
+    /// This is the canonical entry point for "given a citation
+    /// `@framework(<tag>, ...)`, what foundation does it imply?".
+    pub fn resolve_citation(tag: &str) -> Option<Self> {
+        Self::from_framework_tag(tag).or_else(|| Self::from_known_framework(tag))
+    }
+
     /// All known foundation profiles, in canonical order.  Used by
     /// the audit gate's "list-all-foundations" emission.
     pub fn all() -> [FoundationProfile; 10] {
@@ -396,5 +511,178 @@ mod tests {
                 profile,
             );
         }
+    }
+
+    #[test]
+    fn from_framework_tag_bridges_existing_corpus() {
+        // These tags appear in the actual core/math/ corpus
+        // (`@framework(hott, "...")`, `@framework(cubical, "...")`,
+        // `@framework(msfs, "...")`).  The bridge maps each to its
+        // foundation.
+        assert_eq!(
+            FoundationProfile::from_framework_tag("hott"),
+            Some(FoundationProfile::Hott),
+        );
+        assert_eq!(
+            FoundationProfile::from_framework_tag("cubical"),
+            Some(FoundationProfile::Cubical),
+        );
+        assert_eq!(
+            FoundationProfile::from_framework_tag("zfc"),
+            Some(FoundationProfile::Zfc),
+        );
+        assert_eq!(
+            FoundationProfile::from_framework_tag("msfs"),
+            Some(FoundationProfile::ZfcTwoInaccessibles),
+            "MSFS uses ZFC + 2 inaccessibles per the corpus README",
+        );
+        assert_eq!(
+            FoundationProfile::from_framework_tag("htt"),
+            Some(FoundationProfile::ZfcOneInaccessible),
+            "Lurie HTT requires ZFC + 1 inaccessible",
+        );
+    }
+
+    #[test]
+    fn from_framework_tag_aliases() {
+        // UIP tag → MlttUip.
+        assert_eq!(
+            FoundationProfile::from_framework_tag("uip"),
+            Some(FoundationProfile::MlttUip),
+        );
+        // Coq tag → CIC (Coq's kernel logic).
+        assert_eq!(
+            FoundationProfile::from_framework_tag("coq"),
+            Some(FoundationProfile::Cic),
+        );
+    }
+
+    #[test]
+    fn from_framework_tag_returns_none_for_framework_names() {
+        // Framework names (specific corpora WITHIN a foundation) are
+        // not foundations themselves — they cite results in the
+        // foundation's literature.  Return None so consumers
+        // dispatch through a separate framework→foundation map.
+        assert!(FoundationProfile::from_framework_tag("lurie_htt").is_none());
+        assert!(FoundationProfile::from_framework_tag("schreiber_dcct").is_none());
+        assert!(FoundationProfile::from_framework_tag("baez_dolan").is_none());
+        assert!(FoundationProfile::from_framework_tag("connes_reconstruction").is_none());
+    }
+
+    #[test]
+    fn from_framework_tag_unknown_returns_none() {
+        assert!(FoundationProfile::from_framework_tag("").is_none());
+        assert!(FoundationProfile::from_framework_tag("some_garbage_tag").is_none());
+        assert!(FoundationProfile::from_framework_tag("ZFC").is_none(), "case-sensitive");
+    }
+
+    #[test]
+    fn from_known_framework_msfs_family_is_zfc_two_inaccessibles() {
+        // The MSFS family of frameworks all share Verum's default
+        // meta-theory: ZFC + 2 Grothendieck inaccessibles.
+        for framework in [
+            "msfs",
+            "diakrisis",
+            "connes_reconstruction",
+            "baez_dolan",
+            "schreiber_dcct",
+            "petz_classification",
+            "adamek_rosicky",
+            "lair_makkai_pare",
+            "lambek_scott",
+        ] {
+            assert_eq!(
+                FoundationProfile::from_known_framework(framework),
+                Some(FoundationProfile::ZfcTwoInaccessibles),
+                "framework {:?} should resolve to ZFC + 2 inaccessibles",
+                framework,
+            );
+        }
+    }
+
+    #[test]
+    fn from_known_framework_lurie_htt_is_zfc_one_inaccessible() {
+        assert_eq!(
+            FoundationProfile::from_known_framework("lurie_htt"),
+            Some(FoundationProfile::ZfcOneInaccessible),
+        );
+    }
+
+    #[test]
+    fn from_known_framework_pure_zfc_corpora() {
+        for framework in [
+            "arnold_catastrophe",
+            "bounded_arithmetic_i_delta_0",
+            "bounded_arithmetic_s_2_1",
+            "bounded_arithmetic_v_0",
+            "bounded_arithmetic_v_1",
+            "bounded_arithmetic_v_np",
+            "bounded_arithmetic_v_ph",
+        ] {
+            assert_eq!(
+                FoundationProfile::from_known_framework(framework),
+                Some(FoundationProfile::Zfc),
+                "framework {:?} should resolve to plain ZFC",
+                framework,
+            );
+        }
+    }
+
+    #[test]
+    fn from_known_framework_unknown_returns_none() {
+        // Domain-specific or unrecognised tags are not foundations.
+        assert!(FoundationProfile::from_known_framework("owl2_fs").is_none());
+        assert!(FoundationProfile::from_known_framework("").is_none());
+        assert!(FoundationProfile::from_known_framework("garbage").is_none());
+    }
+
+    #[test]
+    fn from_known_framework_does_not_overlap_foundation_tags() {
+        // Foundation-level tags belong to `from_framework_tag`, not
+        // `from_known_framework`.  Keep the boundary clean so
+        // `resolve_citation` always picks the foundation-tag bridge
+        // first when both could match.
+        assert!(FoundationProfile::from_known_framework("hott").is_none());
+        assert!(FoundationProfile::from_known_framework("cubical").is_none());
+        assert!(FoundationProfile::from_known_framework("zfc").is_none());
+        assert!(FoundationProfile::from_known_framework("htt").is_none());
+        assert!(FoundationProfile::from_known_framework("cic").is_none());
+    }
+
+    #[test]
+    fn resolve_citation_combines_both_bridges() {
+        // Foundation-level tags resolve via `from_framework_tag`.
+        assert_eq!(
+            FoundationProfile::resolve_citation("hott"),
+            Some(FoundationProfile::Hott),
+        );
+        // Framework-level tags resolve via `from_known_framework`.
+        assert_eq!(
+            FoundationProfile::resolve_citation("lurie_htt"),
+            Some(FoundationProfile::ZfcOneInaccessible),
+        );
+        assert_eq!(
+            FoundationProfile::resolve_citation("diakrisis"),
+            Some(FoundationProfile::ZfcTwoInaccessibles),
+        );
+        // Unknown tags return None.
+        assert!(FoundationProfile::resolve_citation("garbage").is_none());
+        assert!(FoundationProfile::resolve_citation("owl2_fs").is_none());
+    }
+
+    #[test]
+    fn resolve_citation_msfs_tag_prefers_foundation_bridge() {
+        // The string `"msfs"` is recognised by BOTH bridges (the
+        // foundation-tag bridge as ZfcTwoInaccessibles, the framework
+        // bridge as ZfcTwoInaccessibles).  `resolve_citation` picks
+        // the foundation-tag bridge first; both must agree.
+        let from_tag = FoundationProfile::from_framework_tag("msfs");
+        let from_known = FoundationProfile::from_known_framework("msfs");
+        assert_eq!(from_tag, Some(FoundationProfile::ZfcTwoInaccessibles));
+        assert_eq!(from_known, Some(FoundationProfile::ZfcTwoInaccessibles));
+        assert_eq!(
+            FoundationProfile::resolve_citation("msfs"),
+            Some(FoundationProfile::ZfcTwoInaccessibles),
+        );
     }
 }
