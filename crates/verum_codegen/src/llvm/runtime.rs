@@ -4433,30 +4433,52 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// libc on Linux now routes through this helper.  Other-Unix
     /// platforms (FreeBSD/OpenBSD) keep libc fallback under `@cfg`
     /// for now; production targeting needs explicit per-platform arms.
-    #[cfg(target_os = "linux")]
+    ///
+    /// **Cross-compilation note**: this method is ALWAYS available
+    /// regardless of host OS — the inline-asm register convention is
+    /// selected by inspecting `module.get_triple()` at codegen time
+    /// (the LLVM module's *target* triple) so that producing a
+    /// Linux/aarch64 binary on an x86_64-darwin host emits ARM64
+    /// syscall conventions, and vice versa.  HOST-based `#[cfg]`
+    /// gating would have tied the method's behavior to the compile
+    /// host instead of the target — silently miscompiling every
+    /// cross build.
+    ///
+    /// The LLVM module is the source of truth for the target triple
+    /// (set by `verum_codegen::llvm::vbc_lowering` from
+    /// `CompilerOptions.target_triple`), so we read the architecture
+    /// substring from `module.get_triple()`.
     fn emit_linux_syscall(
         &self,
         builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
         sys_num: u64,
         args: &[IntValue<'ctx>],
     ) -> Result<IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
 
-        #[cfg(target_arch = "x86_64")]
-        let (asm_str, constraints) = (
-            "syscall",
-            "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
-        );
-        #[cfg(target_arch = "aarch64")]
-        let (asm_str, constraints) = (
-            "svc #0",
-            "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
-        );
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        let (asm_str, constraints): (&str, &str) = (
-            "",
-            "=r,r,r,r,r,r,r,r",
-        );
+        // Inspect the LLVM module's TARGET triple, NOT the compile
+        // host's `target_arch`.  Cross-compilation safe: producing a
+        // Linux/aarch64 binary on x86_64-darwin emits ARM64 syscall
+        // conventions correctly.
+        let triple = module.get_triple();
+        let triple_str = triple.as_str().to_string_lossy();
+        let (asm_str, constraints) = if triple_str.contains("aarch64") || triple_str.contains("arm64") {
+            (
+                "svc #0",
+                "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
+            )
+        } else if triple_str.contains("x86_64") {
+            (
+                "syscall",
+                "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
+            )
+        } else {
+            // Other archs (32-bit ARM, RISC-V, …): caller should
+            // route through the per-platform fallback rather than
+            // relying on this helper.  Emit a stub that returns 0.
+            ("", "=r,r,r,r,r,r,r,r")
+        };
 
         let fn_type = i64_type.fn_type(
             &[
@@ -5577,6 +5599,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         });
 
         // verum_sys_getpid() -> i64
+        //
+        // Per-platform dispatch (libc-free):
+        //   * Linux: direct `getpid` syscall via inline asm.
+        //     SYS_getpid: x86_64=39, aarch64=172.
+        //   * macOS / other Unix: libSystem `getpid()` (acceptable —
+        //     libsystem IS the macOS OS interface).
         {
             let fn_type = i64_type.fn_type(&[], false);
             let func = module.get_function("verum_sys_getpid")
@@ -5585,10 +5613,25 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let entry = self.context.append_basic_block(func, "entry");
                 let builder = self.context.create_builder();
                 builder.position_at_end(entry);
-                let pid = builder.build_call(getpid_fn, &[], "pid")
-                    .or_llvm_err()?.try_as_basic_value().basic().or_internal("call returned void")?.into_int_value();
-                let result = builder.build_int_s_extend(pid, i64_type, "ext").or_llvm_err()?;
-                builder.build_return(Some(&result)).or_llvm_err()?;
+
+                #[cfg(target_os = "linux")]
+                {
+                    #[cfg(target_arch = "x86_64")]
+                    let sys_num = 39_u64;
+                    #[cfg(target_arch = "aarch64")]
+                    let sys_num = 172_u64;
+                    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+                    let sys_num = 0_u64;
+                    let pid = self.emit_linux_syscall(&builder, module, sys_num, &[])?;
+                    builder.build_return(Some(&pid)).or_llvm_err()?;
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let pid = builder.build_call(getpid_fn, &[], "pid")
+                        .or_llvm_err()?.try_as_basic_value().basic().or_internal("call returned void")?.into_int_value();
+                    let result = builder.build_int_s_extend(pid, i64_type, "ext").or_llvm_err()?;
+                    builder.build_return(Some(&result)).or_llvm_err()?;
+                }
             }
         }
 
