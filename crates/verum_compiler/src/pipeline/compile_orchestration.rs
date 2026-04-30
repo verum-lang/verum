@@ -24,12 +24,24 @@ use std::time::Instant;
 use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
-use verum_ast::Module;
-use verum_common::{List, Map, Text};
+use verum_ast::{decl::ItemKind, FileId, Module};
+use verum_common::{List, Map, Shared, Text};
+use verum_diagnostics::DiagnosticBuilder;
+use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
+use verum_modules::{
+    ModuleId, ModuleInfo, extract_exports_from_module, resolve_glob_reexports,
+    resolve_specific_reexport_kinds,
+};
+use verum_types::TypeChecker;
 
 use crate::hash::compute_item_hashes_from_module;
+use crate::phases::type_error_to_diagnostic;
 
-use super::{CheckResult, CompilationPipeline, CompilerPass};
+use super::{
+    CheckResult, CompilationMode, CompilationPipeline, CompilerPass, save_registry_to_disk,
+    should_parse_as_script,
+};
 
 impl<'s> CompilationPipeline<'s> {
     /// Compile a string of source code (simple API)
