@@ -25,7 +25,7 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount core.sys.common.{FileDesc, OSError, pwrite, full_fsync};
 mount core.database.sqlite.native.l1_pager.journal.wal.{
-    Wal, WalHeader, WalChecksum, PagerWalFrameHeader,
+    Wal, WalHeader, WalChecksum, WalFrameHeader,
     WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE, WAL_FORMAT_VERSION,
     wal_new, wal_header_serialize, wal_frame_header_serialize,
     wal_running_checksum,
@@ -211,7 +211,7 @@ implement WalWriter {
         let after_prefix = wal_running_checksum(self.running.clone(), prefix.as_slice());
         let after_body   = wal_running_checksum(after_prefix, body);
 
-        let frame_header = PagerWalFrameHeader {
+        let frame_header = WalFrameHeader {
             page_number: page_no,
             db_size_after_commit: db_size_after_commit,
             salt_1: self.salt_1,

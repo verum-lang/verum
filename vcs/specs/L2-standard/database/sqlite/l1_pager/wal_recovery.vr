@@ -25,7 +25,7 @@ mount core.database.sqlite.native.l1_pager.recovery.{
     wal_scan, plan_has_recoverable_commit,
 };
 mount core.database.sqlite.native.l1_pager.journal.wal.{
-    WalHeader, PagerWalFrameHeader, WalChecksum,
+    WalHeader, WalFrameHeader, WalChecksum,
     WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE, WAL_FORMAT_VERSION,
     WAL_MAGIC_LE,
     wal_new, wal_header_serialize, wal_frame_header_serialize,
@@ -83,7 +83,7 @@ fn build_wal(
         push_be32(&mut prefix, wal.header.salt_2);
         let after_prefix = wal_running_checksum(running.clone(), prefix.as_slice());
         let after_body   = wal_running_checksum(after_prefix, body.as_slice());
-        let fh = PagerWalFrameHeader {
+        let fh = WalFrameHeader {
             page_number: (k + 1) as UInt32,
             db_size_after_commit: db_size_after,
             salt_1: wal.header.salt_1,
