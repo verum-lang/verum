@@ -231,18 +231,46 @@ use verum_ast::ty::{Type, TypeKind};
 /// **Convert a theorem (or lemma / corollary) declaration to a
 /// VerificationGoal.**
 ///
-/// - Hypotheses: the theorem's `requires` clauses, each translated
-///   via [`proposition_to_term`].
-/// - Conclusion: the theorem's `proposition` (synthesised from
-///   `ensures` clauses), translated via [`proposition_to_term`].
-/// - Source: `GoalSource::Theorem` / `Lemma` / `Corollary` per
-///   `kind` selector — caller picks the correct discriminant.
+/// Hypotheses are constructed in two layers:
+///
+///   1. Generic-parameter binders, one per entry in `theorem.generics`
+///      (e.g. `<A, B>`).  Each gets `Universe(0)` as a placeholder
+///      type — sufficient to thread the de Bruijn index through the
+///      Pi-chain so the conclusion can reference type variables.
+///   2. Value-parameter binders, one per entry in `theorem.params`
+///      (e.g. `(x: A, n: Int)`).  Same `Universe(0)` placeholder
+///      until full type translation lands.
+///   3. `requires`-clause hypotheses, translated via
+///      [`proposition_to_term`].
+///
+/// The conclusion is the theorem's `proposition` (synthesised from
+/// `ensures` clauses), translated via [`proposition_to_term`].
+///
+/// **Why parameters become hypotheses**: a theorem
+/// `theorem id<A>(x: A) ensures x` is logically `∀A. ∀x:A. x` — the
+/// generics + params are universal quantifiers.  Pi-chain encoding
+/// turns them into hypotheses of the goal so the certificate's
+/// claimed type reflects the full quantified statement, not just
+/// the proposition body.
 pub fn from_theorem_decl(
     theorem: &TheoremDecl,
     source_kind: TheoremKind,
     ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
-    let hypotheses = translate_clauses(theorem.requires.iter(), ctx)?;
+    let mut hypotheses: Vec<Term> = Vec::new();
+    // Generic-parameter binders.  Each generic contributes one
+    // Pi-binder with `Universe(0)` as the placeholder type.
+    for _ in theorem.generics.iter() {
+        hypotheses.push(Term::Universe(0));
+    }
+    // Value-parameter binders.  Same placeholder until the type
+    // translator produces real Term encodings of param types.
+    for _ in theorem.params.iter() {
+        hypotheses.push(Term::Universe(0));
+    }
+    // `requires`-clause hypotheses, in source order.
+    let mut requires_terms = translate_clauses(theorem.requires.iter(), ctx)?;
+    hypotheses.append(&mut requires_terms);
     let conclusion = proposition_to_term(theorem.proposition.as_ref(), ctx)?;
     let name = theorem.name.name.to_string();
     let source = match source_kind {
@@ -787,6 +815,76 @@ mod tests {
         ctx.register_axiom("my_pred", Term::Universe(0));
         let goal = from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx).unwrap();
         assert_eq!(goal.conclusion, Term::Var(0));
+    }
+
+    #[test]
+    fn from_theorem_decl_encodes_parameters_as_hypotheses() {
+        // A theorem with generic params + value params should produce a
+        // goal whose hypothesis count = generics + params + requires.
+        use verum_ast::decl::{FunctionParam, FunctionParamKind};
+        use verum_ast::pattern::Pattern;
+        use verum_ast::ty::{GenericParam, GenericParamKind, Type, TypeKind};
+        let span = Span::dummy();
+        let mut theorem = TheoremDecl::new(
+            Ident { name: "with_params".into(), span },
+            bool_true_expr(),
+            span,
+        );
+        // Add 1 generic + 2 params + 1 requires clause = 4 hypotheses.
+        let mut generics = List::new();
+        generics.push(GenericParam {
+            kind: GenericParamKind::Type {
+                name: Ident { name: "A".into(), span },
+                bounds: List::new(),
+                default: verum_common::Maybe::None,
+            },
+            is_implicit: false,
+            span,
+        });
+        theorem.generics = generics;
+
+        let mut params = List::new();
+        let int_type = Type {
+            kind: TypeKind::Int,
+            span,
+        };
+        params.push(FunctionParam::new(
+            FunctionParamKind::Regular {
+                pattern: Pattern::ident(
+                    Ident { name: "x".into(), span },
+                    false,
+                    span,
+                ),
+                ty: int_type.clone(),
+                default_value: verum_common::Maybe::None,
+            },
+            span,
+        ));
+        params.push(FunctionParam::new(
+            FunctionParamKind::Regular {
+                pattern: Pattern::ident(
+                    Ident { name: "y".into(), span },
+                    false,
+                    span,
+                ),
+                ty: int_type,
+                default_value: verum_common::Maybe::None,
+            },
+            span,
+        ));
+        theorem.params = params;
+
+        let mut requires = List::new();
+        requires.push(bool_true_expr());
+        theorem.requires = requires;
+
+        let ctx = ElabContext::new();
+        let goal = from_theorem_decl(&theorem, TheoremKind::Theorem, &ctx).unwrap();
+        assert_eq!(
+            goal.hypothesis_count(),
+            4,
+            "1 generic + 2 params + 1 requires should give 4 hypotheses",
+        );
     }
 
     #[test]
