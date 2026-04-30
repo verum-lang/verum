@@ -711,6 +711,21 @@ pub struct CompilationPipeline<'s> {
     /// Stored separately so they survive `self.modules.clear()` after type checking.
     project_modules: Map<Text, Arc<Module>>,
 
+    /// On-demand stdlib filter — when set, `load_stdlib_modules` only
+    /// parses + registers the modules in this set. The keystone for the
+    /// "parse user → compute reachable → load only what's needed" flow.
+    ///
+    /// Set by `compile_string` / `run_check_only` after parsing the user
+    /// source and computing reachability via `stdlib_reachability`. Stays
+    /// `None` for callers that want the legacy full-load behaviour
+    /// (stdlib bootstrap mode, REPL, certain integration tests).
+    ///
+    /// Why a field instead of a function parameter: `load_stdlib_modules`
+    /// is invoked from 10+ call sites; threading a parameter through all
+    /// of them would touch every public entry point. The field is set
+    /// once before the load and consulted inside each cache path.
+    reachable_stdlib_filter: Option<std::collections::HashSet<String>>,
+
     /// Current compiler pass
     current_pass: CompilerPass,
 
@@ -1042,6 +1057,7 @@ impl<'s> CompilationPipeline<'s> {
             lazy_resolver,
             modules: Map::new(),
             project_modules: Map::new(),
+            reachable_stdlib_filter: None,
             current_pass: CompilerPass::Pass1Registration,
             mode: CompilationMode::Interpret,
             build_mode: BuildMode::Normal,
@@ -1153,6 +1169,8 @@ impl<'s> CompilationPipeline<'s> {
             lazy_resolver,
             modules: Map::new(),
             project_modules: Map::new(),
+            // Stdlib bootstrap inherently needs every module — no filter.
+            reachable_stdlib_filter: None,
             current_pass: CompilerPass::Pass1Registration,
             mode: CompilationMode::Interpret, // VBC interpretation for stdlib
             build_mode: BuildMode::StdlibBootstrap { config },
@@ -1513,8 +1531,16 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("Compiling source string ({} bytes)", source.len());
 
-        // Load stdlib modules first (enables std.* imports and type resolution)
-        self.load_stdlib_modules()?;
+        // Parse-user-first flow: produce the user AST WITHOUT loading
+        // stdlib (the parser is target-independent and registry-free),
+        // compute reachability, then load stdlib filtered to the
+        // reachable subset. Cold path saves ~7-8s by skipping the parse
+        // of ~2200 modules the user never references.
+        //
+        // Opt-out: `VERUM_NO_LAZY_STDLIB=1` reverts to the legacy
+        // "load full stdlib up front" order — used for stdlib bootstrap
+        // and certain integration tests.
+        let lazy_enabled = std::env::var("VERUM_NO_LAZY_STDLIB").is_err();
 
         // Create a temporary file ID for the source
         let temp_path = PathBuf::from("<string>");
@@ -1523,13 +1549,17 @@ impl<'s> CompilationPipeline<'s> {
             .load_source_string(source, temp_path.clone())
             .context("Failed to load source string")?;
 
-        // Parse
+        // Parse user source first (no stdlib needed by the parser).
         let module = self.phase_parse(file_id)?;
 
-        // On-demand narrowing: drop stdlib modules not reachable from the
-        // user's `mount` set. Cuts the type-check surface from ~2266 to
-        // typically <100 modules; opt-out via `VERUM_NO_LAZY_STDLIB=1`.
-        if std::env::var("VERUM_NO_LAZY_STDLIB").is_err() {
+        // Arm the reachability filter, then load only the needed subset.
+        if lazy_enabled {
+            self.arm_reachable_stdlib_filter(&module);
+        }
+        self.load_stdlib_modules()?;
+        // Final narrow pass — covers fast-cache paths that loaded the
+        // full registry irrespective of the filter.
+        if lazy_enabled {
             self.narrow_stdlib_to_user_reachable(&module);
         }
 
@@ -3601,6 +3631,35 @@ impl<'s> CompilationPipeline<'s> {
     // STDLIB MODULE LOADING
     // ========================================================================
 
+    /// Pre-compute the reachable-stdlib filter from a user AST and stash
+    /// it on the pipeline so the next `load_stdlib_modules` call only
+    /// parses + registers modules the user actually needs.
+    ///
+    /// This is the "parse-user-first → narrow load" entry point. Cold
+    /// path savings are large: instead of parsing ~2266 stdlib files
+    /// upfront we parse only the ~50–100 reachable ones, plus the user
+    /// source. Warm paths (in-memory + disk cache) still hit their fast
+    /// branches; the same filter is applied when narrowing the cached
+    /// registry post-clone.
+    ///
+    /// Returns the size of the reachable set (diagnostic-only).
+    pub fn arm_reachable_stdlib_filter(&mut self, user_ast: &Module) -> usize {
+        use crate::stdlib_reachability;
+        let Some(reachable) =
+            stdlib_reachability::compute_reachable_stdlib_modules(user_ast)
+        else {
+            self.reachable_stdlib_filter = None;
+            return 0;
+        };
+        if reachable.is_empty() {
+            self.reachable_stdlib_filter = None;
+            return 0;
+        }
+        let count = reachable.len();
+        self.reachable_stdlib_filter = Some(reachable);
+        count
+    }
+
     /// Narrow the loaded stdlib to the modules transitively reachable from
     /// `user_ast`'s `mount` declarations.
     ///
@@ -3956,6 +4015,23 @@ impl<'s> CompilationPipeline<'s> {
             let mut file_data = file_data;
             file_data.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
 
+            // On-demand pruning: when a reachable filter is set (parse-
+            // user-first flow), drop files we know won't be needed before
+            // we pay the parser cost. Skipping is conservative: a path
+            // missing from the filter is genuinely unreachable per the
+            // build-time dep graph.
+            let pre_filter_count = file_data.len();
+            if let Some(filter) = self.reachable_stdlib_filter.clone() {
+                file_data.retain(|(path, _, _)| filter.contains(path.as_str()));
+                let dropped = pre_filter_count.saturating_sub(file_data.len());
+                if dropped > 0 {
+                    info!(
+                        "stdlib parse: filtered {} → {} modules ({} dropped) before parse",
+                        pre_filter_count, file_data.len(), dropped
+                    );
+                }
+            }
+
             // Phase 2: Parse modules (must be sequential due to shared parser state)
             let mut entries = Vec::with_capacity(file_data.len());
             for (module_path_str, source_text, file_path) in &file_data {
@@ -3969,8 +4045,10 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
 
-            // Store in global cache for future pipeline instances
-            {
+            // Cache only when this was a full unfiltered parse — otherwise
+            // a subsequent compilation that needs a different reachable
+            // subset would silently see only the previous run's view.
+            if self.reachable_stdlib_filter.is_none() {
                 let cache = global_stdlib_cache();
                 let mut guard = cache.write().unwrap_or_else(|poisoned| {
                     tracing::warn!("stdlib cache RwLock poisoned during write, recovering");
