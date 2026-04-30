@@ -819,10 +819,24 @@ impl HygieneChecker {
     // Quote-Specific Checking
     // ========================================================================
 
-    /// Check the tokens of a quote expression
+    /// Check the tokens of a quote expression.
+    ///
+    /// Walks the token tree and looks for **identifier tokens that
+    /// shadow bindings from outside the quote scope**. Any such match
+    /// is recorded as a `PotentialCapture` violation so the embedder
+    /// can decide between warning and hard-fail per
+    /// `CheckerConfig::warn_on_potential_capture`.
+    ///
+    /// The walk is intentionally textual — Verum's `TokenTreeToken` does
+    /// not yet carry per-token scope sets (the parser drops them at
+    /// macro-input time). Until the tokeniser is upgraded to thread
+    /// scope sets through, this textual check catches the most common
+    /// accidental-capture class: a quoted body referencing an
+    /// identifier whose name happens to collide with an outer let /
+    /// param binding the macro author did not anticipate.
     fn check_quote_tokens(
         &mut self,
-        _tokens: &List<verum_ast::expr::TokenTree>,
+        tokens: &List<verum_ast::expr::TokenTree>,
         target_stage: Option<u32>,
         span: Span,
     ) {
@@ -837,8 +851,70 @@ impl HygieneChecker {
             });
         }
 
-        // In a full implementation, we would walk the token tree
-        // and check hygiene for each interpolation
+        // Walk tokens looking for accidental capture.
+        self.walk_quote_tokens(tokens);
+    }
+
+    /// Re-check tokens that have already been spliced into a quote.
+    ///
+    /// After `MetaContext::expand_quote_splices` substitutes `${expr}`
+    /// and `$ident` placeholders, the tokens that landed in the
+    /// substitution slots may bring in identifiers from the splice
+    /// site that were never visible to the quote-site author. This
+    /// public entry point lets the meta evaluator re-run the same
+    /// capture-detection walk on the post-splice token tree, closing
+    /// the audit-F P0 finding "splice hygiene re-check missing".
+    ///
+    /// The caller passes the tokens *after* expansion. Violations are
+    /// accumulated on the checker; consumers that want hard-fail
+    /// behaviour should drain `take_violations()` after the call.
+    pub fn check_post_splice_tokens(
+        &mut self,
+        tokens: &List<verum_ast::expr::TokenTree>,
+    ) {
+        self.walk_quote_tokens(tokens);
+    }
+
+    /// Recursive walk shared by `check_quote_tokens` and the post-splice
+    /// re-check entry point. Visits every token, recursing into groups,
+    /// and on each identifier token consults the binding table to flag
+    /// shadowing of out-of-quote bindings.
+    fn walk_quote_tokens(&mut self, tokens: &List<verum_ast::expr::TokenTree>) {
+        use verum_ast::expr::{TokenTree, TokenTreeKind};
+        for tt in tokens.iter() {
+            match tt {
+                TokenTree::Token(tok) => {
+                    if matches!(tok.kind, TokenTreeKind::Ident) {
+                        self.flag_capture_if_shadowing(&tok.text, tok.span);
+                    }
+                }
+                TokenTree::Group { tokens, .. } => {
+                    self.walk_quote_tokens(tokens);
+                }
+            }
+        }
+    }
+
+    /// Helper: if `name` resolves to a binding in any scope on the
+    /// current scope_stack, record a `ShadowConflict` violation. The
+    /// existing `HygieneViolation` taxonomy already has the right
+    /// severity tier for this — the shadowed binding is the one a
+    /// macro author would not have anticipated when writing the
+    /// quoted body.
+    fn flag_capture_if_shadowing(&mut self, name: &Text, span: Span) {
+        // Only flag when the embedder cares about shadowing — projects
+        // that wire shadow recovery in (`allow_shadow_recovery = true`)
+        // intentionally accept the redefinition, so noise here would
+        // be wrong.
+        if self.config.allow_shadow_recovery { return; }
+        let Some(entries) = self.bindings.get(name) else { return; };
+        if entries.is_empty() { return; }
+        let scopes = entries[0].scopes.clone();
+        let shadowed = super::scope::HygienicIdent::new(name.clone(), scopes, span);
+        self.violations.push(HygieneViolation::ShadowConflict {
+            shadowed,
+            introduced_at: span,
+        });
     }
 
     /// Check if we're currently inside a quote

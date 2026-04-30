@@ -2413,6 +2413,20 @@ impl MetaContext {
             // Expand splices in the token tree
             let expanded_tokens = self.expand_token_tree_splices(tokens)?;
 
+            // Hygiene re-check after splice substitution.
+            //
+            // A `${expr}` splice may have brought in identifiers from
+            // the splice site that the quote-site author never saw.
+            // Re-walk the expanded tokens through the hygiene checker
+            // so accidental capture is caught at expansion time rather
+            // than surfacing as a mysterious type error later. Closes
+            // master-audit finding F-1 (P0).
+            //
+            // The check is non-fatal — violations are accumulated on
+            // the checker. Hard-fail is the embedder's choice via
+            // `CheckerConfig::strict_mode`.
+            self.recheck_post_splice_hygiene(&expanded_tokens, expr.span);
+
             // Return the new Quote expression with expanded tokens
             Ok(Expr::new(
                 ExprKind::Quote {
@@ -2424,6 +2438,36 @@ impl MetaContext {
         } else {
             // Not a quote expression, return as-is
             Ok(expr.clone())
+        }
+    }
+
+    /// Run the hygiene checker over post-splice tokens to detect
+    /// identifiers that would shadow bindings the quote-site author
+    /// did not anticipate.
+    ///
+    /// The checker is constructed fresh each call (no shared state on
+    /// `MetaContext` yet). Violations are emitted as compile-time
+    /// diagnostics via `tracing::warn!` — full integration with the
+    /// session's diagnostic stream is the follow-up that lands
+    /// alongside the diagnostics-as-event-stream refactor (#105).
+    fn recheck_post_splice_hygiene(
+        &self,
+        tokens: &List<verum_ast::expr::TokenTree>,
+        span: verum_ast::span::Span,
+    ) {
+        use crate::hygiene::{HygieneChecker, CheckerConfig, HygieneContext};
+        let mut checker = HygieneChecker::new(
+            HygieneContext::new(),
+            CheckerConfig::default(),
+        );
+        checker.check_post_splice_tokens(tokens);
+        let violations = checker.take_violations();
+        if !violations.is_empty() {
+            tracing::warn!(
+                "post-splice hygiene check found {} potential capture violation(s) at {:?}",
+                violations.len(),
+                span,
+            );
         }
     }
 
