@@ -652,6 +652,7 @@ impl<'ctx> VbcToMlirGpuLowering<'ctx> {
                     BinaryIntOp::Add => "arith.addi", BinaryIntOp::Sub => "arith.subi",
                     BinaryIntOp::Mul => "arith.muli", BinaryIntOp::Div => "arith.divsi",
                     BinaryIntOp::Mod => "arith.remsi", BinaryIntOp::Pow => "math.ipowi",
+                    BinaryIntOp::UDiv => "arith.divui", BinaryIntOp::UMod => "arith.remui",
                 };
                 self.build_and_store(block, *dst, op_name, &[lhs, rhs], &[self.i64_type()], location)?;
             }
