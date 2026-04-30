@@ -176,6 +176,39 @@ impl<'c> AotCompiler<'c> {
         #[cfg(feature = "aot-llvm")]
         let llvm_backend = super::llvm_backend::LlvmBackend::from_aot_config(&config).ok();
 
+        // Phase-not-realised tracing: when the LLVM backend isn't
+        // active (the `aot-llvm` feature isn't declared in
+        // Cargo.toml at present, so the backend file is gated out
+        // entirely; even when the feature is added, `from_aot_config`
+        // can fail and yield None), the fallback path uses MLIR's
+        // ExecutionEngine which only consumes `optimization_level`,
+        // `verbose`, and `output_format`. Surface a warning when the
+        // user has set fields that the fallback can't honour, so a
+        // `[codegen.aot] target_triple = "..."` setting in
+        // verum.toml doesn't silently produce a host-native object.
+        #[cfg(not(feature = "aot-llvm"))]
+        if config.target_triple.is_some()
+            || config.cpu.as_str() != "generic"
+            || !config.features.is_empty()
+            || config.enable_lto
+            || !config.enable_pic
+            || config.debug_info
+        {
+            tracing::warn!(
+                "AotConfig surface: target_triple={:?}, cpu={:?}, features={:?}, \
+                 enable_lto={}, enable_pic={}, debug_info={} (these fields land \
+                 on the MLIR-AOT config but the LLVM backend (`aot-llvm` feature) \
+                 is not built — the fallback ExecutionEngine path consumes only \
+                 optimization_level, verbose, and output_format)",
+                config.target_triple,
+                config.cpu,
+                config.features,
+                config.enable_lto,
+                config.enable_pic,
+                config.debug_info,
+            );
+        }
+
         Self {
             config,
             mlir_ctx,
