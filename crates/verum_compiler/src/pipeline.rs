@@ -7283,7 +7283,19 @@ impl<'s> CompilationPipeline<'s> {
         debug!("Running refinement verification");
 
         let start = Instant::now();
-        let mut cost_tracker = CostTracker::new();
+        // Honour `CompilerOptions.slow_verification_threshold_secs`
+        // (default 5s, sourced from `--slow-threshold` / manifest
+        // `[verify].slow_threshold`) so the cost tracker's slow-
+        // verification threshold matches what the user configured.
+        // Pre-fix `CostTracker::new()` hard-coded 5s; the
+        // verification_profiler at verify_cmd.rs:92 already
+        // consults the session option, but the parallel cost
+        // tracker on the pipeline path used the default
+        // regardless. Now both surfaces agree on the threshold.
+        let slow_threshold_secs = self.session.options().slow_verification_threshold_secs;
+        let mut cost_tracker = CostTracker::with_threshold(
+            std::time::Duration::from_secs(slow_threshold_secs),
+        );
         let _smt_ctx = SmtContext::new();
 
         // Framework-hygiene preamble (#190): R1+R2+R3 discipline
