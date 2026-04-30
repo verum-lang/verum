@@ -378,13 +378,31 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     let mut session = Session::new(options);
     let mut pipeline = CompilationPipeline::new(&mut session);
 
-    // Compile via AOT (LLVM native compilation)
+    // Compile via the unified dispatch — `pipeline.run()` reads
+    // `session.options().check_only` and routes to the type-only
+    // path or the AOT path. Pre-fix this site always called
+    // `run_native_compilation` directly, so the `check_only` flag
+    // was inert for the build path; the unified dispatch makes
+    // `options.check_only = true` skip codegen + linking.
     // Note: Stdlib is now embedded directly from source files in verum_compiler
     ui::status("Codegen", &format!("{} via LLVM", manifest.cog.name.as_str()));
-    let output = pipeline
-        .run_native_compilation()
+    let run_result = pipeline
+        .run()
         .map_err(|e| CliError::CompilationFailed(e.to_string()))?;
-    ui::status("Linking", &format!("{}", manifest.cog.name.as_str()));
+    let output = match &run_result {
+        verum_compiler::pipeline::RunResult::Built(p) => {
+            ui::status("Linking", &format!("{}", manifest.cog.name.as_str()));
+            p.clone()
+        }
+        verum_compiler::pipeline::RunResult::Checked => {
+            ui::success(&format!(
+                "Check OK ({} v{}) — codegen skipped (check_only)",
+                manifest.cog.name.as_str(),
+                manifest.cog.version.as_str(),
+            ));
+            return Ok(());
+        }
+    };
 
     // GPU compilation path (MLIR) — auto-detected by the pipeline.
     // When the AST scanner finds @device(gpu) annotations on functions,

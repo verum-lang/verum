@@ -629,38 +629,30 @@ impl Session {
         }
 
         // Phase-not-realised: `CompilerOptions.continue_on_error`
-        // (default false) and `CompilerOptions.check_only` (default
-        // false) — both fields land on the session via direct
+        // (default false) lands on the session via direct
         // assignment from CLI / test harnesses but no production
-        // code path consults `session.options().continue_on_error`
-        // or `session.options().check_only`.
+        // code path consults `session.options().continue_on_error`.
         //
         // The `continue_on_error` semantics (collect diagnostics
         // across all phases instead of bailing on first hard error)
         // would need plumbing into `CompilationPipeline::run` and
-        // each `phase_*` early-return site. The `check_only`
-        // semantics are *partially* implemented as a separately
-        // named entry point (`CompilationPipeline::run_check_only`,
-        // pipeline.rs:5959, called unconditionally from
-        // verify_cmd.rs:180), but the field on `CompilerOptions`
-        // does NOT gate `run` vs `run_check_only` dispatch — the
-        // standard `verum build` path always calls `run` and never
-        // consults the flag.
+        // each `phase_*` early-return site — every `?` in the
+        // phase methods short-circuits on the first hard error
+        // today.
         //
-        // Surface a warning when either flag is set so embedders
-        // see the gap rather than silently believing
-        // `--continue-on-error` or `--check-only` was honoured.
-        if opts.continue_on_error || opts.check_only {
+        // The sister field `check_only` is now load-bearing via
+        // the unified `CompilationPipeline::run` dispatch
+        // (pipeline.rs:RunResult::Checked), so this trace covers
+        // only `continue_on_error`.
+        if opts.continue_on_error {
             tracing::warn!(
-                "CompilerOptions surface: continue_on_error={}, check_only={} — \
-                 these fields land on the session but no production code path \
-                 consults them. `continue_on_error` would need pipeline-wide \
-                 diagnostic-accumulation plumbing; `check_only` has a sibling \
-                 entry point (`CompilationPipeline::run_check_only`) used by \
-                 the verify path but the standard `run` dispatch never branches \
-                 on this field. Forward-looking knobs.",
+                "CompilerOptions.continue_on_error={} — flag lands on the \
+                 session but no production code path consults it. The \
+                 semantics (collect diagnostics across all phases instead \
+                 of bailing on the first hard error) require pipeline-wide \
+                 diagnostic-accumulation plumbing at every `phase_*` \
+                 early-return site. Forward-looking knob.",
                 opts.continue_on_error,
-                opts.check_only,
             );
         }
     }
