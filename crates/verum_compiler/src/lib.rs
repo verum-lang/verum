@@ -222,6 +222,9 @@ pub mod core_compiler;
 pub mod core_loader;
 pub mod core_source;  // Unified stdlib source abstraction (embedded VFS / local FS)
 pub mod embedded_stdlib; // Embedded stdlib archive (zstd-compressed core/*.vr in binary)
+pub mod stdlib_index;    // Module-path index over the embedded stdlib (lazy loader keystone)
+pub mod stdlib_dep_graph; // Pre-built mount-edge graph over the embedded stdlib (BFS reachability)
+pub mod stdlib_reachability; // AST-walking → reachable stdlib subset (Phase 2 of on-demand loader)
 
 // Re-export main types
 pub use compilation_metrics::{

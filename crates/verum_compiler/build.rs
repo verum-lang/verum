@@ -56,11 +56,308 @@ fn main() {
         archive.len() as f64 / 1024.0,
     );
 
+    // === Mount dependency graph =============================================
+    //
+    // For each stdlib file, extract the set of `mount`/`public mount` paths
+    // it references. The graph lets the runtime walk only the modules
+    // transitively reachable from a user entry point's mount set, instead
+    // of registering all 2266 stdlib modules upfront.
+    //
+    // Cost at build time: ~150-300ms scan + ~50KB compressed archive.
+    // Cost at runtime: ~5ms decompress + ~1ms BFS for typical entry point.
+    //
+    // The scanner is regex-light (line-oriented match on `mount …;`); the
+    // grammar is constrained enough that this avoids dragging the full
+    // verum_fast_parser into the build script (which would create a build
+    // cycle since this script *belongs* to verum_compiler).
+    let dep_archive = build_dep_graph(&files);
+    let dep_compressed = zstd::encode_all(dep_archive.as_slice(), 19).unwrap();
+    let dep_path = Path::new(&out_dir).join("stdlib_dep_graph.zst");
+    fs::write(&dep_path, &dep_compressed).unwrap();
+    println!("cargo:rustc-env=STDLIB_DEP_GRAPH_PATH={}", dep_path.display());
+    println!(
+        "cargo:warning=Stdlib mount graph: {} edges, {:.1}KB compressed (from {:.1}KB)",
+        dep_edge_count(&files),
+        dep_compressed.len() as f64 / 1024.0,
+        dep_archive.len() as f64 / 1024.0,
+    );
+
     // Rerun if any .vr file changes
     println!("cargo:rerun-if-changed={}", core_dir.display());
     for (path, _) in &files {
         println!("cargo:rerun-if-changed={}", core_dir.join(path).display());
     }
+}
+
+// =============================================================================
+// Mount dependency graph extraction
+// =============================================================================
+//
+// Archive layout (mirrors stdlib_archive but smaller):
+//   [module_count: u32]
+//   per module:
+//     [path_len: u16] [path: utf8]
+//     [edge_count: u16]
+//     per edge:
+//       [edge_kind: u8]   // 0=Path, 1=Glob, 2=Nested-leaf
+//       [path_len: u16] [path: utf8]
+//
+// All paths are pre-normalised to module-path form (`core.shell.exec`).
+// The archive is consumed by `crate::stdlib_dep_graph::DepGraph` at runtime.
+
+const EDGE_PATH: u8 = 0;
+const EDGE_GLOB: u8 = 1;
+const EDGE_NESTED: u8 = 2;
+
+/// Convert a stdlib file-relative path to its canonical module path.
+/// Mirrors `crate::stdlib_index::file_path_to_module_path` — the two
+/// must stay in sync.
+fn file_to_module(rel: &str) -> String {
+    let normalised = rel.replace('\\', "/");
+    let mut parts: Vec<&str> = vec!["core"];
+    for component in normalised.split('/') {
+        if component.is_empty() { continue; }
+        let trimmed = component.strip_suffix(".vr").unwrap_or(component);
+        parts.push(trimmed);
+    }
+    let joined = parts.join(".");
+    joined.strip_suffix(".mod").map(str::to_string).unwrap_or(joined)
+}
+
+/// Strip line and block comments so a `mount` token inside a comment
+/// isn't picked up as an edge. Kept simple: handles `//` line comments
+/// and `/* … */` block comments (non-nested — sufficient for stdlib).
+fn strip_comments(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut in_block = false;
+    let mut in_string = false;
+    let mut in_line = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_line {
+            if c == b'\n' { in_line = false; out.push('\n'); }
+            i += 1;
+            continue;
+        }
+        if in_block {
+            if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                in_block = false;
+                i += 2;
+                continue;
+            }
+            if c == b'\n' { out.push('\n'); }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if c == b'\\' && i + 1 < bytes.len() { out.push(c as char); out.push(bytes[i + 1] as char); i += 2; continue; }
+            if c == b'"' { in_string = false; }
+            out.push(c as char);
+            i += 1;
+            continue;
+        }
+        if c == b'/' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'/' { in_line = true; i += 2; continue; }
+            if bytes[i + 1] == b'*' { in_block = true; i += 2; continue; }
+        }
+        if c == b'"' { in_string = true; }
+        out.push(c as char);
+        i += 1;
+    }
+    out
+}
+
+/// Edge kinds extracted from a single source file.
+struct Edges {
+    /// `mount core.shell.exec` — load this module directly
+    path: Vec<String>,
+    /// `mount core.shell.*` — load this module + all its submodules
+    glob: Vec<String>,
+    /// `mount core.shell.{exec, jobs}` — flattened to per-leaf module paths
+    nested: Vec<String>,
+}
+
+/// Walk `mount … ;` statements in a single source.
+fn extract_mounts(src: &str) -> Edges {
+    let stripped = strip_comments(src);
+    let mut edges = Edges { path: Vec::new(), glob: Vec::new(), nested: Vec::new() };
+
+    // Find each `mount` keyword that starts a statement (preceded by
+    // whitespace or visibility modifier or start of line, followed by
+    // whitespace).
+    let bytes = stripped.as_bytes();
+    let mut i = 0;
+    while i + 5 < bytes.len() {
+        // Look for "mount" keyword on a token boundary
+        if bytes[i..].starts_with(b"mount") {
+            let preceded_ok = i == 0 || matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r');
+            let followed_ok = matches!(bytes.get(i + 5), Some(b' ' | b'\t' | b'\n'));
+            if preceded_ok && followed_ok {
+                // Check we're not inside `public mount …` for re-export
+                // handling — public mount counts equally as a dep edge.
+                let stmt_end = stripped[i..].find(';').map(|p| i + p).unwrap_or(stripped.len());
+                let body = &stripped[i + 5..stmt_end];
+                parse_mount_body(body.trim(), &mut edges);
+                i = stmt_end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    edges
+}
+
+/// Parse the body of a `mount` statement: everything between `mount`
+/// and `;`, with leading/trailing whitespace already stripped.
+fn parse_mount_body(body: &str, edges: &mut Edges) {
+    // Drop any trailing `as Alias` clause — doesn't affect dep edges.
+    let body = match body.find(" as ") {
+        Some(p) => &body[..p],
+        None => body,
+    }.trim();
+
+    if body.starts_with("./") || body.starts_with("../") {
+        // Relative file mount — not a stdlib dependency.
+        return;
+    }
+
+    if let Some(brace_open) = body.find('{') {
+        // Nested mount: prefix.{a, b, c, …}
+        let prefix = body[..brace_open].trim_end_matches('.').trim();
+        let prefix_path = normalise_path(prefix);
+        let inner = &body[brace_open + 1..];
+        let close = inner.rfind('}').unwrap_or(inner.len());
+        let leaves = &inner[..close];
+        for leaf in split_top_level_commas(leaves) {
+            let leaf = leaf.trim();
+            if leaf.is_empty() { continue; }
+            // The leaf may itself be a nested expression — strip aliases
+            // and brace groups.
+            let leaf_head = leaf.split_whitespace().next().unwrap_or("");
+            let leaf_head = leaf_head.split('{').next().unwrap_or(leaf_head);
+            if leaf_head == "*" {
+                // mount p.{*} — equivalent to glob on prefix
+                edges.glob.push(prefix_path.clone());
+            } else if !leaf_head.is_empty() {
+                // The leaf may be a sub-module *or* an item — we record it
+                // as a candidate module path; the runtime resolver will
+                // discard non-existent module candidates.
+                let candidate = format!("{}.{}", prefix_path, leaf_head);
+                edges.nested.push(candidate);
+                // Also record the prefix itself — it's the module that
+                // owns the items.
+                edges.nested.push(prefix_path.clone());
+            }
+        }
+    } else if let Some(p) = body.strip_suffix(".*") {
+        let normalised = normalise_path(p);
+        // Suppress prelude-style globs.
+        //
+        // `mount core.*;` is the canonical "import the implicit prelude"
+        // pattern in stdlib + user code (~1019 occurrences). The
+        // compiler always preloads the prelude subset, so emitting an
+        // explicit edge here would expand to *every* stdlib module and
+        // defeat reachability pruning entirely. Identifiers actually
+        // referenced via the prelude are resolved by the existing
+        // late-resolution path during type-check.
+        if !is_prelude_glob(&normalised) {
+            edges.glob.push(normalised);
+        }
+    } else {
+        // Plain `mount path`. The path may name a module OR an item
+        // within a module — record both the path and its parent.
+        let p = normalise_path(body);
+        edges.path.push(p.clone());
+        if let Some(dot) = p.rfind('.') {
+            edges.path.push(p[..dot].to_string());
+        }
+    }
+}
+
+/// Split a comma-separated list while respecting brace/paren nesting.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let bytes = s.as_bytes();
+    for (i, &c) in bytes.iter().enumerate() {
+        match c {
+            b'{' | b'(' | b'[' => depth += 1,
+            b'}' | b')' | b']' => depth -= 1,
+            b',' if depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < s.len() { out.push(&s[start..]); }
+    out
+}
+
+/// Strip leading `.` (as in `public mount .submodule.{…}` from inside a
+/// `mod.vr`) and any leading whitespace.
+fn normalise_path(p: &str) -> String {
+    p.trim().trim_start_matches('.').to_string()
+}
+
+/// Whether a glob path should be treated as the implicit prelude (and
+/// therefore NOT emitted as a graph edge — see `parse_mount_body`).
+///
+/// Three forms are recognised:
+///   * `core` — `mount core.*` from user code
+///   * `super` — `mount super.*` from inside a stdlib module
+///   * the empty string — defensive guard; `mount .*;` would be
+///     malformed but should not crash the scanner.
+fn is_prelude_glob(p: &str) -> bool {
+    matches!(p, "core" | "super" | "")
+}
+
+fn build_dep_graph(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    // Build module path → edges
+    let mut entries: Vec<(String, Edges)> = Vec::with_capacity(files.len());
+    for (rel, bytes) in files {
+        let module = file_to_module(rel);
+        let src = std::str::from_utf8(bytes).unwrap_or("");
+        let edges = extract_mounts(src);
+        entries.push((module, edges));
+    }
+    // Sort for deterministic on-disk layout
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut out = Vec::with_capacity(64 * 1024);
+    let module_count: u32 = entries.len().try_into().expect("too many modules for u32");
+    out.extend_from_slice(&module_count.to_le_bytes());
+
+    for (module, edges) in &entries {
+        write_str(&mut out, module);
+        let total: u32 = (edges.path.len() + edges.glob.len() + edges.nested.len()) as u32;
+        // u16 should suffice — clamp defensively
+        let total: u16 = total.try_into().expect("module has too many mount edges");
+        out.extend_from_slice(&total.to_le_bytes());
+        for p in &edges.path  { out.push(EDGE_PATH);   write_str(&mut out, p); }
+        for p in &edges.glob  { out.push(EDGE_GLOB);   write_str(&mut out, p); }
+        for p in &edges.nested{ out.push(EDGE_NESTED); write_str(&mut out, p); }
+    }
+    out
+}
+
+fn dep_edge_count(files: &[(String, Vec<u8>)]) -> usize {
+    let mut total = 0;
+    for (_, bytes) in files {
+        let src = std::str::from_utf8(bytes).unwrap_or("");
+        let e = extract_mounts(src);
+        total += e.path.len() + e.glob.len() + e.nested.len();
+    }
+    total
+}
+
+fn write_str(out: &mut Vec<u8>, s: &str) {
+    let len: u16 = s.len().try_into().expect("path too long for u16");
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(s.as_bytes());
 }
 
 fn collect_vr_files(dir: &Path, root: &Path, files: &mut Vec<(String, Vec<u8>)>) {
