@@ -1787,14 +1787,53 @@ impl SepLogicEncoder {
             SepAssertion::ListSegment { from, to, elements } => {
                 // lseg(from, to, []) = from == to AND emp
                 // lseg(from, to, x::xs) = exists next. from |-> (x, next) * lseg(next, to, xs)
-                self.encode_list_segment(from, to, elements, heap, allocated)
+                //
+                // Route through `encode_with_unfolding` whenever
+                // `UnfoldingConfig.lazy_unfolding` is enabled (the
+                // documented default) so the depth cap from
+                // `max_lseg_depth` actually constrains the formula
+                // size. Pre-fix the encode_assertion path always
+                // called the unbounded `encode_list_segment` directly,
+                // making `lazy_unfolding`, `max_lseg_depth`, and
+                // `max_tree_depth` inert at the production entry —
+                // every caller setting them via `UnfoldingConfig`
+                // (constructed by `SepLogicEncoder::new` from
+                // `SepLogicConfig.max_unfolding_depth`) had no
+                // observable effect because the gate they parameterise
+                // was bypassed. Closes the inert-defense pattern at
+                // the only top-level dispatch site for ListSegment +
+                // Tree assertions.
+                let unfolding = self.unfolding_state.borrow();
+                if unfolding.lazy_unfolding_enabled() {
+                    let depth = unfolding.config.max_lseg_depth;
+                    drop(unfolding);
+                    self.encode_with_unfolding(assertion, heap, allocated, depth)
+                } else {
+                    drop(unfolding);
+                    self.encode_list_segment(from, to, elements, heap, allocated)
+                }
             }
 
             SepAssertion::Tree {
                 root,
                 left_child,
                 right_child,
-            } => self.encode_tree(root, left_child, right_child, heap, allocated),
+            } => {
+                // Sibling routing for tree predicates: when
+                // `lazy_unfolding` is enabled, cap the unfolding at
+                // `max_tree_depth`; otherwise use the unbounded
+                // encoding.  See ListSegment arm for the inert-
+                // defense rationale.
+                let unfolding = self.unfolding_state.borrow();
+                if unfolding.lazy_unfolding_enabled() {
+                    let depth = unfolding.config.max_tree_depth;
+                    drop(unfolding);
+                    self.encode_with_unfolding(assertion, heap, allocated, depth)
+                } else {
+                    drop(unfolding);
+                    self.encode_tree(root, left_child, right_child, heap, allocated)
+                }
+            }
 
             SepAssertion::Block { base, size } => {
                 // block(base, size): forall i in [0, size). allocated[base + i]

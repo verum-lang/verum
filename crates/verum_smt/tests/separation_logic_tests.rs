@@ -1043,3 +1043,114 @@ mod unfolding_config_wiring {
         assert_eq!(state.lemmas.len(), 1);
     }
 }
+
+// =============================================================================
+// SepLogicEncoder::encode_assertion routing wire-up
+// =============================================================================
+//
+// Pin: when `UnfoldingConfig.lazy_unfolding` is enabled (the
+// documented default), `encode_assertion` for ListSegment / Tree
+// assertions routes through `encode_with_unfolding` so the depth
+// caps `max_lseg_depth` / `max_tree_depth` actually constrain the
+// formula. Pre-fix the dispatch went straight to the unbounded
+// `encode_list_segment` / `encode_tree`, making the entire
+// UnfoldingConfig surface inert at the production entry point —
+// every caller setting `[smt.sep_logic] max_unfolding_depth = N`
+// via Verum.toml was silently bypassed.
+
+mod encode_assertion_unfolding_routing {
+    use super::*;
+    use verum_smt::separation_logic::{SepLogicEncoder, Z3HeapModel};
+
+    #[test]
+    fn list_segment_collapses_to_true_when_depth_zero() {
+        // Pin: with lazy_unfolding=true (default) and
+        // max_lseg_depth=0 (derived from max_unfolding_depth=0),
+        // `encode_assertion` short-circuits a non-empty
+        // ListSegment to literal `true` because the routed
+        // `encode_with_unfolding` returns `Bool::from_bool(true)` at
+        // depth 0. Without the routing wire, the unbounded
+        // `encode_list_segment` builds a multi-conjunct formula
+        // (heap_at_from = head ∧ alloc ∧ …) which does NOT collapse
+        // to literal true — a regression that removes the gate
+        // surfaces here.
+        let config = SepLogicConfig {
+            max_unfolding_depth: 0,
+            ..Default::default()
+        };
+        let encoder = SepLogicEncoder::new(config);
+        let model = Z3HeapModel::new();
+
+        let lseg = SepAssertion::list_segment(
+            var_expr("p"),
+            var_expr("q"),
+            List::from(vec![int_expr(1), int_expr(2), int_expr(3)]),
+        );
+
+        let result = encoder.encode_assertion(&lseg, model.heap(), model.allocated());
+        assert_eq!(
+            result.as_bool(),
+            Some(true),
+            "lazy_unfolding=true + max_lseg_depth=0 must route ListSegment \
+             through encode_with_unfolding which short-circuits to literal `true`",
+        );
+    }
+
+    #[test]
+    fn tree_collapses_to_true_when_depth_zero() {
+        // Sibling pin for tree predicates: max_tree_depth derives
+        // from max_unfolding_depth/2 (line 1325 of
+        // separation_logic.rs). With max_unfolding_depth=0,
+        // max_tree_depth=0 and the routed encode_with_unfolding
+        // returns true at depth 0.
+        use verum_common::Heap;
+        let config = SepLogicConfig {
+            max_unfolding_depth: 0,
+            ..Default::default()
+        };
+        let encoder = SepLogicEncoder::new(config);
+        let model = Z3HeapModel::new();
+
+        let leaf_pointing = SepAssertion::points_to(var_expr("leaf"), int_expr(0));
+        let tree = SepAssertion::Tree {
+            root: var_expr("root"),
+            left_child: Maybe::Some(Heap::new(leaf_pointing.clone())),
+            right_child: Maybe::Some(Heap::new(leaf_pointing)),
+        };
+
+        let result = encoder.encode_assertion(&tree, model.heap(), model.allocated());
+        assert_eq!(
+            result.as_bool(),
+            Some(true),
+            "lazy_unfolding=true + max_tree_depth=0 must route Tree \
+             through encode_with_unfolding which short-circuits to literal `true`",
+        );
+    }
+
+    #[test]
+    fn list_segment_with_nonzero_depth_remains_structural() {
+        // Pin the inverse: with a positive depth budget, the
+        // routed encoding still builds a real formula (NOT literal
+        // true) — the gate is a depth cap, not a kill-switch.
+        let config = SepLogicConfig {
+            max_unfolding_depth: 5,
+            ..Default::default()
+        };
+        let encoder = SepLogicEncoder::new(config);
+        let model = Z3HeapModel::new();
+
+        let lseg = SepAssertion::list_segment(
+            var_expr("p"),
+            var_expr("q"),
+            List::from(vec![int_expr(1), int_expr(2)]),
+        );
+
+        let result = encoder.encode_assertion(&lseg, model.heap(), model.allocated());
+        assert_ne!(
+            result.as_bool(),
+            Some(true),
+            "depth budget > 0 must produce a non-trivial Z3 formula, \
+             not the depth-0 short-circuit",
+        );
+    }
+}
