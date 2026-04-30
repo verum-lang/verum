@@ -102,6 +102,12 @@ pub mod tactic_elaborator;
 // base in name only — no Verum theorem reduces to a kernel-readable
 // term.  The de Bruijn criterion lives here.
 
+pub mod framework_citation;
+// Framework-citation manifest collector (#155).  Walks AST items and
+// extracts every `@framework(<system>, "<path>")` citation into a
+// structured manifest that audit gates and CI pipelines consume to
+// enumerate the trust extension or verify upstream paths.
+
 pub mod foreign_system;
 // Canonical `ForeignSystem` enum (#166) — the single source of truth
 // for the external proof systems Verum interacts with.  Lives in
