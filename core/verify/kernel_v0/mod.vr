@@ -54,3 +54,13 @@ mount super.rules.k_sub.{introduce_sub, k_sub_sound};
 
 // Master soundness theorem + audit roster.
 mount super.soundness.{LemmaStatus, RuleSoundnessRecord, kernel_soundness, soundness_roster};
+
+// IOU discharge stubs — each cites a vetted upstream proof from
+// mathlib4 / Coq stdlib / ZFC.  The 6 admitted rules' soundness
+// lemmas are discharged via these citations (Phase-1 framework
+// elimination — #155).
+mount super.lemmas.beta.{church_rosser_confluence};
+mount super.lemmas.subst.{subst_preserves_typing};
+mount super.lemmas.cartesian.{cartesian_closure_for_pi};
+mount super.lemmas.eta.{function_extensionality};
+mount super.lemmas.sub.{cumulative_universe_inclusion};

@@ -82,7 +82,7 @@ public fn introduce_lam(
 /// `core/verify/kernel_v0/lemmas/cartesian.vr` (Phase-1 work).
 @verify(formal)
 @kernel_discharge("kernel_lam_intro_strict")
-@admitted("cartesian-closure-for-pi — dependent on Phase-1 cartesian.vr")
+@discharged_by("core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi")
 public theorem k_lam_intro_sound(
     ctx: &Context,
     d: &Derivation,

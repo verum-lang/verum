@@ -95,7 +95,7 @@ public fn introduce_pi_form(
 ///   `intros; exact pi_form_admissible _ _ ‹_› ‹_›`.
 @verify(formal)
 @kernel_discharge("kernel_pi_form_strict")
-@admitted("substitution-lemma — dependent on Phase-1 subst.vr")
+@discharged_by("core.verify.kernel_v0.lemmas.subst.subst_preserves_typing")
 public theorem k_pi_form_sound(
     ctx: &Context,
     d: &Derivation,

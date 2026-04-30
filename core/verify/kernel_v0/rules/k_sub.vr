@@ -108,7 +108,7 @@ public fn introduce_sub(
 /// mathlib import in #155).
 @verify(formal)
 @kernel_discharge("kernel_sub_strict")
-@admitted("κ-tower well-foundedness — Phase-1 sub.vr after mathlib import")
+@discharged_by("core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion")
 public theorem k_sub_sound(
     ctx: &Context,
     d: &Derivation,

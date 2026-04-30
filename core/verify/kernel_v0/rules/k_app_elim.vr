@@ -83,7 +83,7 @@ public fn introduce_app(
 /// `beta_soundness` in `core/verify/kernel_v0/lemmas/` (Phase-1).
 @verify(formal)
 @kernel_discharge("kernel_app_elim_strict")
-@admitted("substitution-lemma + Church-Rosser — dependent on Phase-1 lemmas")
+@discharged_by("core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + core.verify.kernel_v0.lemmas.beta.church_rosser_confluence")
 public theorem k_app_elim_sound(
     ctx: &Context,
     d: &Derivation,

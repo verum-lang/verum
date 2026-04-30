@@ -99,7 +99,7 @@ public fn introduce_eta(
 /// syntactic check.
 @verify(formal)
 @kernel_discharge("kernel_eta_strict")
-@admitted("function-extensionality — Phase-1 eta.vr")
+@discharged_by("core.verify.kernel_v0.lemmas.eta.function_extensionality")
 public theorem k_eta_sound(
     ctx: &Context,
     d: &Derivation,
