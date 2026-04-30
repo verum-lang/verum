@@ -391,7 +391,7 @@ pub(super) fn try_load_registry_from_disk(
 }
 
 /// Save a ModuleRegistry to disk cache.
-fn save_registry_to_disk(
+pub(super) fn save_registry_to_disk(
     workspace_root: &Path,
     registry: &ModuleRegistry,
     content_hash: &str,
@@ -861,7 +861,7 @@ pub(super) struct CfgBuildContext<'a> {
 ///
 /// The function is allocation-free on the hot path (shebang check is a
 /// 5-byte slice comparison).
-fn should_parse_as_script(
+pub(super) fn should_parse_as_script(
     source: &str,
     opts: &crate::options::CompilerOptions,
     source_path: Option<&std::path::Path>,

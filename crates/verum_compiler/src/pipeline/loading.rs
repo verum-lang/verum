@@ -31,13 +31,22 @@ use std::time::Instant;
 use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
-use verum_ast::Module;
+use verum_ast::{decl::ItemKind, FileId, Module};
 use verum_common::{List, Map, Text};
-use verum_modules::ModulePath;
+use verum_diagnostics::DiagnosticBuilder;
+use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
+use verum_modules::{
+    ModuleId, ModuleInfo, ModulePath, extract_exports_from_module, resolve_glob_reexports,
+    resolve_specific_reexport_kinds,
+};
+
+use crate::phases::type_error_to_diagnostic;
 
 use super::{
     BuildMode, CachedStdlibModules, CompilationPipeline, compute_stdlib_content_hash,
-    global_stdlib_cache, global_stdlib_registry_cache, try_load_registry_from_disk,
+    global_stdlib_cache, global_stdlib_registry_cache, save_registry_to_disk,
+    should_parse_as_script, try_load_registry_from_disk,
 };
 
 impl<'s> CompilationPipeline<'s> {
