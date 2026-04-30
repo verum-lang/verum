@@ -110,7 +110,7 @@ shipping):
 
 | File                                          | Symbol(s)             | Replacement                                  |
 |-----------------------------------------------|-----------------------|----------------------------------------------|
-| `runtime.rs::get_or_declare_open`             | `open`                | Linux `SYS_open` (256 / 56) ; libSystem on macOS. **Open.** |
+| ✅ `runtime.rs::get_or_declare_open`          | `open`                | Linux x86_64 `SYS_open` (2) / aarch64 `SYS_openat` (56) ; libSystem on macOS.  Variadic ABI bug closed by construction (fixed 3-arg wrapper). **Closed.** |
 | ✅ `runtime.rs::get_or_declare_close`         | `close`               | Linux `SYS_close` (3) direct syscall ; libSystem on macOS. **Closed (commit pending).** |
 | ✅ `runtime.rs::get_or_declare_read`          | `read`                | Linux `SYS_read` (0) direct syscall ; libSystem on macOS. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_write`         | `write`               | Linux `SYS_write` (1) direct syscall ; libSystem on macOS. **Closed.** |

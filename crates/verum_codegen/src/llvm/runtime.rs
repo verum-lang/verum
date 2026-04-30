@@ -6038,18 +6038,119 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // never written to (C entry point writes verum_stored_argc/argv instead).
     // The C implementations in verum_runtime.c are the correct path.
 
-    /// Get or declare open(path: *i8, flags: i32, ...) -> i32.
-    /// CRITICAL: open() is variadic — on Apple ARM64, variadic args go on the
-    /// stack, not in registers. Declaring as non-variadic causes mode_t to be
-    /// passed in w2 (register) while libc reads from stack → garbage permissions.
+    /// Get or declare a libc-free `open(path, flags, mode) -> i32` wrapper.
+    ///
+    /// **Libc-free**: Linux x86_64 uses `SYS_open` (2) direct syscall;
+    /// aarch64 uses `SYS_openat` (56) with `AT_FDCWD=-100` (the bare
+    /// `open` syscall was removed from the aarch64 syscall table).
+    /// Other-Unix routes through libSystem.
+    ///
+    /// **Variadic-safe by construction**: pre-fix declared `open` as
+    /// libc-style variadic, which had a known Apple ARM64 ABI bug
+    /// — variadic args go on the stack but the declaration caused
+    /// the mode_t to be passed in `w2` register, producing garbage
+    /// permissions on file creation.  Post-fix the wrapper has a
+    /// fixed 3-arg signature (path, flags, mode), and the syscall
+    /// path passes the mode as a regular i64 register argument so
+    /// the variadic-vs-fixed ABI confusion is impossible.
     fn get_or_declare_open(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("open") {
+        let wrapper_name = "verum_internal_open";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i32_type.fn_type(&[ptr_type.into(), i32_type.into()], true); // true = variadic
-        module.add_function("open", fn_type, None)
+
+        // Wrapper signature: fixed 3-arg (path, flags, mode).
+        // Historical callers passing only 2 args (no mode) must
+        // supply 0 for mode; this is safe because mode is only
+        // consulted when O_CREAT is set in flags.
+        let fn_type = i32_type.fn_type(
+            &[ptr_type.into(), i32_type.into(), i32_type.into()],
+            false,
+        );
+        let wrapper = module.add_function(wrapper_name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let path = wrapper.get_nth_param(0).expect("open p0").into_pointer_value();
+        let flags_i32 = wrapper.get_nth_param(1).expect("open p1").into_int_value();
+        let mode_i32 = wrapper.get_nth_param(2).expect("open p2").into_int_value();
+
+        if target_is_linux(module) {
+            let path_addr = builder
+                .build_ptr_to_int(path, i64_type, "path_addr")
+                .expect("open path p2i");
+            let flags_i64 = builder
+                .build_int_z_extend(flags_i32, i64_type, "flags_i64")
+                .expect("open flags extend");
+            let mode_i64 = builder
+                .build_int_z_extend(mode_i32, i64_type, "mode_i64")
+                .expect("open mode extend");
+            let ret = if target_is_aarch64(module) {
+                // SYS_openat(AT_FDCWD=-100, path, flags, mode) = 56
+                let at_fdcwd = i64_type.const_int(u64::wrapping_sub(0, 100), false);
+                self.emit_linux_syscall(
+                    &builder,
+                    module,
+                    56,
+                    &[at_fdcwd, path_addr, flags_i64, mode_i64],
+                )
+                .expect("openat syscall")
+            } else {
+                // SYS_open(path, flags, mode) = 2 on x86_64.
+                self.emit_linux_syscall(
+                    &builder,
+                    module,
+                    2,
+                    &[path_addr, flags_i64, mode_i64],
+                )
+                .expect("open syscall")
+            };
+            let ret_i32 = builder
+                .build_int_truncate(ret, i32_type, "ret_i32")
+                .expect("open ret trunc");
+            builder.build_return(Some(&ret_i32)).expect("open return");
+        } else {
+            // libSystem path: declare a non-variadic 3-arg `open` —
+            // libSystem on macOS accepts the fixed shape (the variadic
+            // ABI confusion only matters when the caller's declaration
+            // mismatches).  Since *we* control the callee's declaration
+            // here, fixed-3 is safe.
+            let libsys = module.get_function("__verum_libsys_open").unwrap_or_else(|| {
+                let f = module.add_function(
+                    "__verum_libsys_open",
+                    i32_type.fn_type(
+                        &[ptr_type.into(), i32_type.into(), i32_type.into()],
+                        false,
+                    ),
+                    None,
+                );
+                f.add_attribute(
+                    verum_llvm::attributes::AttributeLoc::Function,
+                    self.context.create_string_attribute("verum.libsys", "open"),
+                );
+                f
+            });
+            let ret = builder
+                .build_call(
+                    libsys,
+                    &[path.into(), flags_i32.into(), mode_i32.into()],
+                    "ret",
+                )
+                .expect("open libsys call")
+                .try_as_basic_value()
+                .basic()
+                .expect("open return value")
+                .into_int_value();
+            builder.build_return(Some(&ret)).expect("open return");
+        }
+
+        wrapper
     }
 
     /// Get or declare a libc-free `close(fd) -> i32` wrapper.
