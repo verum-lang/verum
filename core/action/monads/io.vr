@@ -1,0 +1,150 @@
+// =============================================================================
+// core.action.monads.io — real-world side-effect monad (closures-as-thunks)
+// =============================================================================
+//
+// `Io<A>` — a SUSPENDED real-world computation that, when executed,
+// performs zero or more side effects (file I/O, network access,
+// console output, system clock reads, etc.) and produces a value
+// of type `A`. The Kleisli shape is `() -> A`: an effect is a
+// zero-argument thunk whose CALL is the observable enactment of
+// the side effect.
+//
+// The opacity is the key: `Io<A>` does NOT expose the thunk's body
+// for inspection — the only ways to compose `Io` values are through
+// the monad combinators (`unit`, `bind`, `strength`, `map`) and the
+// only way to extract the underlying `A` is through `io_run`, which
+// the kernel models as the runtime's side-effect boundary.
+//
+// **NON-commutative** (Theorem 17.T1, ε-coordinate ω + 1): two
+// independently-effectful programs `m1` and `m2` produce DIFFERENT
+// real-world traces under `bind(m1, |_| m2)` vs `bind(m2, |_| m1)`
+// even when both produce the same `A`. The classic example: `print
+// "1"` followed by `print "2"` writes "12" to stdout; the reverse
+// order writes "21". Both yield `()` as the value, but the
+// observable side effect differs. Sits at ε-coordinate ω + 1
+// alongside `State` and `Exception` — parallel composition of
+// `Io`-effectful programs requires explicit synchronisation
+// (mutex / transaction / serial executor) to preserve
+// `@verify(coherent_concurrent)`.
+//
+// Closes the third and final V1.5 monad gap in `core.action.monads.
+// mod.vr`. With `Exception`, `Nondeterm`, and `Io` now wired,
+// `core.action.monads` covers all eight effects in the Theorem 17.T1
+// catalogue (Pure, Reader, Writer, State, Probability, Quantum,
+// Exception, Nondeterm, Io).
+// =============================================================================
+
+/// `Io<A>` — a suspended computation producing an `A`. The wrapped
+/// thunk is opaque: callers cannot inspect or rewrite it; the
+/// only ways to compose are through the monad combinators below
+/// and the only way to extract the value is via `io_run` at the
+/// program boundary.
+@derive(Clone)
+public type Io<A> is {
+    /// The suspended computation. Calling `thunk()` performs the
+    /// side effect and yields the value.
+    thunk: fn() -> A,
+};
+
+/// `pure : A -> Io<A>` — wrap a pure value as a no-effect thunk.
+/// The unit of the monad. Calling `io_run(io_unit(a))` performs
+/// no side effect and returns `a`.
+public fn io_unit<A>(a: A) -> Io<A> {
+    Io { thunk: || -> A { a.clone() } }
+}
+
+/// `bind : Io<A> -> (A -> Io<B>) -> Io<B>` — sequence two effects.
+/// The combined thunk runs `m`'s thunk first (observable side
+/// effects of `m`), then hands the result to `f` and runs the
+/// returned thunk (observable side effects of `f(a)`). Strict
+/// left-to-right ordering: this is the source of Io's non-
+/// commutativity.
+public fn io_bind<A, B>(m: Io<A>, f: fn(A) -> Io<B>) -> Io<B> {
+    Io {
+        thunk: || -> B {
+            let a: A = (m.thunk.clone())();
+            let inner: Io<B> = f(a);
+            (inner.thunk)()
+        },
+    }
+}
+
+/// `strength : A -> Io<B> -> Io<(A, B)>` — tensor a pure value
+/// alongside an effectful one. The thunk runs `mb`'s side effects
+/// and pairs the result with `a`.
+public fn io_strength<A, B>(a: A, mb: Io<B>) -> Io<(A, B)> {
+    Io {
+        thunk: || -> (A, B) {
+            let b: B = (mb.thunk.clone())();
+            (a.clone(), b)
+        },
+    }
+}
+
+/// `map : Io<A> -> (A -> B) -> Io<B>` — apply a pure function to
+/// the result of an effectful computation. Equivalent to
+/// `io_bind(m, |a| io_unit(f(a)))` but spelled out for the common
+/// case where the transformation introduces no new side effects.
+public fn io_map<A, B>(m: Io<A>, f: fn(A) -> B) -> Io<B> {
+    Io {
+        thunk: || -> B {
+            let a: A = (m.thunk.clone())();
+            f(a)
+        },
+    }
+}
+
+/// `then : Io<A> -> Io<B> -> Io<B>` — sequence two computations,
+/// discarding the first result. The Kleisli `>>` operator. Common
+/// for chaining effects whose return values are unit.
+///
+/// ```verum
+/// io_then(print_line("hello"), print_line("world"))
+/// ```
+public fn io_then<A, B>(m: Io<A>, n: Io<B>) -> Io<B> {
+    Io {
+        thunk: || -> B {
+            let _ignored: A = (m.thunk.clone())();
+            (n.thunk.clone())()
+        },
+    }
+}
+
+/// `defer : (() -> Io<A>) -> Io<A>` — delay constructing the
+/// effectful computation until the outer thunk is invoked. Used
+/// to break recursive `Io` chains that would otherwise build an
+/// infinite syntactic structure at construction time.
+///
+/// ```verum
+/// let rec_loop = io_defer(|| -> Io<()> {
+///     io_then(print_line("tick"), rec_loop.clone())
+/// });
+/// ```
+public fn io_defer<A>(producer: fn() -> Io<A>) -> Io<A> {
+    Io {
+        thunk: || -> A {
+            let inner: Io<A> = producer();
+            (inner.thunk)()
+        },
+    }
+}
+
+/// `run : Io<A> -> A` — the program-boundary executor. Calling
+/// this performs every queued side effect in the constructed `Io`
+/// chain and returns the final value. By convention this is
+/// invoked exactly once per program at the runtime's effect
+/// boundary (typically `main`); calling it elsewhere is allowed
+/// but breaks the linear-effect-trace property the type was
+/// designed to enforce.
+public fn io_run<A>(m: Io<A>) -> A {
+    (m.thunk)()
+}
+
+/// `from_thunk : (() -> A) -> Io<A>` — explicit constructor for
+/// FFI / runtime-builtin shims that need to wrap a primitive
+/// effect as `Io<A>`. Distinct from `io_unit` in intent: `unit`
+/// signals "no side effect"; `from_thunk` signals "this thunk
+/// performs side effects we don't track structurally".
+public fn io_from_thunk<A>(thunk: fn() -> A) -> Io<A> {
+    Io { thunk: thunk }
+}
