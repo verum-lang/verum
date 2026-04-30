@@ -346,6 +346,235 @@ pub fn finalise_certificate(
 }
 
 // =============================================================================
+// AST integration — consume real Verum AST values
+// =============================================================================
+
+use verum_ast::decl::{ProofBody, TacticExpr, TheoremDecl};
+use verum_ast::expr::{Expr, ExprKind};
+
+/// **Elaborate one tactic expression.**  Phase-1 supports:
+///
+///   - `Apply { lemma, args }` — `apply <name>(<args>);` — the most
+///     common shape, covers every `kernel_v0/lemmas/` stub and every
+///     `@delegate` theorem from #146.
+///   - `Reflexivity` — `refl` — produces `Var(0)` referencing the
+///     innermost binder (Phase-1 simplification: assumes the goal
+///     was just-introduced).
+///   - `Exact(expr)` — `exact <expr>;` — translates the expr.
+///
+/// All other tactic forms return [`ElabError::UnsupportedTactic`]
+/// with the variant name; Phase-2 adds them progressively.
+pub fn elaborate_tactic(
+    tactic: &TacticExpr,
+    ctx: &mut ElabContext,
+) -> Result<Term, ElabError> {
+    match tactic {
+        TacticExpr::Apply { lemma, args } => {
+            let lemma_name = expr_to_path_name(lemma)
+                .ok_or_else(|| ElabError::UnsupportedExpression(format!(
+                    "apply target is not a path: {:?}",
+                    lemma.kind,
+                )))?;
+            let head = resolve_apply_target(ctx, &lemma_name)?;
+            let mut arg_terms = Vec::with_capacity(args.len());
+            for arg in args.iter() {
+                arg_terms.push(expr_to_term(arg, ctx)?);
+            }
+            Ok(build_app_chain(head, arg_terms))
+        }
+        TacticExpr::Reflexivity => {
+            // Phase-1 stand-in: refl produces a reference to the
+            // innermost binder.  Real refl would produce a
+            // `DefinitionalEquality::Refl` witness, but the kernel
+            // proof_checker doesn't yet expose a Refl-term form.
+            // Phase-2 wires this through the kernel's def_eq path.
+            if ctx.depth() == 0 {
+                return Err(ElabError::UnsupportedTactic(
+                    "Reflexivity in empty context — Phase-2 will wire \
+                     def-eq witnesses".into(),
+                ));
+            }
+            Ok(Term::Var(0))
+        }
+        TacticExpr::Exact(expr) => expr_to_term(expr, ctx),
+        // Phase-1 stops here.  Every other tactic is recorded as
+        // unsupported with the variant name for diagnostics.
+        TacticExpr::Trivial => Err(ElabError::UnsupportedTactic("Trivial".into())),
+        TacticExpr::Assumption => Err(ElabError::UnsupportedTactic("Assumption".into())),
+        TacticExpr::Intro(_) => Err(ElabError::UnsupportedTactic("Intro".into())),
+        TacticExpr::Rewrite { .. } => Err(ElabError::UnsupportedTactic("Rewrite".into())),
+        TacticExpr::Simp { .. } => Err(ElabError::UnsupportedTactic("Simp".into())),
+        TacticExpr::Ring => Err(ElabError::UnsupportedTactic("Ring".into())),
+        TacticExpr::Field => Err(ElabError::UnsupportedTactic("Field".into())),
+        TacticExpr::Omega => Err(ElabError::UnsupportedTactic("Omega".into())),
+        TacticExpr::Auto { .. } => Err(ElabError::UnsupportedTactic("Auto".into())),
+        TacticExpr::Blast => Err(ElabError::UnsupportedTactic("Blast".into())),
+        TacticExpr::Smt { .. } => Err(ElabError::UnsupportedTactic("Smt".into())),
+        TacticExpr::Split => Err(ElabError::UnsupportedTactic("Split".into())),
+        TacticExpr::Left => Err(ElabError::UnsupportedTactic("Left".into())),
+        TacticExpr::Right => Err(ElabError::UnsupportedTactic("Right".into())),
+        TacticExpr::Exists(_) => Err(ElabError::UnsupportedTactic("Exists".into())),
+        TacticExpr::CasesOn(_) => Err(ElabError::UnsupportedTactic("CasesOn".into())),
+        TacticExpr::InductionOn(_) => Err(ElabError::UnsupportedTactic("InductionOn".into())),
+        TacticExpr::Unfold(_) => Err(ElabError::UnsupportedTactic("Unfold".into())),
+        TacticExpr::Compute => Err(ElabError::UnsupportedTactic("Compute".into())),
+        TacticExpr::Try(_) => Err(ElabError::UnsupportedTactic("Try".into())),
+        TacticExpr::TryElse { .. } => Err(ElabError::UnsupportedTactic("TryElse".into())),
+        TacticExpr::Repeat(_) => Err(ElabError::UnsupportedTactic("Repeat".into())),
+        TacticExpr::Seq(_) => Err(ElabError::UnsupportedTactic(
+            "Seq — Phase-2 will compose multi-step bodies".into(),
+        )),
+        TacticExpr::Alt(_) => Err(ElabError::UnsupportedTactic("Alt".into())),
+        TacticExpr::AllGoals(_) => Err(ElabError::UnsupportedTactic("AllGoals".into())),
+        TacticExpr::Focus(_) => Err(ElabError::UnsupportedTactic("Focus".into())),
+        TacticExpr::Named { .. } => Err(ElabError::UnsupportedTactic("Named".into())),
+        TacticExpr::Let { .. } => Err(ElabError::UnsupportedTactic("Let".into())),
+        _ => Err(ElabError::UnsupportedTactic(
+            "unknown TacticExpr variant".into(),
+        )),
+    }
+}
+
+/// **Elaborate a proof body.**  Phase-1 supports:
+///
+///   - `ProofBody::Tactic(t)` — delegates to [`elaborate_tactic`].
+///
+/// Phase-2 adds `Term`, `Structured`, `ByMethod`.
+pub fn elaborate_proof_body(
+    body: &ProofBody,
+    ctx: &mut ElabContext,
+) -> Result<Term, ElabError> {
+    match body {
+        ProofBody::Tactic(t) => elaborate_tactic(t, ctx),
+        ProofBody::Term(_) => Err(ElabError::UnsupportedTactic(
+            "ProofBody::Term — Phase-2 translates direct proof terms".into(),
+        )),
+        ProofBody::Structured(_) => Err(ElabError::UnsupportedTactic(
+            "ProofBody::Structured — Phase-2 unrolls structured proofs".into(),
+        )),
+        ProofBody::ByMethod(_) => Err(ElabError::UnsupportedTactic(
+            "ProofBody::ByMethod — Phase-2 dispatches by-induction / by-cases".into(),
+        )),
+    }
+}
+
+/// **Elaborate a complete theorem.**  Top-level entry point.
+///
+/// Algorithm:
+///   1. Verify the theorem has a proof body (else `NoProofBody`).
+///   2. Elaborate the proof body to a `Term`.
+///   3. Use [`placeholder_proposition`] for the claimed type
+///      (Phase-2 adds `Type → Term` translation for the real
+///      proposition).
+///   4. [`close_over_axioms`] to wrap the body in a `Lam`/`Pi` chain
+///      over the registered axiom table.
+///   5. [`finalise_certificate`] re-verifies via the kernel checker.
+///
+/// **Limitation**: Phase-1 produces a certificate whose
+/// `claimed_type` is `Universe(0)` (or its Pi-closure over axioms),
+/// not the theorem's actual proposition.  This means the certificate
+/// proves *something* (the term is well-typed) but not *the original
+/// theorem*.  Phase-2 implements full proposition-translation so the
+/// certificate is end-to-end load-bearing.
+pub fn elaborate_theorem(
+    theorem: &TheoremDecl,
+    ctx: &mut ElabContext,
+) -> Result<Certificate, ElabError> {
+    let body = theorem
+        .proof
+        .as_ref()
+        .ok_or(ElabError::NoProofBody)?;
+    let body_term = elaborate_proof_body(body, ctx)?;
+    let body_type = placeholder_proposition();
+    let (closed_term, closed_type) = close_over_axioms(ctx, body_term, body_type);
+    let mut metadata = BTreeMap::new();
+    metadata.insert("theorem_name".to_string(), theorem.name.name.to_string());
+    metadata.insert("kernel_version".to_string(), crate::VVA_VERSION.to_string());
+    metadata.insert("elaborator_phase".to_string(), "1".to_string());
+    finalise_certificate(closed_term, closed_type, metadata)
+}
+
+/// **Path → name extraction.**  Walks an Expr tree expecting
+/// `Path(name)` or a single-segment `Field` chain.  Returns the
+/// dotted name as a String.  Used by `apply` to read its lemma
+/// target.  Returns `None` for non-path expressions.
+pub fn expr_to_path_name(expr: &Expr) -> Option<String> {
+    use verum_ast::ty::PathSegment;
+    match &expr.kind {
+        ExprKind::Path(path) => {
+            let mut parts: Vec<String> = Vec::with_capacity(path.segments.len());
+            for seg in path.segments.iter() {
+                match seg {
+                    PathSegment::Name(ident) => parts.push(ident.name.to_string()),
+                    PathSegment::SelfValue => parts.push("self".to_string()),
+                    PathSegment::Super => parts.push("super".to_string()),
+                    PathSegment::Cog => parts.push("cog".to_string()),
+                    PathSegment::Relative => parts.push("".to_string()),
+                }
+            }
+            Some(parts.join("."))
+        }
+        ExprKind::Field { expr: object, field } => {
+            let base = expr_to_path_name(object)?;
+            Some(format!("{}.{}", base, field.name))
+        }
+        _ => None,
+    }
+}
+
+/// **Translate a Verum `Expr` to a kernel `Term`.**  Phase-1 handles:
+///
+///   - `Path(name)` — resolves via [`resolve_apply_target`].
+///   - `Field(obj, field)` — composes path name then resolves.
+///   - `Call(f, args)` — recursive translation + `App` chain.
+///
+/// All other expression forms return [`ElabError::UnsupportedExpression`].
+/// Phase-2 adds: literals, conditionals, lambda expressions,
+/// type-level constructs.
+pub fn expr_to_term(expr: &Expr, ctx: &ElabContext) -> Result<Term, ElabError> {
+    match &expr.kind {
+        ExprKind::Path(_) | ExprKind::Field { .. } => {
+            let name = expr_to_path_name(expr).ok_or_else(|| {
+                ElabError::UnsupportedExpression("path-walk failed".into())
+            })?;
+            resolve_apply_target(ctx, &name)
+        }
+        ExprKind::Call { func, args, .. } => {
+            let head = expr_to_term(func, ctx)?;
+            let mut arg_terms = Vec::with_capacity(args.len());
+            for arg in args.iter() {
+                arg_terms.push(expr_to_term(arg, ctx)?);
+            }
+            Ok(build_app_chain(head, arg_terms))
+        }
+        other => Err(ElabError::UnsupportedExpression(format!(
+            "Phase-1 does not handle ExprKind::{}",
+            expr_kind_tag(other),
+        ))),
+    }
+}
+
+/// Diagnostic-only tag for the [`ExprKind`] variant.  Used by error
+/// messages to name the unsupported expression form.
+fn expr_kind_tag(kind: &ExprKind) -> &'static str {
+    match kind {
+        ExprKind::Literal(_) => "Literal",
+        ExprKind::Path(_) => "Path",
+        ExprKind::Field { .. } => "Field",
+        ExprKind::Call { .. } => "Call",
+        ExprKind::Binary { .. } => "Binary",
+        ExprKind::Unary { .. } => "Unary",
+        ExprKind::Block(_) => "Block",
+        ExprKind::If { .. } => "If",
+        ExprKind::Match { .. } => "Match",
+        ExprKind::Tuple(_) => "Tuple",
+        ExprKind::Index { .. } => "Index",
+        ExprKind::MethodCall { .. } => "MethodCall",
+        _ => "<other>",
+    }
+}
+
+// =============================================================================
 // Tests — Phase-1 contract pins
 // =============================================================================
 
@@ -545,6 +774,205 @@ mod tests {
             let s = format!("{}", c);
             assert!(!s.is_empty(), "Display for {:?} returned empty", c);
             assert!(s.len() > 10, "Display for {:?} too short: {:?}", c, s);
+        }
+    }
+
+    // ----- AST-integration tests (Phase-2 entry points) -----
+
+    use verum_ast::decl::{ProofBody, TacticExpr};
+    use verum_ast::expr::{Expr, ExprKind};
+    use verum_ast::ty::{Ident, Path, PathSegment};
+    use verum_common::List;
+    use verum_common::Span;
+
+    /// Build a Path expression with a single segment.  Test helper so
+    /// integration tests don't drown in AST construction.
+    fn path_expr(name: &str) -> Expr {
+        let span = Span::dummy();
+        let mut list = List::new();
+        list.push(PathSegment::Name(Ident {
+            name: name.into(),
+            span,
+        }));
+        let path = Path::new(list, span);
+        Expr::new(ExprKind::Path(path), span)
+    }
+
+    /// Build a dotted-Path expression `a.b.c`.
+    fn path_expr_dotted(parts: &[&str]) -> Expr {
+        let span = Span::dummy();
+        let mut list = List::new();
+        for p in parts {
+            list.push(PathSegment::Name(Ident {
+                name: (*p).into(),
+                span,
+            }));
+        }
+        let path = Path::new(list, span);
+        Expr::new(ExprKind::Path(path), span)
+    }
+
+    #[test]
+    fn expr_to_path_name_extracts_simple() {
+        assert_eq!(expr_to_path_name(&path_expr("foo")).as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn expr_to_path_name_dotted_path() {
+        assert_eq!(
+            expr_to_path_name(&path_expr_dotted(&["mathlib4", "lambda", "ChurchRosser"])).as_deref(),
+            Some("mathlib4.lambda.ChurchRosser"),
+        );
+    }
+
+    #[test]
+    fn expr_to_term_resolves_path_via_axiom() {
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::Universe(0));
+        let term = expr_to_term(&path_expr("foo"), &ctx).unwrap();
+        assert_eq!(term, Term::Var(0)); // depth 0 + axiom position 0
+    }
+
+    #[test]
+    fn elaborate_tactic_apply_zero_args() {
+        // Tactic body: `apply foo;`
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::Universe(0));
+        let tactic = TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("foo")),
+            args: List::new(),
+        };
+        let term = elaborate_tactic(&tactic, &mut ctx).unwrap();
+        assert_eq!(term, Term::Var(0));
+    }
+
+    #[test]
+    fn elaborate_tactic_apply_with_args() {
+        // Tactic body: `apply foo(a, b);` where foo, a, b all axioms.
+        // BTreeMap iterates by KEY order: a < b < foo, so positions are
+        // a=0, b=1, foo=2.  Depth=0.
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::Universe(0));
+        ctx.register_axiom("a", Term::Universe(0));
+        ctx.register_axiom("b", Term::Universe(0));
+        let mut args = List::new();
+        args.push(path_expr("a"));
+        args.push(path_expr("b"));
+        let tactic = TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("foo")),
+            args,
+        };
+        let term = elaborate_tactic(&tactic, &mut ctx).unwrap();
+        // App(App(Var(2), Var(0)), Var(1)) — foo=2 (head), a=0, b=1.
+        assert_eq!(
+            term,
+            Term::App(
+                Box::new(Term::App(
+                    Box::new(Term::Var(2)),
+                    Box::new(Term::Var(0)),
+                )),
+                Box::new(Term::Var(1)),
+            ),
+        );
+    }
+
+    #[test]
+    fn elaborate_tactic_apply_undeclared_rejects() {
+        let mut ctx = ElabContext::new();
+        let tactic = TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("nope")),
+            args: List::new(),
+        };
+        match elaborate_tactic(&tactic, &mut ctx) {
+            Err(ElabError::UndeclaredApplyTarget(name)) => assert_eq!(name, "nope"),
+            other => panic!("expected UndeclaredApplyTarget, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn elaborate_tactic_unsupported_returns_named_error() {
+        let mut ctx = ElabContext::new();
+        match elaborate_tactic(&TacticExpr::Ring, &mut ctx) {
+            Err(ElabError::UnsupportedTactic(t)) => assert_eq!(t, "Ring"),
+            other => panic!("expected UnsupportedTactic(Ring), got {:?}", other),
+        }
+        match elaborate_tactic(&TacticExpr::Smt { solver: verum_common::Maybe::None, timeout: verum_common::Maybe::None }, &mut ctx) {
+            Err(ElabError::UnsupportedTactic(t)) => assert_eq!(t, "Smt"),
+            other => panic!("expected UnsupportedTactic(Smt), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn elaborate_proof_body_dispatches_to_tactic() {
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("witness", Term::Universe(0));
+        let body = ProofBody::Tactic(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("witness")),
+            args: List::new(),
+        });
+        let term = elaborate_proof_body(&body, &mut ctx).unwrap();
+        assert_eq!(term, Term::Var(0));
+    }
+
+    #[test]
+    fn elaborate_proof_body_term_unsupported() {
+        let mut ctx = ElabContext::new();
+        let body = ProofBody::Term(verum_common::Heap::new(path_expr("foo")));
+        match elaborate_proof_body(&body, &mut ctx) {
+            Err(ElabError::UnsupportedTactic(_)) => {}
+            other => panic!("expected UnsupportedTactic, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn elaborate_theorem_apply_axiom_round_trips() {
+        // Construct: `theorem id_proof() ensures true { proof { apply foo; } }`
+        // where foo is an axiom of type Universe(0).  The elaborator
+        // produces a closure-over-axioms certificate that the kernel
+        // re-verifies.
+        use verum_ast::decl::TheoremDecl;
+        let span = Span::dummy();
+        let mut theorem = TheoremDecl::new(
+            Ident { name: "id_proof".into(), span },
+            path_expr("true_marker"),
+            span,
+        );
+        theorem.proof = verum_common::Maybe::Some(ProofBody::Tactic(TacticExpr::Apply {
+            lemma: verum_common::Heap::new(path_expr("foo")),
+            args: List::new(),
+        }));
+
+        let mut ctx = ElabContext::new();
+        ctx.register_axiom("foo", Term::Universe(0));
+
+        let cert = elaborate_theorem(&theorem, &mut ctx).unwrap();
+        // De Bruijn criterion: certificate re-verifies via the kernel.
+        cert.verify().unwrap();
+        // Metadata pin
+        assert_eq!(
+            cert.metadata.get("theorem_name").map(|s| s.as_str()),
+            Some("id_proof"),
+        );
+        assert_eq!(
+            cert.metadata.get("elaborator_phase").map(|s| s.as_str()),
+            Some("1"),
+        );
+    }
+
+    #[test]
+    fn elaborate_theorem_no_body_rejects() {
+        use verum_ast::decl::TheoremDecl;
+        let span = Span::dummy();
+        let theorem = TheoremDecl::new(
+            Ident { name: "unproved".into(), span },
+            path_expr("foo"),
+            span,
+        );
+        // theorem.proof is None by default.
+        let mut ctx = ElabContext::new();
+        match elaborate_theorem(&theorem, &mut ctx) {
+            Err(ElabError::NoProofBody) => {}
+            other => panic!("expected NoProofBody, got {:?}", other),
         }
     }
 }
