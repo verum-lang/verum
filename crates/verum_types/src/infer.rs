@@ -6571,6 +6571,27 @@ impl TypeChecker {
         self.protocol_checker.write().set_blanket_impls(allowed);
     }
 
+    /// Apply `[protocols].coherence` to the embedded
+    /// `ProtocolChecker`. Threads from manifest →
+    /// `phase_checker.set_protocol_coherence_mode(...)` →
+    /// `ProtocolChecker.coherence_mode`, which `register_impl`
+    /// consults to gate orphan-rule + overlap checks.  Closes the
+    /// inert-defense pattern at session.rs:587 — pre-fix the
+    /// production resolver always rejected orphan/overlap
+    /// regardless of manifest.
+    pub fn set_protocol_coherence_mode(&mut self, mode: crate::protocol::CoherenceMode) {
+        self.protocol_checker.write().set_coherence_mode(mode);
+    }
+
+    /// Drain coherence violations the embedded `ProtocolChecker`
+    /// downgraded to warnings under `CoherenceMode::Lenient`.
+    /// Returns an empty vec under Strict / Off.
+    pub fn drain_protocol_coherence_warnings(
+        &mut self,
+    ) -> Vec<crate::protocol::CoherenceError> {
+        self.protocol_checker.write().drain_coherence_warnings()
+    }
+
     pub fn register_builtins(&mut self) {
         // ============================================================
         // UNIFIED BUILTIN REGISTRATION
