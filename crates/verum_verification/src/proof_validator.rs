@@ -6278,9 +6278,31 @@ impl ProofValidator {
         let def_conclusion = def_proof.conclusion();
         self.validate_impl(def_proof, &def_conclusion)?;
 
-        // The result of applying the definition should match expected
-        // In a full implementation, we would check that expected is
-        // the original with the definition applied
+        // Soundness gate: `def_proof` must conclude a definitional
+        // equality (`Binary { op: Eq, .. }`). Without this shape
+        // check the validator accepts any proof of `expected` as
+        // a "definition unfolding" — pre-fix this was the only
+        // step gating apply_def, and `def_proof` could conclude
+        // anything as long as it equalled `expected`.
+        //
+        // Full apply-def soundness — verifying
+        // `expected = original[name := body]` — requires
+        // substitution machinery and is tracked separately.
+        if !matches!(
+            def_conclusion.kind,
+            ExprKind::Binary { op: BinOp::Eq, .. }
+        ) {
+            return Err(ValidationError::ValidationFailed {
+                message: format!(
+                    "apply_def: def_proof concludes {}, which is not an equality. \
+                     A definition proof must conclude `name == body`.",
+                    self.expr_to_text(&def_conclusion)
+                )
+                .into(),
+            });
+        }
+
+        // The result of applying the definition should match expected.
         if !self.expr_eq(&def_conclusion, expected) {
             return Err(ValidationError::PropositionMismatch {
                 expected: self.expr_to_text(expected),
