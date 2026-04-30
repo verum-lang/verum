@@ -36,6 +36,7 @@
 //! operations, providing one coherent model with convenient syntax sugar.
 
 use verum_ast::ty::TypeKind;
+use verum_ast::{Expr, ExprKind, LiteralKind};
 use verum_common::{List, Text};
 
 use super::context_requirements::{BuiltinInfo, BuiltinRegistry};
@@ -220,6 +221,30 @@ fn meta_type_max(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 // Type Property Computation Functions
 // ============================================================================
 
+/// Try to fold a size-expression to a non-negative `u64`.
+///
+/// Recognises bare integer literals and parenthesised wrappers around
+/// them — the two shapes a written-by-hand `[T; N]` size produces
+/// before const-evaluation runs. Anything else (named const, runtime
+/// expression, arithmetic) returns `None` so callers can fall back
+/// to a conservative answer instead of guessing.
+fn try_const_int_u64(expr: &Expr) -> Option<u64> {
+    match &expr.kind {
+        ExprKind::Literal(lit) => match &lit.kind {
+            LiteralKind::Int(int_lit) => {
+                if int_lit.value < 0 {
+                    None
+                } else {
+                    u64::try_from(int_lit.value).ok()
+                }
+            }
+            _ => None,
+        },
+        ExprKind::Paren(inner) => try_const_int_u64(inner),
+        _ => None,
+    }
+}
+
 /// Compute the size of a type in bytes
 pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
     match ty {
@@ -244,14 +269,23 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
         // Arrays
         TypeKind::Array { element, size } => {
             let elem_stride = compute_type_stride(&element.kind)?;
-            // For const expressions, we can't evaluate at this phase
-            // Return 0 for dynamic-sized arrays
-            if size.is_none() {
-                Ok(0)
-            } else {
-                // Size expression would need evaluation
-                // For now, return element stride (single element)
-                Ok(elem_stride)
+            // No size expression at all (slice-form `[T]` carrying
+            // the dynamic-size-through-the-AST shape) — surface 0
+            // as the conservative answer for "no static size known".
+            let Some(size_expr) = size.as_ref() else {
+                return Ok(0);
+            };
+            // Try to fold the size expression as a non-negative
+            // integer literal. Pre-fix this branch returned just
+            // `elem_stride` (the stride of ONE element) regardless
+            // of the literal — `[Int; 100]` reported 8 bytes, not
+            // 800. For non-literal size expressions (named const,
+            // arithmetic, etc.) we still can't compute statically
+            // here; fall back to `elem_stride` to preserve the
+            // pre-fix conservative answer.
+            match try_const_int_u64(size_expr) {
+                Some(n) => Ok(elem_stride.saturating_mul(n)),
+                None => Ok(elem_stride),
             }
         }
 
@@ -615,10 +649,14 @@ pub fn compute_type_name(ty: &TypeKind) -> Text {
 
         TypeKind::Array { element, size } => {
             let elem_name = compute_type_name(&element.kind);
-            if size.is_some() {
-                Text::from(format!("[{}; _]", elem_name))
-            } else {
-                Text::from(format!("[{}]", elem_name))
+            // size: Option<Heap<Expr>> — peel the Heap before passing
+            // to try_const_int_u64(&Expr). The closure form is
+            // necessary because and_then can't see through Heap deref
+            // coercion.
+            match size.as_ref().and_then(|h| try_const_int_u64(h)) {
+                Some(n) => Text::from(format!("[{}; {}]", elem_name, n)),
+                None if size.is_some() => Text::from(format!("[{}; _]", elem_name)),
+                None => Text::from(format!("[{}]", elem_name)),
             }
         }
 
