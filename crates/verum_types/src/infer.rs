@@ -500,6 +500,14 @@ pub struct TypeChecker {
     /// from a Named type to the underlying Variant structure.
     /// Key is a stable string signature of the variant structure (sorted variant names).
     variant_type_names: Map<Text, Text>,
+    /// Audit-A1: every collision detected during
+    /// `register_variant_type_name_first_wins` (existing entry maps
+    /// signature `S` to type `A`, second registration tries to map `S`
+    /// to a different type `B`). Stored as `(signature, kept, dropped)`
+    /// so downstream diagnostics can report both type names. Empty in
+    /// the well-formed case; non-empty surfaces a coherence violation
+    /// the prior `or_insert()` silently swallowed.
+    variant_collision_log: List<(Text, Text, Text)>,
     /// Record variant fields: maps variant name (e.g., "Rect") to its field types.
     /// Used for `Rect { w: 4, h: 6 }` construction resolution in check_expr.
     /// Stored separately from type_defs to avoid infinite recursion during type resolution.
@@ -1044,6 +1052,7 @@ impl TypeChecker {
             method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
+            variant_collision_log: List::new(),
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
@@ -1228,6 +1237,7 @@ impl TypeChecker {
             method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
+            variant_collision_log: List::new(),
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
@@ -1854,6 +1864,7 @@ impl TypeChecker {
             method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
+            variant_collision_log: List::new(),
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
@@ -1969,6 +1980,7 @@ impl TypeChecker {
             method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
+            variant_collision_log: List::new(),
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
@@ -2085,6 +2097,7 @@ impl TypeChecker {
             method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
+            variant_collision_log: List::new(),
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
@@ -37188,12 +37201,44 @@ impl TypeChecker {
     /// Mirrors the same `entry().or_insert()` semantics used by the protocol
     /// checker (`protocol.rs`) and the unifier (`unify.rs`) — three layers, one
     /// rule, no hardcoded type names.
+    ///
+    /// **Audit-A1 coherence: collision logging.** Prior revisions used
+    /// a bare `or_insert_with` that silently dropped any second
+    /// registration claiming the same signature. Two distinct types
+    /// with identical variant signatures (e.g. `type A is X(Int)|Y` and
+    /// `type B is X(Int)|Y` declared in different cogs) would map the
+    /// same signature to whichever type was iterated first; the second
+    /// type's downstream method lookups would then silently resolve
+    /// via the first type's vtable — a real soundness hole when the
+    /// two types' methods diverge. We keep first-registered-wins (the
+    /// architectural rule) but ALSO log every collision into
+    /// `variant_collision_log` so `take_variant_collisions()` can
+    /// surface them as compile-time diagnostics.
     fn register_variant_type_name_first_wins(&mut self, sig: Text, type_name: Text) {
+        if let Some(existing) = self.variant_type_names.get(&sig) {
+            if existing != &type_name {
+                self.variant_collision_log.push((
+                    sig.clone(),
+                    existing.clone(),
+                    type_name.clone(),
+                ));
+            }
+        }
         self.variant_type_names
             .entry(sig.clone())
             .or_insert_with(|| type_name.clone());
         self.protocol_checker.write().register_variant_type_name(sig.clone(), type_name.clone());
         self.unifier.register_variant_type_name(sig, type_name);
+    }
+
+    /// Drain and return the collision log accumulated during
+    /// `register_variant_type_name_first_wins`. Each entry is
+    /// `(signature, kept_type, dropped_type)`. Diagnostic emitters
+    /// consume this once per compilation; subsequent calls return an
+    /// empty list. The drain semantic prevents the same collision
+    /// from being reported twice across phases.
+    pub fn take_variant_collisions(&mut self) -> List<(Text, Text, Text)> {
+        std::mem::replace(&mut self.variant_collision_log, List::new())
     }
 
     /// Generate a stable signature for a variant type for use as a map key.
