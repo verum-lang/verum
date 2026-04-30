@@ -738,6 +738,57 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             Ok(DispatchResult::Continue)
         }
 
+        Some(FfiSubOpcode::DerefRawSigned) => {
+            // Sign-extending sibling of `DerefRaw`.  Format and layout
+            // identical (`dst:reg, ptr:reg, size:u8`) — only the
+            // extension policy differs: we read `size` bytes through
+            // the pointer and **sign-extend** the result to i64.
+            //
+            // This is the load-bearing read for typed signed C
+            // primitives at FFI boundaries — `int8_t` / `int16_t` /
+            // `int32_t` slots whose high bit can flip the sign of the
+            // i64 representation.  errno is the canonical user (a
+            // positive errno fits either policy, but the engine should
+            // not depend on errno staying non-negative — kernel APIs
+            // that return signed i32 results in pointer-deref form
+            // need this sign-fidelity).
+            //
+            // See `DerefRaw`'s comment block above for the historical
+            // CRC32 zero-extension rationale that motivated keeping the
+            // two opcodes separate.
+            let dst = read_reg(state)?;
+            let ptr_reg = read_reg(state)?;
+            let size = read_u8(state)?;
+
+            let val = state.get_reg(ptr_reg);
+            let ptr: *mut u8 = if val.is_ptr() {
+                val.as_ptr()
+            } else {
+                val.as_i64() as *mut u8
+            };
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+
+            // SAFETY: `ptr` was null-checked above.  The caller is
+            // responsible for the pointer being valid for reads of
+            // `size` bytes per the FFI contract.  `read_unaligned`
+            // handles arbitrary alignment.
+            let value = unsafe {
+                match size {
+                    1 => *(ptr as *const i8) as i64,                                    // i8 → i64 (sign-extend)
+                    2 => std::ptr::read_unaligned(ptr as *const i16) as i64,            // i16 → i64 (sign-extend)
+                    4 => std::ptr::read_unaligned(ptr as *const i32) as i64,            // i32 → i64 (sign-extend)
+                    8 => std::ptr::read_unaligned(ptr as *const i64),                   // 8 bytes fill the slot
+                    _ => return Err(InterpreterError::InvalidOperand {
+                        message: format!("invalid signed deref size: {}", size),
+                    }),
+                }
+            };
+            state.set_reg(dst, Value::from_i64(value));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(FfiSubOpcode::DerefMutRaw) => {
             // Write value through raw pointer
             // Format: ptr:reg, value:reg, size:u8
