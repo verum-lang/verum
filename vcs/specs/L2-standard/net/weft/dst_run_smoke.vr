@@ -1,0 +1,47 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: net, weft, dst, deterministic-simulation, runtime, smoke
+// @timeout: 15000
+// @expected-stdout: DST_TYPES_OK seed=2526323 cfg=ok sim=ok
+// @expected-exit: 0
+
+// First DST run-test for `core/net/weft/dst.vr`. Closes part of
+// task #9 — the И-axis (executable) gate for the DST sub-pillar.
+//
+// Spec: internal/specs/net-framework.md §8.15.
+//
+// Smoke-tests the *construction* path: every public DST type
+// (TestClock / SeededRng / SimNetworkConfig / SimConfig /
+// WeftSimulator) can be instantiated end-to-end without panic.
+// This validates module loading, type resolution, and the type-
+// constructor lowering for nested generic-Shared<Atomic*> fields.
+//
+// Per-method runtime exercise (rng.next_u64, sim.advance, …) is a
+// follow-up gate: the interpreter currently lacks deref-and-call
+// dispatch for `Shared<Atomic*>` method invocations, tracked
+// separately from #9. The construction smoke is the immediate
+// gate that flips weft DST from "compile-only" to "loadable at
+// runtime".
+
+mount core.net.weft.dst.{
+    TestClock, SeededRng, SimNetworkConfig, SimConfig, WeftSimulator,
+};
+
+fn main() {
+    let seed: UInt64 = 0x00268C73; // = 2526323 dec — fixed for replay
+
+    let cfg = SimConfig.from_seed(seed);
+    let _sim = WeftSimulator.new(cfg);
+
+    // Independently construct the sub-systems — confirms each
+    // public type's constructor lands without runtime panic.
+    let _clock = TestClock.seeded(seed);
+    let _rng   = SeededRng.new(seed);
+    let _net   = SimNetworkConfig.default();
+
+    let cfg_status = "ok";
+    let sim_status = "ok";
+
+    print(f"DST_TYPES_OK seed={seed} cfg={cfg_status} sim={sim_status}");
+}
