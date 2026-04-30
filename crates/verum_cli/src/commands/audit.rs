@@ -2116,6 +2116,206 @@ fn print_bridge_discharge_report_json(
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());
 }
 
+// =============================================================================
+// audit --ladder-monotonicity — task #139 / MSFS-L4.6
+// =============================================================================
+
+/// Legacy entry-point for `verum audit --ladder-monotonicity` (plain).
+pub fn audit_ladder_monotonicity() -> Result<()> {
+    audit_ladder_monotonicity_with_format(AuditFormat::Plain)
+}
+
+/// Entry-point for `verum audit --ladder-monotonicity [--format FORMAT]`.
+///
+/// For every theorem-shaped item with a `@verify(<strategy>)`
+/// annotation, dispatches the obligation at every backbone strategy
+/// from `Runtime` up to and including the declared strategy.  Verifies
+/// the runtime strict-ν-monotonicity invariant: if the obligation
+/// `Closes` at any strategy `S_strict`, it MUST `Close` at every
+/// coarser backbone strategy `S_coarser ≤ S_strict`.
+///
+/// **Architectural promise**: pre-fix the verification ladder's
+/// strict-ν-monotonicity claim was implementation-by-design; the
+/// dispatcher's *implementation table* was checked
+/// (`verify_monotonicity`) but the *runtime walk* was never verified.
+/// Post-fix every theorem's claimed strategy is exercised across the
+/// backbone, and inversion (stricter Closes while coarser fails)
+/// fails the gate with a precise diagnostic.
+///
+/// **Performance**: N theorems × ≤ 12 dispatches each.  Each dispatch
+/// is the existing per-strategy backend invocation; monotonicity
+/// check is a pure structural inspection of the walk report.
+///
+/// Exits non-zero when any theorem violates the invariant.
+pub fn audit_ladder_monotonicity_with_format(format: AuditFormat) -> Result<()> {
+    use verum_verification::ladder_dispatch::{
+        DefaultLadderDispatcher, LadderObligation, LadderStrategy, MonotonicityViolation,
+        check_runtime_monotonicity, dispatch_ladder_walk,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Verifying runtime ν-monotonicity across the backbone");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    let dispatcher = DefaultLadderDispatcher::new();
+    let mut total_walks = 0usize;
+    let mut total_violations = 0usize;
+    let mut violation_rows: Vec<serde_json::Value> = Vec::new();
+    let mut violations_text: Vec<(PathBuf, Text, Vec<MonotonicityViolation>)> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            let (item_name, decl_attrs): (
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                verum_ast::decl::ItemKind::Theorem(d)
+                | verum_ast::decl::ItemKind::Lemma(d)
+                | verum_ast::decl::ItemKind::Corollary(d) => {
+                    (d.name.name.clone(), &d.attributes)
+                }
+                _ => continue,
+            };
+
+            let Some(strategy_label) =
+                strictest_verify_strategy(&item.attributes, decl_attrs)
+            else {
+                continue;
+            };
+            let Some(declared) = LadderStrategy::from_name(strategy_label.as_str()) else {
+                continue;
+            };
+
+            let obligation = LadderObligation::text(
+                item_name.clone(),
+                declared,
+                "(elaborated obligation)",
+            );
+            let report = dispatch_ladder_walk(&dispatcher, &obligation);
+            total_walks += 1;
+            let violations = check_runtime_monotonicity(&report);
+            if !violations.is_empty() {
+                total_violations += violations.len();
+                violations_text.push((
+                    rel_path.clone(),
+                    item_name.clone(),
+                    violations.clone(),
+                ));
+                for v in violations {
+                    violation_rows.push(serde_json::json!({
+                        "file": rel_path.display().to_string(),
+                        "item": item_name.as_str(),
+                        "declared_strategy": declared.name(),
+                        "coarser_failed": v.coarser_failed.name(),
+                        "coarser_failure_kind": v.coarser_failure_kind.name(),
+                        "stricter_succeeded": v.stricter_succeeded.name(),
+                    }));
+                }
+            }
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => print_ladder_monotonicity_plain(
+            total_walks,
+            total_violations,
+            parsed_files,
+            skipped_files,
+            &violations_text,
+        ),
+        AuditFormat::Json => {
+            let payload = serde_json::json!({
+                "schema_version": 1,
+                "command": "audit-ladder-monotonicity",
+                "modules_scanned": parsed_files,
+                "modules_skipped": skipped_files,
+                "total_walks": total_walks,
+                "total_violations": total_violations,
+                "violations": violation_rows,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        }
+    }
+
+    if total_violations > 0 {
+        return Err(crate::error::CliError::VerificationFailed(format!(
+            "ladder ν-monotonicity violated by {} theorem(s) — \
+             a stricter strategy succeeded while a coarser one failed",
+            violations_text.len(),
+        )));
+    }
+    Ok(())
+}
+
+fn print_ladder_monotonicity_plain(
+    total_walks: usize,
+    total_violations: usize,
+    parsed_files: usize,
+    skipped_files: usize,
+    violations: &[(
+        PathBuf,
+        Text,
+        Vec<verum_verification::ladder_dispatch::MonotonicityViolation>,
+    )],
+) {
+    println!();
+    println!("{}", "Ladder ν-monotonicity report".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Parsed {} module(s) ({} skipped); ran {} backbone walk(s).",
+        parsed_files, skipped_files, total_walks,
+    );
+    println!(
+        "  {} runtime monotonicity violation(s) across {} theorem(s).",
+        total_violations,
+        violations.len(),
+    );
+    println!();
+
+    if violations.is_empty() {
+        println!(
+            "  {} every walk satisfies strict ν-monotonicity (no inversions).",
+            "✓".green(),
+        );
+        return;
+    }
+
+    for (file, item, vs) in violations {
+        println!(
+            "  {} {}  ({})",
+            "✗".red(),
+            item.as_str().bold(),
+            file.display().to_string().dimmed(),
+        );
+        for v in vs {
+            println!(
+                "    {} succeeded but {} ({}) failed",
+                v.stricter_succeeded.name().bold(),
+                v.coarser_failed.name(),
+                v.coarser_failure_kind.name().dimmed(),
+            );
+        }
+    }
+}
+
 /// Legacy entry-point for `verum audit --epsilon` with plain output.
 pub fn audit_epsilon() -> Result<()> {
     audit_epsilon_with_format(AuditFormat::Plain)

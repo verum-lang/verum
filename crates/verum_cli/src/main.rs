@@ -1240,6 +1240,20 @@ enum Commands {
         #[clap(long = "bridge-discharge")]
         bridge_discharge: bool,
 
+        /// Run the runtime ν-monotonicity drive (task #139 / MSFS-L4.6).
+        /// For every theorem-shaped item with a `@verify(<strategy>)`
+        /// annotation, dispatches the obligation at every backbone
+        /// strategy from `Runtime` up to and including the declared
+        /// strategy, then verifies the strict-ν-monotonicity
+        /// invariant: `Closes` at any strategy `S_strict` MUST imply
+        /// `Closes` at every coarser backbone strategy `S_coarser ≤
+        /// S_strict`.  Exits non-zero on any inversion.  This is the
+        /// architectural promise the verification ladder makes by
+        /// design — this audit keeps the promise honest at runtime
+        /// across the live corpus.
+        #[clap(long = "ladder-monotonicity")]
+        ladder_monotonicity: bool,
+
         /// Enumerate the ε-distribution (Actic / DC coordinate) of the
         /// corpus — the dual of `--framework-axioms`. Prints every
         /// `@enact(epsilon = "...")` marker grouped by ε-primitive
@@ -3531,6 +3545,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_recheck,
             kernel_soundness,
             bridge_discharge,
+            ladder_monotonicity,
             epsilon,
             coord,
             no_coord,
@@ -3575,6 +3590,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
+            } else if ladder_monotonicity {
+                commands::audit::audit_ladder_monotonicity_with_format(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
             } else if epsilon {
