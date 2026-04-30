@@ -5156,6 +5156,31 @@ impl<'s> CompilationPipeline<'s> {
 
         debug!("Expanding macros in module: {}", path.as_str());
 
+        // Pre-pass: expand @delegate(target) attributes (#146 / MSFS-L4.14).
+        // Synthesizes `proof { apply target(p1, p2, ...); }` for theorems
+        // carrying the attribute and no explicit body, before macro
+        // expansion sees the AST. Running here means the rest of the
+        // pipeline (macro expansion, semantic analysis, contract
+        // verification, audit gates) sees a structurally complete proof
+        // body without distinguishing synthesized-vs-manual forms.
+        let delegate_outcomes = crate::phases::delegate_expansion::expand_delegates_in_module(module);
+        for outcome in &delegate_outcomes {
+            if let crate::phases::delegate_expansion::DelegateExpansion::Rejected {
+                theorem,
+                reason,
+            } = outcome
+            {
+                let diag = DiagnosticBuilder::error()
+                    .message(format!(
+                        "@delegate on `{}` rejected: {}",
+                        theorem.as_str(),
+                        reason.as_str(),
+                    ))
+                    .build();
+                self.session.emit_diagnostic(diag);
+            }
+        }
+
         // Create a macro expander visitor
         let mut expander = MacroExpander {
             registry: &self.meta_registry,

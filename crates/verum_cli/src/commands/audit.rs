@@ -1341,6 +1341,12 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 
 /// Parse a single `.vr` file without running semantic analysis. We only need
 /// the top-level item list + attributes.
+///
+/// Post-parse the @delegate(target) attribute pre-pass runs so audit
+/// walkers see the synthesised proof bodies (#146 / MSFS-L4.14).
+/// Without this step a corpus theorem with `@delegate(target_full)` and
+/// no manual proof body would surface to audit gates as a body-less
+/// axiom, mis-classifying the L4 verdict.
 pub(crate) fn parse_file_for_audit(path: &Path) -> std::result::Result<verum_ast::Module, String> {
     let mut options = CompilerOptions::default();
     options.input = path.to_path_buf();
@@ -1349,9 +1355,15 @@ pub(crate) fn parse_file_for_audit(path: &Path) -> std::result::Result<verum_ast
         .load_file(path)
         .map_err(|e| format!("load: {}", e))?;
     let mut pipeline = CompilationPipeline::new_check(&mut session);
-    pipeline
+    let mut module = pipeline
         .phase_parse(file_id)
-        .map_err(|e| format!("parse: {}", e))
+        .map_err(|e| format!("parse: {}", e))?;
+    // Run @delegate expansion post-parse so audit walkers see the
+    // synthesised proof bodies.  Rejected outcomes (delegate + manual
+    // body) are dropped silently here — the elaborator surfaces them
+    // when the same file goes through full compilation.
+    let _ = verum_compiler::phases::delegate_expansion::expand_delegates_in_module(&mut module);
+    Ok(module)
 }
 
 fn collect_framework_markers_from(
