@@ -160,6 +160,14 @@ pub trait ForeignSystemChecker {
 
     /// One-line install hint for the user.
     fn install_hint(&self) -> &'static str;
+
+    /// Canonical foreign-system handle.  Default implementation
+    /// converts [`format`](Self::format) via
+    /// [`ExportFormat::to_foreign_system`].  Lets consumers dispatch
+    /// by typed enum without going through the format → ID mapping.
+    fn foreign_system(&self) -> verum_kernel::foreign_system::ForeignSystem {
+        self.format().to_foreign_system()
+    }
 }
 
 /// Helper: spawn a command, capture exit/stderr/stdout, return a

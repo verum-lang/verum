@@ -87,6 +87,31 @@ impl ExportFormat {
             ExportFormat::Dedukti,
         ]
     }
+
+    /// Convert to the canonical `ForeignSystem` enum.  Total — every
+    /// `ExportFormat` variant has a corresponding `ForeignSystem`.
+    pub fn to_foreign_system(self) -> crate::foreign_system::ForeignSystem {
+        match self {
+            ExportFormat::Coq => crate::foreign_system::ForeignSystem::Coq,
+            ExportFormat::Lean4 => crate::foreign_system::ForeignSystem::Lean4,
+            ExportFormat::Isabelle => crate::foreign_system::ForeignSystem::Isabelle,
+            ExportFormat::Dedukti => crate::foreign_system::ForeignSystem::Dedukti,
+        }
+    }
+
+    /// Try to construct from the canonical `ForeignSystem`.  Returns
+    /// `None` for systems without a cross-format-export pathway
+    /// (Mizar, Agda, Metamath).
+    pub fn from_foreign_system(system: crate::foreign_system::ForeignSystem) -> Option<Self> {
+        use crate::foreign_system::ForeignSystem;
+        match system {
+            ForeignSystem::Coq => Some(ExportFormat::Coq),
+            ForeignSystem::Lean4 => Some(ExportFormat::Lean4),
+            ForeignSystem::Isabelle => Some(ExportFormat::Isabelle),
+            ForeignSystem::Dedukti => Some(ExportFormat::Dedukti),
+            ForeignSystem::Mizar | ForeignSystem::Agda | ForeignSystem::Metamath => None,
+        }
+    }
 }
 
 // =============================================================================

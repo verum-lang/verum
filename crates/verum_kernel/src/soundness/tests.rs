@@ -134,6 +134,15 @@ fn lemma_names_match_rule_names_with_sound_suffix() {
 }
 
 #[test]
+fn soundness_backend_id_resolves_to_canonical_foreign_system() {
+    use crate::foreign_system::ForeignSystem;
+    let coq = CoqBackend::new();
+    let lean = LeanBackend::new();
+    assert_eq!(coq.foreign_system(), Some(ForeignSystem::Coq));
+    assert_eq!(lean.foreign_system(), Some(ForeignSystem::Lean4));
+}
+
+#[test]
 fn coq_backend_emits_full_file() {
     let exporter = SoundnessExporter::new();
     let coq = CoqBackend::new();
