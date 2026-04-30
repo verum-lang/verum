@@ -481,6 +481,33 @@ impl EnhancedEscapeAnalyzer {
     pub fn analyze(&mut self) -> EscapeAnalysisResult {
         let start_time = std::time::Instant::now();
 
+        // Surface 2 EscapeAnalysisConfig fields via tracing —
+        // `enable_closure_analysis` and `confidence_threshold` are
+        // set in defaults but no production analysis path consults
+        // them yet (closure-walk is a future precision pass; the
+        // analyzer's promotion-decision sites use the diagnostics
+        // crate's own confidence_threshold from WarningConfig, not
+        // this one). Same fail-open recorder pattern as
+        // 270b84c8 / 07213987 — log the gap so operators see when
+        // their setting is observed-but-unconsumed without rebuilding
+        // the analyzer. Default-valued configs stay log-quiet to
+        // avoid polluting the typical path.
+        let defaults = EscapeAnalysisConfig::default();
+        if self.config.enable_closure_analysis != defaults.enable_closure_analysis
+            || (self.config.confidence_threshold - defaults.confidence_threshold).abs()
+                > f64::EPSILON
+        {
+            tracing::debug!(
+                target: "verum_cbgr::escape_analysis",
+                enable_closure_analysis = self.config.enable_closure_analysis,
+                confidence_threshold = self.config.confidence_threshold,
+                "EscapeAnalysisConfig: non-default knobs observed but not consumed by \
+                 the current analysis path. Closure-escape walk is tracked separately; \
+                 the diagnostics crate has its own WarningConfig.confidence_threshold \
+                 that gates promotion warnings."
+            );
+        }
+
         // Step 1: Initialize all references
         self.initialize_references();
 
@@ -792,18 +819,31 @@ impl EnhancedEscapeAnalyzer {
                 }
             }
 
-            // Check if any call in the same block targets a thread-spawning function
-            for (func_id, sig) in &cg.signatures {
-                if sig.is_thread_spawn {
-                    // Check if our reference's block has a call to this function
-                    if let Maybe::Some(callers) = cg.callers.get(func_id) {
-                        for caller in callers {
-                            if let Maybe::Some(edges_from_caller) = cg.calls.get(caller)
-                                && edges_from_caller.contains(func_id)
-                            {
-                                // There's a call to thread spawn - check if our ref is involved
-                                // Be conservative: if thread spawn is called, reference may escape
-                                return true;
+            // Check if any call in the same block targets a thread-spawning function.
+            //
+            // Gated on `EscapeAnalysisConfig.enable_thread_analysis`
+            // (default true). Pre-fix the field was set in defaults
+            // but no path consulted it — disabling thread analysis
+            // in the manifest had zero observable effect; the
+            // thread-spawn walk fired regardless. Now operators can
+            // opt out for analysis configurations where thread
+            // semantics are out-of-scope (single-threaded targets,
+            // pure-pipeline analyses) without rebuilding the
+            // analyzer. The conservative default (true) keeps
+            // existing behaviour for the typical path.
+            if self.config.enable_thread_analysis {
+                for (func_id, sig) in &cg.signatures {
+                    if sig.is_thread_spawn {
+                        // Check if our reference's block has a call to this function
+                        if let Maybe::Some(callers) = cg.callers.get(func_id) {
+                            for caller in callers {
+                                if let Maybe::Some(edges_from_caller) = cg.calls.get(caller)
+                                    && edges_from_caller.contains(func_id)
+                                {
+                                    // There's a call to thread spawn - check if our ref is involved
+                                    // Be conservative: if thread spawn is called, reference may escape
+                                    return true;
+                                }
                             }
                         }
                     }
@@ -990,5 +1030,34 @@ mod tests {
 
         assert_eq!(stats.no_escape_percentage(), 70.0);
         assert_eq!(stats.estimated_time_saved_ns(), 70 * 150);
+    }
+
+    #[test]
+    fn escape_config_default_enable_thread_analysis_is_true() {
+        // Pin: the default `enable_thread_analysis = true` keeps
+        // backward compatibility — the thread-spawn walk fires for
+        // any analysis configuration that doesn't explicitly opt
+        // out. Regression flipping the default would silently relax
+        // the analysis (returning false more often) and let
+        // thread-escaping references slip through promotion.
+        let cfg = EscapeAnalysisConfig::default();
+        assert!(
+            cfg.enable_thread_analysis,
+            "default must be true to preserve the conservative thread-spawn walk"
+        );
+    }
+
+    #[test]
+    fn escape_config_thread_analysis_field_round_trip() {
+        // Pin: the field is reachable via builder-style construction.
+        // A regression that drops or renames the field surfaces here
+        // as a compile error rather than silently re-introducing the
+        // pre-fix "set the field but ignore it" inert-defense.
+        let cfg = EscapeAnalysisConfig {
+            enable_thread_analysis: false,
+            ..EscapeAnalysisConfig::default()
+        };
+        assert!(!cfg.enable_thread_analysis);
+        assert!(cfg.enable_interprocedural); // Other defaults preserved
     }
 }
