@@ -1207,3 +1207,257 @@ mod tests {
         );
     }
 }
+
+// =============================================================================
+// MakeVariantTyped layout validation (#272 — public surface).
+// =============================================================================
+//
+// Tier 1 (AOT) codegen path uses this from
+// `verum_codegen::llvm::instruction::Instruction::MakeVariantTyped`
+// arm to validate the (type_id, tag, field_count) tuple at codegen
+// time, BEFORE emitting any IR.  Pre-#272 the AOT path skipped the
+// check entirely while Tier 0 (interpreter) validated via
+// `validate_make_variant_typed` at dispatch time — silent
+// divergence between the two tiers on layout-mismatched bytecode.
+//
+// Validating at codegen time (rather than runtime) is correct
+// architecturally: every operand of MakeVariantTyped is a compile-
+// time constant, so the check is doable without any runtime
+// reflection / type-table marshalling. Failure produces a hard
+// codegen error matching the Tier 0 panic, ensuring both tiers
+// reject the same bytecode for the same reason.
+
+/// Layout validation error for `MakeVariantTyped` (#272).
+#[derive(Debug, Clone)]
+pub enum VariantLayoutError {
+    /// type_id has no descriptor in the module's type table.
+    UnknownTypeId { type_id: TypeId, tag: u32, got_field_count: u32 },
+    /// type_id is registered but its descriptor has no variant
+    /// matching `tag`.
+    UnknownTag { type_id: TypeId, tag: u32, got_field_count: u32 },
+    /// `(type_id, tag)` resolves to a variant descriptor whose
+    /// arity disagrees with the bytecode-encoded `field_count`.
+    /// `expected` is the variant's declared arity; `got` is what
+    /// the instruction tried to emit.
+    FieldCountMismatch {
+        type_id: TypeId,
+        tag: u32,
+        expected: u32,
+        got: u32,
+    },
+}
+
+impl std::fmt::Display for VariantLayoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VariantLayoutError::UnknownTypeId { type_id, tag, got_field_count } => write!(
+                f,
+                "MakeVariantTyped: type_id={:?} has no descriptor in the type \
+                 table (tag={}, field_count={}). Codegen emitted a typed-variant \
+                 instruction for a type the module doesn't declare.",
+                type_id, tag, got_field_count,
+            ),
+            VariantLayoutError::UnknownTag { type_id, tag, got_field_count } => write!(
+                f,
+                "MakeVariantTyped: tag={} is not a declared variant of type_id={:?} \
+                 (field_count={}). Codegen emitted a tag the type's variant list \
+                 doesn't include.",
+                tag, type_id, got_field_count,
+            ),
+            VariantLayoutError::FieldCountMismatch { type_id, tag, expected, got } => write!(
+                f,
+                "MakeVariantTyped: variant tag={} of type_id={:?} expects \
+                 field_count={}, codegen tried to emit field_count={}.",
+                tag, type_id, expected, got,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for VariantLayoutError {}
+
+/// Compute the expected field count for a variant descriptor.
+///
+/// Mirrors `verum_vbc::interpreter::dispatch_table::handlers::extended::
+/// expected_field_count` (which is private to the interpreter).
+/// Kept in sync with that function — they MUST agree on every
+/// VariantKind so Tier 0 dispatch validation and Tier 1 codegen
+/// validation reject the same tuples.
+fn variant_expected_field_count(
+    variant: &crate::types::VariantDescriptor,
+) -> u32 {
+    use crate::types::VariantKind;
+    match variant.kind {
+        VariantKind::Unit => 0,
+        VariantKind::Tuple => variant.arity as u32,
+        VariantKind::Record => variant.fields.len() as u32,
+    }
+}
+
+/// Validate a `(type_id, tag, field_count)` tuple at codegen time.
+///
+/// Returns `Ok(())` when the tuple is consistent with the module's
+/// type table.  Returns `Err(VariantLayoutError)` on mismatch — the
+/// codegen path converts this to a hard `LlvmLoweringError` so the
+/// build fails loud rather than emitting IR with a layout bug.
+///
+/// Builtin-range type ids (`is_builtin()`) bypass the check because
+/// they don't carry a `variants` list.  This matches the Tier 0
+/// validator's behaviour at extended.rs:62.
+pub fn validate_variant_layout(
+    module: &VbcModule,
+    type_id: TypeId,
+    tag: u32,
+    field_count: u32,
+) -> Result<(), VariantLayoutError> {
+    if type_id.is_builtin() {
+        return Ok(());
+    }
+    let desc = match module.get_type(type_id) {
+        Some(d) => d,
+        None => {
+            return Err(VariantLayoutError::UnknownTypeId {
+                type_id,
+                tag,
+                got_field_count: field_count,
+            });
+        }
+    };
+    let variant = match desc.variants.iter().find(|v| v.tag == tag) {
+        Some(v) => v,
+        None => {
+            return Err(VariantLayoutError::UnknownTag {
+                type_id,
+                tag,
+                got_field_count: field_count,
+            });
+        }
+    };
+    let expected = variant_expected_field_count(variant);
+    if expected != field_count {
+        return Err(VariantLayoutError::FieldCountMismatch {
+            type_id,
+            tag,
+            expected,
+            got: field_count,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod variant_layout_tests {
+    use super::*;
+    use crate::types::{
+        StringId, TypeDescriptor, TypeKind, VariantDescriptor, VariantKind,
+    };
+    use smallvec::SmallVec;
+
+    fn mk_module_with_user_type() -> VbcModule {
+        let mut module = VbcModule::default();
+        // Register a Maybe-like type at id 0x100 (first non-builtin):
+        // None (Unit, arity=0), Some (Tuple, arity=1).
+        let mut variants = SmallVec::new();
+        variants.push(VariantDescriptor {
+            name: StringId::EMPTY,
+            tag: 0,
+            kind: VariantKind::Unit,
+            payload: None,
+            arity: 0,
+            fields: SmallVec::new(),
+        });
+        variants.push(VariantDescriptor {
+            name: StringId::EMPTY,
+            tag: 1,
+            kind: VariantKind::Tuple,
+            payload: None,
+            arity: 1,
+            fields: SmallVec::new(),
+        });
+        let type_id = TypeId(0x100);
+        let desc = TypeDescriptor {
+            id: type_id,
+            kind: TypeKind::Sum,
+            variants,
+            ..Default::default()
+        };
+        module.add_type(desc);
+        module
+    }
+
+    #[test]
+    fn builtin_type_id_bypasses_check() {
+        // Pin: builtin ids (< 0x100) skip the lookup — matches the
+        // Tier 0 validator's behaviour at extended.rs:62.
+        let module = VbcModule::default();
+        assert!(validate_variant_layout(&module, TypeId::INT, 0, 0).is_ok());
+        assert!(validate_variant_layout(&module, TypeId::BOOL, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn unknown_type_id_rejected() {
+        let module = mk_module_with_user_type();
+        let result = validate_variant_layout(&module, TypeId(0x999), 0, 0);
+        assert!(matches!(
+            result,
+            Err(VariantLayoutError::UnknownTypeId { .. })
+        ));
+    }
+
+    #[test]
+    fn unknown_tag_rejected() {
+        let module = mk_module_with_user_type();
+        // The Maybe-type has tags 0 and 1; tag 99 is invalid.
+        let result = validate_variant_layout(&module, TypeId(0x100), 99, 0);
+        assert!(matches!(
+            result,
+            Err(VariantLayoutError::UnknownTag { .. })
+        ));
+    }
+
+    #[test]
+    fn field_count_mismatch_rejected() {
+        let module = mk_module_with_user_type();
+        // Some(arg) is a Tuple with arity=1; emitting field_count=2
+        // is a layout bug.
+        let result = validate_variant_layout(&module, TypeId(0x100), 1, 2);
+        match result {
+            Err(VariantLayoutError::FieldCountMismatch { expected, got, .. }) => {
+                assert_eq!(expected, 1);
+                assert_eq!(got, 2);
+            }
+            other => panic!("expected FieldCountMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn valid_tuple_variant_accepted() {
+        let module = mk_module_with_user_type();
+        // Some(arg) tuple with arity=1.
+        assert!(validate_variant_layout(&module, TypeId(0x100), 1, 1).is_ok());
+    }
+
+    #[test]
+    fn valid_unit_variant_accepted() {
+        let module = mk_module_with_user_type();
+        // None unit with arity=0.
+        assert!(validate_variant_layout(&module, TypeId(0x100), 0, 0).is_ok());
+    }
+
+    #[test]
+    fn variant_layout_error_displays_helpfully() {
+        // Pin: error message contains the type_id, tag, and
+        // field_count so codegen-time failures route through the
+        // existing diagnostic machinery with full context.
+        let err = VariantLayoutError::FieldCountMismatch {
+            type_id: TypeId(0x100),
+            tag: 1,
+            expected: 1,
+            got: 2,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("MakeVariantTyped"), "got: {}", msg);
+        assert!(msg.contains("field_count=1"), "got: {}", msg);
+        assert!(msg.contains("field_count=2"), "got: {}", msg);
+    }
+}
