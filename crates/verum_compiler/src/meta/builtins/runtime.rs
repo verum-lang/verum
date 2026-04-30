@@ -378,15 +378,78 @@ fn meta_target_has_feature(_ctx: &mut MetaContext, args: List<ConstValue>) -> Re
     }
 
     match &args[0] {
-        ConstValue::Text(_feature) => {
-            // In a real implementation, this would check target_feature cfg
-            // For now, return false for all features
-            Ok(ConstValue::Bool(false))
+        ConstValue::Text(feature) => {
+            // Mirrors meta_target_os / meta_target_arch: read the
+            // compile-time `target_feature` cfg of the compiler host.
+            // `cfg!(target_feature = ...)` requires a literal so the
+            // user's runtime string is matched against a known set.
+            // Unknown/unsupported features fall through to `false` —
+            // safer than over-claiming a feature the host doesn't
+            // actually have. Cross-compilation queries should consult
+            // ProjectInfoData.target_triple via a separate
+            // build-target-aware path (not yet plumbed).
+            Ok(ConstValue::Bool(detect_target_feature(feature.as_str())))
         }
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Text"),
             found: args[0].type_name(),
         }),
+    }
+}
+
+/// Resolve a target feature name against the compiler host's
+/// compile-time `target_feature` cfgs. The returned bool is
+/// honest for the listed features and conservatively `false`
+/// for everything else (unknown name → unknown answer → false).
+///
+/// Coverage mirrors what stdlib detection macros expose for the
+/// two architectures we ship for:
+///   - x86_64 / x86: SSE family, AVX family, FMA, BMI, LZCNT,
+///     POPCNT, AES, PCLMULQDQ, RDRAND/RDSEED
+///   - aarch64 / arm: NEON, FP, ASIMD, CRC, AES, SHA2/SHA3,
+///     LSE, RCPC, DOTPROD, VFP2/3/4
+fn detect_target_feature(feature: &str) -> bool {
+    match feature {
+        // x86 / x86_64 — SSE family
+        "sse" => cfg!(target_feature = "sse"),
+        "sse2" => cfg!(target_feature = "sse2"),
+        "sse3" => cfg!(target_feature = "sse3"),
+        "ssse3" => cfg!(target_feature = "ssse3"),
+        "sse4.1" => cfg!(target_feature = "sse4.1"),
+        "sse4.2" => cfg!(target_feature = "sse4.2"),
+        // x86 / x86_64 — AVX family
+        "avx" => cfg!(target_feature = "avx"),
+        "avx2" => cfg!(target_feature = "avx2"),
+        "avx512f" => cfg!(target_feature = "avx512f"),
+        "avx512bw" => cfg!(target_feature = "avx512bw"),
+        "avx512cd" => cfg!(target_feature = "avx512cd"),
+        "avx512dq" => cfg!(target_feature = "avx512dq"),
+        "avx512vl" => cfg!(target_feature = "avx512vl"),
+        // x86 / x86_64 — bit ops + crypto
+        "fma" => cfg!(target_feature = "fma"),
+        "bmi1" => cfg!(target_feature = "bmi1"),
+        "bmi2" => cfg!(target_feature = "bmi2"),
+        "lzcnt" => cfg!(target_feature = "lzcnt"),
+        "popcnt" => cfg!(target_feature = "popcnt"),
+        "aes" => cfg!(target_feature = "aes"),
+        "pclmulqdq" => cfg!(target_feature = "pclmulqdq"),
+        "rdrand" => cfg!(target_feature = "rdrand"),
+        "rdseed" => cfg!(target_feature = "rdseed"),
+        // aarch64
+        "neon" => cfg!(target_feature = "neon"),
+        "fp" => cfg!(target_feature = "fp"),
+        "asimd" => cfg!(target_feature = "asimd"),
+        "crc" => cfg!(target_feature = "crc"),
+        "sha2" => cfg!(target_feature = "sha2"),
+        "sha3" => cfg!(target_feature = "sha3"),
+        "lse" => cfg!(target_feature = "lse"),
+        "rcpc" => cfg!(target_feature = "rcpc"),
+        "dotprod" => cfg!(target_feature = "dotprod"),
+        // arm 32-bit
+        "vfp2" => cfg!(target_feature = "vfp2"),
+        "vfp3" => cfg!(target_feature = "vfp3"),
+        "vfp4" => cfg!(target_feature = "vfp4"),
+        _ => false,
     }
 }
 
@@ -751,5 +814,61 @@ mod tests {
         } else {
             panic!("Expected Some");
         }
+    }
+
+    #[test]
+    fn target_has_feature_unknown_returns_false() {
+        // Names that don't appear in the dispatch table fall
+        // through to false. Pre-fix this was the only path
+        // (every input → false); the test ensures unknown names
+        // remain conservatively false post-fix.
+        let mut ctx = MetaContext::new();
+        let args =
+            List::from(vec![ConstValue::Text(Text::from("nonexistent_feature_xyz"))]);
+        let result = meta_target_has_feature(&mut ctx, args).unwrap();
+        assert_eq!(result, ConstValue::Bool(false));
+    }
+
+    #[test]
+    fn target_has_feature_baseline_isa_is_detected() {
+        // Each Tier-1 architecture has a baseline ISA feature that
+        // Rust's default target requires. Pre-fix the function
+        // returned false for every input — so a passing assertion
+        // here is the strongest single-test pin that wiring is in
+        // place: if `cfg!(target_feature = ...)` reaches the
+        // dispatch path, at least one of these must light up.
+        let mut ctx = MetaContext::new();
+        let baseline = if cfg!(target_arch = "x86_64") {
+            "sse2"
+        } else if cfg!(target_arch = "aarch64") {
+            "neon"
+        } else {
+            // Other archs: skip the positive assertion, the
+            // unknown-returns-false pin still locks the dispatch.
+            return;
+        };
+        let args = List::from(vec![ConstValue::Text(Text::from(baseline))]);
+        let result = meta_target_has_feature(&mut ctx, args).unwrap();
+        assert_eq!(
+            result,
+            ConstValue::Bool(true),
+            "{} must be detected on this Tier-1 arch — pre-fix would \
+             return false unconditionally",
+            baseline
+        );
+    }
+
+    #[test]
+    fn target_has_feature_arity_and_type_errors() {
+        let mut ctx = MetaContext::new();
+
+        // Wrong arity (no args)
+        let result = meta_target_has_feature(&mut ctx, List::new());
+        assert!(matches!(result, Err(MetaError::ArityMismatch { .. })));
+
+        // Wrong arg type (Int instead of Text)
+        let args = List::from(vec![ConstValue::Int(42)]);
+        let result = meta_target_has_feature(&mut ctx, args);
+        assert!(matches!(result, Err(MetaError::TypeMismatch { .. })));
     }
 }
