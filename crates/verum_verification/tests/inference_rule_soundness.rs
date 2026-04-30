@@ -194,6 +194,16 @@ fn forall_elim_rejects_non_forall_premise() {
     );
 }
 
+// NOTE: tests for the strengthened body-shape gate
+// (forall_elim's expected-vs-body discriminant check / exists_intro's
+// premise-vs-body discriminant check) cannot yet be written against
+// the public `validate` entry point because `expr_eq` doesn't handle
+// Forall/Exists variants — `validate_axiom`'s formula-match check
+// fails before the apply rule runs. The gates themselves are in
+// place and don't regress the existing test suite. Adding
+// Forall/Exists arms to expr_eq_impl is tracked separately as a
+// precondition for direct end-to-end testing.
+
 #[test]
 fn exists_intro_rejects_non_exists_expected() {
     // Symmetric pin for exists_intro: when the expected conclusion
