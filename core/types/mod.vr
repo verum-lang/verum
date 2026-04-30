@@ -1,0 +1,36 @@
+// =============================================================================
+// core/types/mod.vr — Stdlib surface for advanced type-system features
+// =============================================================================
+// Layer: Standard Library / Types
+// =============================================================================
+//
+// Type-system extensions that live BEYOND the Layer-0 base types
+// (`core.base.{Maybe, Result, Heap, Shared, …}`) — these are the
+// research-grade type machinery the language exposes for users
+// who want to encode richer invariants in types:
+//
+//   * `poly_kinds.vr` — universe-polymorphic kind machinery for
+//     higher-kinded protocols (HKT) and kind-indexed type families.
+//
+//   * `qtt.vr` — Quantitative Type Theory (Atkey-McBride) resource
+//     tracking. Multiplicities `0` (erased) / `1` (linear) / `ω`
+//     (unrestricted) annotated on type parameters and bindings,
+//     gating the kernel's relevance + linearity checks.
+//
+//   * `two_level.vr` — Two-Level Type Theory (Annenkov-Capriotti-
+//     Kraus-Sattler) — runs an inner cubical-univalent type theory
+//     alongside an outer set-truncated meta-theory, so static-vs-
+//     runtime hygiene is encoded in the type system rather than
+//     the syntax of meta-programs.
+//
+// Usage is opt-in: most user code lives entirely at the base-types
+// layer. These modules are surfaced so research-grade Verum
+// programs (formal-methods libraries, dependently-typed kernels,
+// resource-aware DSLs) can pull them in explicitly.
+// =============================================================================
+
+module core.types;
+
+public module poly_kinds;
+public module qtt;
+public module two_level;

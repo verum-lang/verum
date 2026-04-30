@@ -34,6 +34,15 @@
 // See `docs/verification/gradual-verification.md` for the full
 // spec.
 
+module core.verify;
+
+public module level;
+public module attempt;
+public module certificate;
+public module coherence;
+
+// Re-export the user-facing symbols at the umbrella so callers
+// can `mount core.verify.*;` without traversing the sub-paths.
 mount core.verify.level.*;
 mount core.verify.attempt.*;
 mount core.verify.certificate.*;

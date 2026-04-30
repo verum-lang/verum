@@ -1,0 +1,24 @@
+// =============================================================================
+// core/control/mod.vr — Stdlib surface for control-flow primitives
+// =============================================================================
+// Layer: Standard Library / Control
+// =============================================================================
+//
+// Higher-order control-flow primitives that go beyond plain
+// `return` / `break` / `continue`:
+//
+//   * `continuation.vr` — Delimited continuations (`shift` / `reset`,
+//     Danvy-Filinski 1990). First-class capture of "the rest of the
+//     computation up to a marked boundary". Foundation for
+//     user-space coroutines, generator-style iteration,
+//     non-deterministic search via `core.action.monads.nondeterm`,
+//     and effect-handler-style composition without baking effect
+//     types into the language.
+//
+// Future additions (V1.5): undelimited `call/cc`, exception-style
+// non-local jump primitives, prompt-based effect handlers.
+// =============================================================================
+
+module core.control;
+
+public module continuation;

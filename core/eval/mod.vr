@@ -1,0 +1,27 @@
+// =============================================================================
+// core/eval/mod.vr — Stdlib surface for evaluation strategies
+// =============================================================================
+// Layer: Standard Library / Evaluation
+// =============================================================================
+//
+// Evaluation-strategy machinery for embedding non-default reduction
+// orders into Verum programs:
+//
+//   * `cbpv.vr` — Call-by-Push-Value (Levy 1999). Polarises the
+//     value/computation distinction explicitly: `value` types
+//     have first-class duplication and erasure, `computation`
+//     types are forced exactly once. Provides a uniform framework
+//     for embedding both call-by-value and call-by-name reduction
+//     in the same source language; the basis for the
+//     core-language IR's evaluation contract and the bridge to
+//     `core.action.monads.io` (Io as the canonical `F U value`
+//     forced computation).
+//
+// Future additions (V1.5): cbn.vr (call-by-name), cbnf.vr
+// (call-by-need / call-by-strict-need), normalisation-by-
+// evaluation primitives (NbE).
+// =============================================================================
+
+module core.eval;
+
+public module cbpv;
