@@ -709,14 +709,50 @@ impl<'s> CompilationPipeline<'s> {
 
     pub(super) fn load_project_modules(&mut self) -> Result<()> {
         let input_path = self.session.options().input.clone();
-        let input_dir = match input_path.parent() {
+        let immediate_dir = match input_path.parent() {
             Some(dir) if dir.as_os_str().is_empty() => std::env::current_dir()?,
             Some(dir) => dir.to_path_buf(),
             None => return Ok(()),
         };
 
         // Canonicalize for reliable path comparison
-        let input_dir = input_dir.canonicalize().unwrap_or(input_dir);
+        let immediate_dir = immediate_dir.canonicalize().unwrap_or(immediate_dir);
+
+        // **Project-root walk (#192 fundamental fix)**.
+        //
+        // Pre-fix the project root was the input file's IMMEDIATE
+        // parent directory.  For a file like `core/verify/kernel_v0/soundness.vr`
+        // that picked `kernel_v0/` as the root and used `kernel_v0`
+        // as the project_prefix — so the file's `module
+        // core.verify.kernel_v0.soundness;` declaration mismatched
+        // the loader-derived path `kernel_v0.soundness`.
+        //
+        // Post-fix the loader walks UP from the immediate parent
+        // until it finds a directory carrying a `verum.toml`.  That
+        // is the outermost project root; its directory name (e.g.
+        // `core`) becomes the project_prefix and the relative path
+        // captures the full namespace structure correctly.
+        //
+        // The walk stops at the first `verum.toml` ancestor — if
+        // none exists we fall back to the immediate-dir behaviour
+        // so single-file scripts still work.
+        let input_dir = {
+            let mut cursor = immediate_dir.clone();
+            let mut root: Option<std::path::PathBuf> = None;
+            loop {
+                if cursor.join("verum.toml").exists() {
+                    root = Some(cursor.clone());
+                    break;
+                }
+                match cursor.parent() {
+                    Some(p) if p != cursor => {
+                        cursor = p.to_path_buf();
+                    }
+                    _ => break,
+                }
+            }
+            root.unwrap_or(immediate_dir.clone())
+        };
 
         // Only treat as a project if there's a mod.vr in the directory
         let mod_file = input_dir.join("mod.vr");

@@ -112,8 +112,19 @@ impl<'s> CompilationPipeline<'s> {
         let file_id = self.phase_load_source()?;
         let mut module = self.phase_parse(file_id)?;
 
-        // Get module path for registration and expansion
-        let module_path = Text::from(self.session.options().input.display().to_string());
+        // Get module path for registration and expansion.  Prefer the
+        // file's `module <dotted.path>;` declaration (the canonical
+        // namespace name) over the filesystem path — the latter
+        // produces strings like `verify/kernel_v0/soundness.vr`
+        // which break super-/self-resolution because the path
+        // resolver expects dotted module-namespace segments.
+        //
+        // Fundamental fix for #192 (kernel_v0 self-check unblock).
+        let module_path = self
+            .extract_top_level_module_decl_path(&module)
+            .unwrap_or_else(|| {
+                Text::from(self.session.options().input.display().to_string())
+            });
 
         // Register meta functions (enables meta-fail tests)
         self.register_meta_declarations(&module_path, &module)?;
@@ -281,5 +292,40 @@ impl<'s> CompilationPipeline<'s> {
         self.phase_interpret_with_args(&module, args)?;
 
         Ok(())
+    }
+
+    /// Extract the canonical dotted module path from a parsed
+    /// module's top-level `module <dotted.path>;` declaration.
+    ///
+    /// Returns `Some("core.verify.kernel_v0.soundness")` when the
+    /// file's first item is `module core.verify.kernel_v0.soundness;`,
+    /// `None` when no top-level module declaration exists (e.g.,
+    /// inline-modules-only files or scripts).
+    ///
+    /// Used by `run_check_only` to anchor the type-checker's
+    /// `current_module_path` correctly in single-file mode — the
+    /// filesystem path is unsuitable because the relative-path
+    /// resolver (`super.X`) splits on `.` and expects dotted
+    /// namespace segments, not slashes/`.vr`.
+    fn extract_top_level_module_decl_path(
+        &self,
+        module: &verum_ast::Module,
+    ) -> Option<Text> {
+        for item in &module.items {
+            if let verum_ast::ItemKind::Module(decl) = &item.kind {
+                // Inline modules (`module foo { ... }` with body) are
+                // NOT the top-level module declaration; skip those.
+                if matches!(&decl.items, verum_common::Maybe::Some(_)) {
+                    continue;
+                }
+                // The parser stores the full dotted name (`core.verify.kernel_v0.soundness`)
+                // as a single Text in `decl.name.name`.
+                let name = decl.name.name.as_str();
+                if !name.is_empty() {
+                    return Some(Text::from(name));
+                }
+            }
+        }
+        None
     }
 }
