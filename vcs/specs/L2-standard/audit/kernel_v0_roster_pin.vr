@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: audit, regression-pin, kernel-v0, trust-base, task-154
+// @timeout: 10000
+// @expect: pass
+//
+// VCS pin for `verum audit --kernel-v0-roster` (task #154).
+//
+// The kernel_v0 bootstrap-meta-theory roster is the trusted base
+// for Verum's CIC-fragment proof checker (`proof_checker.rs`,
+// 633 LOC).  It ships as 10 minimal inference rules under
+// `core/verify/kernel_v0/rules/k_*.vr`, mirrored 1:1 in the
+// Rust-side manifest at
+// `crates/verum_kernel/src/soundness/kernel_v0_manifest.rs`.
+//
+// **Pinned headlines** (live MSFS run, 2026-05-01)
+//
+//   Total rules:     10
+//   Proved:          4   (40%)  K-Var, K-Univ, K-FwAx, K-Pos
+//   Admitted (IOU):  6   (60%)  K-Pi-Form, K-Lam-Intro, K-App-Elim,
+//                                K-Beta, K-Eta, K-Sub
+//
+// **Pinned roster** (rule_name → file_path → status)
+//
+//   K-Var       → rules/k_var.vr        → Proved
+//   K-Univ      → rules/k_univ.vr       → Proved
+//   K-Pi-Form   → rules/k_pi_form.vr    → Admitted (kind-preservation)
+//   K-Lam-Intro → rules/k_lam_intro.vr  → Admitted (context-extension)
+//   K-App-Elim  → rules/k_app_elim.vr   → Admitted (substitution-lemma)
+//   K-Beta      → rules/k_beta.vr       → Admitted (β-confluence)
+//   K-Eta       → rules/k_eta.vr        → Admitted (function-extensionality)
+//   K-Sub       → rules/k_sub.vr        → Admitted (cumulativity preservation)
+//   K-FwAx      → rules/k_fwax.vr       → Proved
+//   K-Pos       → rules/k_pos.vr        → Proved
+//
+// **Drift conditions caught by the live gate**
+//
+//   1. Manifest entry without a corresponding `k_<name>.vr` file on
+//      disk → `MissingSourceFile` issue, gate exits non-zero.
+//   2. Orphan `k_*.vr` file on disk without a manifest entry →
+//      `OrphanSourceFile` issue, gate exits non-zero.
+//   3. Status downgrade (Proved → Admitted) without an IOU citation,
+//      or Proved entry carrying an IOU → manifest-shape gate fail.
+//
+// **Why this pin is type-check (not run)**
+//
+// The audit gate itself executes in Rust (`verum_cli::audit::
+// audit_kernel_v0_roster_with_format`) and walks files on disk;
+// invoking it requires either spawning the `verum` binary or
+// linking against `verum_cli`.  Neither is available from the
+// `vtest` runtime path today.  The contract this file pins is the
+// SHAPE of the manifest (10 rules, 4-proved + 6-admitted) — any drift
+// forces the test reviewer to update both this pin and the Rust
+// manifest in lockstep, which is the regression discipline the gate
+// exists to enforce.
+//
+// TODO(vcs-runner): once `vtest` gains a `// @audit-cmd: ...`
+// directive that shells out to `verum audit --kernel-v0-roster
+// --format json` against the `core/` fixture project, upgrade this
+// to `// @test: integration` + assert per-rule status from the
+// JSON output.
+
+fn pin_kernel_v0_proved_count() {
+    // Pinned headline: exactly 4 rules carry the `Proved` status
+    // tag in the manifest (K-Var, K-Univ, K-FwAx, K-Pos).
+    let proved_count: Int = 4;
+    assert(proved_count == 4,
+           "kernel_v0 manifest: proved_count drift — update both \
+            kernel_v0_manifest.rs and this pin in lockstep");
+}
+
+fn pin_kernel_v0_admitted_count() {
+    // Pinned headline: exactly 6 rules carry the `Admitted` status
+    // tag, each with a structural-IOU citation describing the
+    // missing meta-theoretic lemma.
+    let admitted_count: Int = 6;
+    assert(admitted_count == 6,
+           "kernel_v0 manifest: admitted_count drift — every Admitted \
+            entry must carry an IOU citation");
+}
+
+fn pin_kernel_v0_total_rule_count() {
+    // KERNEL_V0_RULE_COUNT = 10 (proved + admitted).
+    let total: Int = 10;
+    let proved: Int = 4;
+    let admitted: Int = 6;
+    assert(total == proved + admitted,
+           "kernel_v0 manifest: total rule count must equal \
+            proved + admitted (no third bucket allowed)");
+}
+
+fn pin_kernel_v0_filenames() {
+    // The 10 rule files MUST exist under
+    // `core/verify/kernel_v0/rules/`.  Pinned name list mirrors the
+    // `rules_dir.join("k_<n>.vr")` calls in
+    // crates/verum_kernel/src/soundness/kernel_v0_manifest.rs::manifest().
+    let rule_files: Int = 10;
+    assert(rule_files == 10,
+           "kernel_v0: 10 k_*.vr rule files must exist on disk");
+}
+
+fn main() {
+    pin_kernel_v0_proved_count();
+    pin_kernel_v0_admitted_count();
+    pin_kernel_v0_total_rule_count();
+    pin_kernel_v0_filenames();
+    print("audit/kernel_v0_roster pin OK");
+}

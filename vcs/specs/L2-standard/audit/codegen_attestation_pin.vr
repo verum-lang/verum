@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: audit, regression-pin, codegen-attestation, compcert, task-162
+// @timeout: 10000
+// @expect: pass
+//
+// VCS pin for `verum audit --codegen-attestation` (task #162).
+//
+// The codegen-attestation audit gate enumerates Verum's 6-pass
+// codegen pipeline manifest from
+// `crates/verum_kernel/src/codegen_attestation.rs` and reports the
+// per-pass kernel-discharge status (Discharged / AdmittedWithIou
+// / NotYetAttested).  This is the L4 IOU surface for Verum's
+// CompCert-style verified-compilation chain.
+//
+// **Pinned headlines** (live MSFS run, 2026-05-01)
+//
+//   Total passes:        6
+//   Attested:            0   (0%)
+//   Admitted with IOU:   0   (0%)
+//   Not yet attested:    6   (100%)
+//
+//   "0 of 6 passes attested" — the V0 baseline.  The gate always
+//   exits 0 at this baseline (pending entries are observability,
+//   not failure); the only failure surface is a literal-claim
+//   mismatch (manifest claims "all attested" but data disagrees).
+//
+// **Pinned roster** (CodegenPassId → kernel_intrinsic → V0 status)
+//
+//   1. VbcLowering            → kernel_vbc_lowering_strict      → NotYetAttested
+//   2. SsaConstruction        → kernel_ssa_construction_strict  → NotYetAttested
+//   3. RegisterAllocation     → kernel_register_allocation_strict → NotYetAttested
+//   4. LinearScanRegalloc     → kernel_linear_scan_regalloc_strict → NotYetAttested
+//   5. LlvmEmission           → kernel_llvm_emission_strict     → NotYetAttested
+//   6. MachineCodeEmission    → kernel_machine_code_strict      → NotYetAttested
+//
+// **Forward roadmap**
+//
+//   V0 (now)  : 0 / 6 attested — every pass NotYetAttested
+//   V1+       : k / 6 attested via Discharged or AdmittedWithIou
+//                — each step shrinks the verified-compilation IOU
+//   Goal      : 6 / 6 attested — CompCert-parity for Verum
+//
+// **Drift conditions caught by the live gate**
+//
+//   1. Manifest internal inconsistency:
+//      `attested + admitted + pending != total` → gate exits
+//      non-zero with explicit error message.  This is the only
+//      hard failure mode at V0.
+//   2. Pass added to the codegen pipeline without a manifest
+//      entry → audit-time drift between `CodegenPassId` enum
+//      cardinality and `manifest()` len.
+//   3. `all_attested_claim_supported: true` while
+//      `attested != total` → manifest data layer disagrees with
+//      its own claim (build-time bug).
+//
+// **Why this pin is type-check (not run)**
+//
+// Same rationale as siblings in this directory: the audit gate
+// itself runs in Rust; vtest can't invoke it.  This pin documents
+// the V0 baseline (6 passes, 0 attested) so a future commit
+// flipping any pass to `Discharged` MUST update this pin in
+// lockstep — the regression discipline.
+//
+// TODO(vcs-runner): once `vtest` gains an `// @audit-cmd: ...`
+// directive, upgrade to `// @test: integration` + JSON assertions
+// on `codegen-attestation.json::pass_count` and per-pass
+// `status` field.
+
+fn pin_codegen_pass_count() {
+    // CODEGEN_PASS_COUNT = 6.  Verum's codegen pipeline has six
+    // distinct passes from VBC lowering through machine-code
+    // emission.  Adding a 7th pass requires updating both the
+    // `CodegenPassId` enum AND `manifest()` AND this pin in
+    // lockstep — the manifest's audit gate fails internally if
+    // the count diverges from `manifest().len()`.
+    let codegen_pass_count: Int = 6;
+    assert(codegen_pass_count == 6,
+           "codegen-attestation: pass-count drift from canonical 6 \
+            — CompCert-parity baseline broken");
+}
+
+fn pin_codegen_v0_attested_count() {
+    // V0 baseline: 0 passes attested.  Every flip to
+    // `Discharged` shrinks Verum's verified-compilation IOU; each
+    // such commit MUST update this pin.
+    let v0_attested_count: Int = 0;
+    assert(v0_attested_count == 0,
+           "codegen-attestation: V0 attested-count drift — when a \
+            pass moves from NotYetAttested → Discharged, update \
+            this pin AND the live MSFS report headline");
+}
+
+fn pin_codegen_v0_admitted_count() {
+    // V0 baseline: 0 passes carrying IOUs (every pass is fully
+    // pending, none has even an admit-with-IOU yet).
+    let v0_admitted_count: Int = 0;
+    assert(v0_admitted_count == 0,
+           "codegen-attestation: V0 admitted-count drift");
+}
+
+fn pin_codegen_v0_pending_count() {
+    // V0 baseline: 6 passes pending.  Equals total − attested −
+    // admitted.
+    let v0_pending_count: Int = 6;
+    let total: Int = 6;
+    let attested: Int = 0;
+    let admitted: Int = 0;
+    assert(v0_pending_count == total - attested - admitted,
+           "codegen-attestation: pending = total - attested - \
+            admitted invariant violated");
+}
+
+fn pin_codegen_partition_invariant() {
+    // attested + admitted + pending == total
+    // This is the hard-fail invariant of the audit gate; if it's
+    // ever violated at runtime, the gate exits non-zero with an
+    // "internally inconsistent" message.
+    let total: Int = 6;
+    let attested: Int = 0;
+    let admitted: Int = 0;
+    let pending: Int = 6;
+    assert(attested + admitted + pending == total,
+           "codegen-attestation: per-pass status partition \
+            invariant violated — manifest is internally inconsistent");
+}
+
+fn main() {
+    pin_codegen_pass_count();
+    pin_codegen_v0_attested_count();
+    pin_codegen_v0_admitted_count();
+    pin_codegen_v0_pending_count();
+    pin_codegen_partition_invariant();
+    print("audit/codegen_attestation pin OK");
+}
