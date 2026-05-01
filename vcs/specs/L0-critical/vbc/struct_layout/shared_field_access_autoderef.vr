@@ -1,0 +1,66 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: vbc, struct-layout, shared, autoderef, field-access
+// @expected-stdout: shared-autoderef ok
+//
+// Pin (#338) — `Shared<T>` auto-deref for field access.
+//
+// Pre-fix the VBC interpreter's GetF (0x62) handler had auto-deref
+// for `Heap<T>` (variant wrappers with type_id >= 0x8000) and CBGR
+// allocations, but NOT for `Shared<T>`.  Concrete failure:
+//
+//   type Outer is { state: Shared<Inner> }
+//   type Inner is { value: Int }
+//   let o = Outer { state: Shared.new(Inner { value: 42 }) };
+//   let v = o.state.value;  // expected 42, got 1 (the Shared refcount!)
+//
+// Shared<T> layout: `[ObjectHeader][refcount: i64][value: Value]`.
+// When the codegen lowers `o.state.value` to `GetF state.value`,
+// the field-index path read field 0 of the Shared object's data
+// section — which is the REFCOUNT slot, not the inner T's field 0.
+// New Shared<T> instances start with refcount=1, so the read
+// returned `1` for any `.field` access on a fresh `Shared<T>`,
+// silently corrupting downstream logic (BufferPool /
+// ArenaPool field reads in particular).
+//
+// Post-fix the GetF handler peeks at the receiver's TypeId; if it's
+// `TypeId::SHARED`, advance `ptr` past the refcount slot to reach
+// the inner T (mirrors the existing method-dispatch auto-deref at
+// method_dispatch.rs:457-560), re-read the header, then proceed
+// with the normal field-offset bounds check + read.
+
+// Minimal repro — the exact pattern that crashed BufferPool /
+// ArenaPool field accesses in `core/net/weft/connection.vr`.
+type Inner is { value: Int };
+type Outer is { state: Shared<Inner> };
+
+implement Outer {
+    public fn new(v: Int) -> Outer {
+        Outer { state: Shared.new(Inner { value: v }) }
+    }
+
+    /// Reads `self.state.value` — the Shared deep-field-access
+    /// pattern.  Pre-fix this returned the Shared refcount; post-fix
+    /// it returns the actual Inner.value.
+    public fn get(&self) -> Int {
+        self.state.value
+    }
+}
+
+fn main() {
+    // Constructor sets value = 42; pre-fix `o.get()` returned 1
+    // (the refcount).  Post-fix it returns 42.
+    let o = Outer.new(42);
+    assert_eq(o.get(), 42);
+
+    // Verify across multiple values to rule out any constant-fold
+    // coincidence — refcount stays at 1, but value varies.
+    let o2 = Outer.new(7);
+    assert_eq(o2.get(), 7);
+
+    let o3 = Outer.new(99);
+    assert_eq(o3.get(), 99);
+
+    print("shared-autoderef ok");
+}
