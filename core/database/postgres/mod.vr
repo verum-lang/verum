@@ -45,7 +45,8 @@ public module copy;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
-    PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull,
+    PgConfig, PgTlsMode,
+    PtmDisable, PtmAllow, PtmRequire, PtmVerifyCa, PtmVerifyFull,
 };
 public mount .connection.{
     PgConnection, PgConnState, SimpleQueryResult,

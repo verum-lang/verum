@@ -20,21 +20,70 @@ mount base.{Text, Maybe, None, Some};
 // PgTlsMode
 // -----------------------------------------------------------------------------
 
+/// Postgres TLS posture per spec §8.13.1. Five variants matching
+/// libpq's `sslmode` taxonomy:
+///
+///   * `PtmDisable`     — plain TCP. Compile-warning unless the
+///                        call site has `@allow_plaintext_db`.
+///   * `PtmAllow`       — try plain first; if server demands TLS,
+///                        retry with TLS. Mostly legacy; production
+///                        deployments should pin to `PtmVerifyFull`.
+///   * `PtmRequire`     — TLS mandatory; certificate NOT verified.
+///                        Compile-warning. Useful behind a trusted
+///                        load-balancer where the network is
+///                        already authenticated.
+///   * `PtmVerifyCa`    — TLS + CA chain validation. Hostname not
+///                        checked — caller trusts the CA but
+///                        accepts cert subject ≠ host (e.g.
+///                        wildcard certs that don't match the
+///                        connect-string host).
+///   * `PtmVerifyFull`  — Default for production. TLS + CA + hostname
+///                        match. Spec §8.13.1 normative.
 public type PgTlsMode is
-      PtmDisable           // plain TCP — Spindle compile-warning unless opted in
-    | PtmVerifyFull;       // default; CA + hostname-match
+      PtmDisable
+    | PtmAllow
+    | PtmRequire
+    | PtmVerifyCa
+    | PtmVerifyFull;
 
 implement PgTlsMode {
     public fn name(&self) -> Text {
         match self {
             PtmDisable    => "disable".clone(),
+            PtmAllow      => "allow".clone(),
+            PtmRequire    => "require".clone(),
+            PtmVerifyCa   => "verify-ca".clone(),
             PtmVerifyFull => "verify-full".clone(),
         }
     }
     public fn is_encrypted(&self) -> Bool {
         match self {
-            PtmDisable    => false,
+            PtmDisable => false,
+            _          => true,
+        }
+    }
+    /// Whether the server's certificate must be CA-validated.
+    public fn requires_ca_check(&self) -> Bool {
+        match self {
+            PtmVerifyCa | PtmVerifyFull => true,
+            _                            => false,
+        }
+    }
+    /// Whether the server's certificate hostname must match the
+    /// connect-string host.
+    public fn requires_hostname_match(&self) -> Bool {
+        match self {
             PtmVerifyFull => true,
+            _              => false,
+        }
+    }
+    /// Whether a server that declines TLS (sends 'N' in response to
+    /// SSLRequest) is acceptable. Disable / Allow → yes; everything
+    /// else rejects the connection.
+    public fn permits_plaintext_fallback(&self) -> Bool {
+        match self {
+            PtmDisable | PtmAllow => true,
+            _                      => false,
         }
     }
 }
