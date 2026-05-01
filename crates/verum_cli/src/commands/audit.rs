@@ -5092,6 +5092,44 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_codegen_attestation_with_format(AuditFormat::Json),
     );
 
+    // 11. Differential-kernel — N-kernel cross-implementation
+    //  agreement (#159 V0+V1+V4). Walks the kernel_v0 manifest's
+    //  10 rules through every registered kernel implementation
+    //  (currently `proof_checker` + `proof_checker_nbe`) on the
+    //  canonical polymorphic-identity certificate. Disagreements
+    //  are kernel-implementation bugs to be fixed; this is the
+    //  load-bearing CI gate that catches them at audit time.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "differential_kernel",
+        report_dir.join("differential-kernel.json"),
+        || audit_differential_kernel_with_format(AuditFormat::Json),
+    );
+    if summary.get("differential_kernel") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
+    // 12. Proof-term-library — N-kernel + universe-stability +
+    //  adversarial verification of the canonical certificate
+    //  library at `core/verify/proof_term_examples/` (#157, #158
+    //  V1, #159 V2-V4). Every certificate runs through every
+    //  registered kernel; the verdict is checked for
+    //  universe-stability across lifts 0..=2 (Gödel-2nd
+    //  workaround foundation); adversarial certificates
+    //  (`expected_outcome=reject` metadata) MUST be unanimously
+    //  rejected — soundness violations flip the gate.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "proof_term_library",
+        report_dir.join("proof-term-library.json"),
+        || audit_proof_term_library_with_format(AuditFormat::Json),
+    );
+    if summary.get("proof_term_library") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
     let bundle_path = report_dir.join("bundle.json");
     let payload = serde_json::json!({
         "schema_version": 1,
