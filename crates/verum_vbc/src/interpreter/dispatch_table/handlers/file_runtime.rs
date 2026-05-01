@@ -190,7 +190,7 @@ fn intercept_read_to_string(
         return Ok(None);
     }
     let path = extract_path_arg(state, args_start_reg, caller_base);
-    if let Some(denied) = check_fs_permission(state, "read") {
+    if let Some(denied) = check_fs_permission(state, "read", &path) {
         return Ok(Some(denied));
     }
     match std::fs::read_to_string(&path) {
@@ -209,7 +209,7 @@ fn intercept_read_bytes(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
-    if let Some(denied) = check_fs_permission(state, "read") {
+    if let Some(denied) = check_fs_permission(state, "read", &path) {
         return Ok(Some(denied));
     }
     match std::fs::read(&path) {
@@ -229,7 +229,7 @@ fn intercept_write_text(
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
     let contents = extract_text_arg(state, args_start_reg + 1, caller_base);
-    if let Some(denied) = check_fs_permission(state, "write") {
+    if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
     match std::fs::write(&path, contents.as_bytes()) {
@@ -249,7 +249,7 @@ fn intercept_write_bytes(
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
     let bytes = extract_byte_list_arg(state, args_start_reg + 1, caller_base);
-    if let Some(denied) = check_fs_permission(state, "write") {
+    if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
     match std::fs::write(&path, &bytes) {
@@ -296,7 +296,7 @@ fn intercept_unit_op(
     op: FsUnitOp,
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
-    if let Some(denied) = check_fs_permission(state, "write") {
+    if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
     let p = std::path::Path::new(&path);
@@ -320,7 +320,10 @@ fn intercept_rename(
 ) -> InterpreterResult<Option<Value>> {
     let from = extract_path_arg(state, args_start_reg, caller_base);
     let to = extract_path_arg(state, args_start_reg + 1, caller_base);
-    if let Some(denied) = check_fs_permission(state, "write") {
+    if let Some(denied) = check_fs_permission(state, "write", &from) {
+        return Ok(Some(denied));
+    }
+    if let Some(denied) = check_fs_permission(state, "write", &to) {
         return Ok(Some(denied));
     }
     match std::fs::rename(&from, &to) {
@@ -336,7 +339,10 @@ fn intercept_copy(
 ) -> InterpreterResult<Option<Value>> {
     let from = extract_path_arg(state, args_start_reg, caller_base);
     let to = extract_path_arg(state, args_start_reg + 1, caller_base);
-    if let Some(denied) = check_fs_permission(state, "write") {
+    if let Some(denied) = check_fs_permission(state, "read", &from) {
+        return Ok(Some(denied));
+    }
+    if let Some(denied) = check_fs_permission(state, "write", &to) {
         return Ok(Some(denied));
     }
     match std::fs::copy(&from, &to) {
@@ -361,7 +367,7 @@ fn intercept_write_dispatch(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     let path = extract_path_arg(state, args_start_reg, caller_base);
-    if let Some(denied) = check_fs_permission(state, "write") {
+    if let Some(denied) = check_fs_permission(state, "write", &path) {
         return Ok(Some(denied));
     }
     let contents_v = state
@@ -516,20 +522,39 @@ fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -
 // ============================================================================
 
 /// Check that the script has FileSystem permission for the given
-/// access kind (`"read"` or `"write"`). Returns `Some(denied_err)`
-/// when blocked — the caller substitutes the value into `dst` and
-/// short-circuits. Returns `None` when allowed.
-fn check_fs_permission(state: &mut InterpreterState, _kind: &str) -> Option<Value> {
-    if state.check_permission(PermissionScope::FileSystem, 0) == PermissionDecision::Deny {
-        // Build an Err(PermissionDenied) result.
-        let kind_variant = build_io_error_kind(state, "PermissionDenied", 1).ok()?;
-        let msg_text = alloc_string_value(state, "permission denied: filesystem access").ok()?;
-        let msg_some = wrap_in_variant(state, "Maybe", 1, &[msg_text]).ok()?;
-        let stream_err =
-            alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some]).ok()?;
-        return wrap_in_variant(state, "Result", 1, &[stream_err]).ok();
+/// access kind (`"read"` or `"write"`) and target path.  Returns
+/// `Some(denied_err)` when blocked — the caller substitutes the
+/// value into `dst` and short-circuits.  Returns `None` when
+/// allowed.
+///
+/// **VBC-PERM-1 — granular target_id**: passes a stable
+/// `target_id_for(path)` hash so a script frontmatter
+/// `permissions = ["fs:read=./data"]` grants only that path
+/// (the policy registry pre-populates `(FileSystem,
+/// target_id_for("./data")) → Allow`).  The router falls through
+/// to its `WILDCARD_TARGET_ID` fallback when the script's policy
+/// has any wildcard fs grant — preserving backward compatibility
+/// for scripts that grant `"fs:read"` without a target.
+fn check_fs_permission(state: &mut InterpreterState, _kind: &str, target_path: &str) -> Option<Value> {
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    let target_id = target_id_for(target_path);
+    // Granular check first.  If the policy doesn't have a
+    // path-specific entry, fall through to the wildcard check that
+    // matches the legacy "any fs grant allows" behaviour.
+    if state.check_permission(PermissionScope::FileSystem, target_id) == PermissionDecision::Allow {
+        return None;
     }
-    None
+    if state.check_permission(PermissionScope::FileSystem, WILDCARD_TARGET_ID) != PermissionDecision::Deny {
+        return None;
+    }
+    // Build an Err(PermissionDenied) result.
+    let kind_variant = build_io_error_kind(state, "PermissionDenied", 1).ok()?;
+    let msg = format!("permission denied: filesystem access to {}", target_path);
+    let msg_text = alloc_string_value(state, &msg).ok()?;
+    let msg_some = wrap_in_variant(state, "Maybe", 1, &[msg_text]).ok()?;
+    let stream_err =
+        alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some]).ok()?;
+    wrap_in_variant(state, "Result", 1, &[stream_err]).ok()
 }
 
 // ============================================================================
