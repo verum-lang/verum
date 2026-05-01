@@ -1,0 +1,408 @@
+// =============================================================================
+// core/database/common/pool_supervisor.vr — supervision-tree integration
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §4.3 (pool under supervision-tree)
+// =============================================================================
+//
+// Wires `ConnectionPool<C>` into `core.runtime.supervisor` so an
+// application's pool sits as a `Permanent` child under the root
+// supervisor. Spec §4.3:
+//
+//   root.add_child(ChildSpec.permanent("pg-pool")
+//       .with_start(|| PostgresPool.run(PgConfig.from_env()?)));
+//
+// Beyond the root-level wiring, every pool has two side tasks of
+// its own:
+//
+//   * **Health-checker** (`Transient`) — periodically pings idle
+//     connections; replaces broken sockets before the next
+//     `acquire` notices.
+//   * **Adaptive sizer** (`Transient`) — Vegas-style controller
+//     that probes for the latency knee and resizes the pool's
+//     `max_connections` in response.
+//
+// This module is the canonical place where those three lifetime
+// boundaries (pool-as-child, health-checker-as-child, sizer-as-
+// child) are spelled out as `ChildSpec` builders. Callers wire
+// them into their own supervisor topology — Spindle does not
+// hard-code a particular root.
+//
+// # Why a separate module
+//
+// `pool_impl.vr` owns the *concurrency primitive* (Mutex + Condvar
+// over the idle queue + outstanding count). This module owns the
+// *lifecycle* (when the pool is born / restarted / drained) and
+// the *side-task scheduling* (health-check cadence, sizer probe
+// interval). Splitting them means:
+//
+//   * `pool_impl.vr` stays a pure data-structure module with no
+//     dependency on `core.runtime.supervisor`.
+//   * Adapter-specific pools (`PostgresPool`, `MysqlPool`,
+//     `SqlitePool`) construct a `SupervisedPool<C>` once and hand
+//     three ChildSpecs back to the user.
+//   * Test code can build `ConnectionPool<C>` directly without
+//     pulling in the supervisor's async machinery.
+//
+// # Restart-storm protection
+//
+// The pool itself uses `Permanent` (always restart on exit). Any
+// exit during steady state is a bug we want to recover from, and
+// the supervisor's `RestartIntensity` already caps the recovery
+// rate at `max_restarts = 10` over `restart_window_secs = 60` —
+// past that the supervisor escalates to its parent. Spec
+// requirement: a flapping connection cannot DDoS the supervisor
+// with reconnect attempts.
+//
+// The health-checker and adaptive sizer use `Transient` — they
+// restart on abnormal exit but a `NormalExit` (graceful drain
+// signalled by the user) is honoured.
+// =============================================================================
+
+module core.database.common.pool_supervisor;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount async.duration.Duration;
+mount runtime.supervisor.{
+    ChildSpec, SupervisorRestartStrategy,
+    Permanent, Transient, Temporary,
+};
+
+mount core.database.common.error.{DbError, AdapterId};
+mount core.database.common.pool.{PoolStats, AdaptiveSizerConfig};
+
+// -----------------------------------------------------------------------------
+// Health-checker configuration
+// -----------------------------------------------------------------------------
+
+/// Health-checker tuning. The checker runs as a `Transient` child
+/// under the pool's own supervisor — every `period_ms` milliseconds
+/// it walks the idle queue, runs a cheap protocol-level ping
+/// (`SELECT 1` / `COM_PING` / `sqlite3_db_status`), and evicts
+/// connections that fail or exceed `ping_timeout_ms`.
+public type HealthCheckConfig is {
+    /// Wall-clock period between sweeps. Default 30 s — high
+    /// enough that idle pool-of-32 ≈ ~1 ping per second average,
+    /// low enough that a network blip is detected within one
+    /// minute.
+    period_ms: Int,
+    /// Per-connection ping timeout. Default 1 s — generous for a
+    /// localhost connection (sub-millisecond expected), tight
+    /// enough to flush a hung TCP socket.
+    ping_timeout_ms: Int,
+    /// Skip the sweep when the pool has fewer than this many idle
+    /// connections. Saves a round-trip on a hot pool that's
+    /// constantly checking out and back. Default 1 — always probe
+    /// at least the longest-idle slot.
+    min_idle_to_probe: Int,
+    /// Hard cap on connections probed per sweep. Prevents a sweep
+    /// from monopolising the runtime when the pool has tens of
+    /// idle slots. Default 8 — at 30 s period, every connection
+    /// gets probed within ~4 minutes even on a 64-slot pool.
+    max_probes_per_sweep: Int,
+    /// Whether to evict a connection on the first ping failure
+    /// (true) or only after `eviction_threshold` consecutive
+    /// failures (false). Default true — TCP RST is unambiguous;
+    /// lingering on a half-dead socket only delays the user-
+    /// visible failure.
+    evict_on_first_failure: Bool,
+};
+
+implement HealthCheckConfig {
+    public fn default() -> HealthCheckConfig {
+        HealthCheckConfig {
+            period_ms: 30_000,
+            ping_timeout_ms: 1_000,
+            min_idle_to_probe: 1,
+            max_probes_per_sweep: 8,
+            evict_on_first_failure: true,
+        }
+    }
+
+    /// Tighter cadence for tests / chaos harnesses where 30 s is
+    /// too coarse.
+    public fn aggressive() -> HealthCheckConfig {
+        HealthCheckConfig {
+            period_ms: 1_000,
+            ping_timeout_ms: 200,
+            min_idle_to_probe: 1,
+            max_probes_per_sweep: 16,
+            evict_on_first_failure: true,
+        }
+    }
+
+    public fn with_period_ms(self, ms: Int) -> HealthCheckConfig {
+        HealthCheckConfig { period_ms: ms, .. self }
+    }
+
+    public fn with_ping_timeout_ms(self, ms: Int) -> HealthCheckConfig {
+        HealthCheckConfig { ping_timeout_ms: ms, .. self }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Supervised-pool ChildSpec builders
+// -----------------------------------------------------------------------------
+
+/// Default restart limits for the pool itself. Spec §4.3 says
+/// "permanent, max_restarts = 10, restart_window_secs = 60 —
+/// defence against reconnect-storm". Past those thresholds the
+/// supervisor's `RestartIntensity` escalates to the parent.
+public const POOL_MAX_RESTARTS: Int       = 10;
+public const POOL_RESTART_WINDOW_SECS: Int = 60;
+
+/// Default restart limits for the health-checker. Tighter than the
+/// pool itself — a checker that flaps means something is wrong with
+/// the runtime, not the pool.
+public const HEALTH_CHECKER_MAX_RESTARTS: Int       = 3;
+public const HEALTH_CHECKER_RESTART_WINDOW_SECS: Int = 30;
+
+/// Default restart limits for the adaptive sizer. Same logic as
+/// the health-checker — tight bounds since the sizer doesn't touch
+/// the network and shouldn't be crashing.
+public const ADAPTIVE_SIZER_MAX_RESTARTS: Int       = 3;
+public const ADAPTIVE_SIZER_RESTART_WINDOW_SECS: Int = 30;
+
+/// Default shutdown timeout (ms) — how long the supervisor waits
+/// for the pool's `drain` to complete before force-killing. 10 s
+/// matches the spec's `Graceful shutdown` SLA.
+public const POOL_SHUTDOWN_TIMEOUT_MS: Int = 10_000;
+
+/// Build the pool's own `ChildSpec`. The user wires this under their
+/// root supervisor:
+///
+///     root.add_child(pool_supervisor.pool_child_spec("pg-primary"));
+///
+/// The returned spec uses `Permanent` (always restart on any exit
+/// — spec §4.3) and the standard restart-intensity bounds. Use the
+/// `with_*` helpers on `ChildSpec` if you need to override defaults.
+public fn pool_child_spec(name: Text) -> ChildSpec {
+    ChildSpec.permanent(name)
+        .with_shutdown_timeout_ms(POOL_SHUTDOWN_TIMEOUT_MS as UInt32)
+        .with_restart_limits(
+            POOL_MAX_RESTARTS as UInt16,
+            POOL_RESTART_WINDOW_SECS as UInt32,
+        )
+        // Pools are core infrastructure — start them ahead of
+        // application workers (so the workers find a live pool on
+        // first acquire) and stop them after (so in-flight
+        // requests finish before the pool drains).
+        .with_priority(200_u8)
+}
+
+/// Build the health-checker's `ChildSpec` — runs as a `Transient`
+/// child under the pool's own supervisor. Restarts on abnormal
+/// exit, honours graceful shutdown.
+public fn health_checker_child_spec(pool_name: &Text) -> ChildSpec {
+    let mut name: Text = pool_name.clone();
+    name.push_str(&"/health".clone());
+    ChildSpec.new(name)
+        .with_restart(SupervisorRestartStrategy.Transient)
+        .with_shutdown_timeout_ms(2_000_u32)
+        .with_restart_limits(
+            HEALTH_CHECKER_MAX_RESTARTS as UInt16,
+            HEALTH_CHECKER_RESTART_WINDOW_SECS as UInt32,
+        )
+        // Lower priority than the pool itself — health-checker
+        // depends on the pool being up.
+        .with_priority(100_u8)
+}
+
+/// Build the adaptive sizer's `ChildSpec`. Same `Transient`
+/// restart policy as the health-checker.
+public fn adaptive_sizer_child_spec(pool_name: &Text) -> ChildSpec {
+    let mut name: Text = pool_name.clone();
+    name.push_str(&"/sizer".clone());
+    ChildSpec.new(name)
+        .with_restart(SupervisorRestartStrategy.Transient)
+        .with_shutdown_timeout_ms(2_000_u32)
+        .with_restart_limits(
+            ADAPTIVE_SIZER_MAX_RESTARTS as UInt16,
+            ADAPTIVE_SIZER_RESTART_WINDOW_SECS as UInt32,
+        )
+        .with_priority(100_u8)
+}
+
+// -----------------------------------------------------------------------------
+// Vegas-like adaptive sizer state
+// -----------------------------------------------------------------------------
+//
+// The Netflix concurrency-limits "Vegas" algorithm:
+//
+//   * Measure RTT continuously.
+//   * Maintain `min_rtt` (best observed) and `current_rtt` (smoothed
+//     recent estimate).
+//   * Compute queueing-delay proxy: `current_rtt - min_rtt`.
+//   * If the proxy is below `alpha` (default 3) — load is light,
+//     room to grow.
+//   * If above `beta` (default 6) — queue is forming, back off.
+//
+// Spec defaults (§4.3): min = 1, max = cpu_count * 2, startup-size
+// = cpu_count, target_p95_ms = 50, probe_interval_ms = 1000.
+//
+// The state machine in this module lives between probe ticks; the
+// actual RTT measurements feed in via `record_acquire_latency`.
+
+public type VegasSizerState is {
+    config: AdaptiveSizerConfig,
+    /// Best observed RTT in milliseconds — decay handled by
+    /// periodic resets driven by `tick`.
+    min_rtt_ms: Int,
+    /// Exponentially-smoothed recent RTT (alpha = 0.125, the TCP
+    /// retransmission-timer constant).
+    smoothed_rtt_ms: Int,
+    /// Currently-recommended `max_connections`. Caller applies
+    /// this to the underlying pool's config via
+    /// `update_max_connections`.
+    current_limit: Int,
+    /// Total samples observed since construction — for diagnostic
+    /// emit.
+    sample_count: Int,
+    /// Total resize events since construction.
+    resize_count: Int,
+};
+
+/// Algorithm parameters. `alpha` and `beta` are Vegas-classic.
+public const VEGAS_ALPHA: Int = 3;
+public const VEGAS_BETA:  Int = 6;
+
+implement VegasSizerState {
+    public fn new(config: AdaptiveSizerConfig) -> VegasSizerState {
+        VegasSizerState {
+            config: config,
+            min_rtt_ms: 0x7FFF_FFFF_FFFF_FFFF,    // sentinel "no sample yet"
+            smoothed_rtt_ms: 0,
+            current_limit: config.initial_connections,
+            sample_count: 0,
+            resize_count: 0,
+        }
+    }
+
+    /// Feed one acquire-latency sample (ms) into the estimator.
+    /// O(1) — just two arithmetic updates.
+    public fn record_acquire_latency(&mut self, latency_ms: Int) {
+        if latency_ms < 0 {
+            return;
+        }
+        self.sample_count = self.sample_count + 1;
+        if latency_ms < self.min_rtt_ms {
+            self.min_rtt_ms = latency_ms;
+        }
+        // Exponential smoothing with alpha = 1/8 (TCP RTO style).
+        // smoothed = (7 * old + new) / 8 — done in fixed-point on
+        // Int to avoid fp.
+        if self.smoothed_rtt_ms == 0 {
+            self.smoothed_rtt_ms = latency_ms;
+        } else {
+            self.smoothed_rtt_ms = (self.smoothed_rtt_ms * 7 + latency_ms) / 8;
+        }
+    }
+
+    /// Drive one probe tick. Returns the new `max_connections`
+    /// recommendation; caller applies it via the pool's reconfig
+    /// path. Idempotent — calling without recent samples returns
+    /// the current limit unchanged.
+    public fn tick(&mut self) -> Int {
+        if self.sample_count == 0 || self.smoothed_rtt_ms == 0 {
+            return self.current_limit;
+        }
+        let queueing = self.smoothed_rtt_ms - self.min_rtt_ms;
+        let new_limit = if queueing < VEGAS_ALPHA {
+            // Light queue — grow, capped at config.max.
+            let next = self.current_limit + 1;
+            if next > self.config.max_connections {
+                self.config.max_connections
+            } else {
+                next
+            }
+        } else if queueing > VEGAS_BETA {
+            // Building queue — back off, floored at config.min.
+            let next = self.current_limit - 1;
+            if next < self.config.min_connections {
+                self.config.min_connections
+            } else {
+                next
+            }
+        } else {
+            self.current_limit
+        };
+        if new_limit != self.current_limit {
+            self.resize_count = self.resize_count + 1;
+        }
+        self.current_limit = new_limit;
+        new_limit
+    }
+
+    /// Periodic decay — resets `min_rtt_ms` so a temporary slow
+    /// network blip doesn't anchor the estimator forever.
+    /// Recommended every ~1 minute.
+    public fn decay(&mut self) {
+        // Reset to "no sample" so the next acquire repopulates.
+        self.min_rtt_ms = 0x7FFF_FFFF_FFFF_FFFF;
+    }
+
+    public fn current_limit(&self) -> Int { self.current_limit }
+    public fn smoothed_rtt_ms(&self) -> Int { self.smoothed_rtt_ms }
+    public fn min_rtt_ms(&self) -> Int { self.min_rtt_ms }
+    public fn sample_count(&self) -> Int { self.sample_count }
+    public fn resize_count(&self) -> Int { self.resize_count }
+}
+
+// -----------------------------------------------------------------------------
+// SupervisedPoolMetrics — observable counters for the side tasks
+// -----------------------------------------------------------------------------
+
+public type SupervisedPoolMetrics is {
+    pool_stats: PoolStats,
+    health_checker: HealthCheckerMetrics,
+    sizer: SizerMetrics,
+};
+
+public type HealthCheckerMetrics is {
+    /// Total sweeps completed since startup.
+    total_sweeps: Int,
+    /// Total connections probed across all sweeps.
+    total_probes: Int,
+    /// Total connections evicted by the health-checker (failed ping).
+    total_evictions: Int,
+    /// Last sweep's wall-clock at-end (monotonic ns; 0 = never).
+    last_sweep_at_ns: Int,
+};
+
+implement HealthCheckerMetrics {
+    public fn empty() -> HealthCheckerMetrics {
+        HealthCheckerMetrics {
+            total_sweeps: 0,
+            total_probes: 0,
+            total_evictions: 0,
+            last_sweep_at_ns: 0,
+        }
+    }
+}
+
+public type SizerMetrics is {
+    /// Current recommended `max_connections`.
+    current_limit: Int,
+    /// Total tick events.
+    total_ticks: Int,
+    /// Total times the sizer changed `current_limit`.
+    total_resizes: Int,
+    /// Most recent smoothed RTT estimate (ms).
+    smoothed_rtt_ms: Int,
+    /// Most recent observed minimum RTT (ms).
+    min_rtt_ms: Int,
+};
+
+implement SizerMetrics {
+    public fn from_state(state: &VegasSizerState) -> SizerMetrics {
+        SizerMetrics {
+            current_limit: state.current_limit,
+            total_ticks: state.sample_count,
+            total_resizes: state.resize_count,
+            smoothed_rtt_ms: state.smoothed_rtt_ms,
+            min_rtt_ms: state.min_rtt_ms,
+        }
+    }
+}
