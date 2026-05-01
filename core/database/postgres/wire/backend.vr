@@ -590,3 +590,79 @@ public fn parse_backend(frame: PgFrame, data_row_formats: &List<Int>) -> Result<
     if tag == BE_PORTAL_SUSPEND   { return Ok(BmPortalSuspend); }
     Ok(BmUnknown { tag: tag })
 }
+
+// =============================================================================
+// Arena-backed backend message + dispatch — spec §4.2 (per-connection arena)
+// =============================================================================
+//
+// `BackendMessageArena` mirrors `BackendMessage` 1:1, with the single
+// divergence that `BmaDataRow` carries an `ArenaWireRow` whose
+// per-column bytes live INSIDE the connection arena (zero per-cell
+// heap allocation). All non-DataRow variants stay heap-backed —
+// row descriptions / command tags / error fields are infrequent and
+// already-arena-cold compared to the per-row data path.
+//
+// Lifetime contract: the returned `ArenaWireRow` references the
+// `&mut SpindleArena` passed in. The next `arena.reset()` (typically
+// invoked at `PgConnection.release_healthy()`) bumps the generation
+// and `is_stale(&arena)` flips true. Callers materialising rows past
+// the checkout boundary must `to_owned()` first.
+
+public type BackendMessageArena is
+      BmaAuth(AuthRequest)
+    | BmaParameterStatus(ParameterStatus)
+    | BmaBackendKeyData(BackendKeyData)
+    | BmaReadyForQuery(TxStatus)
+    | BmaRowDescription(RowDescription)
+    | BmaDataRow(ArenaWireRow)
+    | BmaCommandComplete(CommandComplete)
+    | BmaEmptyQueryResponse
+    | BmaError(Diagnostic)
+    | BmaNotice(Diagnostic)
+    | BmaNotification(NotificationResponse)
+    | BmaCopyInResponse(CopyResponse)
+    | BmaCopyOutResponse(CopyResponse)
+    | BmaCopyData { bytes: List<Byte> }
+    | BmaCopyDone
+    | BmaParseComplete
+    | BmaBindComplete
+    | BmaCloseComplete
+    | BmaNoData
+    | BmaPortalSuspend
+    | BmaUnknown { tag: Byte };
+
+/// Same as `parse_backend`, except DataRow is decoded via
+/// `parse_data_row_arena(payload, formats, arena)` so each column's
+/// payload is a slice into `arena` rather than a heap-owned
+/// `List<Byte>`.
+public fn parse_backend_arena(
+    frame: PgFrame,
+    data_row_formats: &List<Int>,
+    arena: &mut SpindleArena,
+) -> Result<BackendMessageArena, BackendDecodeError> {
+    let tag = frame.tag();
+    let payload = frame.into_payload();
+    if tag == BE_AUTH_REQUEST     { return Ok(BmaAuth(parse_auth_request(payload)?)); }
+    if tag == BE_PARAMETER_STATUS { return Ok(BmaParameterStatus(parse_parameter_status(payload)?)); }
+    if tag == BE_BACKEND_KEY_DATA { return Ok(BmaBackendKeyData(parse_backend_key_data(payload)?)); }
+    if tag == BE_READY_FOR_QUERY  { return Ok(BmaReadyForQuery(parse_ready_for_query(payload)?)); }
+    if tag == BE_ROW_DESCRIPTION  { return Ok(BmaRowDescription(parse_row_description(payload)?)); }
+    if tag == BE_DATA_ROW         {
+        return Ok(BmaDataRow(parse_data_row_arena(payload, data_row_formats, arena)?));
+    }
+    if tag == BE_COMMAND_COMPLETE { return Ok(BmaCommandComplete(parse_command_complete(payload)?)); }
+    if tag == BE_EMPTY_QUERY_RES  { return Ok(BmaEmptyQueryResponse); }
+    if tag == BE_ERROR_RESPONSE   { return Ok(BmaError(parse_error_response(payload)?)); }
+    if tag == BE_NOTICE_RESPONSE  { return Ok(BmaNotice(parse_error_response(payload)?)); }
+    if tag == BE_NOTIFICATION     { return Ok(BmaNotification(parse_notification_response(payload)?)); }
+    if tag == BE_COPY_IN          { return Ok(BmaCopyInResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_OUT         { return Ok(BmaCopyOutResponse(parse_copy_response(payload)?)); }
+    if tag == BE_COPY_DATA        { return Ok(BmaCopyData { bytes: payload }); }
+    if tag == BE_COPY_DONE        { return Ok(BmaCopyDone); }
+    if tag == BE_PARSE_COMPLETE   { return Ok(BmaParseComplete); }
+    if tag == BE_BIND_COMPLETE    { return Ok(BmaBindComplete); }
+    if tag == BE_CLOSE_COMPLETE   { return Ok(BmaCloseComplete); }
+    if tag == BE_NO_DATA          { return Ok(BmaNoData); }
+    if tag == BE_PORTAL_SUSPEND   { return Ok(BmaPortalSuspend); }
+    Ok(BmaUnknown { tag: tag })
+}

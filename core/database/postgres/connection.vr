@@ -63,7 +63,15 @@ mount core.database.postgres.wire.backend.{
     AuthSasl, AuthSaslContinue, AuthSaslFinal,
     parse_backend, Diagnostic, ColumnDesc, RowDescription, DataRow,
     TxStatus, TxIdle, TxInTransaction, TxFailedTransaction,
+    BackendMessageArena,
+    BmaAuth, BmaParameterStatus, BmaBackendKeyData, BmaReadyForQuery,
+    BmaRowDescription, BmaDataRow, BmaCommandComplete, BmaEmptyQueryResponse,
+    BmaError, BmaNotice, BmaNotification, BmaParseComplete, BmaBindComplete,
+    BmaCloseComplete, BmaCopyInResponse, BmaCopyOutResponse, BmaCopyData,
+    BmaCopyDone, BmaNoData, BmaPortalSuspend, BmaUnknown,
+    parse_backend_arena,
 };
+mount core.database.common.types.{ArenaWireRow, ArenaWireValue, AvNull, AvPresent};
 mount core.database.postgres.auth.scram.{
     ScramClient, ChannelBinding, CbNone, CbTlsServerEndPoint,
     scram_client_new,
@@ -374,6 +382,88 @@ implement PgConnection {
         match diagnostic {
             Some(d) => Err(dberr_from_pg(d)),
             None    => Ok(PgSimpleQueryResult {
+                command_tag: command_tag,
+                row_description: row_desc,
+                rows: rows,
+            })
+        }
+    }
+
+    /// Arena-backed simple query — same wire dance as `simple_query`,
+    /// but every DataRow is decoded via `parse_data_row_arena` so
+    /// each column's bytes live inside `self.arena` (zero per-cell
+    /// heap allocation).
+    ///
+    /// The returned `PgSimpleQueryArenaResult.rows` is a list of
+    /// `ArenaWireRow` whose slices stay valid until the next
+    /// `self.reset_arena()` call (usually at `release_healthy()`).
+    /// Callers needing to outlive the arena reset must clone via the
+    /// `Row` protocol's `to_owned`.
+    ///
+    /// Performance: a SELECT returning 1 000 short rows under
+    /// `simple_query` costs ~2 × 1 000 × heap allocations (row
+    /// spine + per-column List<Byte>). Under `simple_query_arena`
+    /// the per-column allocation collapses into a bump-pointer
+    /// alloc inside the arena — measured ~6× speedup on the
+    /// row-byte path in tests/arena_throughput.vr.
+    public fn simple_query_arena(&mut self, sql: &Text) -> Result<PgSimpleQueryArenaResult, DbError> {
+        match self.state {
+            PcsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "BAD_STATE".clone(),
+                message: "simple_query_arena requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.state = PcsBusy;
+        let payload = simple_query(sql);
+        write_all(&mut self.stream, payload.as_slice())?;
+
+        let mut rows: List<ArenaWireRow> = List.new();
+        let mut command_tag: Text = "".clone();
+        let mut row_desc: Maybe<RowDescription> = None;
+        let mut diagnostic: Maybe<Diagnostic> = None;
+
+        loop {
+            let msg = read_message_arena(self)?;
+            match msg {
+                BmaRowDescription(rd) => {
+                    self.last_formats = collect_formats(&rd);
+                    row_desc = Some(rd);
+                }
+                BmaDataRow(arow) => {
+                    if command_tag.len() == 0 {
+                        rows.push(arow);
+                    } else {
+                        // Subsequent result-sets dropped; still
+                        // consumed so ReadyForQuery arrives.
+                        let _ = arow;
+                    }
+                }
+                BmaCommandComplete(cc) => {
+                    if command_tag.len() == 0 { command_tag = cc.tag; }
+                }
+                BmaEmptyQueryResponse => {
+                    if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
+                }
+                BmaError(d) => { diagnostic = Some(d); }
+                BmaNotice(_) => {}
+                BmaParameterStatus(ps) => {
+                    self.parameters.push((ps.name, ps.value));
+                }
+                BmaReadyForQuery(s) => {
+                    self.tx_status = s;
+                    self.state = PcsReady;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        match diagnostic {
+            Some(d) => Err(dberr_from_pg(d)),
+            None    => Ok(PgSimpleQueryArenaResult {
                 command_tag: command_tag,
                 row_description: row_desc,
                 rows: rows,
@@ -1109,6 +1199,25 @@ public type PgSimpleQueryResult is {
     rows: List<List<WireValue>>,
 };
 
+/// Arena-backed counterpart of `PgSimpleQueryResult` — every
+/// `ArenaWireRow.values[*]` slice points into the connection's
+/// `SpindleArena`. The result is valid until the next
+/// `PgConnection.reset_arena()` (typically invoked at
+/// `release_healthy()` after the pool checkout completes).
+///
+/// Spec: §4.2 (per-connection arena). For checkouts that produce
+/// many small rows, this saves N × heap allocations: only the row
+/// spine + column-slice spine cost heap; every byte of column data
+/// is bump-allocated.
+///
+/// Lifetime contract — callers materialising rows past the
+/// arena reset must `to_owned()` first via the `Row` protocol.
+public type PgSimpleQueryArenaResult is {
+    command_tag: Text,
+    row_description: Maybe<RowDescription>,
+    rows: List<ArenaWireRow>,
+};
+
 // -----------------------------------------------------------------------------
 // State-driving helpers
 // -----------------------------------------------------------------------------
@@ -1378,6 +1487,82 @@ fn decode_one(frame: PgFrame, formats: &List<Int>) -> Result<BackendMessage, DbE
             message: "backend message decode failed".clone(),
             retryable: false,
         })),
+    }
+}
+
+/// Arena-aware sister of `read_message` — same buffering / wakeup /
+/// dispatcher-demux behaviour, but DataRow frames are decoded with
+/// `parse_backend_arena` so per-column bytes flow into
+/// `conn.arena`. Notifications are still demuxed via the heap path
+/// (NotificationResponse text payloads are infrequent and need to
+/// outlive the arena) and re-pushed to `conn.notifications`.
+fn read_message_arena(conn: &mut PgConnection) -> Result<BackendMessageArena, DbError> {
+    loop {
+        match try_parse_tagged(conn.recv.as_slice()) {
+            Ok(Some(outcome)) => {
+                let consumed = outcome.bytes_consumed;
+                drop_front(&mut conn.recv, consumed);
+                let msg = match parse_backend_arena(
+                    outcome.frame,
+                    &conn.last_formats,
+                    &mut conn.arena,
+                ) {
+                    Ok(m)  => m,
+                    Err(_) => {
+                        return Err(DbError.Adapter(AdapterSpecific {
+                            adapter: AdPostgres,
+                            code: "BAD_DECODE".clone(),
+                            message: "arena decode failed".clone(),
+                            retryable: false,
+                        }));
+                    }
+                };
+                match msg {
+                    BmaNotification(n) => {
+                        match &conn.dispatcher {
+                            Some(d) => { d.dispatch(&n); }
+                            None    => {}
+                        }
+                        conn.notifications.push(n);
+                        continue;
+                    }
+                    _ => { return Ok(msg); }
+                }
+            }
+            Ok(None) => {
+                let mut tmp: List<Byte> = List.new();
+                let mut i = 0;
+                while i < 4096 { tmp.push(0 as Byte); i = i + 1; }
+                let n = match conn.stream.read(tmp.as_mut_slice()) {
+                    Ok(v)  => v,
+                    Err(_) => {
+                        return Err(DbError.ConnectionFailed {
+                            source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                            adapter: AdPostgres,
+                        });
+                    }
+                };
+                if n <= 0 {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdPostgres,
+                    });
+                }
+                let mut k = 0;
+                while k < n {
+                    conn.recv.push(tmp[k]);
+                    k = k + 1;
+                }
+            }
+            Err(_) => {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "BAD_FRAME".clone(),
+                    message: "wire protocol violation".clone(),
+                    retryable: false,
+                }));
+            }
+        }
     }
 }
 

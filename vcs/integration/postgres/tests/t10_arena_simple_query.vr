@@ -1,0 +1,107 @@
+// =============================================================================
+// t10_arena_simple_query.vr — arena-backed simple_query end-to-end
+// =============================================================================
+// Spec: internal/specs/database.md §4.2 (per-connection arena),
+//       §6.1.3 (simple-query protocol).
+// =============================================================================
+//
+// Proves the arena hot-path migration is wired:
+//
+//   1. `simple_query_arena` returns rows whose column slices live
+//      INSIDE the connection's SpindleArena.
+//   2. While the arena hasn't been reset, `is_stale(&arena)` is
+//      false — the slices are addressable.
+//   3. After `reset_arena()`, `is_stale(&arena)` flips true — the
+//      generation invalidation guard works as documented.
+//
+// This test is the load-bearing proof for spec §4.2: until this
+// passes, the arena is just a bag of bytes nothing reads from.
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+mount core.database.postgres.{PgConnection, PgSimpleQueryArenaResult};
+mount core.database.common.types.{ArenaWireRow, ArenaWireValue, AvNull, AvPresent};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app() failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 1. SELECT three short rows — each row has two integer columns
+    //    that the wire returns as text-formatted ASCII bytes.
+    // -------------------------------------------------------------------------
+    let r = expect_ok(
+        conn.simple_query_arena(&
+            "SELECT n AS num, n * 10 AS scaled FROM generate_series(1, 3) AS n".clone()
+        ),
+        &"simple_query_arena failed".clone(),
+    );
+    expect_eq_int(r.rows.len() as Int, 3, &"arena row count".clone());
+
+    // -------------------------------------------------------------------------
+    // 2. Every row's slice generation matches the live arena —
+    //    the rows decoded into the same arena and haven't been
+    //    invalidated yet.
+    // -------------------------------------------------------------------------
+    let mut i: Int = 0;
+    while i < (r.rows.len() as Int) {
+        let row = &r.rows[i];
+        expect_eq_int(row.column_count(), 2, &"arena row col count".clone());
+        expect(
+            !row.is_stale(conn.arena_ref()),
+            &f"row {i}: arena slice unexpectedly stale before reset",
+        );
+        // Spot-check: column 0 must be non-NULL (generate_series
+        // returns ints).
+        expect(
+            !row.is_null(0),
+            &f"row {i}: column 0 unexpectedly NULL",
+        );
+        match row.slice(0) {
+            Some(s) => expect(
+                s.len > 0,
+                &f"row {i}: slice 0 length must be positive",
+            ),
+            None    => expect(false, &f"row {i}: slice(0) returned None"),
+        }
+        i = i + 1;
+    }
+
+    // Hold a reference to row 0 across the reset for the
+    // staleness check.
+    let r0_snapshot_gen = (&r.rows[0]).generation;
+
+    // -------------------------------------------------------------------------
+    // 3. Reset the arena → all previously-decoded rows must report
+    //    is_stale == true. This is the safety net that prevents
+    //    use-after-free on the bump-allocated bytes.
+    // -------------------------------------------------------------------------
+    let pre_gen = conn.arena_ref().generation();
+    conn.reset_arena();
+    let post_gen = conn.arena_ref().generation();
+    expect(
+        post_gen > pre_gen,
+        &f"arena generation must increment on reset (pre={pre_gen}, post={post_gen})",
+    );
+
+    let mut j: Int = 0;
+    while j < (r.rows.len() as Int) {
+        let row = &r.rows[j];
+        expect(
+            row.is_stale(conn.arena_ref()),
+            &f"row {j}: must be stale after reset_arena()",
+        );
+        j = j + 1;
+    }
+
+    expect(
+        r0_snapshot_gen != post_gen,
+        &"row 0 captured generation must differ from post-reset generation".clone(),
+    );
+
+    pass(&"t10_arena_simple_query".clone());
+}

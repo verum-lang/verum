@@ -91,3 +91,6 @@ Test list per `internal/specs/database.md` follow-up:
 - `t07_transaction.vr` — begin/commit/rollback/savepoint
 - `t08_pool.vr` — concurrent acquire + arena reset
 - `t09_capability.vr` — Database<PgPool, DbRead> compile-rejects writes
+- `t10_arena_simple_query.vr` — `simple_query_arena` returns rows whose
+  bytes live in the connection arena; `reset_arena()` invalidates them
+  via generation bump (spec §4.2 load-bearing)

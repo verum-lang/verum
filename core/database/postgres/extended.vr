@@ -42,7 +42,13 @@ mount core.database.postgres.wire.backend.{
     BmBackendKeyData, BmUnknown,
     RowDescription, DataRow, CommandComplete, Diagnostic, ColumnDesc,
     TxStatus,
+    BackendMessageArena,
+    BmaRowDescription, BmaDataRow, BmaCommandComplete, BmaEmptyQueryResponse,
+    BmaError, BmaNotice, BmaParseComplete, BmaBindComplete, BmaCloseComplete,
+    BmaNoData, BmaPortalSuspend, BmaReadyForQuery, BmaParameterStatus, BmaAuth,
+    BmaBackendKeyData, BmaUnknown,
 };
+mount core.database.common.types.{ArenaWireRow};
 
 // -----------------------------------------------------------------------------
 // Public types — the result of one extended-protocol round-trip.
@@ -221,6 +227,85 @@ implement ExtendedResultBuilder {
         match self.diagnostic {
             Some(d) => Err(error_translator(d)),
             None    => Ok(ExtendedQueryResult {
+                command_tag: self.command_tag,
+                row_description: self.row_desc,
+                rows: self.rows,
+            }),
+        }
+    }
+}
+
+// =============================================================================
+// Arena-backed extended-query result + builder — spec §4.2 mirror
+// =============================================================================
+//
+// Same finite-state shape as `ExtendedResultBuilder`, but `step`
+// consumes `BackendMessageArena` so DataRow payloads stay zero-copy
+// (slices into the connection arena). Lifetime contract identical
+// to `simple_query_arena`: rows are valid until the next
+// `arena.reset()`.
+
+public type ExtendedQueryArenaResult is {
+    command_tag: Text,
+    row_description: Maybe<RowDescription>,
+    rows: List<ArenaWireRow>,
+};
+
+public type ExtendedResultArenaBuilder is {
+    rows: List<ArenaWireRow>,
+    row_desc: Maybe<RowDescription>,
+    command_tag: Text,
+    diagnostic: Maybe<Diagnostic>,
+    finished: Bool,
+};
+
+implement ExtendedResultArenaBuilder {
+    public fn new() -> ExtendedResultArenaBuilder {
+        ExtendedResultArenaBuilder {
+            rows: List.new(),
+            row_desc: None,
+            command_tag: "".clone(),
+            diagnostic: None,
+            finished: false,
+        }
+    }
+
+    /// Drive one arena-decoded backend message into the builder.
+    /// Returns `true` once ReadyForQuery is observed.
+    public fn step(&mut self, msg: BackendMessageArena) -> Bool {
+        match msg {
+            BmaParseComplete    => {}
+            BmaBindComplete     => {}
+            BmaCloseComplete    => {}
+            BmaNoData           => {}
+            BmaPortalSuspend    => {
+                self.command_tag = "PORTAL_SUSPEND".clone();
+            }
+            BmaRowDescription(rd) => { self.row_desc = Some(rd); }
+            BmaDataRow(arow)      => { self.rows.push(arow); }
+            BmaCommandComplete(cc) => {
+                if self.command_tag.len() == 0 { self.command_tag = cc.tag; }
+            }
+            BmaEmptyQueryResponse => {
+                if self.command_tag.len() == 0 { self.command_tag = "EMPTY".clone(); }
+            }
+            BmaError(d) => { self.diagnostic = Some(d); }
+            BmaNotice(_) => {}
+            BmaReadyForQuery(_) => { self.finished = true; }
+            BmaParameterStatus(_) => {}
+            BmaBackendKeyData(_) => {}
+            BmaAuth(_) => {}
+            BmaUnknown { .. } => {}
+        }
+        self.finished
+    }
+
+    public fn finish(self, error_translator: fn(Diagnostic) -> DbError)
+        -> Result<ExtendedQueryArenaResult, DbError>
+    {
+        match self.diagnostic {
+            Some(d) => Err(error_translator(d)),
+            None    => Ok(ExtendedQueryArenaResult {
                 command_tag: self.command_tag,
                 row_description: self.row_desc,
                 rows: self.rows,
