@@ -2737,20 +2737,24 @@ fn audit_cross_format_roundtrip_inner(
             .to_string();
 
         for item in &module.items {
-            let (name, decl_attrs, has_proof, proposition_expr, theorem_params, theorem_generics)
+            let (name, decl_attrs, proof_body, proposition_expr, theorem_params, theorem_generics)
                 = match &item.kind {
                 verum_ast::decl::ItemKind::Theorem(d)
                 | verum_ast::decl::ItemKind::Lemma(d)
                 | verum_ast::decl::ItemKind::Corollary(d) => (
                     d.name.name.as_str().to_string(),
                     &d.attributes,
-                    matches!(&d.proof, verum_common::Maybe::Some(_)),
+                    match &d.proof {
+                        verum_common::Maybe::Some(b) => Some(b),
+                        verum_common::Maybe::None => None,
+                    },
                     d.proposition.as_ref(),
                     &d.params,
                     &d.generics,
                 ),
                 _ => continue,
             };
+            let has_proof = proof_body.is_some();
             let declared_strategy =
                 strictest_verify_strategy(&item.attributes, decl_attrs)
                     .map(|t| t.as_str().to_string());
@@ -2814,22 +2818,29 @@ fn audit_cross_format_roundtrip_inner(
             // in their respective maps; fallbacks leave the entry
             // absent and the per-format renderer reverts to a
             // generic placeholder.
-            theorem_specs.push(
-                TheoremSpec {
-                    name: sanitise_theorem_name(&name),
-                    module_path: module_path_text.clone(),
-                    proposition_text,
-                    per_backend_proposition: std::collections::BTreeMap::new(),
-                    params: Vec::new(),
-                    generics: Vec::new(),
-                    has_proof_body: has_proof,
-                    per_backend_proof_tactic: std::collections::BTreeMap::new(),
-                    declared_strategy,
-                }
-                .with_translated_params(&walker_params)
-                .with_generics(&walker_generics)
-                .with_translated_proposition(proposition_expr),
-            );
+            let mut spec = TheoremSpec {
+                name: sanitise_theorem_name(&name),
+                module_path: module_path_text.clone(),
+                proposition_text,
+                per_backend_proposition: std::collections::BTreeMap::new(),
+                params: Vec::new(),
+                generics: Vec::new(),
+                has_proof_body: has_proof,
+                per_backend_proof_tactic: std::collections::BTreeMap::new(),
+                declared_strategy,
+            }
+            .with_translated_params(&walker_params)
+            .with_generics(&walker_generics)
+            .with_translated_proposition(proposition_expr);
+            // #153 / Phase 2: when the theorem has a proof body and
+            // its shape is V0-translatable (term-mode or single-apply
+            // tactic), thread the translation into per_backend_proof_tactic.
+            // Untranslatable shapes leave the entry absent and the
+            // renderer falls back to Admitted./sorry.
+            if let Some(body) = proof_body {
+                spec = spec.with_translated_proof_body(body);
+            }
+            theorem_specs.push(spec);
         }
     }
 

@@ -247,6 +247,35 @@ impl TheoremSpec {
         }
         self
     }
+
+    /// **Populate `per_backend_proof_tactic` (#153 / Phase 2)** by
+    /// running the [`super::proof_body_translate::ProofBodyRenderer`]s
+    /// over the supplied AST proof body.  Successful translations
+    /// land in the per-backend map; fallbacks leave the entry absent
+    /// so the per-format renderer reverts to `Admitted.` / `:= by sorry`.
+    ///
+    /// **Why a builder method (vs. inline construction)**: every
+    /// audit walker that builds a TheoremSpec follows the same
+    /// translate-the-translatable-pieces pattern; centralising the
+    /// translator dispatch here keeps the shape consistent across
+    /// `audit_cross_format_roundtrip` (the load-bearing site) and
+    /// any future site that builds specs directly.
+    pub fn with_translated_proof_body(mut self, body: &verum_ast::decl::ProofBody) -> Self {
+        use super::proof_body_translate::{
+            CoqProofBodyRenderer, LeanProofBodyRenderer, ProofBodyRenderer,
+            TranslatedProofBody,
+        };
+        for renderer in [
+            Box::new(CoqProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
+            Box::new(LeanProofBodyRenderer::new()) as Box<dyn ProofBodyRenderer>,
+        ] {
+            if let TranslatedProofBody::Translated { text } = renderer.render(body) {
+                self.per_backend_proof_tactic
+                    .insert(renderer.id().to_string(), text);
+            }
+        }
+        self
+    }
 }
 
 /// One backend's per-theorem render of [`TheoremSpec`].  Returned
