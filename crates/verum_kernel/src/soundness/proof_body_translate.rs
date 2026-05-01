@@ -49,7 +49,7 @@ use verum_ast::ty::PathSegment;
 use verum_common::Maybe;
 
 use super::expr_translate::{
-    CoqExprRenderer, ExprRenderer, LeanExprRenderer, TranslatedExpr,
+    AgdaExprRenderer, CoqExprRenderer, ExprRenderer, LeanExprRenderer, TranslatedExpr,
 };
 
 // =============================================================================
@@ -384,6 +384,91 @@ fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
     }
     TranslatedProofBody::Fallback {
         reason: "Lean: V0 covers single-apply + primitive tactics (auto/trivial/refl/assumption/ring/field/omega)".to_string(),
+    }
+}
+
+// =============================================================================
+// AgdaProofBodyRenderer (#156 — third backend)
+// =============================================================================
+
+/// Agda 4 backend.  Agda has no tactic system in the vanilla
+/// language (the experimental `Reflection` library is out of scope
+/// for V0), so the translator's surface is necessarily smaller than
+/// Coq/Lean: only term-mode proofs and `apply <name>(args)` shapes
+/// translate cleanly.  Everything else falls back to `postulate` at
+/// the corpus-emission layer.
+///
+/// **Coverage**:
+///   * `ProofBody::Term(expr)` → `<expr>` (Agda accepts term-mode
+///     proofs as the right-hand side of `name = body`).
+///   * `ProofBody::Tactic(Apply{lemma})` / structured single-apply
+///     → `<lemma>` (Agda treats the apply as a bare-term proof).
+///   * Primitive tactics (`auto`, `omega`, `ring`, ...) → fall back.
+///     Agda has no built-in equivalents, and the experimental
+///     `simp`/`automation` ecosystem is library-dependent.
+pub struct AgdaProofBodyRenderer;
+
+impl AgdaProofBodyRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for AgdaProofBodyRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProofBodyRenderer for AgdaProofBodyRenderer {
+    fn id(&self) -> &'static str {
+        "agda"
+    }
+
+    fn render(&self, body: &ProofBody) -> TranslatedProofBody {
+        match body.kind() {
+            ProofBodyKind::Term => render_term_agda(body),
+            ProofBodyKind::Tactic | ProofBodyKind::Structured => {
+                render_single_apply_agda(body)
+            }
+            other => TranslatedProofBody::Fallback {
+                reason: format!(
+                    "Agda translator: proof-body kind {:?} not yet covered (Agda has no tactic system; V0 covers Term + single-apply only)",
+                    other,
+                ),
+            },
+        }
+    }
+}
+
+/// Agda term-mode proof: `<expr>` — same shape as Lean's term-mode.
+fn render_term_agda(body: &ProofBody) -> TranslatedProofBody {
+    let expr = match body {
+        ProofBody::Term(e) => e.as_ref(),
+        _ => unreachable!("called from kind() == Term arm"),
+    };
+    match AgdaExprRenderer::new().render(expr) {
+        TranslatedExpr::Translated { text } => TranslatedProofBody::Translated { text },
+        TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
+            reason: format!("Agda term-mode: expr renderer fallback — {}", reason),
+        },
+    }
+}
+
+/// Agda single-apply proof: `<name>` — Agda has no `apply` keyword
+/// and no tactic mode in vanilla form, so the translation is just
+/// the bare lemma name as a term.  The args are dropped — Agda's
+/// unification fills in implicit arguments when the proof is
+/// type-checked against the goal.
+fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
+    if let Some((name, _args)) = classify_single_apply(body) {
+        return TranslatedProofBody::Translated {
+            text: name.to_string(),
+        };
+    }
+    TranslatedProofBody::Fallback {
+        reason: "Agda: no tactic system; only Term and single-apply translate in V0".to_string(),
     }
 }
 
@@ -956,6 +1041,65 @@ mod tests {
             LeanProofBodyRenderer::new().render(&body).text(),
             Some("by trivial"),
         );
+    }
+
+    // -------------------------------------------------------------
+    // Agda translator (#156 — third backend)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn agda_renders_apply_as_bare_term() {
+        // Agda has no `apply` keyword — the translation is just the
+        // lemma name as a term (Agda unification fills implicits).
+        let body = apply_body("backbone_full", vec![name_path_expr("n")]);
+        let r = AgdaProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("backbone_full"));
+    }
+
+    #[test]
+    fn agda_renders_call_shape_apply() {
+        let body = apply_body_via_call(
+            "syn_mod_lemma_3_4_steps_2_3",
+            vec![name_path_expr("x"), name_path_expr("membership")],
+        );
+        let r = AgdaProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("syn_mod_lemma_3_4_steps_2_3"));
+    }
+
+    #[test]
+    fn agda_renders_term_body_passthrough() {
+        let body = term_body("h_x");
+        let r = AgdaProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("h_x"));
+    }
+
+    #[test]
+    fn agda_falls_back_on_primitive_tactic() {
+        // Agda has no built-in `auto` / `omega` / `ring`.  The
+        // primitive tactics fall back; the corpus-emission layer
+        // then uses `postulate` for these theorems.
+        for tactic in [
+            TacticExpr::Trivial,
+            TacticExpr::Reflexivity,
+            TacticExpr::Auto {
+                with_hints: List::new(),
+            },
+            TacticExpr::Omega,
+        ] {
+            let body = ProofBody::Tactic(tactic);
+            let r = AgdaProofBodyRenderer::new().render(&body);
+            assert!(
+                matches!(r, TranslatedProofBody::Fallback { .. }),
+                "Agda must fall back on primitive tactics — no built-in equivalents",
+            );
+        }
+    }
+
+    #[test]
+    fn agda_translates_structured_apply_step() {
+        let body = structured_apply_step("backbone_full", vec![]);
+        let r = AgdaProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("backbone_full"));
     }
 
     #[test]
