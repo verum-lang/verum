@@ -3718,13 +3718,55 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         let num_blocks = block_starts.len();
 
         // Ensure all basic blocks have terminators (exception handler blocks, etc.)
+        // **AND** delete orphan `dead_after_N` blocks that have no
+        // predecessors AND no instructions other than `unreachable`.
+        //
+        // Pre-fix: the codegen at line 3711 inserted `dead_after_N`
+        // placeholder blocks after every terminator-emitting instruction
+        // as a safety net.  When subsequent instructions started a new
+        // block (the normal path), the placeholder stayed empty with
+        // `unreachable` added by this sweep — producing
+        //
+        //     dead_after_2:                ; No predecessors!
+        //       unreachable
+        //
+        // These orphan blocks are valid IR but trip
+        // `SimplifyCFG::TryToSimplifyUncondBranchFromEmptyBlock` on
+        // arity-collided / type-conflict modules (#96), causing SIGBUS.
+        // Deleting them pre-optimization eliminates the crash surface
+        // without affecting program semantics — they're unreachable
+        // by definition.
         let mut bb = llvm_fn.get_first_basic_block();
+        let mut orphan_blocks: Vec<_> = Vec::new();
         while let Some(block) = bb {
+            let next = block.get_next_basic_block();
             if block.get_terminator().is_none() {
                 ctx.position_at_end(block);
                 let _ = ctx.builder().build_unreachable();
             }
-            bb = block.get_next_basic_block();
+            // Detect orphan: no predecessor uses + first instruction is
+            // `unreachable` (i.e. the block has nothing else in it).
+            // Skip the entry block — never delete that even if empty.
+            if Some(block) != llvm_fn.get_first_basic_block()
+                && block.get_first_use().is_none()
+            {
+                if let Some(first_instr) = block.get_first_instruction() {
+                    let opcode_name = first_instr.get_opcode();
+                    use verum_llvm::values::InstructionOpcode;
+                    if matches!(opcode_name, InstructionOpcode::Unreachable) {
+                        orphan_blocks.push(block);
+                    }
+                }
+            }
+            bb = next;
+        }
+        for orphan in orphan_blocks {
+            // SAFETY: block has no predecessor uses; deleting it doesn't
+            // dangle any reference.  Only the unreachable instruction is
+            // present, which is removed alongside the block.
+            unsafe {
+                let _ = orphan.delete();
+            }
         }
 
         self.stats.functions_lowered += 1;

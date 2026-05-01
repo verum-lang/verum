@@ -1915,11 +1915,59 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                     }
                 }
                 BasicValueEnum::PointerValue(v) => {
-                    // Store pointer through typed ptr alloca.
+                    // Store pointer through typed ptr alloca when possible.
                     // SROA can track pointer provenance through `alloca ptr`.
+                    //
+                    // **Type-conflict guard** (#96 fundamental fix): VBC
+                    // sometimes reuses the same register for BOTH i64 and
+                    // ptr at different program points (e.g. arity-collided
+                    // method bodies in the stdlib).  Pre-fix this branch
+                    // unconditionally re-tagged the alloca's declared type
+                    // as `ptr` even when the existing alloca was `i64`,
+                    // producing mixed-type stores into a single slot:
+                    //
+                    //     %r5_slot = alloca i64
+                    //     store i64 %x, ptr %r5_slot     ; OK
+                    //     store ptr %y, ptr %r5_slot     ; mixed-type
+                    //     %r5 = load ptr, ptr %r5_slot   ; load mismatched type
+                    //
+                    // Mem2reg / SROA can't promote such an alloca, and
+                    // SimplifyCFG crashes (SIGBUS) on the resulting IR
+                    // when the function gets default<O2> optimization.
+                    //
+                    // **Fix**: if the alloca already exists with a non-ptr
+                    // declared type, coerce the pointer to i64 via
+                    // `ptrtoint` and store it as i64 — preserving the
+                    // alloca's uniform type so mem2reg can promote it.
+                    // The corresponding load_register coerces back to
+                    // ptr via `inttoptr` if the consumer needs ptr.
                     let ptr_type = self.types.ptr_type();
                     if let Some(&existing_ptr) = self.alloca_registers.get(&reg) {
-                        let _ = self.builder.build_store(existing_ptr, v);
+                        let existing_ty = self
+                            .alloca_register_types
+                            .get(&reg)
+                            .copied()
+                            .unwrap_or(BasicTypeEnum::IntType(i64_ty));
+                        if matches!(existing_ty, BasicTypeEnum::PointerType(_)) {
+                            // Alloca is already ptr-typed — store directly.
+                            let _ = self.builder.build_store(existing_ptr, v);
+                        } else {
+                            // Type conflict — coerce ptr to i64 and store
+                            // into the existing i64-typed alloca.
+                            let v_i64 = self
+                                .builder
+                                .build_ptr_to_int(
+                                    v,
+                                    i64_ty,
+                                    &format!("r{}_ptr_to_i64", reg),
+                                )
+                                .expect("ptrtoint should not fail");
+                            let _ = self.builder.build_store(existing_ptr, v_i64);
+                            // Don't update alloca_register_types — it
+                            // stays at its uniform i64 to preserve
+                            // mem2reg promotability.
+                            return;
+                        }
                     } else {
                         let entry = self
                             .function
@@ -2026,12 +2074,55 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             };
 
             if let Some(&existing_ptr) = self.alloca_registers.get(&reg) {
-                let _ = self.builder.build_store(existing_ptr, i64_value);
-                // CRITICAL: Update the register type to i64. If this alloca was
-                // previously used for a pointer (alloca ptr), get_register must now
-                // load as i64, not ptr. Without this, an integer value (e.g., loop
-                // accumulator) gets loaded as ptr and passed to puts() → SIGSEGV.
-                self.alloca_register_types.insert(reg, i64_ty.into());
+                // **Type-conflict guard** (#96): if the existing alloca is
+                // typed (ptr/f64), don't store an i64 into it raw — that
+                // produces mixed-type stores which prevent mem2reg/SROA
+                // promotion and crash SimplifyCFG downstream.
+                //
+                // Instead: keep the alloca's declared type stable.  For
+                // a previously-ptr alloca, coerce i64 → ptr via inttoptr.
+                // For a previously-f64 alloca, coerce i64 → bitcast.
+                // The corresponding load_register reads the alloca's
+                // declared type, then coerces as needed for the consumer.
+                let existing_ty = self
+                    .alloca_register_types
+                    .get(&reg)
+                    .copied()
+                    .unwrap_or(BasicTypeEnum::IntType(i64_ty));
+                match existing_ty {
+                    BasicTypeEnum::PointerType(ptr_ty) => {
+                        // Existing alloca is `alloca ptr`.  Coerce the i64
+                        // value to ptr and store; preserve ptr-typed alloca.
+                        let i64_int = match i64_value {
+                            BasicValueEnum::IntValue(iv) => iv,
+                            _ => unreachable!(
+                                "i64_value must be IntValue after coercion above"
+                            ),
+                        };
+                        let v_ptr = self
+                            .builder
+                            .build_int_to_ptr(
+                                i64_int,
+                                ptr_ty,
+                                &format!("r{}_i64_to_ptr", reg),
+                            )
+                            .expect("inttoptr should not fail");
+                        let _ = self.builder.build_store(existing_ptr, v_ptr);
+                        // Don't change alloca_register_types — keep ptr.
+                    }
+                    BasicTypeEnum::FloatType(_) => {
+                        // Existing alloca is `alloca double`.  i64-into-f64
+                        // is a bitcast.  This case is rare (VBC keeps int
+                        // and float registers distinct via different
+                        // descriptor types) but defend anyway.
+                        let _ = self.builder.build_store(existing_ptr, i64_value);
+                        self.alloca_register_types.insert(reg, i64_ty.into());
+                    }
+                    _ => {
+                        let _ = self.builder.build_store(existing_ptr, i64_value);
+                        self.alloca_register_types.insert(reg, i64_ty.into());
+                    }
+                }
             } else {
                 // First use of this register — create i64 alloca in entry block
                 let entry = self
