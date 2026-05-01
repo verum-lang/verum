@@ -438,6 +438,32 @@ enum Commands {
         /// Path to the `.vproof` certificate file.
         #[clap(value_name = "FILE")]
         file: Text,
+
+        /// **Meta-mode universe lift** (#158 V2 — kernel reflection).
+        /// Re-runs the kernel with every `Universe(n)` interpreted as
+        /// `Universe(n + LIFT)`. Equivalent to running the proof at a
+        /// strictly stronger universe, which is what Gödel's 2nd
+        /// Incompleteness Theorem demands for self-soundness claims.
+        ///
+        /// `--meta-mode` (no value) is equivalent to `--meta-lift 1`.
+        ///
+        /// Soundness invariant: a closed certificate accepts at lift 0
+        /// iff it accepts at any lift k > 0 (universe-cumulativity:
+        /// HTT 1.4, U_n ⊂ U_{n+1}).  Disagreements indicate either a
+        /// shift-implementation bug or an unsound universe-identity
+        /// dependence in the proof structure.
+        ///
+        /// Use case: `verum check-proof foo.vproof --meta-mode` to
+        /// confirm a proof survives meta-level interpretation; useful
+        /// as a sanity check before publishing.
+        #[clap(long, conflicts_with = "meta_lift")]
+        meta_mode: bool,
+
+        /// Explicit universe-lift level for meta-mode (#158 V2).
+        /// `--meta-lift 0` is identical to default; higher values
+        /// run the kernel at progressively stronger universes.
+        #[clap(long, value_name = "LIFT")]
+        meta_lift: Option<u32>,
     },
 
     /// Elaborate Verum theorems into kernel-checkable certificates.
@@ -2930,7 +2956,16 @@ fn run_command(cli: Cli) -> Result<()> {
                 PathTarget::Project => commands::check::execute(workspace, false, false),
             }
         }
-        Commands::CheckProof { file } => commands::check_proof::execute(file.as_str()),
+        Commands::CheckProof {
+            file,
+            meta_mode,
+            meta_lift,
+        } => {
+            // Meta-mode dispatch (#158 V2): `--meta-mode` (no value) →
+            // lift=1; `--meta-lift N` → lift=N; default → lift=0.
+            let lift = meta_lift.unwrap_or(if meta_mode { 1 } else { 0 });
+            commands::check_proof::execute_with_universe_lift(file.as_str(), lift)
+        }
         Commands::ElaborateProof { file, output_dir } => commands::elaborate_proof::execute(
             file.as_str(),
             output_dir.as_ref().map(|s| s.as_str()),
