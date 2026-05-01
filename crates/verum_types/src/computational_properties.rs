@@ -291,6 +291,181 @@ pub fn lift_ffi_function_to_properties(ffi: &verum_ast::ffi::FFIFunction) -> Opt
     Some(PropertySet { properties: props })
 }
 
+// =============================================================================
+// @effect(...) attribute lift — #161 separation logic + effect tracking
+// =============================================================================
+
+/// Lift a slice of AST attributes into a declared [`PropertySet`].
+///
+/// Walks the attribute list, finds every `@effect(<kind>)` attribute,
+/// maps the kind ident to a [`ComputationalProperty`], and unions the
+/// results. Returns `None` when no `@effect` attribute is present —
+/// callers should treat this as "no declared effect contract", which
+/// is distinct from `Some(PropertySet::pure())` (explicit @effect(pure)).
+///
+/// **Mapping** (mirrors `core/meta/diakrisis_attrs.vr::DiakrisisEffectKind`
+/// so the .vr-side and compiler-side surfaces agree on the canonical
+/// effect taxonomy):
+///
+/// | `@effect(<kind>)` | `ComputationalProperty` |
+/// |-------------------|-------------------------|
+/// | `pure`            | `Pure`                  |
+/// | `io`              | `IO`                    |
+/// | `state`           | `Mutates`               |
+/// | `async`           | `Async`                 |
+/// | `exception` / `exn` | `Fallible`            |
+/// | `nondet` / `non_det` | `Nondeterministic`   |
+/// | `quantum`         | `Quantum`               |
+///
+/// Multiple `@effect(...)` attributes union: `@effect(io) @effect(async)`
+/// declares the function as `{IO, Async}`. Unknown kinds are silently
+/// dropped — the parser-side validator (`core/meta/diakrisis_attrs.vr::
+/// parse_effect_attr`) is the canonical kind validator and emits the
+/// user-facing diagnostic; this function's job is the compiler-side
+/// lift.
+///
+/// **Architectural reuse** (#161): every effect declaration on every
+/// function flows through this single lift, just as
+/// [`lift_ffi_function_to_properties`] handles every FFI declaration.
+/// One lift, one consistent mapping, no per-callsite hardcoding.
+pub fn lift_effect_attributes_to_property_set(
+    attributes: &verum_common::List<verum_ast::attr::Attribute>,
+) -> Option<PropertySet> {
+    use verum_ast::expr::ExprKind;
+    use verum_ast::ty::PathSegment;
+
+    let mut found_effect = false;
+    let mut props = Set::<ComputationalProperty>::new();
+
+    for attr in attributes {
+        if !attr.is_named("effect") {
+            continue;
+        }
+        found_effect = true;
+        let args = match &attr.args {
+            verum_common::Maybe::Some(list) => list,
+            verum_common::Maybe::None => continue,
+        };
+        for arg in args {
+            // The kind is an identifier — accept the parser's actual
+            // representation (single-segment Path) plus any text-literal
+            // form for future extension.
+            let kind_text: Option<&str> = match &arg.kind {
+                ExprKind::Path(p) if p.segments.len() == 1 => match &p.segments[0] {
+                    PathSegment::Name(ident) => Some(ident.name.as_str()),
+                    _ => None,
+                },
+                ExprKind::Literal(lit) => match &lit.kind {
+                    verum_ast::LiteralKind::Text(s) => Some(match s {
+                        verum_ast::literal::StringLit::Regular(t)
+                        | verum_ast::literal::StringLit::MultiLine(t) => t.as_str(),
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let kind = match kind_text {
+                Some(s) => s,
+                None => continue,
+            };
+            // Case-insensitive — mirrors DiakrisisEffectKind::from_ident.
+            let lowered = kind.to_ascii_lowercase();
+            match lowered.as_str() {
+                "pure" => {
+                    props.insert(ComputationalProperty::Pure);
+                }
+                "io" => {
+                    props.insert(ComputationalProperty::IO);
+                }
+                "state" => {
+                    props.insert(ComputationalProperty::Mutates);
+                }
+                "async" => {
+                    props.insert(ComputationalProperty::Async);
+                }
+                "exception" | "exn" => {
+                    props.insert(ComputationalProperty::Fallible);
+                }
+                "nondet" | "non_det" => {
+                    // No first-class `Nondeterministic` variant yet — fall
+                    // back to the generic `Custom("nondet")` so the lift
+                    // is total. Promotion to a first-class variant is a
+                    // separate task once the verifier consumes it.
+                    props.insert(ComputationalProperty::Custom(
+                        verum_common::Text::from("nondet"),
+                    ));
+                }
+                "quantum" => {
+                    // Same reasoning as `nondet` — quantum is a Diakrisis
+                    // §14.4 marker without a dedicated enum variant.
+                    props.insert(ComputationalProperty::Custom(
+                        verum_common::Text::from("quantum"),
+                    ));
+                }
+                // Unknown kind — DiakrisisEffectKind::from_ident is
+                // the canonical validator and produces a user-facing
+                // diagnostic. The compiler-side lift drops silently
+                // so a parse-rejected attribute doesn't double-error.
+                _ => {}
+            }
+        }
+    }
+
+    if !found_effect {
+        return None;
+    }
+    if props.is_empty() {
+        // `@effect()` with no kind — degenerate but handled: yield Pure
+        // to match the "no declared effect → pure" reading.
+        props.insert(ComputationalProperty::Pure);
+    }
+    Some(PropertySet { properties: props })
+}
+
+/// Effect-compatibility check (#161 / VVA Part B §9 enforcement).
+///
+/// Compares a function's *declared* effect set (from
+/// `@effect(...)` attributes via [`lift_effect_attributes_to_property_set`])
+/// against its *inferred* effect set (from
+/// [`PropertyInferrer::infer_function_decl`]).
+///
+/// Returns the set of effects the body actually has but the
+/// declaration doesn't cover. An empty result means the declaration
+/// is sufficient; non-empty means the body uses effects the declaration
+/// doesn't account for — the caller emits a diagnostic.
+///
+/// **Asymmetric semantics**: only the body→declaration direction is
+/// checked. A function declared `@effect(io, async)` whose body is
+/// only `IO` (no async) is fine — the declaration is a *contract*
+/// upper bound, not an exact match. This mirrors how function types
+/// in row-effect calculi work: the declaration says "may use up to
+/// these effects"; the body uses a subset.
+///
+/// **Pure normalisation**: `ComputationalProperty::Pure` is treated
+/// as the empty set. A declaration of `@effect(pure)` covers a body
+/// with `PropertySet::pure()` (single Pure marker) but does NOT cover
+/// a body with any other effect.
+///
+/// Caller is responsible for ignoring the result when the declaration
+/// is `None` (no `@effect` annotation present).
+pub fn effects_inferred_minus_declared(
+    declared: &PropertySet,
+    inferred: &PropertySet,
+) -> PropertySet {
+    let mut diff = Set::<ComputationalProperty>::new();
+    for inferred_prop in inferred.properties.iter() {
+        // `Pure` is the identity element — never counts as a
+        // "missing-from-declaration" violation.
+        if matches!(inferred_prop, ComputationalProperty::Pure) {
+            continue;
+        }
+        if !declared.properties.contains(inferred_prop) {
+            diff.insert(inferred_prop.clone());
+        }
+    }
+    PropertySet { properties: diff }
+}
+
 impl PropertySet {
     /// Create an empty property set (pure computation)
     pub fn pure() -> Self {
@@ -1425,6 +1600,197 @@ mod tests {
         assert!(pure.is_pure());
         assert_eq!(pure.len(), 1);
         assert!(pure.contains(&ComputationalProperty::Pure));
+    }
+
+    // -----------------------------------------------------------------
+    // #161 — @effect(...) attribute lift + compatibility check
+    // -----------------------------------------------------------------
+
+    /// Build an `@effect(<kind>)` attribute with a single ident-shaped
+    /// argument. Mirrors what the parser produces for source like
+    /// `@effect(io)` on a function declaration.
+    fn effect_attr(kind: &str) -> verum_ast::attr::Attribute {
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::span::Span;
+        use verum_ast::ty::{Ident, Path, PathSegment};
+        use verum_common::Maybe;
+        let kind_expr = Expr::new(
+            ExprKind::Path(Path::new(
+                List::from(vec![PathSegment::Name(Ident::new(kind, Span::dummy()))]),
+                Span::dummy(),
+            )),
+            Span::dummy(),
+        );
+        verum_ast::attr::Attribute {
+            name: verum_common::Text::from("effect"),
+            args: Maybe::Some(List::from(vec![kind_expr])),
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn lift_effect_returns_none_when_no_effect_attribute() {
+        let attrs: List<verum_ast::attr::Attribute> = List::new();
+        assert!(
+            lift_effect_attributes_to_property_set(&attrs).is_none(),
+            "no @effect attribute → None (means 'no contract', distinct from explicit @effect(pure))",
+        );
+    }
+
+    #[test]
+    fn lift_effect_pure_yields_pure_set() {
+        let attrs = List::from(vec![effect_attr("pure")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        assert!(set.contains(&ComputationalProperty::Pure));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn lift_effect_io_yields_io_property() {
+        let attrs = List::from(vec![effect_attr("io")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        assert!(set.contains(&ComputationalProperty::IO));
+    }
+
+    #[test]
+    fn lift_effect_state_yields_mutates_property() {
+        // Diakrisis `state` maps to compiler-side `Mutates` — they're
+        // the same concept under different vocabularies.
+        let attrs = List::from(vec![effect_attr("state")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        assert!(set.contains(&ComputationalProperty::Mutates));
+    }
+
+    #[test]
+    fn lift_effect_async_yields_async_property() {
+        let attrs = List::from(vec![effect_attr("async")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        assert!(set.contains(&ComputationalProperty::Async));
+    }
+
+    #[test]
+    fn lift_effect_exception_yields_fallible_property() {
+        let attrs = List::from(vec![effect_attr("exception")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        assert!(set.contains(&ComputationalProperty::Fallible));
+        // Alias.
+        let attrs_exn = List::from(vec![effect_attr("exn")]);
+        let set_exn = lift_effect_attributes_to_property_set(&attrs_exn).unwrap();
+        assert!(set_exn.contains(&ComputationalProperty::Fallible));
+    }
+
+    #[test]
+    fn lift_effect_unions_multiple_attributes() {
+        // `@effect(io) @effect(async)` declares both effects.
+        let attrs = List::from(vec![effect_attr("io"), effect_attr("async")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        assert!(set.contains(&ComputationalProperty::IO));
+        assert!(set.contains(&ComputationalProperty::Async));
+    }
+
+    #[test]
+    fn lift_effect_is_case_insensitive() {
+        // Mirrors DiakrisisEffectKind::from_ident: "IO" / "Io" / "io" all valid.
+        let attrs_upper = List::from(vec![effect_attr("IO")]);
+        assert!(
+            lift_effect_attributes_to_property_set(&attrs_upper)
+                .unwrap()
+                .contains(&ComputationalProperty::IO),
+        );
+    }
+
+    #[test]
+    fn lift_effect_unknown_kind_drops_silently() {
+        // Parser-side validator emits the user-facing diagnostic;
+        // compiler-side lift drops to avoid double-error.
+        let attrs = List::from(vec![effect_attr("not_a_real_kind")]);
+        let set = lift_effect_attributes_to_property_set(&attrs).unwrap();
+        // Found-effect=true but no kinds matched → degenerate: yields Pure.
+        assert!(set.contains(&ComputationalProperty::Pure));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn lift_effect_other_attributes_ignored() {
+        // Non-@effect attributes don't influence the lift.
+        use verum_ast::span::Span;
+        use verum_common::Maybe;
+        let other = verum_ast::attr::Attribute {
+            name: verum_common::Text::from("inline"),
+            args: Maybe::None,
+            span: Span::dummy(),
+        };
+        let attrs = List::from(vec![other]);
+        assert!(lift_effect_attributes_to_property_set(&attrs).is_none());
+    }
+
+    #[test]
+    fn effects_inferred_minus_declared_pure_on_pure_is_empty() {
+        let declared = PropertySet::pure();
+        let inferred = PropertySet::pure();
+        let diff = effects_inferred_minus_declared(&declared, &inferred);
+        assert!(diff.is_empty() || (diff.len() == 1 && diff.contains(&ComputationalProperty::Pure)));
+        // Specifically, Pure is filtered: diff should be empty.
+        assert!(!diff.properties.iter().any(|p| !matches!(p, ComputationalProperty::Pure)));
+    }
+
+    #[test]
+    fn effects_inferred_minus_declared_io_body_pure_decl_flags_io() {
+        // @effect(pure) declared, but body has IO → diagnostic.
+        let declared = PropertySet::pure();
+        let inferred = PropertySet::single(ComputationalProperty::IO);
+        let diff = effects_inferred_minus_declared(&declared, &inferred);
+        assert!(diff.contains(&ComputationalProperty::IO));
+    }
+
+    #[test]
+    fn effects_inferred_minus_declared_io_decl_io_body_is_compatible() {
+        let declared = PropertySet::single(ComputationalProperty::IO);
+        let inferred = PropertySet::single(ComputationalProperty::IO);
+        let diff = effects_inferred_minus_declared(&declared, &inferred);
+        assert!(!diff.contains(&ComputationalProperty::IO));
+    }
+
+    #[test]
+    fn effects_inferred_minus_declared_super_set_decl_is_compatible() {
+        // Declaration covers more than body uses — perfectly fine.
+        let mut declared_props = Set::new();
+        declared_props.insert(ComputationalProperty::IO);
+        declared_props.insert(ComputationalProperty::Async);
+        declared_props.insert(ComputationalProperty::Fallible);
+        let declared = PropertySet { properties: declared_props };
+        let inferred = PropertySet::single(ComputationalProperty::IO);
+        let diff = effects_inferred_minus_declared(&declared, &inferred);
+        assert!(diff.is_empty() || (diff.len() == 1 && diff.contains(&ComputationalProperty::Pure)));
+    }
+
+    #[test]
+    fn effects_inferred_minus_declared_multiple_violations_surface_all() {
+        let declared = PropertySet::single(ComputationalProperty::IO);
+        let mut inferred_props = Set::new();
+        inferred_props.insert(ComputationalProperty::IO);
+        inferred_props.insert(ComputationalProperty::Async);
+        inferred_props.insert(ComputationalProperty::Fallible);
+        let inferred = PropertySet { properties: inferred_props };
+        let diff = effects_inferred_minus_declared(&declared, &inferred);
+        assert!(!diff.contains(&ComputationalProperty::IO));
+        assert!(diff.contains(&ComputationalProperty::Async));
+        assert!(diff.contains(&ComputationalProperty::Fallible));
+    }
+
+    #[test]
+    fn effects_inferred_minus_declared_pure_marker_in_body_is_ignored() {
+        // The body-side may include `Pure` as the identity marker
+        // alongside actual effects. The Pure marker must never count
+        // as a violation.
+        let declared = PropertySet::single(ComputationalProperty::IO);
+        let mut inferred_props = Set::new();
+        inferred_props.insert(ComputationalProperty::Pure);
+        inferred_props.insert(ComputationalProperty::IO);
+        let inferred = PropertySet { properties: inferred_props };
+        let diff = effects_inferred_minus_declared(&declared, &inferred);
+        assert!(!diff.contains(&ComputationalProperty::Pure));
+        assert!(!diff.contains(&ComputationalProperty::IO));
     }
 
     // -----------------------------------------------------------------
