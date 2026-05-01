@@ -154,35 +154,16 @@ fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
     }
 }
 
-/// MLS classification level (Phase 1 of #266 — surface gate).
+/// MLS classification level — re-exported from
+/// `verum_common::mls::MlsLevel` (#282 Phase 2a).
 ///
-/// The lattice is total-ordered: Public ⊑ Secret ⊑ TopSecret.  A
-/// function's classification "satisfies" a manifest floor when the
-/// function's level is ≥ the floor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum MlsLevel {
-    Public = 0,
-    Secret = 1,
-    TopSecret = 2,
-}
-
-impl MlsLevel {
-    fn from_manifest_str(s: &str) -> Self {
-        match s {
-            "secret" => MlsLevel::Secret,
-            "top_secret" => MlsLevel::TopSecret,
-            _ => MlsLevel::Public,
-        }
-    }
-
-    fn as_manifest_str(&self) -> &'static str {
-        match self {
-            MlsLevel::Public => "public",
-            MlsLevel::Secret => "secret",
-            MlsLevel::TopSecret => "top_secret",
-        }
-    }
-}
+/// Pre-#282 this enum was private to safety_gate. Promoting it to
+/// the shared layer lets the type checker (Phase 2b) and the
+/// context system (Phase 3) consume the same lattice without
+/// re-defining it. Phase 1 (#266 surface gate) continues to use
+/// only `subsumes` / `from_manifest_str` — the lattice operations
+/// (`join`, `meet`) are reserved for downstream Phase 2b/3 work.
+use verum_common::mls::MlsLevel;
 
 /// Inspect an attribute list for `@classification(<level>)`.  Returns
 /// the highest classification declared (so a function carrying
