@@ -125,6 +125,9 @@ public fn is_strictly_positive(
 /// freely anywhere in `term`? Used by the positivity check to rule
 /// out contravariant occurrences.
 public fn occurs_in(term: &CoreTerm, target: Int{>= 0}) -> Bool {
+    // Tail-expression match — the result IS the function's value.
+    // No trailing `;` so Verum's type-checker treats the match
+    // as Bool-typed instead of Unit-typed.
     match term {
         CoreTerm.Var { index } => index == target,
         CoreTerm.Universe { .. } => false,
@@ -140,7 +143,7 @@ public fn occurs_in(term: &CoreTerm, target: Int{>= 0}) -> Bool {
             occurs_in(function.deref(), target)
                 || occurs_in(argument.deref(), target)
         },
-    };
+    }
 }
 
 /// Construct a T-Pos derivation when every constructor type passes

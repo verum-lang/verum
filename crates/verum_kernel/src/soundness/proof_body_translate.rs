@@ -326,6 +326,90 @@ fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
     }
 }
 
+/// One recognised step in a multi-step tactic chain. Either an
+/// `apply <name>` (with optional args, currently dropped per V0
+/// convention) or a primitive tactic that the per-backend renderer
+/// already knows how to translate. Used by
+/// [`classify_tactic_chain`].
+#[derive(Debug, Clone)]
+enum ChainStep<'a> {
+    /// `apply <name>` step. Args dropped at render-time — the
+    /// foreign tool's unifier supplies implicits.
+    Apply { name: String },
+    /// A primitive tactic — `Trivial`, `Reflexivity`, `Auto{...}`,
+    /// `Ring`, `Field`, `Omega`, `Assumption` — that has a direct
+    /// per-backend translation.
+    Primitive(&'a TacticExpr),
+}
+
+/// If `body` is `ProofBody::Structured` with **all** steps + the
+/// optional conclusion classifying as either `apply <name>` or one
+/// of the recognised primitive tactics, return the ordered chain.
+/// Otherwise return `None`.
+///
+/// Single-step shapes are NOT returned here — they're already
+/// handled by [`classify_single_apply`] / [`primitive_tactic`] and
+/// the existing per-backend single-step renderers. This classifier
+/// targets the **N≥2** shapes (multi-`apply` proofs, mixed
+/// `apply` + primitive sequences, steps + conclusion) that
+/// previously fell through to `Admitted.`/`sorry`.
+///
+/// **Why this matters for #153**: corpus theorems with two or
+/// more sequential `apply` steps (composition lemmas, transport
+/// chains) used to emit unconditional admits — the foreign tool
+/// only verified the proposition's TYPE, not the proof structure.
+/// With chain support, the foreign tool re-runs every step.
+fn classify_tactic_chain(body: &ProofBody) -> Option<Vec<ChainStep<'_>>> {
+    let s = match body {
+        ProofBody::Structured(s) => s,
+        _ => return None,
+    };
+    let step_count = s.steps.iter().count();
+    let has_conclusion = matches!(s.conclusion, Maybe::Some(_));
+    let total = step_count + if has_conclusion { 1 } else { 0 };
+    // Reject single-step / empty shapes — those routes already
+    // exist (classify_single_apply + primitive_tactic).
+    if total < 2 {
+        return None;
+    }
+    let mut chain: Vec<ChainStep<'_>> = Vec::with_capacity(total);
+    for step in s.steps.iter() {
+        let tactic = match &step.kind {
+            ProofStepKind::Tactic(t) => t,
+            // Have/Show/Suffices/Let/Obtain/Calc/Cases/Focus carry
+            // sub-bodies that V0 doesn't yet render — fall back so
+            // the renderer reverts to admitted/sorry.
+            _ => return None,
+        };
+        chain.push(classify_chain_step(tactic)?);
+    }
+    if let Maybe::Some(t) = &s.conclusion {
+        chain.push(classify_chain_step(t)?);
+    }
+    Some(chain)
+}
+
+/// Recognise one tactic as either an `apply` step or a primitive.
+/// Returns `None` for shapes outside the chain-renderable set —
+/// `Split`, `Intro`, hint-bearing `Auto`, etc. fall back here so
+/// the whole chain bails out rather than emitting a half-translated
+/// proof.
+fn classify_chain_step(tactic: &TacticExpr) -> Option<ChainStep<'_>> {
+    if let Some((name, _args)) = classify_apply_tactic(tactic) {
+        return Some(ChainStep::Apply { name });
+    }
+    // Recognise primitives whose per-backend tactic forms exist —
+    // probing each translator with this tactic and accepting the
+    // first hit keeps coverage in lockstep with primitive_tactic_to_*.
+    let coq_ok = primitive_tactic_to_coq(tactic).is_some();
+    let lean_ok = primitive_tactic_to_lean(tactic).is_some();
+    let isa_ok = primitive_tactic_to_isabelle(tactic).is_some();
+    if coq_ok || lean_ok || isa_ok {
+        return Some(ChainStep::Primitive(tactic));
+    }
+    None
+}
+
 // =============================================================================
 // CoqProofBodyRenderer
 // =============================================================================
@@ -391,7 +475,8 @@ fn render_term_coq(body: &ProofBody) -> TranslatedProofBody {
 /// `proof { apply <name>(args); }` blocks. Also covers the simple
 /// primitive tactics (Auto / Trivial / Reflexivity / Assumption /
 /// Ring / Field / Omega) — each translates to a single Coq tactic
-/// of the same name.
+/// of the same name. Multi-step shapes route through
+/// [`render_tactic_chain_coq`].
 fn render_single_apply_coq(body: &ProofBody) -> TranslatedProofBody {
     if let Some((name, _args)) = classify_single_apply(body) {
         return TranslatedProofBody::Translated {
@@ -403,8 +488,46 @@ fn render_single_apply_coq(body: &ProofBody) -> TranslatedProofBody {
             return TranslatedProofBody::Translated { text };
         }
     }
+    if let Some(chain) = classify_tactic_chain(body) {
+        return render_tactic_chain_coq(&chain);
+    }
     TranslatedProofBody::Fallback {
-        reason: "Coq: V0 covers single-apply + primitive tactics (auto/trivial/refl/assumption/ring/field/omega)".to_string(),
+        reason: "Coq: V0 covers single-apply + primitive tactics + multi-step tactic chains".to_string(),
+    }
+}
+
+/// Coq multi-step tactic chain: each step on its own line, ending
+/// in `.` — Coq's standard tactic-mode separator. Example:
+///
+/// ```text
+/// apply intro_lemma.
+/// apply transport.
+/// reflexivity.
+/// ```
+///
+/// Coq's `Proof. <body> Qed.` framing wraps this verbatim; each
+/// `.` advances the proof state. If any step's primitive form
+/// doesn't have a Coq translation (e.g., a hint-bearing `Auto`),
+/// fall back so we don't emit a half-translated proof — chains
+/// must be all-or-nothing for soundness.
+fn render_tactic_chain_coq(chain: &[ChainStep<'_>]) -> TranslatedProofBody {
+    let mut lines: Vec<String> = Vec::with_capacity(chain.len());
+    for step in chain {
+        match step {
+            ChainStep::Apply { name } => lines.push(format!("apply {}.", name)),
+            ChainStep::Primitive(t) => match primitive_tactic_to_coq(t) {
+                Some(text) => lines.push(text),
+                None => {
+                    return TranslatedProofBody::Fallback {
+                        reason: "Coq chain: at least one step has no Coq primitive translation"
+                            .to_string(),
+                    }
+                }
+            },
+        }
+    }
+    TranslatedProofBody::Translated {
+        text: lines.join("\n"),
     }
 }
 
@@ -462,7 +585,8 @@ fn render_term_lean(body: &ProofBody) -> TranslatedProofBody {
 /// Lean single-apply proof: `by apply <name>`. Covers both bare
 /// tactic-mode and structured-with-single-apply shapes. Also covers
 /// the simple primitive tactics — each gets a `by <lean_name>`
-/// translation.
+/// translation. Multi-step shapes route through
+/// [`render_tactic_chain_lean`].
 fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
     if let Some((name, _args)) = classify_single_apply(body) {
         return TranslatedProofBody::Translated {
@@ -474,8 +598,53 @@ fn render_single_apply_lean(body: &ProofBody) -> TranslatedProofBody {
             return TranslatedProofBody::Translated { text };
         }
     }
+    if let Some(chain) = classify_tactic_chain(body) {
+        return render_tactic_chain_lean(&chain);
+    }
     TranslatedProofBody::Fallback {
-        reason: "Lean: V0 covers single-apply + primitive tactics (auto/trivial/refl/assumption/ring/field/omega)".to_string(),
+        reason: "Lean: V0 covers single-apply + primitive tactics + multi-step tactic chains".to_string(),
+    }
+}
+
+/// Lean 4 multi-step tactic chain: a single `by` block with each
+/// step on its own indented line. Example:
+///
+/// ```text
+/// by
+///   apply intro_lemma
+///   apply transport
+///   rfl
+/// ```
+///
+/// Lean strips the leading `by` from each step's primitive form
+/// (since `primitive_tactic_to_lean` returns the standalone
+/// `by <tactic>` shape) — inside the block the bare tactic is what
+/// Lean expects. Chains are all-or-nothing.
+fn render_tactic_chain_lean(chain: &[ChainStep<'_>]) -> TranslatedProofBody {
+    let mut lines: Vec<String> = Vec::with_capacity(chain.len() + 1);
+    lines.push("by".to_string());
+    for step in chain {
+        match step {
+            ChainStep::Apply { name } => lines.push(format!("  apply {}", name)),
+            ChainStep::Primitive(t) => match primitive_tactic_to_lean(t) {
+                Some(text) => {
+                    // Strip the standalone `by ` prefix since we're
+                    // inside an outer `by` block — Lean rejects nested
+                    // `by` here.
+                    let bare = text.strip_prefix("by ").unwrap_or(text.as_str());
+                    lines.push(format!("  {}", bare));
+                }
+                None => {
+                    return TranslatedProofBody::Fallback {
+                        reason: "Lean chain: at least one step has no Lean primitive translation"
+                            .to_string(),
+                    }
+                }
+            },
+        }
+    }
+    TranslatedProofBody::Translated {
+        text: lines.join("\n"),
     }
 }
 
@@ -772,8 +941,52 @@ fn render_single_apply_isabelle(body: &ProofBody) -> TranslatedProofBody {
             return TranslatedProofBody::Translated { text };
         }
     }
+    if let Some(chain) = classify_tactic_chain(body) {
+        return render_tactic_chain_isabelle(&chain);
+    }
     TranslatedProofBody::Fallback {
-        reason: "Isabelle: V0 covers single-apply + primitive tactics".to_string(),
+        reason: "Isabelle: V0 covers single-apply + primitive tactics + multi-step tactic chains".to_string(),
+    }
+}
+
+/// Isabelle/HOL multi-step tactic chain: each step is a separate
+/// `apply (...)` line, terminated with `done`. Example:
+///
+/// ```text
+/// apply (rule intro_lemma)
+/// apply (rule transport)
+/// apply (rule refl)
+/// done
+/// ```
+///
+/// The terminating `done` closes the apply-chain — Isabelle rejects
+/// the chain otherwise. Primitive tactics whose Isabelle form is
+/// `by <name>` are converted to the apply-chain-internal `<name>`
+/// shape (strip the leading `by ` so they fit inside the chain).
+fn render_tactic_chain_isabelle(chain: &[ChainStep<'_>]) -> TranslatedProofBody {
+    let mut lines: Vec<String> = Vec::with_capacity(chain.len() + 1);
+    for step in chain {
+        match step {
+            ChainStep::Apply { name } => lines.push(format!("apply (rule {})", name)),
+            ChainStep::Primitive(t) => match primitive_tactic_to_isabelle(t) {
+                Some(text) => {
+                    // primitive_tactic_to_isabelle returns the
+                    // standalone `by <method>` form; inside an
+                    // apply-chain we need `apply <method>`.
+                    let bare = text.strip_prefix("by ").unwrap_or(text.as_str());
+                    lines.push(format!("apply {}", bare));
+                }
+                None => {
+                    return TranslatedProofBody::Fallback {
+                        reason: "Isabelle chain: at least one step has no Isabelle primitive translation".to_string(),
+                    }
+                }
+            },
+        }
+    }
+    lines.push("done".to_string());
+    TranslatedProofBody::Translated {
+        text: lines.join("\n"),
     }
 }
 
@@ -1347,9 +1560,9 @@ mod tests {
         assert_eq!(r.text(), Some("by apply lemma_x"));
     }
 
-    #[test]
-    fn structured_with_two_steps_falls_back() {
-        // Multiple steps don't reduce to a single apply.
+    /// Helper: build a Structured proof body whose `steps` is the
+    /// given list of `apply <name>` tactics with no conclusion.
+    fn structured_apply_chain(names: &[&str]) -> ProofBody {
         use verum_ast::decl::{ProofStep, ProofStructure};
         let make_step = |name: &str| ProofStep {
             kind: ProofStepKind::Tactic(TacticExpr::Apply {
@@ -1358,36 +1571,276 @@ mod tests {
             }),
             span: span(),
         };
+        let steps: Vec<ProofStep> = names.iter().map(|n| make_step(n)).collect();
+        ProofBody::Structured(ProofStructure {
+            steps: List::from(steps),
+            conclusion: Maybe::None,
+            span: span(),
+        })
+    }
+
+    /// Helper: same as above, but the last apply lands in `conclusion`
+    /// instead of `steps`. Some parser paths produce this shape.
+    fn structured_apply_chain_with_conclusion(steps: &[&str], conclusion: &str) -> ProofBody {
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let make_step = |name: &str| ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(name)),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let mid: Vec<ProofStep> = steps.iter().map(|n| make_step(n)).collect();
+        ProofBody::Structured(ProofStructure {
+            steps: List::from(mid),
+            conclusion: Maybe::Some(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(conclusion)),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        })
+    }
+
+    // ----- Multi-step tactic chain (#153 Phase 2 extension) -----
+
+    #[test]
+    fn coq_renders_two_step_apply_chain() {
+        let body = structured_apply_chain(&["intro_lemma", "transport"]);
+        let r = CoqProofBodyRenderer::new().render(&body);
+        assert_eq!(
+            r.text(),
+            Some("apply intro_lemma.\napply transport."),
+            "Coq must emit one `apply <name>.` per step, newline-separated",
+        );
+    }
+
+    #[test]
+    fn lean_renders_two_step_apply_chain() {
+        let body = structured_apply_chain(&["intro_lemma", "transport"]);
+        let r = LeanProofBodyRenderer::new().render(&body);
+        assert_eq!(
+            r.text(),
+            Some("by\n  apply intro_lemma\n  apply transport"),
+            "Lean must emit a single `by` block with each apply on its own indented line",
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_two_step_apply_chain() {
+        let body = structured_apply_chain(&["intro_lemma", "transport"]);
+        let r = IsabelleProofBodyRenderer::new().render(&body);
+        assert_eq!(
+            r.text(),
+            Some("apply (rule intro_lemma)\napply (rule transport)\ndone"),
+            "Isabelle must emit one `apply (rule <name>)` per step, terminated with `done`",
+        );
+    }
+
+    #[test]
+    fn coq_renders_three_step_chain_with_primitive() {
+        // apply foo; apply bar; reflexivity. — mixed apply + primitive.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let make_apply = |name: &str| ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(name)),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let make_refl = || ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Reflexivity),
+            span: span(),
+        };
         let body = ProofBody::Structured(ProofStructure {
-            steps: List::from(vec![make_step("a"), make_step("b")]),
+            steps: List::from(vec![make_apply("foo"), make_apply("bar"), make_refl()]),
             conclusion: Maybe::None,
             span: span(),
         });
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert!(matches!(r, TranslatedProofBody::Fallback { .. }));
+        assert_eq!(
+            r.text(),
+            Some("apply foo.\napply bar.\nreflexivity."),
+            "Mixed apply + primitive chain must render every step",
+        );
     }
 
     #[test]
-    fn structured_with_step_and_conclusion_falls_back() {
-        // A non-trivial structure — both steps and a conclusion —
-        // is multi-tactic and outside V0 coverage.
+    fn lean_renders_three_step_chain_with_primitive() {
         use verum_ast::decl::{ProofStep, ProofStructure};
-        let body = ProofBody::Structured(ProofStructure {
-            steps: List::from(vec![ProofStep {
-                kind: ProofStepKind::Tactic(TacticExpr::Apply {
-                    lemma: Heap::new(name_path_expr("a")),
-                    args: List::from(Vec::new()),
-                }),
-                span: span(),
-            }]),
-            conclusion: Maybe::Some(TacticExpr::Apply {
-                lemma: Heap::new(name_path_expr("b")),
+        let make_apply = |name: &str| ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(name)),
                 args: List::from(Vec::new()),
             }),
             span: span(),
+        };
+        let make_refl = || ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Reflexivity),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![make_apply("foo"), make_apply("bar"), make_refl()]),
+            conclusion: Maybe::None,
+            span: span(),
         });
+        let r = LeanProofBodyRenderer::new().render(&body);
+        // `Reflexivity` → `by rfl` standalone — the `by ` prefix is
+        // stripped inside the outer `by` block.
+        assert_eq!(
+            r.text(),
+            Some("by\n  apply foo\n  apply bar\n  rfl"),
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_three_step_chain_with_primitive() {
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let make_apply = |name: &str| ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(name)),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let make_assumption = || ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Assumption),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![
+                make_apply("foo"),
+                make_apply("bar"),
+                make_assumption(),
+            ]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        let r = IsabelleProofBodyRenderer::new().render(&body);
+        assert_eq!(
+            r.text(),
+            Some("apply (rule foo)\napply (rule bar)\napply assumption\ndone"),
+        );
+    }
+
+    #[test]
+    fn coq_renders_chain_with_step_plus_conclusion() {
+        // The parser may place the final apply in `conclusion` while
+        // earlier applies sit in `steps`. The chain renderer must
+        // accept both shapes uniformly.
+        let body = structured_apply_chain_with_conclusion(&["a"], "b");
         let r = CoqProofBodyRenderer::new().render(&body);
-        assert!(matches!(r, TranslatedProofBody::Fallback { .. }));
+        assert_eq!(r.text(), Some("apply a.\napply b."));
+    }
+
+    #[test]
+    fn lean_renders_chain_with_step_plus_conclusion() {
+        let body = structured_apply_chain_with_conclusion(&["a"], "b");
+        let r = LeanProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("by\n  apply a\n  apply b"));
+    }
+
+    #[test]
+    fn isabelle_renders_chain_with_step_plus_conclusion() {
+        let body = structured_apply_chain_with_conclusion(&["a"], "b");
+        let r = IsabelleProofBodyRenderer::new().render(&body);
+        assert_eq!(
+            r.text(),
+            Some("apply (rule a)\napply (rule b)\ndone"),
+        );
+    }
+
+    #[test]
+    fn chain_with_unsupported_tactic_falls_back_atomically() {
+        // Chain coverage is all-or-nothing: a single step that the
+        // backend can't translate (`Split`) blocks the entire chain.
+        // Half-translated proofs would be unsound.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let make_apply = |name: &str| ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr(name)),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let make_split = || ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Split),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![make_apply("foo"), make_split()]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        // All three backends must fall back — `Split` isn't covered.
+        assert!(matches!(
+            CoqProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+        assert!(matches!(
+            LeanProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+        assert!(matches!(
+            IsabelleProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+    }
+
+    #[test]
+    fn agda_falls_back_on_chain() {
+        // Agda has no tactic chain syntax in vanilla form — chains
+        // must fall back to postulate.
+        let body = structured_apply_chain(&["foo", "bar"]);
+        assert!(matches!(
+            AgdaProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+    }
+
+    #[test]
+    fn dedukti_falls_back_on_chain() {
+        // Dedukti has no tactic chain syntax — chains must fall back.
+        let body = structured_apply_chain(&["foo", "bar"]);
+        assert!(matches!(
+            DeduktiProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+    }
+
+    #[test]
+    fn classify_tactic_chain_rejects_single_step() {
+        // Single-step shapes route through classify_single_apply,
+        // not the chain classifier — keep responsibility split.
+        let body = structured_apply_chain(&["foo"]);
+        assert!(classify_tactic_chain(&body).is_none());
+    }
+
+    #[test]
+    fn classify_tactic_chain_rejects_have_step() {
+        // `have h: P by t;` carries a sub-body that V0 doesn't render —
+        // chain classifier must bail so the whole body falls back.
+        use verum_ast::decl::{ProofStep, ProofStructure};
+        let have_step = ProofStep {
+            kind: ProofStepKind::Have {
+                name: ident("h"),
+                proposition: Heap::new(name_path_expr("P")),
+                justification: TacticExpr::Trivial,
+            },
+            span: span(),
+        };
+        let apply_step = ProofStep {
+            kind: ProofStepKind::Tactic(TacticExpr::Apply {
+                lemma: Heap::new(name_path_expr("foo")),
+                args: List::from(Vec::new()),
+            }),
+            span: span(),
+        };
+        let body = ProofBody::Structured(ProofStructure {
+            steps: List::from(vec![have_step, apply_step]),
+            conclusion: Maybe::None,
+            span: span(),
+        });
+        assert!(classify_tactic_chain(&body).is_none());
     }
 
     // ----- TranslatedProofBody surface -----

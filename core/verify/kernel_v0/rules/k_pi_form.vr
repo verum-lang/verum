@@ -61,7 +61,8 @@ module core.verify.kernel_v0.rules.k_pi_form;
 
 mount core.prelude.{Heap, Maybe};
 mount super.super.core_term.{CoreTerm};
-mount super.super.context.{Context, extend};
+mount super.super.context.{Context};
+// `extend` is now a method on Context (`ctx.extend(ty)`), accessed via UFCS.
 mount super.super.judgment.{Derivation, type_of};
 
 /// Construct a T-Pi-Form derivation from two sub-derivations.
