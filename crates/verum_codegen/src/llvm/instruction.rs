@@ -97,6 +97,219 @@ fn checked_malloc_instr<'ctx>(
     Ok(raw_ptr)
 }
 
+/// Get or declare a libc-free `strtol(nptr, endptr, base) -> i64` wrapper.
+///
+/// **Libc-free**: open-coded base-10 integer parser emitted as
+/// `verum_internal_strtol` (internal-linkage).  Skips leading
+/// whitespace, accepts optional `+`/`-`, accumulates digits, stops
+/// at first non-digit.  Caller passes base=10 for the typical
+/// Verum `parse_int` path; non-10 bases fall through to base-10
+/// (typical caller convention).
+///
+/// Signature matches libc: `(ptr nptr, ptr endptr_unused, i32 base) -> i64`.
+/// `endptr` is ignored by the wrapper since callers consistently
+/// pass NULL for it.
+///
+/// See `docs/architecture/no-libc-architecture.md`.
+fn get_or_declare_internal_strtol<'ctx>(
+    llvm_ctx: &'ctx verum_llvm::context::Context,
+    module: &Module<'ctx>,
+) -> verum_llvm::values::FunctionValue<'ctx> {
+    let wrapper_name = "verum_internal_strtol";
+    if let Some(f) = module.get_function(wrapper_name) {
+        return f;
+    }
+    let i8_type = llvm_ctx.i8_type();
+    let i32_type = llvm_ctx.i32_type();
+    let i64_type = llvm_ctx.i64_type();
+    let ptr_type = llvm_ctx.ptr_type(verum_llvm::AddressSpace::default());
+
+    let fn_type = i64_type.fn_type(
+        &[ptr_type.into(), ptr_type.into(), i32_type.into()],
+        false,
+    );
+    let func = module.add_function(wrapper_name, fn_type, None);
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    let entry = llvm_ctx.append_basic_block(func, "entry");
+    let skip_ws = llvm_ctx.append_basic_block(func, "skip_ws");
+    let after_ws = llvm_ctx.append_basic_block(func, "after_ws");
+    let neg_branch = llvm_ctx.append_basic_block(func, "neg_branch");
+    let pos_branch = llvm_ctx.append_basic_block(func, "pos_branch");
+    let parse_loop = llvm_ctx.append_basic_block(func, "parse_loop");
+    let on_digit = llvm_ctx.append_basic_block(func, "on_digit");
+    let return_val = llvm_ctx.append_basic_block(func, "return_val");
+
+    let builder = llvm_ctx.create_builder();
+
+    let nptr = func.get_first_param().expect("nptr").into_pointer_value();
+
+    // entry → skip_ws (start with i=0)
+    builder.position_at_end(entry);
+    builder.build_unconditional_branch(skip_ws).expect("skip_ws br");
+
+    // skip_ws: PHI(i_phi); load nptr[i]; if c is space (' '/'\t'/'\n'),
+    //   advance.  otherwise → after_ws.
+    builder.position_at_end(skip_ws);
+    let ws_i_phi = builder
+        .build_phi(i64_type, "ws_i")
+        .expect("ws_i phi");
+    ws_i_phi.add_incoming(&[(&i64_type.const_zero(), entry)]);
+    let ws_i_val = ws_i_phi.as_basic_value().into_int_value();
+    let ws_p = unsafe {
+        builder.build_gep(i8_type, nptr, &[ws_i_val], "ws_p").expect("ws gep")
+    };
+    let ws_c = builder
+        .build_load(i8_type, ws_p, "ws_c")
+        .expect("ws load")
+        .into_int_value();
+    let space_ch = i8_type.const_int(b' ' as u64, false);
+    let tab_ch = i8_type.const_int(b'\t' as u64, false);
+    let nl_ch = i8_type.const_int(b'\n' as u64, false);
+    let is_space = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, space_ch, "is_sp")
+        .expect("is_sp");
+    let is_tab = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, tab_ch, "is_tab")
+        .expect("is_tab");
+    let is_nl = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, ws_c, nl_ch, "is_nl")
+        .expect("is_nl");
+    let is_ws_a = builder.build_or(is_space, is_tab, "ws_a").expect("ws or1");
+    let is_ws = builder.build_or(is_ws_a, is_nl, "is_ws").expect("ws or2");
+    let advance_ws = llvm_ctx.append_basic_block(func, "advance_ws");
+    builder
+        .build_conditional_branch(is_ws, advance_ws, after_ws)
+        .expect("ws cond");
+
+    builder.position_at_end(advance_ws);
+    let ws_next = builder
+        .build_int_add(ws_i_val, i64_type.const_int(1, false), "ws_next")
+        .expect("ws inc");
+    builder
+        .build_unconditional_branch(skip_ws)
+        .expect("ws back");
+    ws_i_phi.add_incoming(&[(&ws_next, advance_ws)]);
+
+    // after_ws: check sign character.
+    builder.position_at_end(after_ws);
+    let i_after_ws = ws_i_phi.as_basic_value().into_int_value();
+    let sign_p = unsafe {
+        builder.build_gep(i8_type, nptr, &[i_after_ws], "sign_p").expect("sign gep")
+    };
+    let sign_c = builder
+        .build_load(i8_type, sign_p, "sign_c")
+        .expect("sign load")
+        .into_int_value();
+    let minus = i8_type.const_int(b'-' as u64, false);
+    let plus = i8_type.const_int(b'+' as u64, false);
+    let is_minus = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, sign_c, minus, "is_minus")
+        .expect("is_minus");
+    let is_plus = builder
+        .build_int_compare(verum_llvm::IntPredicate::EQ, sign_c, plus, "is_plus")
+        .expect("is_plus");
+    let is_sign = builder.build_or(is_minus, is_plus, "is_sign").expect("is_sign or");
+    builder
+        .build_conditional_branch(is_minus, neg_branch, pos_branch)
+        .expect("sign br");
+
+    // neg_branch: i = i+1, sign = -1, → parse_loop
+    builder.position_at_end(neg_branch);
+    let neg_i = builder
+        .build_int_add(i_after_ws, i64_type.const_int(1, false), "neg_i")
+        .expect("neg i++");
+    builder
+        .build_unconditional_branch(parse_loop)
+        .expect("neg → parse");
+
+    // pos_branch: i = i+1 if was '+' else i unchanged; sign = +1
+    builder.position_at_end(pos_branch);
+    let one_i64 = i64_type.const_int(1, false);
+    let pos_i_inc = builder
+        .build_int_add(i_after_ws, one_i64, "pos_i_inc")
+        .expect("pos i++");
+    let pos_i = builder
+        .build_select(is_plus, pos_i_inc, i_after_ws, "pos_i")
+        .expect("pos i sel")
+        .into_int_value();
+    builder
+        .build_unconditional_branch(parse_loop)
+        .expect("pos → parse");
+    let _ = is_sign;
+
+    // parse_loop: PHI(i, accum); load nptr[i]; if digit → on_digit, else → return_val.
+    builder.position_at_end(parse_loop);
+    let pl_i_phi = builder.build_phi(i64_type, "pl_i").expect("pl_i phi");
+    let pl_acc_phi = builder.build_phi(i64_type, "pl_acc").expect("pl_acc phi");
+    let pl_sign_phi = builder.build_phi(i64_type, "pl_sign").expect("pl_sign phi");
+    pl_i_phi.add_incoming(&[(&neg_i, neg_branch), (&pos_i, pos_branch)]);
+    pl_acc_phi.add_incoming(&[(&i64_type.const_zero(), neg_branch), (&i64_type.const_zero(), pos_branch)]);
+    pl_sign_phi.add_incoming(&[
+        (&i64_type.const_int(u64::MAX, true), neg_branch),     // -1
+        (&i64_type.const_int(1, false), pos_branch),
+    ]);
+
+    let pl_i_val = pl_i_phi.as_basic_value().into_int_value();
+    let pl_acc_val = pl_acc_phi.as_basic_value().into_int_value();
+    let pl_p = unsafe {
+        builder.build_gep(i8_type, nptr, &[pl_i_val], "pl_p").expect("pl gep")
+    };
+    let pl_c = builder
+        .build_load(i8_type, pl_p, "pl_c")
+        .expect("pl load")
+        .into_int_value();
+    let zero_ch = i8_type.const_int(b'0' as u64, false);
+    let nine_ch = i8_type.const_int(b'9' as u64, false);
+    let ge0 = builder
+        .build_int_compare(verum_llvm::IntPredicate::UGE, pl_c, zero_ch, "ge0")
+        .expect("ge0");
+    let le9 = builder
+        .build_int_compare(verum_llvm::IntPredicate::ULE, pl_c, nine_ch, "le9")
+        .expect("le9");
+    let is_d = builder.build_and(ge0, le9, "is_d").expect("digit and");
+    builder
+        .build_conditional_branch(is_d, on_digit, return_val)
+        .expect("digit cond");
+
+    // on_digit: acc = acc*10 + (c-'0'); i++; back to parse_loop.
+    builder.position_at_end(on_digit);
+    let pl_c_i64 = builder
+        .build_int_z_extend(pl_c, i64_type, "c_i64")
+        .expect("c ext");
+    let zero_off = i64_type.const_int(b'0' as u64, false);
+    let digit_v = builder
+        .build_int_sub(pl_c_i64, zero_off, "digit_v")
+        .expect("digit sub");
+    let ten = i64_type.const_int(10, false);
+    let acc_x10 = builder
+        .build_int_mul(pl_acc_val, ten, "acc_x10")
+        .expect("acc mul");
+    let new_acc = builder
+        .build_int_add(acc_x10, digit_v, "new_acc")
+        .expect("acc add");
+    let pl_i_next = builder
+        .build_int_add(pl_i_val, one_i64, "pl_i_next")
+        .expect("pl_i++");
+    builder
+        .build_unconditional_branch(parse_loop)
+        .expect("loop back");
+    pl_i_phi.add_incoming(&[(&pl_i_next, on_digit)]);
+    pl_acc_phi.add_incoming(&[(&new_acc, on_digit)]);
+    pl_sign_phi.add_incoming(&[(&pl_sign_phi.as_basic_value().into_int_value(), on_digit)]);
+
+    // return_val: result = acc * sign.
+    builder.position_at_end(return_val);
+    let final_acc = pl_acc_phi.as_basic_value().into_int_value();
+    let final_sign = pl_sign_phi.as_basic_value().into_int_value();
+    let result = builder
+        .build_int_mul(final_acc, final_sign, "result")
+        .expect("final mul");
+    builder.build_return(Some(&result)).expect("ret result");
+
+    func
+}
+
 /// Get or declare a libc-free `puts(s) -> i32` wrapper.
 ///
 /// **Libc-free**: emits an internal-linkage wrapper that calls
@@ -13837,13 +14050,11 @@ fn lower_text_extended<'ctx>(
             let len = ctx.get_register(len_reg)?;
             let module = ctx.get_module();
             let i64_ty = ctx.types().i64_type();
-            // Use libc strtol(ptr, NULL, 10) — no C runtime needed
+            let _ = i64_ty;
+            // Libc-free: route through inline strtol wrapper.
             let ptr_type = ctx.types().ptr_type();
             let i32_ty = ctx.types().i32_type();
-            let fn_type = i64_ty.fn_type(&[ptr_type.into(), ptr_type.into(), i32_ty.into()], false);
-            let strtol_fn = module.get_function("strtol").unwrap_or_else(|| {
-                module.add_function("strtol", fn_type, None)
-            });
+            let strtol_fn = get_or_declare_internal_strtol(ctx.llvm_context(), &module);
             let ptr_val = as_ptr(ctx, ptr, "parse_int_ptr")?;
             let null_ptr = ptr_type.const_null();
             let base_10 = i32_ty.const_int(10, false);
