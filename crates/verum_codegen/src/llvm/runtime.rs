@@ -12790,7 +12790,16 @@ fn checked_malloc<'ctx>(
     size: IntValue<'ctx>,
     name: &str,
 ) -> Result<PointerValue<'ctx>> {
-    let malloc_fn = module.get_function("malloc").or_missing_fn("malloc")?;
+    // Auto-declare `malloc` if no other codegen pass has yet declared
+    // it.  Pre-fix `or_missing_fn("malloc")?` failed immediately,
+    // silently falling back to interpreter mode for any program that
+    // exercised heap allocation at the runtime-helper layer.
+    let i64_type = context.i64_type();
+    let ptr_type = context.ptr_type(AddressSpace::default());
+    let malloc_fn = module.get_function("malloc").unwrap_or_else(|| {
+        let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
+        module.add_function("malloc", fn_type, None)
+    });
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
         .or_llvm_err()?
