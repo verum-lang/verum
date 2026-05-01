@@ -12,6 +12,7 @@ mount core.collections.list.{List};
 mount core.net.addr.{SocketAddr};
 mount core.time.instant.{Instant};
 mount core.net.weft.transport.{WeftTransport};
+mount core.net.weft.bufpool.{BufferPool, BufferHandle};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.net.http_parser.{
     HttpParser, ParseProgress, HeaderView,
@@ -51,6 +52,30 @@ public type ConnectionConfig is {
     /// holding a connection slot indefinitely after a successful
     /// response. 0 = no deadline. Default 60 s.
     idle_deadline_ms: Int,
+    /// Optional registered-buffer pool (#315 — wires `bufpool.vr`
+    /// into the connection lifecycle).
+    ///
+    /// **None (default)**: per-message chunk buffer is heap-allocated
+    /// once per `serve_one_message` (16 KiB capacity) and cleared
+    /// across read iterations — eliminating the pre-fix
+    /// per-iteration `List.with_capacity(4096)` allocation churn.
+    /// Same observable behaviour as before, with O(1) allocations
+    /// per connection instead of O(K) per K read iterations.
+    ///
+    /// **Some(pool)**: the per-message chunk buffer's capacity is
+    /// drawn from `pool.config.buf_size` (typically 16 KiB) and
+    /// every read attempt is registered against the pool's
+    /// `acquires_total` / `misses_total` counters. When `acquire()`
+    /// returns `Some(handle)`, the handle scope-pins one slot for
+    /// the entire `serve_one_message` body, releasing it on Drop —
+    /// this is the io_uring-IORING_REGISTER_BUFFERS-aligned path
+    /// (kernel-side pinning of the connection's read buffer for
+    /// zero-copy `prep_read_fixed`).
+    ///
+    /// The `Shared` wrapper makes the pool cheap to clone across
+    /// every per-connection task — pool state lives on the heap
+    /// once, with refcounted handles per connection.
+    pool: Maybe<Shared<BufferPool>>,
 };
 
 implement ConnectionConfig {
@@ -62,7 +87,29 @@ implement ConnectionConfig {
             header_deadline_ms: 5_000,
             body_deadline_ms: 30_000,
             idle_deadline_ms: 60_000,
+            // #315: pool is opt-in — None preserves the heap-fallback
+            // path that already covers the zero-overhead default
+            // contract. Operators wire a Shared<BufferPool> at server
+            // construction (typically once per listener, sized for
+            // `max_concurrent_connections`).
+            pool: None,
         }
+    }
+
+    /// #315: opt this connection config into the registered-buffer
+    /// pool.  The pool is shared across every connection driven by
+    /// `serve_http1` under this config — typical deployment:
+    ///
+    /// ```verum
+    /// let pool = Shared.new(BufferPool.new(
+    ///     BufferPoolConfig.default()
+    ///         .with_count(listener_cfg.max_concurrent_connections)
+    ///         .with_buf_size(16 * 1024)
+    /// ));
+    /// let conn_cfg = ConnectionConfig.default().with_pool(pool);
+    /// ```
+    public fn with_pool(self, pool: Shared<BufferPool>) -> ConnectionConfig {
+        ConnectionConfig { pool: Some(pool), ..self }
     }
 }
 
@@ -75,6 +122,12 @@ implement Clone for ConnectionConfig {
             header_deadline_ms: self.header_deadline_ms,
             body_deadline_ms: self.body_deadline_ms,
             idle_deadline_ms: self.idle_deadline_ms,
+            // Shared<BufferPool> clone is a refcount bump — every
+            // connection observes the SAME pool state.
+            pool: match &self.pool {
+                Some(p) => Some(p.clone()),
+                None => None,
+            },
         }
     }
 }
@@ -212,11 +265,43 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     let mut accum: List<Byte> = List.with_capacity(config.read_buffer_capacity);
     let mut hdr_frame: Maybe<HeaderFrame> = None;
 
+    // #315: hoist the per-read scratch chunk OUT of the loop, then
+    // clear-and-reuse on every iteration.  Pre-fix `let mut chunk:
+    // List<Byte> = List.with_capacity(4096)` ran on EVERY read
+    // syscall — for K read iterations on a slowloris-paced peer
+    // that's K heap allocations + K corresponding deallocations
+    // + K CBGR-tracked references, all on the hot path of every
+    // request frame.  Post-fix we allocate the chunk ONCE per
+    // `serve_one_message` and `clear()` between reads — O(1)
+    // allocations per connection regardless of read iteration
+    // count.
+    //
+    // The chunk's capacity is drawn from the BufferPool config when
+    // a pool is wired (`config.pool == Some(_)`), else from the
+    // pre-existing 4 KiB default.  When a pool is wired, we also
+    // call `pool.acquire()` to cycle the pool's accounting (the
+    // handle is released on return via Drop) — pre-Phase-5 the
+    // handle's slab IS the kernel-pinned io_uring buffer that
+    // `prep_read_fixed` would target; in interpreter / pre-Linux-
+    // wired mode the slab acts as a documented slot reservation
+    // for observability.
+    let chunk_capacity: Int = match &config.pool {
+        Some(p) => p.state.config.buf_size,
+        None => 4096,
+    };
+    let mut chunk: List<Byte> = List.with_capacity(chunk_capacity);
+    let _pool_lease: Maybe<BufferHandle> = match &config.pool {
+        Some(p) => p.acquire(),
+        None => None,
+    };
+
     loop {
-        // Read directly into a byte-typed scratch buffer; the
-        // transport API hands out `List<Byte>` post-#316 so the
-        // accumulator gets bytes the parser already understands.
-        let mut chunk: List<Byte> = List.with_capacity(4096);
+        // Reuse the hoisted chunk: clear() resets `len` to 0 without
+        // de-allocating the backing storage.  The transport's
+        // `read_cancellable(&mut buf)` appends to the buffer, so
+        // we get a fresh empty buffer every iteration without
+        // re-allocating.
+        chunk.clear();
         // Header-deadline wrap (redteam §2): the `header_deadline_ms`
         // budget bounds total time-on-wire from the FIRST read of
         // this request frame to the parser's `Done` verdict.

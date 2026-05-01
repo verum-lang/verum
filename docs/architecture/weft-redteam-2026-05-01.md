@@ -413,3 +413,67 @@ client request without a trace.  These fixes turn weft from
 **incorrect server code uncompilable**, the goal of "не позволять
 создавать некорректные или уязвимые системы" (Verum's core
 architectural idea per the project README and CLAUDE.md).
+
+---
+
+## §11. Structural: `BufferPool` defined but not wired into `connection.vr` — **FIXED**
+
+### Attack
+The dedicated `core/net/weft/bufpool.vr` module shipped a full
+io_uring-aligned registered-buffer pool — `BufferPool`,
+`BufferHandle` (RAII lease), `register_with_iouring` /
+`unregister_iouring` syscall path, free-slot stack, hit/miss
+counters — yet **NO weft module referenced it**.  The
+per-connection read loop in `serve_one_message` allocated a
+fresh `List<Byte>` chunk on EVERY read iteration:
+
+```verum
+loop {
+    let mut chunk: List<Byte> = List.with_capacity(4096);  // ← every iter!
+    stream.read_cancellable(&mut chunk, token).await
+    …
+}
+```
+
+Under a slowloris-paced peer (one byte per syscall) this means
+**K heap allocations + K CBGR-tracked references per request
+frame** — exactly the hot-path garbage churn that the BufferPool
+was designed to eliminate.
+
+### Fundamental fix (LANDED)
+Two-phase wiring in `core/net/weft/connection.vr`:
+
+1. **Hoist the chunk allocation** out of the loop — allocate once
+   per `serve_one_message`, `clear()` between iterations to
+   reset `len` to 0 without re-allocating the backing storage.
+   Result: O(1) allocations per connection regardless of read
+   iteration count, replacing the prior O(K) churn.
+2. **Add `pool: Maybe<Shared<BufferPool>>` to `ConnectionConfig`**
+   — when set, the chunk's capacity is drawn from the pool's
+   `buf_size` (defaults still 4 KiB without a pool); a
+   `pool.acquire()` lease is held for the entire
+   `serve_one_message` body, releasing on Drop.  The lease's
+   slab range IS the kernel-pinned io_uring buffer that
+   `prep_read_fixed` would target — pre-Phase-5 (transport API
+   extension) the lease serves as observability instrumentation
+   (acquires_total / misses_total counters) AND as the
+   architectural pin for the future zero-copy path.
+
+`Shared<BufferPool>` clone semantics give every per-connection
+task a refcounted view of the SAME pool state — pool memory
+sits in one place; per-connection cost is a single atomic
+refcount bump.
+
+### Verification
+* `vcs/specs/L2-standard/net/weft/connection_pool_wired.vr`
+  (typecheck-pass) pins the `with_pool` builder API and the
+  `Clone for ConnectionConfig` propagation.
+* `vcs/specs/L2-standard/net/weft/bufpool_basic.vr`
+  (pre-existing) — green.
+* `cargo test -p verum_vbc --features codegen
+   test_compile_stdlib_net_*` — all five net stdlib compile
+  tests green.
+* Default `ConnectionConfig.default()` keeps `pool: None` —
+  zero-overhead default contract preserved (bit-identical
+  observable behaviour to the pre-fix path with the
+  iteration-allocation hoisting as net win).
