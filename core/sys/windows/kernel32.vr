@@ -724,14 +724,12 @@ public fn WaitForSingleObjectEx(
     alertable: Int32,
 ) -> UInt32;
 
-/// Wait for multiple objects
-@extern("kernel32.dll")
-public fn WaitForMultipleObjects(
-    count: UInt32,
-    handles: &Handle,
-    wait_all: Int32,
-    milliseconds: UInt32,
-) -> UInt32;
+// `WaitForMultipleObjects` is declared earlier in this file
+// (around line 297) — keep a single canonical extern declaration.
+// A duplicate declaration here previously emitted two
+// codegen-time function bodies with the same descriptor id, which
+// the dedup pass at `crates/verum_vbc/src/codegen/mod.rs` had to
+// collapse on every script run.
 
 /// Wait for multiple objects ex
 @extern("kernel32.dll")
