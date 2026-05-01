@@ -282,11 +282,34 @@ implement Database {
     /// Compile `sql` into a PreparedStatement. Routes through the
     /// schema-aware pipeline so that `SELECT ... FROM t` resolves
     /// column references against the live SchemaCache.
+    ///
+    /// **Cursor seed at prepare-time** — pre-fix the bare `prepare`
+    /// path returned a statement with empty cursors, so a direct
+    /// `db.prepare(sql).step()` returned no rows for SELECT and
+    /// silently dropped INSERTs (only `execute`/`query_first_row`/
+    /// `query_all` called `seed_cursors_from_connection`).  Seeding
+    /// here gives `prepare()` the same row-store visibility as the
+    /// other entry points; the caller still owns writeback via
+    /// `Database.flush_statement(&stmt)` (added below) when their
+    /// statement issues mutations.  Read-only `SELECT` callers
+    /// don't need writeback.
     public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, SqliteApiDbError> {
         match prepare_with_schema(sql, self.conn.schema()) {
-            Ok(p)  => Ok(p),
+            Ok(mut p) => {
+                seed_cursors_from_connection(&mut p, &self.conn);
+                Ok(p)
+            }
             Err(e) => Err(DbStmtError(e)),
         }
+    }
+
+    /// Drain mutations from a `prepare()`-obtained statement back
+    /// into the connection's row stores.  Caller MUST invoke this
+    /// after stepping a mutating statement (INSERT/UPDATE/DELETE)
+    /// or the writes are lost.  Read-only SELECTs may skip it.
+    /// Internal `execute`/`query_*` paths still call this implicitly.
+    public fn flush_statement(&mut self, stmt: &PreparedStatement) {
+        writeback_cursors_to_connection(stmt, &mut self.conn);
     }
 
     /// Compile + run-to-completion. Intended for statements that
