@@ -82,6 +82,17 @@ impl<'s> CompilationPipeline<'s> {
             interpreter.state.config.task_stack_size = rt.task_stack_size;
             interpreter.state.config.heap_policy = rt.heap_policy.as_str().to_string();
         }
+        // Production `verum run` has no wall-clock budget — long-running
+        // services (HTTP servers, daemons, REPL loops) must not be killed
+        // by the interpreter's default 30s deadline.  The deadline is a
+        // test-runner safety net; production execution opts out by
+        // setting `timeout_ms = 0` (the dispatch loop interprets 0 as
+        // "no deadline" — see
+        // `crates/verum_vbc/.../dispatch_table/mod.rs:1284`).  Same for
+        // `max_instructions = 0` so server accept-loops can run for
+        // billions of iterations without hitting the test-mode cap.
+        interpreter.state.config.timeout_ms = 0;
+        interpreter.state.config.max_instructions = 0;
         // Script-mode permission policy (see `phase_interpret_with_args`
         // for the full rationale).
         if let Some(policy) = self.session.take_script_permission_policy() {
