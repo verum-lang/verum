@@ -1322,6 +1322,17 @@ enum Commands {
         #[clap(long = "kernel-v0-roster")]
         kernel_v0_roster: bool,
 
+        /// dependent-theorems query (task #188).  Given an axiom
+        /// name, walks the workspace apply-graph and lists every
+        /// theorem whose transitive proof depends on the axiom.
+        /// Mathematician-facing utility — when an axiom rejects or
+        /// is admitted under audit, "which of my theorems lose
+        /// their discharge?" is answered without manual dependency
+        /// tracing.  Output:
+        /// `target/audit-reports/dependent-theorems-<axiom>.json`.
+        #[clap(long = "dependent-theorems", value_name = "AXIOM")]
+        dependent_theorems: Option<String>,
+
         /// Codegen-pass kernel-discharge attestation audit
         /// (task #162 / CompCert-style verified compilation).
         /// Walks the canonical 6-pass codegen manifest from
@@ -3783,6 +3794,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_recheck,
             kernel_soundness,
             kernel_v0_roster,
+            dependent_theorems,
             codegen_attestation,
             bridge_discharge,
             ladder_monotonicity,
@@ -3836,6 +3848,11 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
             } else if kernel_v0_roster {
                 commands::audit::audit_kernel_v0_roster_with_format(output_format)
+            } else if let Some(axiom_name) = dependent_theorems.as_deref() {
+                commands::audit::audit_dependent_theorems_with_format(
+                    axiom_name,
+                    output_format,
+                )
             } else if codegen_attestation {
                 commands::audit::audit_codegen_attestation_with_format(output_format)
             } else if bridge_discharge {
