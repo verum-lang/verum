@@ -12782,7 +12782,22 @@ impl<'ctx> RuntimeLowering<'ctx> {
 // =========================================================================
 
 /// Standalone checked malloc for use in free functions (not methods on RuntimeLowering).
-/// Calls malloc, checks for null, aborts via `_exit(1)` on OOM.
+/// Allocates `size` bytes through the Verum CBGR-aware bump allocator
+/// (`verum_alloc` from `platform_ir::emit_allocator`), checks for null,
+/// aborts via `_exit(1)` on OOM.
+///
+/// **Architectural invariant** (CLAUDE.md no-libc rule): never call
+/// libc `malloc` from emitted LLVM IR.  The Verum CBGR allocator is
+/// the single source of heap allocations across both Tier-0
+/// (interpreter, via `core/mem/allocator.vr::cbgr_alloc`) and
+/// Tier-1 (AOT, via `verum_alloc` emitted in `platform_ir.rs`).
+///
+/// If `verum_alloc` isn't yet declared we DECLARE it (signature
+/// `ptr(i64)`) so the runtime helpers can be lowered before
+/// `emit_allocator` runs in the same compile pass — the linker
+/// resolves the body at link time.  Pre-fix this site auto-
+/// declared libc `malloc` instead, which violated the no-libc
+/// invariant and hid the architectural mismatch from CI.
 fn checked_malloc<'ctx>(
     context: &'ctx Context,
     builder: &Builder<'ctx>,
@@ -12790,15 +12805,11 @@ fn checked_malloc<'ctx>(
     size: IntValue<'ctx>,
     name: &str,
 ) -> Result<PointerValue<'ctx>> {
-    // Auto-declare `malloc` if no other codegen pass has yet declared
-    // it.  Pre-fix `or_missing_fn("malloc")?` failed immediately,
-    // silently falling back to interpreter mode for any program that
-    // exercised heap allocation at the runtime-helper layer.
     let i64_type = context.i64_type();
     let ptr_type = context.ptr_type(AddressSpace::default());
-    let malloc_fn = module.get_function("malloc").unwrap_or_else(|| {
+    let malloc_fn = module.get_function("verum_alloc").unwrap_or_else(|| {
         let fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        module.add_function("malloc", fn_type, None)
+        module.add_function("verum_alloc", fn_type, None)
     });
     let raw_ptr = builder
         .build_call(malloc_fn, &[size.into()], name)
@@ -15959,13 +15970,22 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_int_add(header_size, aligned, "total")
             .or_llvm_err()?;
 
-        // raw = malloc(total_size)
-        // Note: use malloc, NOT verum_alloc — verum_alloc is static in verum_platform.c
-        // and cannot be called from LLVM IR. CBGR objects are freed with free() via
-        // the dealloc path, so this is consistent.
+        // raw = verum_alloc(total_size)
+        //
+        // **Architectural rule (CLAUDE.md no-libc invariant)**: emit
+        // IR routes ALL heap allocations through `verum_alloc` (the
+        // CBGR-aware bump allocator emitted in `platform_ir.rs::
+        // emit_allocator`).  The legacy comment that claimed
+        // "verum_alloc is static in verum_platform.c and cannot be
+        // called from LLVM IR" is obsolete — `emit_allocator` now
+        // emits `verum_alloc` directly into the LLVM module with
+        // external linkage, callable from any other site in the
+        // same module.  Pre-fix this site called libc `malloc`,
+        // which silently violated the no-libc invariant for every
+        // CBGR-allocated object (List, Map, Text, etc.).
         let alloc_fn = self.get_or_declare_fn(
             module,
-            "malloc",
+            "verum_alloc",
             ptr_type.fn_type(&[i64_type.into()], false),
         );
         let raw = builder
