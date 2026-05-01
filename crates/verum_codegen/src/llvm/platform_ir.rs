@@ -599,6 +599,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(alloc_fn, "entry");
         let large_path = ctx.append_basic_block(alloc_fn, "large_path");
+        let large_ok = ctx.append_basic_block(alloc_fn, "large_ok");
+        let large_fail = ctx.append_basic_block(alloc_fn, "large_fail");
         let small_path = ctx.append_basic_block(alloc_fn, "small_path");
         let acquire_lock = ctx.append_basic_block(alloc_fn, "acquire_lock");
         let lock_acquired = ctx.append_basic_block(alloc_fn, "lock_acquired");
@@ -626,18 +628,53 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(is_large, large_path, small_path)
             .or_llvm_err()?;
 
-        // ---- large_path: align original size to 16, no freelist ----
+        // ---- large_path: page-align and call verum_os_alloc directly ----
+        // Bypass arena entirely: large allocations get their own
+        // mmap, so verum_dealloc(ptr, size) can munmap them later.
         builder.position_at_end(large_path);
-        let fifteen = i64_type.const_int(15, false);
-        let neg_sixteen = i64_type.const_int(!15u64, false);
-        let large_plus = builder
-            .build_int_add(size_param, fifteen, "large_plus")
+        let page_align_minus_one = i64_type.const_int(4095, false);
+        let neg_page_align = i64_type.const_int(!4095u64, false);
+        let large_plus_page = builder
+            .build_int_add(size_param, page_align_minus_one, "large_plus_page")
             .or_llvm_err()?;
-        let large_aligned = builder
-            .build_and(large_plus, neg_sixteen, "large_aligned")
+        let large_page_size = builder
+            .build_and(large_plus_page, neg_page_align, "large_page_size")
+            .or_llvm_err()?;
+        let os_alloc_for_large = module.get_function("verum_os_alloc").unwrap_or_else(|| {
+            module.add_function(
+                "verum_os_alloc",
+                ptr_type.fn_type(&[i64_type.into()], false),
+                None,
+            )
+        });
+        let large_block = builder
+            .build_call(os_alloc_for_large, &[large_page_size.into()], "large_block")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_pointer_value();
+        let large_block_i64 = builder
+            .build_ptr_to_int(large_block, i64_type, "large_blk_i64")
+            .or_llvm_err()?;
+        let large_block_not_null = builder
+            .build_int_compare(IntPredicate::NE, large_block_i64, i64_type.const_zero(), "lb_ok")
             .or_llvm_err()?;
         builder
-            .build_unconditional_branch(acquire_lock)
+            .build_conditional_branch(large_block_not_null, large_ok, large_fail)
+            .or_llvm_err()?;
+
+        // ---- large_ok: zero memory and return ----
+        builder.position_at_end(large_ok);
+        builder
+            .build_memset(large_block, 1, i8_type.const_zero(), large_page_size)
+            .or_llvm_err()?;
+        builder.build_return(Some(&large_block)).or_llvm_err()?;
+
+        // ---- large_fail: return null (no lock to release on this path) ----
+        builder.position_at_end(large_fail);
+        builder
+            .build_return(Some(&ptr_type.const_null()))
             .or_llvm_err()?;
 
         // ---- small_path: compute size class ----
@@ -683,23 +720,12 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_unconditional_branch(acquire_lock)
             .or_llvm_err()?;
 
-        // ---- acquire_lock: PHI(large/small) for size + class info, then CAS spinlock ----
+        // ---- acquire_lock: small-path-only — CAS spinlock, then try freelist ----
+        // (Large allocations went straight to verum_os_alloc above and never
+        // reach this block, so the PHIs for is_large/class are not needed.)
         builder.position_at_end(acquire_lock);
-        // PHI: final_size from each path
-        let final_size_phi = builder.build_phi(i64_type, "final_size").or_llvm_err()?;
-        final_size_phi.add_incoming(&[(&large_aligned, large_path), (&small_alloc_size, small_path)]);
-        let final_size = final_size_phi.as_basic_value().into_int_value();
-        // PHI: is_large_flag (1 for large, 0 for small) — used to skip freelist
-        let is_large_phi = builder.build_phi(i64_type, "is_large_flag").or_llvm_err()?;
-        is_large_phi.add_incoming(&[
-            (&i64_type.const_int(1, false), large_path),
-            (&i64_type.const_zero(), small_path),
-        ]);
-        let is_large_flag = is_large_phi.as_basic_value().into_int_value();
-        // PHI: class index (0 for large, computed for small) — only meaningful when is_large=0
-        let class_phi = builder.build_phi(i64_type, "class_idx").or_llvm_err()?;
-        class_phi.add_incoming(&[(&i64_type.const_zero(), large_path), (&class, small_path)]);
-        let class_idx = class_phi.as_basic_value().into_int_value();
+        let final_size = small_alloc_size;
+        let class_idx = class;
 
         let lock_ptr = alloc_lock.as_pointer_value();
         let zero_i32 = i32_type.const_zero();
@@ -721,13 +747,10 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(cas_success, lock_acquired, acquire_lock)
             .or_llvm_err()?;
 
-        // ---- lock_acquired: branch on is_large ----
+        // ---- lock_acquired: small-path goes straight to try_freelist ----
         builder.position_at_end(lock_acquired);
-        let skip_freelist = builder
-            .build_int_compare(IntPredicate::NE, is_large_flag, i64_type.const_zero(), "skip_fl")
-            .or_llvm_err()?;
         builder
-            .build_conditional_branch(skip_freelist, try_bump, try_freelist)
+            .build_unconditional_branch(try_freelist)
             .or_llvm_err()?;
 
         // ---- try_freelist: load head; if non-null, pop and return ----
@@ -954,8 +977,34 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(d_is_large, d_large, d_small)
             .or_llvm_err()?;
 
-        // ---- d_large: leak (TODO: track per-large-alloc mmap and munmap) ----
+        // ---- d_large: page-align size + munmap via verum_os_free ----
+        // Mirrors large_path in verum_alloc which page-aligns and
+        // mmaps directly.  Caller must pass the SAME logical size
+        // they passed to verum_alloc; we round it up to the page
+        // boundary the same way.
         builder.position_at_end(d_large);
+        let d_page_minus_one = i64_type.const_int(4095, false);
+        let d_neg_page = i64_type.const_int(!4095u64, false);
+        let d_plus_page = builder
+            .build_int_add(dealloc_size_param, d_page_minus_one, "d_plus_page")
+            .or_llvm_err()?;
+        let d_page_size = builder
+            .build_and(d_plus_page, d_neg_page, "d_page_size")
+            .or_llvm_err()?;
+        let os_free = module.get_function("verum_os_free").unwrap_or_else(|| {
+            module.add_function(
+                "verum_os_free",
+                void_type.fn_type(&[ptr_type.into(), i64_type.into()], false),
+                None,
+            )
+        });
+        builder
+            .build_call(
+                os_free,
+                &[dealloc_ptr_param.into(), d_page_size.into()],
+                "",
+            )
+            .or_llvm_err()?;
         builder.build_unconditional_branch(d_done).or_llvm_err()?;
 
         // ---- d_small: compute class index ----
