@@ -43,6 +43,11 @@ pub(super) mod file_runtime;
 // `getenv`/`setenv`/`unsetenv` via `std::env`.
 pub(super) mod env_runtime;
 
+// High-level Rust intercepts for stdin (read_line, read_int,
+// read_float, read_to_end).  Sibling to env_runtime; bypasses
+// libSystem `read(2)` on stdin via `std::io::stdin()`.
+pub(super) mod stdio_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
