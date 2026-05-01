@@ -51,6 +51,8 @@ pub enum ExportFormat {
     Coq,
     /// **Lean 4** — DTT + univalent foundations, via `lean`.
     Lean4,
+    /// **Agda** — Martin-Löf type theory, via `agda`.
+    Agda,
     /// **Isabelle/HOL** — higher-order logic, via `isabelle build`.
     Isabelle,
     /// **Dedukti** — λΠ-modulo, via `kontroli` / `dkcheck`.
@@ -63,6 +65,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Coq => "coq",
             ExportFormat::Lean4 => "lean4",
+            ExportFormat::Agda => "agda",
             ExportFormat::Isabelle => "isabelle",
             ExportFormat::Dedukti => "dedukti",
         }
@@ -73,16 +76,18 @@ impl ExportFormat {
         match self {
             ExportFormat::Coq => "v",
             ExportFormat::Lean4 => "lean",
+            ExportFormat::Agda => "agda",
             ExportFormat::Isabelle => "thy",
             ExportFormat::Dedukti => "dk",
         }
     }
 
     /// Iterate the full list (= MSFS-required formats).
-    pub fn full_list() -> [ExportFormat; 4] {
+    pub fn full_list() -> [ExportFormat; 5] {
         [
             ExportFormat::Coq,
             ExportFormat::Lean4,
+            ExportFormat::Agda,
             ExportFormat::Isabelle,
             ExportFormat::Dedukti,
         ]
@@ -94,6 +99,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Coq => crate::foreign_system::ForeignSystem::Coq,
             ExportFormat::Lean4 => crate::foreign_system::ForeignSystem::Lean4,
+            ExportFormat::Agda => crate::foreign_system::ForeignSystem::Agda,
             ExportFormat::Isabelle => crate::foreign_system::ForeignSystem::Isabelle,
             ExportFormat::Dedukti => crate::foreign_system::ForeignSystem::Dedukti,
         }
@@ -101,15 +107,16 @@ impl ExportFormat {
 
     /// Try to construct from the canonical `ForeignSystem`.  Returns
     /// `None` for systems without a cross-format-export pathway
-    /// (Mizar, Agda, Metamath).
+    /// (Mizar, Metamath — both lift to V1).
     pub fn from_foreign_system(system: crate::foreign_system::ForeignSystem) -> Option<Self> {
         use crate::foreign_system::ForeignSystem;
         match system {
             ForeignSystem::Coq => Some(ExportFormat::Coq),
             ForeignSystem::Lean4 => Some(ExportFormat::Lean4),
+            ForeignSystem::Agda => Some(ExportFormat::Agda),
             ForeignSystem::Isabelle => Some(ExportFormat::Isabelle),
             ForeignSystem::Dedukti => Some(ExportFormat::Dedukti),
-            ForeignSystem::Mizar | ForeignSystem::Agda | ForeignSystem::Metamath => None,
+            ForeignSystem::Mizar | ForeignSystem::Metamath => None,
         }
     }
 }
@@ -229,7 +236,8 @@ impl CrossFormatReport {
 // =============================================================================
 
 /// MSFS-required format list — the canonical set that every theorem
-/// must survive.  Currently all four.
+/// must survive.  Currently all five (Coq + Lean4 + Agda +
+/// Isabelle + Dedukti) after #156 closed Agda.
 pub fn required_formats_for_msfs() -> Vec<ExportFormat> {
     ExportFormat::full_list().to_vec()
 }
@@ -249,6 +257,7 @@ pub fn format_replay_command(fmt: ExportFormat, artefact_stem: &str) -> String {
     match fmt {
         ExportFormat::Coq => format!("coqc {}.v", artefact_stem),
         ExportFormat::Lean4 => format!("lean {}.lean", artefact_stem),
+        ExportFormat::Agda => format!("agda --no-libraries {}.agda", artefact_stem),
         ExportFormat::Isabelle => format!("isabelle build -d {}.thy", artefact_stem),
         ExportFormat::Dedukti => format!("kontroli check {}.dk", artefact_stem),
     }
@@ -279,8 +288,8 @@ mod tests {
     // ----- ExportFormat -----
 
     #[test]
-    fn export_format_full_list_has_four() {
-        assert_eq!(ExportFormat::full_list().len(), 4);
+    fn export_format_full_list_has_five() {
+        assert_eq!(ExportFormat::full_list().len(), 5);
     }
 
     #[test]
@@ -289,7 +298,7 @@ mod tests {
             .iter()
             .map(|f| f.extension())
             .collect();
-        assert_eq!(exts.len(), 4);
+        assert_eq!(exts.len(), 5);
     }
 
     // ----- FormatStatus -----
@@ -311,10 +320,11 @@ mod tests {
     }
 
     #[test]
-    fn three_of_four_passed_does_not_pass_gate() {
+    fn four_of_five_passed_does_not_pass_gate() {
         let mut r = CrossFormatReport::new("theorem_X");
         r.record(ExportFormat::Coq, passed("coq 8.18 ok"));
         r.record(ExportFormat::Lean4, passed("lean 4.5 ok"));
+        r.record(ExportFormat::Agda, passed("agda 2.6 ok"));
         r.record(ExportFormat::Isabelle, passed("isabelle 2024 ok"));
         // dedukti missing
         assert!(!r.all_passed());
@@ -323,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn all_four_passed_satisfies_gate() {
+    fn all_five_passed_satisfies_gate() {
         let mut r = CrossFormatReport::new("theorem_X");
         for f in ExportFormat::full_list() {
             r.record(f, passed("ok"));
@@ -386,9 +396,9 @@ mod tests {
     // ----- MSFS-required-formats invariant -----
 
     #[test]
-    fn msfs_requires_all_four_formats() {
+    fn msfs_requires_all_five_formats() {
         let req = required_formats_for_msfs();
-        assert_eq!(req.len(), 4);
+        assert_eq!(req.len(), 5);
         for f in ExportFormat::full_list() {
             assert!(req.contains(&f));
         }

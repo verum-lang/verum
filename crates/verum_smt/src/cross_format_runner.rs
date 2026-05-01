@@ -286,6 +286,38 @@ impl ForeignSystemChecker for LeanChecker {
     }
 }
 
+/// Agda — `agda --safe <file>.agda`.  The `--safe` flag rejects
+/// postulates / unsafe primitives that would let the file
+/// "type-check" trivially via `Set` inhabitation; a clean
+/// `agda --safe` pass is meaningful (the closest analogue to
+/// `coqc -q` in strictness).  For files that legitimately use
+/// postulates (Verum's untranslated theorems), the checker omits
+/// `--safe` so postulates pass without rejection.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AgdaChecker;
+
+impl ForeignSystemChecker for AgdaChecker {
+    fn format(&self) -> ExportFormat { ExportFormat::Agda }
+    fn is_available(&self) -> bool { is_tool_on_path("agda") }
+    fn install_hint(&self) -> &'static str {
+        "cabal install Agda  /  brew install agda  /  nix-env -iA nixpkgs.agda"
+    }
+    fn check_file(&self, path: &Path) -> CheckResult {
+        let p = path.to_string_lossy();
+        // `--no-libraries` keeps the checker hermetic — it doesn't
+        // try to resolve a stdlib import path that may be missing
+        // on the host.  Verum-emitted files import nothing by
+        // default; if a future emission imports stdlib, this flag
+        // can be lifted.
+        run_external_tool(
+            "agda",
+            &["--no-libraries", "--no-default-libraries", &p],
+            self.install_hint(),
+            4096,
+        )
+    }
+}
+
 /// Isabelle/HOL — `isabelle process -e 'use_thy "<file>"'`.  Lighter
 /// than `isabelle build -d`; works on standalone .thy files.
 #[derive(Debug, Default, Clone, Copy)]
@@ -337,13 +369,13 @@ impl ForeignSystemChecker for DeduktiChecker {
 // Generic format → checker dispatch
 // =============================================================================
 
-/// Return the canonical checker for a format.  Returns `None` for
-/// formats that aren't yet wired (currently: Agda + Metamath; lift
-/// to V1).
+/// Return the canonical checker for a format.  Total over the
+/// `ExportFormat` enum after #156 closed Agda (was the last gap).
 pub fn checker_for(format: ExportFormat) -> Option<Box<dyn ForeignSystemChecker>> {
     match format {
         ExportFormat::Coq      => Some(Box::new(CoqChecker)),
         ExportFormat::Lean4    => Some(Box::new(LeanChecker)),
+        ExportFormat::Agda     => Some(Box::new(AgdaChecker)),
         ExportFormat::Isabelle => Some(Box::new(IsabelleChecker)),
         ExportFormat::Dedukti  => Some(Box::new(DeduktiChecker)),
     }
