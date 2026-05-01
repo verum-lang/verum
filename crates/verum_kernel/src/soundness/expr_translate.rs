@@ -1546,6 +1546,323 @@ fn generic_arg_to_isabelle_text(arg: &verum_ast::ty::GenericArg) -> Option<Strin
     }
 }
 
+// -----------------------------------------------------------------------------
+// DeduktiExprRenderer (#156 — fifth backend)
+// -----------------------------------------------------------------------------
+
+/// Dedukti backend.  Dedukti is a logical framework based on the
+/// λΠ-calculus modulo rewriting (LF-style); it embeds many proof
+/// systems (Coq, Lean, Agda, Matita) into a uniform meta-language.
+/// Adding it is the architectural keystone of #156 — Dedukti can
+/// re-check artefacts emitted from any of the four upstream
+/// backends, providing a meta-validation pass.
+///
+/// Surface conventions:
+///
+///   * Equality: `eq T x y` (encoded; no infix operator).
+///   * Logic: `and` / `or` / `imp` / `iff` (named connectives in the
+///     stdlib; no operator notation by default).
+///   * Negation: `not`.
+///   * Universal: `! x : T, body` / Existential: `? x : T, body`
+///     (Lambdapi syntax; pure-Dedukti omits the quantifier symbols
+///     and uses encodings).
+///   * Function application: `f x y` (juxtaposition).
+pub struct DeduktiExprRenderer;
+
+impl DeduktiExprRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DeduktiExprRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExprRenderer for DeduktiExprRenderer {
+    fn id(&self) -> &'static str {
+        "dedukti"
+    }
+
+    fn render(&self, expr: &Expr) -> TranslatedExpr {
+        match render_expr_dedukti(expr) {
+            Some(text) => TranslatedExpr::Translated { text },
+            None => TranslatedExpr::Fallback {
+                reason: classify_unrenderable(expr).to_string(),
+                original: verum_ast::pretty::format_expr(expr).to_string(),
+            },
+        }
+    }
+}
+
+fn render_expr_dedukti(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Literal(lit) => render_literal_dedukti(&lit.kind),
+        ExprKind::Path(path) => path.as_ident().map(|i| i.as_str().to_string()),
+        ExprKind::Paren(inner) => render_expr_dedukti(inner).map(|t| format!("({})", t)),
+        ExprKind::Unary { op, expr: inner } => {
+            let inner_text = render_expr_dedukti(inner)?;
+            match op {
+                UnOp::Not => Some(format!("not ({})", inner_text)),
+                UnOp::Neg => Some(format!("neg ({})", inner_text)),
+                _ => None,
+            }
+        }
+        ExprKind::Binary { op, left, right } => {
+            let l = render_expr_dedukti(left)?;
+            let r = render_expr_dedukti(right)?;
+            // Dedukti encodes binops as named functions — there are
+            // no infix operators in the core λΠ-modulo calculus.
+            let connective = match op {
+                BinOp::Eq => Some("eq"),
+                BinOp::Ne => Some("neq"),
+                BinOp::Lt => Some("lt"),
+                BinOp::Le => Some("le"),
+                BinOp::Gt => Some("gt"),
+                BinOp::Ge => Some("ge"),
+                BinOp::And => Some("and"),
+                BinOp::Or => Some("or"),
+                BinOp::Imply => Some("imp"),
+                BinOp::Iff => Some("iff"),
+                BinOp::Add => Some("add"),
+                BinOp::Sub => Some("sub"),
+                BinOp::Mul => Some("mul"),
+                BinOp::Div => Some("div"),
+                BinOp::Rem => Some("mod"),
+                _ => None,
+            }?;
+            Some(format!(
+                "({} {} {})",
+                connective,
+                parens_if_complex(&l),
+                parens_if_complex(&r),
+            ))
+        }
+        ExprKind::Call { func, args, .. } => {
+            // Dedukti uses left-associative juxtaposition.
+            let head = render_expr_dedukti(func)?;
+            let mut out = head;
+            for a in args.iter() {
+                let arg_text = render_expr_dedukti(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(out)
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let receiver_text = render_expr_dedukti(receiver)?;
+            let mut out = format!(
+                "{} {}",
+                method.as_str(),
+                parens_if_complex(&receiver_text),
+            );
+            for a in args.iter() {
+                let arg_text = render_expr_dedukti(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(out)
+        }
+        ExprKind::Field { expr: inner, field } => {
+            let receiver_text = render_expr_dedukti(inner)?;
+            Some(format!(
+                "{} {}",
+                field.as_str(),
+                parens_if_complex(&receiver_text),
+            ))
+        }
+        ExprKind::Forall { bindings, body } => {
+            // Pure-Dedukti universal: `(x : T) -> body` (Π-binder).
+            // The type slot defaults to a placeholder when the
+            // binding has no annotation in source.
+            let body_text = render_expr_dedukti(body)?;
+            let names: Vec<String> = bindings
+                .iter()
+                .filter_map(quantifier_binding_name)
+                .collect();
+            if names.is_empty() {
+                return None;
+            }
+            let mut out = body_text;
+            for n in names.into_iter().rev() {
+                out = format!("({} : _ -> {})", n, out);
+            }
+            Some(out)
+        }
+        ExprKind::Exists { bindings, body } => {
+            // Pure-Dedukti has no first-class exists; encode via the
+            // stdlib `ex` constant when present, else fall back.
+            let body_text = render_expr_dedukti(body)?;
+            let names: Vec<String> = bindings
+                .iter()
+                .filter_map(quantifier_binding_name)
+                .collect();
+            if names.is_empty() {
+                return None;
+            }
+            // `ex (\x => body)` — λ-encoded existential.
+            let mut out = body_text;
+            for n in names.into_iter().rev() {
+                out = format!("(ex ({} : _ => {}))", n, out);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+fn render_literal_dedukti(kind: &LiteralKind) -> Option<String> {
+    match kind {
+        LiteralKind::Int(int_lit) => Some(int_lit.value.to_string()),
+        LiteralKind::Bool(true) => Some("true".to_string()),
+        LiteralKind::Bool(false) => Some("false".to_string()),
+        LiteralKind::Text(s) => match s {
+            StringLit::Regular(t) | StringLit::MultiLine(t) => {
+                Some(format!("\"{}\"", t.as_str().replace('"', "\\\"")))
+            }
+        },
+        LiteralKind::Float(f) => Some(f.value.to_string()),
+        _ => None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DeduktiTypeRenderer
+// -----------------------------------------------------------------------------
+
+/// Dedukti type backend.  Dedukti's type system is the λΠ-calculus
+/// modulo rewriting — types are first-class terms and the syntactic
+/// surface is intentionally minimal.  Most Verum stdlib types map
+/// to bare-name constants (the consumer encoding-library is
+/// expected to provide concrete declarations).
+pub struct DeduktiTypeRenderer;
+
+impl DeduktiTypeRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DeduktiTypeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeRenderer for DeduktiTypeRenderer {
+    fn id(&self) -> &'static str {
+        "dedukti"
+    }
+
+    fn render(&self, ty: &Type) -> TranslatedType {
+        match render_type_dedukti(ty) {
+            Some(text) => TranslatedType::Translated { text },
+            None => TranslatedType::Fallback {
+                reason: classify_unrenderable_type(ty).to_string(),
+                original: format!("{:?}", ty.kind),
+            },
+        }
+    }
+}
+
+fn render_type_dedukti(ty: &Type) -> Option<String> {
+    match &ty.kind {
+        TypeKind::Unit => Some("Unit".to_string()),
+        TypeKind::Bool => Some("Bool".to_string()),
+        TypeKind::Int => Some("Int".to_string()),
+        TypeKind::Float => Some("Float".to_string()),
+        TypeKind::Char => Some("Char".to_string()),
+        TypeKind::Text => Some("String".to_string()),
+        TypeKind::Path(path) => path.as_ident().map(|i| match i.as_str() {
+            "Int" => "Int".to_string(),
+            "Bool" => "Bool".to_string(),
+            "Float" => "Float".to_string(),
+            "Text" => "String".to_string(),
+            "Char" => "Char".to_string(),
+            "Unit" => "Unit".to_string(),
+            "Nat" => "Nat".to_string(),
+            other => other.to_string(),
+        }),
+        TypeKind::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .iter()
+                .map(render_type_dedukti)
+                .collect::<Option<Vec<_>>>()?;
+            if parts.is_empty() {
+                Some("Unit".to_string())
+            } else if parts.len() == 1 {
+                Some(parts.into_iter().next().unwrap())
+            } else {
+                // Dedukti pair encoding: `Pair T1 T2` — nested for
+                // arity > 2.
+                let mut out = parts[parts.len() - 1].clone();
+                for p in parts.iter().rev().skip(1) {
+                    out = format!("(Pair {} {})", p, out);
+                }
+                Some(out)
+            }
+        }
+        TypeKind::Slice(inner) | TypeKind::Array { element: inner, .. } => {
+            // Dedukti list constructor.
+            let t = render_type_dedukti(inner)?;
+            Some(format!("(List {})", t))
+        }
+        TypeKind::Generic { base, args, .. } => {
+            let base_text = render_type_dedukti(base)?;
+            let mapped_base = match base_text.as_str() {
+                "List" => "List",
+                "Maybe" | "Option" => "Option",
+                "Result" => "Sum",
+                other => other,
+            }
+            .to_string();
+            let arg_parts: Vec<String> = args
+                .iter()
+                .filter_map(generic_arg_to_dedukti_text)
+                .collect();
+            if arg_parts.is_empty() {
+                Some(mapped_base)
+            } else {
+                Some(format!("({} {})", mapped_base, arg_parts.join(" ")))
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => render_type_dedukti(inner),
+        TypeKind::Refined { base, predicate } => {
+            // Dedukti refinement: `Sig T (\x : T => P x)` — Σ-type encoding.
+            let base_text = render_type_dedukti(base)?;
+            let pred_text = render_expr_dedukti(&predicate.expr)?;
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(i) => i.as_str().to_string(),
+                verum_common::Maybe::None => "it".to_string(),
+            };
+            Some(format!(
+                "(Sig {} ({} : {} => {}))",
+                base_text, binder, base_text, pred_text,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn generic_arg_to_dedukti_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
+    use verum_ast::ty::GenericArg;
+    match arg {
+        GenericArg::Type(t) => render_type_dedukti(t),
+        _ => Some("_".to_string()),
+    }
+}
+
 /// Diagnostic classifier for unrenderable type shapes.
 fn classify_unrenderable_type(ty: &Type) -> &'static str {
     match &ty.kind {
