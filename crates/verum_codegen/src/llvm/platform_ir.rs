@@ -119,6 +119,186 @@ impl<'ctx> PlatformIR<'ctx> {
             .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
     }
 
+    /// **Adaptive call helper — Verum-ABI ⇄ POSIX-ABI bridge.** (#96)
+    ///
+    /// Calls `func` with Verum-ABI args (caller passes i64 ints,
+    /// pointers, or the actual native type — whichever is available),
+    /// inspects the callee's declared signature, and coerces each arg
+    /// individually to match.  Returns the result coerced back to i64
+    /// (sign-extending i32 returns to preserve negative-error
+    /// semantics: `-1` stays `-1`).
+    ///
+    /// **Why this exists**: pre-fix every socket-family call site in
+    /// `platform_ir.rs` did the ABI dance manually — but inconsistently.
+    /// `verum_tcp_connect` assumed `socket` returned i64; after #96
+    /// fixed the libsys wrapper signature reconciliation, `socket`
+    /// returns i32 (matching the POSIX FFI declaration in
+    /// `core/sys/darwin/libsystem.vr`).  Without coercion the wrapper
+    /// emitted `ret i32 %fd` from an i64-returning function — LLVM
+    /// verifier rejection.  Centralising the dance into one helper
+    /// eliminates the latent class of "i32 leaked into i64 slot"
+    /// bugs uniformly.
+    ///
+    /// **Coercions**:
+    ///   * caller IntValue → callee param IntType: zext / trunc as
+    ///     needed (zext for unsigned widening of fd / port / opt-id).
+    ///   * caller IntValue (i64 address) → callee PointerType:
+    ///     int_to_ptr.
+    ///   * caller PointerValue → callee IntType: ptr_to_int.
+    ///   * caller PointerValue → callee PointerType: pass through.
+    ///
+    /// **Cost**: zero at runtime — the trunc/zext / ptr-conv
+    /// instructions are folded by `instcombine` when the source/dest
+    /// types are statically known.
+    fn call_native_i64(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        func: verum_llvm::values::FunctionValue<'ctx>,
+        args: &[verum_llvm::values::BasicValueEnum<'ctx>],
+        name: &str,
+    ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
+        use verum_llvm::types::BasicTypeEnum;
+        use verum_llvm::values::{BasicMetadataValueEnum, BasicValueEnum};
+
+        let i64_type = self.context.i64_type();
+        let fn_ty = func.get_type();
+        let n_params = func.count_params() as usize;
+        if args.len() != n_params {
+            return Err(super::error::LlvmLoweringError::internal(format!(
+                "call_native_i64({}): arity mismatch — caller passed {} args, callee declares {}",
+                name,
+                args.len(),
+                n_params
+            )));
+        }
+
+        let mut coerced: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(n_params);
+        for (i, arg) in args.iter().enumerate() {
+            let param_ty = func
+                .get_nth_param(i as u32)
+                .ok_or_else(|| {
+                    super::error::LlvmLoweringError::internal(format!(
+                        "call_native_i64({}): missing param {}",
+                        name, i
+                    ))
+                })?
+                .get_type();
+
+            let v: BasicValueEnum<'ctx> = match (*arg, param_ty) {
+                // Int → Int: trunc (caller wider) or zext (caller narrower)
+                (BasicValueEnum::IntValue(iv), BasicTypeEnum::IntType(pt)) => {
+                    let src_bits = iv.get_type().get_bit_width();
+                    let dst_bits = pt.get_bit_width();
+                    if src_bits == dst_bits {
+                        iv.into()
+                    } else if src_bits > dst_bits {
+                        builder
+                            .build_int_truncate(iv, pt, &format!("{}_a{}_trunc", name, i))
+                            .map_err(|e| {
+                                super::error::LlvmLoweringError::llvm_error(e.to_string())
+                            })?
+                            .into()
+                    } else {
+                        builder
+                            .build_int_z_extend(iv, pt, &format!("{}_a{}_zext", name, i))
+                            .map_err(|e| {
+                                super::error::LlvmLoweringError::llvm_error(e.to_string())
+                            })?
+                            .into()
+                    }
+                }
+                // Int → Pointer: inttoptr
+                (BasicValueEnum::IntValue(iv), BasicTypeEnum::PointerType(pt)) => builder
+                    .build_int_to_ptr(iv, pt, &format!("{}_a{}_i2p", name, i))
+                    .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
+                    .into(),
+                // Pointer → Pointer: pass through (LLVM opaque ptrs)
+                (BasicValueEnum::PointerValue(pv), BasicTypeEnum::PointerType(_)) => pv.into(),
+                // Pointer → Int: ptrtoint
+                (BasicValueEnum::PointerValue(pv), BasicTypeEnum::IntType(pt)) => {
+                    let as_i64 = builder
+                        .build_ptr_to_int(pv, i64_type, &format!("{}_a{}_p2i", name, i))
+                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                    if pt.get_bit_width() == 64 {
+                        as_i64.into()
+                    } else {
+                        builder
+                            .build_int_truncate(as_i64, pt, &format!("{}_a{}_ptrtrunc", name, i))
+                            .map_err(|e| {
+                                super::error::LlvmLoweringError::llvm_error(e.to_string())
+                            })?
+                            .into()
+                    }
+                }
+                (other_arg, other_ty) => {
+                    return Err(super::error::LlvmLoweringError::internal(format!(
+                        "call_native_i64({}): unsupported coercion arg #{} {:?} → {:?}",
+                        name, i, other_arg, other_ty
+                    )));
+                }
+            };
+            coerced.push(v.into());
+        }
+
+        let _ = fn_ty; // reserved for future arity-collision diagnostics
+        let call_site = builder
+            .build_call(func, &coerced, &format!("{}_call", name))
+            .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+
+        // Coerce return to i64.
+        let ret_ty = func.get_type().get_return_type();
+        match ret_ty {
+            None => Err(super::error::LlvmLoweringError::internal(format!(
+                "call_native_i64({}): callee returns void; use build_call directly",
+                name
+            ))),
+            Some(BasicTypeEnum::IntType(it)) => {
+                let raw = call_site
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| {
+                        super::error::LlvmLoweringError::internal(format!(
+                            "{}: call returned no basic value",
+                            name
+                        ))
+                    })?
+                    .into_int_value();
+                let bits = it.get_bit_width();
+                if bits == 64 {
+                    Ok(raw)
+                } else if bits < 64 {
+                    // Sign-extend so POSIX `-1` errors stay `-1` in i64 slots.
+                    builder
+                        .build_int_s_extend(raw, i64_type, &format!("{}_ret_sext", name))
+                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+                } else {
+                    builder
+                        .build_int_truncate(raw, i64_type, &format!("{}_ret_trunc", name))
+                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+                }
+            }
+            Some(BasicTypeEnum::PointerType(_)) => {
+                let raw = call_site
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| {
+                        super::error::LlvmLoweringError::internal(format!(
+                            "{}: call returned no basic value",
+                            name
+                        ))
+                    })?
+                    .into_pointer_value();
+                builder
+                    .build_ptr_to_int(raw, i64_type, &format!("{}_ret_p2i", name))
+                    .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))
+            }
+            Some(other) => Err(super::error::LlvmLoweringError::internal(format!(
+                "call_native_i64({}): unsupported return type {:?}",
+                name, other
+            ))),
+        }
+    }
+
     /// Direct Linux syscall — libc-free emission of the kernel trap.
     ///
 
@@ -5399,25 +5579,23 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing param 1")?
             .into_int_value();
 
-        // AF_INET=2, SOCK_STREAM=1 (macOS) or 1 (Linux)
+        // AF_INET=2, SOCK_STREAM=1.  `call_native_i64` adapts to the
+        // POSIX-i32 signature declared in `core/sys/darwin/libsystem.vr`
+        // (or libc on Linux): args truncated to i32, return sext'd to
+        // i64 so the SGE-vs-zero check downstream remains correct.
         let socket_fn = module.get_function("socket").or_missing_fn("socket")?;
-        let fd = builder
-            .build_call(
-                socket_fn,
-                &[
-                    i32_type.const_int(2, false).into(), // AF_INET
-                    i32_type.const_int(1, false).into(), // SOCK_STREAM
-                    i32_type.const_zero().into(),        // protocol
-                ],
-                "fd",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let fd = self.call_native_i64(
+            &builder,
+            socket_fn,
+            &[
+                i64_type.const_int(2, false).into(),
+                i64_type.const_int(1, false).into(),
+                i64_type.const_zero().into(),
+            ],
+            "fd",
+        )?;
         let fd_ok = builder
-            .build_int_compare(IntPredicate::SGE, fd, i32_type.const_zero(), "fd_ok")
+            .build_int_compare(IntPredicate::SGE, fd, i64_type.const_zero(), "fd_ok")
             .or_llvm_err()?;
         builder
             .build_conditional_branch(fd_ok, sock_ok, ret_fail)
@@ -5429,18 +5607,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(sock_ok);
-        // Build sockaddr_in with 127.0.0.1 (will be overridden for non-localhost)
-        // For simplicity, always use the host ptr as IPv4 via inet_pton pattern
-        // Actually, just hardcode 127.0.0.1 for now (localhost) and use verum_inet_pton4 for others
-        // But inet_pton4 is a static C function — we can't call it from LLVM IR
-        // Instead, implement inline IPv4 parsing in LLVM IR (complex) or just use 0.0.0.0 + connect
-
-        // For practical networking: connect with INADDR_ANY and let the OS resolve
-        // Actually the C code uses inet_pton4 for dotted-decimal IPs.
-        // For LLVM IR, let's declare and call a simple helper.
-        // For now: use INADDR_LOOPBACK (127.0.0.1) = 0x7f000001 in network byte order = 0x0100007f
+        // INADDR_LOOPBACK (127.0.0.1) = 0x7f000001 in network byte order.
         let port_be = self.build_htons(&builder, port)?;
-        let localhost_addr = i32_type.const_int(0x0100007f, false); // 127.0.0.1 in network byte order
+        let localhost_addr = i32_type.const_int(0x0100007f, false);
         let saddr = self.build_sockaddr_in(
             module,
             &builder,
@@ -5450,33 +5619,27 @@ impl<'ctx> PlatformIR<'ctx> {
         )?;
 
         let connect_fn = module.get_function("connect").or_missing_fn("connect")?;
-        let cr = builder
-            .build_call(
-                connect_fn,
-                &[
-                    fd.into(),
-                    saddr.into(),
-                    i32_type.const_int(16, false).into(), // sizeof(sockaddr_in)
-                ],
-                "cr",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let cr = self.call_native_i64(
+            &builder,
+            connect_fn,
+            &[
+                fd.into(), // i64 — helper truncates to i32 for POSIX
+                saddr.into(),
+                i64_type.const_int(16, false).into(), // sizeof(sockaddr_in)
+            ],
+            "cr",
+        )?;
         let conn_ok = builder
-            .build_int_compare(IntPredicate::SGE, cr, i32_type.const_zero(), "cok")
+            .build_int_compare(IntPredicate::SGE, cr, i64_type.const_zero(), "cok")
             .or_llvm_err()?;
         builder
             .build_conditional_branch(conn_ok, do_connect, ret_fail)
             .or_llvm_err()?;
 
         builder.position_at_end(do_connect);
-        builder.build_return(Some(&fd)).or_llvm_err()?; // fd is already i64
+        builder.build_return(Some(&fd)).or_llvm_err()?; // fd is i64 (sext'd by call_native_i64)
 
-        // Note: ret_fail should also close the socket on connect failure
-        // Rebuild ret_fail to close fd first
+        // Rewrite ret_fail to close fd before returning -1.
         while ret_fail.get_instructions().count() > 0 {
             ret_fail
                 .get_last_instruction()
@@ -5484,13 +5647,10 @@ impl<'ctx> PlatformIR<'ctx> {
                 .erase_from_basic_block();
         }
         builder.position_at_end(ret_fail);
-        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
-        // Only close if fd >= 0 (may come from entry or sock_ok)
-        // ABI bridge: POSIX close(int fd) expects i32 fd; Verum-side fd is i64.
-        let fd_i32 = self.fd_to_i32(&builder, fd)?;
-        builder
-            .build_call(close_fn, &[fd_i32.into()], "")
-            .or_llvm_err()?;
+        let close_fn = module
+            .get_function("verum_internal_close")
+            .or_missing_fn("verum_internal_close")?;
+        let _ = self.call_native_i64(&builder, close_fn, &[fd.into()], "close_ret")?;
         builder
             .build_return(Some(&i64_type.const_all_ones()))
             .or_llvm_err()?;
@@ -5525,42 +5685,37 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing param 1")?
             .into_int_value();
 
+        // socket(AF_INET, SOCK_STREAM, 0).  call_native_i64 adapts to
+        // POSIX i32 ABI declared by `core/sys/{darwin,linux}/...`.
         let socket_fn = module.get_function("socket").or_missing_fn("socket")?;
-        let fd = builder
-            .build_call(
-                socket_fn,
-                &[
-                    i32_type.const_int(2, false).into(),
-                    i32_type.const_int(1, false).into(),
-                    i32_type.const_zero().into(),
-                ],
-                "fd",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let fd = self.call_native_i64(
+            &builder,
+            socket_fn,
+            &[
+                i64_type.const_int(2, false).into(),
+                i64_type.const_int(1, false).into(),
+                i64_type.const_zero().into(),
+            ],
+            "fd",
+        )?;
         let fd_good = builder
-            .build_int_compare(IntPredicate::SGE, fd, i32_type.const_zero(), "ok")
+            .build_int_compare(IntPredicate::SGE, fd, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
         builder
             .build_conditional_branch(fd_good, sock_ok, ret_fail)
             .or_llvm_err()?;
 
         builder.position_at_end(ret_fail);
-        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
-        // ABI bridge: POSIX close(int fd).
-        let fd_i32_close = self.fd_to_i32(&builder, fd)?;
-        builder
-            .build_call(close_fn, &[fd_i32_close.into()], "")
-            .or_llvm_err()?;
+        let close_fn = module
+            .get_function("verum_internal_close")
+            .or_missing_fn("verum_internal_close")?;
+        let _ = self.call_native_i64(&builder, close_fn, &[fd.into()], "close_ret")?;
         builder
             .build_return(Some(&i64_type.const_all_ones()))
             .or_llvm_err()?;
 
         builder.position_at_end(sock_ok);
-        // setsockopt SO_REUSEADDR
+        // setsockopt SO_REUSEADDR — `opt` is a *pointer* to i32(1).
         let opt_alloca = builder.build_alloca(i32_type, "opt").or_llvm_err()?;
         builder
             .build_store(opt_alloca, i32_type.const_int(1, false))
@@ -5576,21 +5731,20 @@ impl<'ctx> PlatformIR<'ctx> {
             } else {
                 (0xFFFF, 0x0004)
             };
-        builder
-            .build_call(
-                setsockopt_fn,
-                &[
-                    fd.into(),
-                    i32_type.const_int(sol_socket, false).into(),
-                    i32_type.const_int(so_reuseaddr, false).into(),
-                    opt_alloca.into(),
-                    i32_type.const_int(4, false).into(),
-                ],
-                "",
-            )
-            .or_llvm_err()?;
+        let _ = self.call_native_i64(
+            &builder,
+            setsockopt_fn,
+            &[
+                fd.into(),
+                i64_type.const_int(sol_socket, false).into(),
+                i64_type.const_int(so_reuseaddr, false).into(),
+                opt_alloca.into(),
+                i64_type.const_int(4, false).into(),
+            ],
+            "sso",
+        )?;
 
-        // Build sockaddr_in with INADDR_ANY
+        // Build sockaddr_in with INADDR_ANY.
         let port_be = self.build_htons(&builder, port)?;
         let saddr = self.build_sockaddr_in(
             module,
@@ -5601,23 +5755,14 @@ impl<'ctx> PlatformIR<'ctx> {
         )?;
 
         let bind_fn = module.get_function("bind").or_missing_fn("bind")?;
-        let br = builder
-            .build_call(
-                bind_fn,
-                &[
-                    fd.into(),
-                    saddr.into(),
-                    i32_type.const_int(16, false).into(),
-                ],
-                "br",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let br = self.call_native_i64(
+            &builder,
+            bind_fn,
+            &[fd.into(), saddr.into(), i64_type.const_int(16, false).into()],
+            "br",
+        )?;
         let bind_good = builder
-            .build_int_compare(IntPredicate::SGE, br, i32_type.const_zero(), "bok")
+            .build_int_compare(IntPredicate::SGE, br, i64_type.const_zero(), "bok")
             .or_llvm_err()?;
         builder
             .build_conditional_branch(bind_good, bind_ok, ret_fail)
@@ -5625,18 +5770,14 @@ impl<'ctx> PlatformIR<'ctx> {
 
         builder.position_at_end(bind_ok);
         let listen_fn = module.get_function("listen").or_missing_fn("listen")?;
-        let bl = builder
-            .build_int_truncate(backlog, i32_type, "bl")
-            .or_llvm_err()?;
-        let lr = builder
-            .build_call(listen_fn, &[fd.into(), bl.into()], "lr")
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let lr = self.call_native_i64(
+            &builder,
+            listen_fn,
+            &[fd.into(), backlog.into()],
+            "lr",
+        )?;
         let listen_good = builder
-            .build_int_compare(IntPredicate::SGE, lr, i32_type.const_zero(), "lok")
+            .build_int_compare(IntPredicate::SGE, lr, i64_type.const_zero(), "lok")
             .or_llvm_err()?;
         let ret_ok = ctx.append_basic_block(func, "ret_ok");
         builder
@@ -5644,7 +5785,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(ret_ok);
-        builder.build_return(Some(&fd)).or_llvm_err()?; // fd is already i64
+        builder.build_return(Some(&fd)).or_llvm_err()?; // fd is i64 (sext'd by helper)
         Ok(())
     }
 
@@ -5684,18 +5825,17 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         let accept_fn = module.get_function("accept").or_missing_fn("accept")?;
-        let client_fd = builder
-            .build_call(
-                accept_fn,
-                &[fd32.into(), client_addr.into(), client_len.into()],
-                "cfd",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
-        builder.build_return(Some(&client_fd)).or_llvm_err()?; // already i64
+        let client_fd = self.call_native_i64(
+            &builder,
+            accept_fn,
+            &[
+                fd32.into(),
+                client_addr.into(),
+                client_len.into(),
+            ],
+            "cfd",
+        )?;
+        builder.build_return(Some(&client_fd)).or_llvm_err()?;
         Ok(())
     }
 
@@ -5764,23 +5904,17 @@ impl<'ctx> PlatformIR<'ctx> {
             .basic()
             .or_internal("expected basic value")?
             .into_int_value();
-        let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let n = builder
-            .build_call(
-                send_fn,
-                &[
-                    fd32.into(),
-                    ptr.into(),
-                    len.into(),
-                    i32_type.const_zero().into(),
-                ],
-                "n",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let n = self.call_native_i64(
+            &builder,
+            send_fn,
+            &[
+                fd.into(),
+                ptr.into(),
+                len.into(),
+                i64_type.const_zero().into(),
+            ],
+            "n",
+        )?;
         let is_ok = builder
             .build_int_compare(IntPredicate::SGE, n, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
@@ -5862,23 +5996,17 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("expected basic value")?
             .into_pointer_value();
 
-        let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let n = builder
-            .build_call(
-                recv_fn,
-                &[
-                    fd32.into(),
-                    buf.into(),
-                    buf_size.into(),
-                    i32_type.const_zero().into(),
-                ],
-                "n",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let n = self.call_native_i64(
+            &builder,
+            recv_fn,
+            &[
+                fd.into(),
+                buf.into(),
+                buf_size.into(),
+                i64_type.const_zero().into(),
+            ],
+            "n",
+        )?;
         let n_pos = builder
             .build_int_compare(IntPredicate::SGT, n, i64_type.const_zero(), "np")
             .or_llvm_err()?;
@@ -5990,19 +6118,18 @@ impl<'ctx> PlatformIR<'ctx> {
         let setsockopt_fn = module
             .get_function("setsockopt")
             .or_missing_fn("setsockopt")?;
-        builder
-            .build_call(
-                setsockopt_fn,
-                &[
-                    fd.into(),
-                    i64_type.const_int(sol_level, false).into(),
-                    i64_type.const_int(opt_name, false).into(),
-                    tv.into(),
-                    i64_type.const_int(16, false).into(),
-                ],
-                "sso_to",
-            )
-            .or_llvm_err()?;
+        let _ = self.call_native_i64(
+            &builder,
+            setsockopt_fn,
+            &[
+                fd.into(),
+                i64_type.const_int(sol_level, false).into(),
+                i64_type.const_int(opt_name, false).into(),
+                tv.into(),
+                i64_type.const_int(16, false).into(),
+            ],
+            "sso_to",
+        )?;
         Ok(())
     }
 
@@ -6313,22 +6440,17 @@ impl<'ctx> PlatformIR<'ctx> {
         let peek_buf = builder.build_alloca(i8_type, "peek").or_llvm_err()?;
         // MSG_PEEK = 0x2 on both Linux and Darwin.
         let recv_fn = module.get_function("recv").or_missing_fn("recv")?;
-        let n = builder
-            .build_call(
-                recv_fn,
-                &[
-                    fd.into(),
-                    peek_buf.into(),
-                    i64_type.const_int(1, false).into(),
-                    i64_type.const_int(2, false).into(),
-                ],
-                "n",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let n = self.call_native_i64(
+            &builder,
+            recv_fn,
+            &[
+                fd.into(),
+                peek_buf.into(),
+                i64_type.const_int(1, false).into(),
+                i64_type.const_int(2, false).into(),
+            ],
+            "n",
+        )?;
         let _ = i32_type; // suppress unused
 
         // n > 0 → ready; n == 0 → EOF; n < 0 → timeout (we don't
@@ -6416,22 +6538,17 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let buf = builder.build_alloca(i8_type, "wb").or_llvm_err()?;
         let send_fn = module.get_function("send").or_missing_fn("send")?;
-        let n = builder
-            .build_call(
-                send_fn,
-                &[
-                    fd.into(),
-                    buf.into(),
-                    i64_type.const_zero().into(),
-                    i64_type.const_int(0, false).into(),
-                ],
-                "n",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let n = self.call_native_i64(
+            &builder,
+            send_fn,
+            &[
+                fd.into(),
+                buf.into(),
+                i64_type.const_zero().into(),
+                i64_type.const_int(0, false).into(),
+            ],
+            "n",
+        )?;
         let is_ok = builder
             .build_int_compare(IntPredicate::SGE, n, i64_type.const_zero(), "iok")
             .or_llvm_err()?;
@@ -6505,25 +6622,20 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing first param")?
             .into_int_value();
 
+        // socket(AF_INET, SOCK_DGRAM, 0)
         let socket_fn = module.get_function("socket").or_missing_fn("socket")?;
-        // AF_INET=2, SOCK_DGRAM=2
-        let fd = builder
-            .build_call(
-                socket_fn,
-                &[
-                    i32_type.const_int(2, false).into(),
-                    i32_type.const_int(2, false).into(),
-                    i32_type.const_zero().into(),
-                ],
-                "fd",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let fd = self.call_native_i64(
+            &builder,
+            socket_fn,
+            &[
+                i64_type.const_int(2, false).into(),
+                i64_type.const_int(2, false).into(),
+                i64_type.const_zero().into(),
+            ],
+            "fd",
+        )?;
         let fd_good = builder
-            .build_int_compare(IntPredicate::SGE, fd, i32_type.const_zero(), "ok")
+            .build_int_compare(IntPredicate::SGE, fd, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
         builder
             .build_conditional_branch(fd_good, sock_ok, ret_fail)
@@ -6545,23 +6657,14 @@ impl<'ctx> PlatformIR<'ctx> {
         )?;
 
         let bind_fn = module.get_function("bind").or_missing_fn("bind")?;
-        let br = builder
-            .build_call(
-                bind_fn,
-                &[
-                    fd.into(),
-                    saddr.into(),
-                    i32_type.const_int(16, false).into(),
-                ],
-                "br",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let br = self.call_native_i64(
+            &builder,
+            bind_fn,
+            &[fd.into(), saddr.into(), i64_type.const_int(16, false).into()],
+            "br",
+        )?;
         let bind_good = builder
-            .build_int_compare(IntPredicate::SGE, br, i32_type.const_zero(), "bok")
+            .build_int_compare(IntPredicate::SGE, br, i64_type.const_zero(), "bok")
             .or_llvm_err()?;
         let ret_ok = ctx.append_basic_block(func, "ret_ok");
         builder
@@ -6569,7 +6672,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(ret_ok);
-        builder.build_return(Some(&fd)).or_llvm_err()?; // fd is already i64
+        builder.build_return(Some(&fd)).or_llvm_err()?;
         Ok(())
     }
 
@@ -6654,32 +6757,26 @@ impl<'ctx> PlatformIR<'ctx> {
             .basic()
             .or_internal("expected basic value")?
             .into_int_value();
-        let fd32 = fd; // i64 Verum ABI — no truncation needed
 
-        // Build destination sockaddr_in (localhost for now)
+        // Build destination sockaddr_in (localhost for now).
         let port_be = self.build_htons(&builder, port)?;
         let dest_addr = i32_type.const_int(0x0100007f, false); // 127.0.0.1
         let saddr =
             self.build_sockaddr_in(module, &builder, i32_type.const_int(2, false), port_be, dest_addr)?;
 
-        let n = builder
-            .build_call(
-                sendto_fn,
-                &[
-                    fd32.into(),
-                    txt_ptr.into(),
-                    len.into(),
-                    i32_type.const_zero().into(),
-                    saddr.into(),
-                    i32_type.const_int(16, false).into(),
-                ],
-                "n",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let n = self.call_native_i64(
+            &builder,
+            sendto_fn,
+            &[
+                fd.into(),
+                txt_ptr.into(),
+                len.into(),
+                i64_type.const_zero().into(),
+                saddr.into(),
+                i64_type.const_int(16, false).into(),
+            ],
+            "n",
+        )?;
         let is_ok = builder
             .build_int_compare(IntPredicate::SGE, n, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
@@ -6761,25 +6858,19 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("expected basic value")?
             .into_pointer_value();
 
-        let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let n = builder
-            .build_call(
-                recvfrom_fn,
-                &[
-                    fd32.into(),
-                    buf.into(),
-                    buf_size.into(),
-                    i32_type.const_zero().into(),
-                    ptr_type.const_null().into(),
-                    ptr_type.const_null().into(),
-                ],
-                "n",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let n = self.call_native_i64(
+            &builder,
+            recvfrom_fn,
+            &[
+                fd.into(),
+                buf.into(),
+                buf_size.into(),
+                i64_type.const_zero().into(),
+                ptr_type.const_null().into(),
+                ptr_type.const_null().into(),
+            ],
+            "n",
+        )?;
         let n_pos = builder
             .build_int_compare(IntPredicate::SGT, n, i64_type.const_zero(), "np")
             .or_llvm_err()?;
@@ -7245,21 +7336,16 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing first param")?
             .into_int_value();
         let fcntl_fn = module.get_function("fcntl").or_missing_fn("fcntl")?;
-        let flags = builder
-            .build_call(
-                fcntl_fn,
-                &[
-                    fd.into(),
-                    i64_type.const_int(3, false).into(),
-                    i64_type.const_zero().into(),
-                ],
-                "flags",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let flags = self.call_native_i64(
+            &builder,
+            fcntl_fn,
+            &[
+                fd.into(),
+                i64_type.const_int(3, false).into(),
+                i64_type.const_zero().into(),
+            ],
+            "flags",
+        )?;
         let ok = builder
             .build_int_compare(IntPredicate::SGE, flags, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
@@ -7274,17 +7360,12 @@ impl<'ctx> PlatformIR<'ctx> {
         let nf = builder
             .build_or(flags, i64_type.const_int(o_nonblock, false), "nf")
             .or_llvm_err()?;
-        let r = builder
-            .build_call(
-                fcntl_fn,
-                &[fd.into(), i64_type.const_int(4, false).into(), nf.into()],
-                "r",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let r = self.call_native_i64(
+            &builder,
+            fcntl_fn,
+            &[fd.into(), i64_type.const_int(4, false).into(), nf.into()],
+            "r",
+        )?;
         builder.build_return(Some(&r)).or_llvm_err()?;
         Ok(())
     }
@@ -7315,21 +7396,16 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing first param")?
             .into_int_value();
         let fcntl_fn = module.get_function("fcntl").or_missing_fn("fcntl")?;
-        let flags = builder
-            .build_call(
-                fcntl_fn,
-                &[
-                    fd.into(),
-                    i64_type.const_int(3, false).into(),
-                    i64_type.const_zero().into(),
-                ],
-                "flags",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let flags = self.call_native_i64(
+            &builder,
+            fcntl_fn,
+            &[
+                fd.into(),
+                i64_type.const_int(3, false).into(),
+                i64_type.const_zero().into(),
+            ],
+            "flags",
+        )?;
         let ok = builder
             .build_int_compare(IntPredicate::SGE, flags, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
@@ -7344,17 +7420,12 @@ impl<'ctx> PlatformIR<'ctx> {
         let nf = builder
             .build_and(flags, i64_type.const_int(!o_nonblock, false), "nf")
             .or_llvm_err()?;
-        let r = builder
-            .build_call(
-                fcntl_fn,
-                &[fd.into(), i64_type.const_int(4, false).into(), nf.into()],
-                "r",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let r = self.call_native_i64(
+            &builder,
+            fcntl_fn,
+            &[fd.into(), i64_type.const_int(4, false).into(), nf.into()],
+            "r",
+        )?;
         builder.build_return(Some(&r)).or_llvm_err()?;
         Ok(())
     }
@@ -7387,25 +7458,21 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(va, i32_type.const_int(1, false))
             .or_llvm_err()?;
-        let r = builder
-            .build_call(
-                module
-                    .get_function("setsockopt")
-                    .or_missing_fn("setsockopt")?,
-                &[
-                    fd.into(),
-                    i64_type.const_int(sol_level, false).into(),
-                    i64_type.const_int(opt_name, false).into(),
-                    va.into(),
-                    i64_type.const_int(4, false).into(),
-                ],
-                "r",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let setsockopt_fn = module
+            .get_function("setsockopt")
+            .or_missing_fn("setsockopt")?;
+        let r = self.call_native_i64(
+            &builder,
+            setsockopt_fn,
+            &[
+                fd.into(),
+                i64_type.const_int(sol_level, false).into(),
+                i64_type.const_int(opt_name, false).into(),
+                va.into(),
+                i64_type.const_int(4, false).into(),
+            ],
+            "r",
+        )?;
         builder.build_return(Some(&r)).or_llvm_err()?;
         Ok(())
     }
@@ -7472,25 +7539,21 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_store(la, i32_type.const_int(4, false))
             .or_llvm_err()?;
-        let r = builder
-            .build_call(
-                module
-                    .get_function("getsockopt")
-                    .or_missing_fn("getsockopt")?,
-                &[
-                    fd.into(),
-                    i64_type.const_int(sol, false).into(),
-                    i64_type.const_int(soe, false).into(),
-                    va.into(),
-                    la.into(),
-                ],
-                "r",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let getsockopt_fn = module
+            .get_function("getsockopt")
+            .or_missing_fn("getsockopt")?;
+        let r = self.call_native_i64(
+            &builder,
+            getsockopt_fn,
+            &[
+                fd.into(),
+                i64_type.const_int(sol, false).into(),
+                i64_type.const_int(soe, false).into(),
+                va.into(),
+                la.into(),
+            ],
+            "r",
+        )?;
         let ok = builder
             .build_int_compare(IntPredicate::SGE, r, i64_type.const_zero(), "ok")
             .or_llvm_err()?;
@@ -7546,17 +7609,13 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_nth_param(2)
             .or_internal("missing param 2")?
             .into_int_value();
-        let cr = builder
-            .build_call(
-                module.get_function("connect").or_missing_fn("connect")?,
-                &[fd.into(), addr.into(), alen.into()],
-                "cr",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let connect_fn = module.get_function("connect").or_missing_fn("connect")?;
+        let cr = self.call_native_i64(
+            &builder,
+            connect_fn,
+            &[fd.into(), addr.into(), alen.into()],
+            "cr",
+        )?;
         let cok = builder
             .build_int_compare(IntPredicate::SGE, cr, i64_type.const_zero(), "cok")
             .or_llvm_err()?;
@@ -7629,21 +7688,17 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_first_param()
             .or_internal("missing first param")?
             .into_int_value();
-        let cfd = builder
-            .build_call(
-                module.get_function("accept").or_missing_fn("accept")?,
-                &[
-                    fd.into(),
-                    ptr_type.const_null().into(),
-                    ptr_type.const_null().into(),
-                ],
-                "cfd",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let accept_fn = module.get_function("accept").or_missing_fn("accept")?;
+        let cfd = self.call_native_i64(
+            &builder,
+            accept_fn,
+            &[
+                fd.into(),
+                ptr_type.const_null().into(),
+                ptr_type.const_null().into(),
+            ],
+            "cfd",
+        )?;
         builder.build_return(Some(&cfd)).or_llvm_err()?;
         Ok(())
     }
@@ -12473,23 +12528,19 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(ready, poll_ok, ret_err)
             .or_llvm_err()?;
 
-        // poll_ok: accept the connection
+        // poll_ok: accept the connection.  call_native_i64 handles
+        // the i32 fd → i64 sext for POSIX accept's `int` return.
         builder.position_at_end(poll_ok);
-        let cfd = builder
-            .build_call(
-                accept_fn,
-                &[
-                    listen_fd.into(),
-                    ptr_type.const_null().into(),
-                    ptr_type.const_null().into(),
-                ],
-                "cfd",
-            )
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let cfd = self.call_native_i64(
+            &builder,
+            accept_fn,
+            &[
+                listen_fd.into(),
+                ptr_type.const_null().into(),
+                ptr_type.const_null().into(),
+            ],
+            "cfd",
+        )?;
         builder.build_return(Some(&cfd)).or_llvm_err()?;
 
         // ret_err: return -1
@@ -12638,18 +12689,18 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(ready, poll_ok, ret_err)
             .or_llvm_err()?;
 
-        // poll_ok: read()
+        // poll_ok: read().  call_native_i64 handles the i64 fd → i32
+        // POSIX truncation if `read` was declared with native i32 fd.
         builder.position_at_end(poll_ok);
         let buf_ptr = builder
             .build_int_to_ptr(buf_i64, ptr_type, "buf_ptr")
             .or_llvm_err()?;
-        let bytes_read = builder
-            .build_call(read_fn, &[fd.into(), buf_ptr.into(), len.into()], "nread")
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let bytes_read = self.call_native_i64(
+            &builder,
+            read_fn,
+            &[fd.into(), buf_ptr.into(), len.into()],
+            "nread",
+        )?;
         builder.build_return(Some(&bytes_read)).or_llvm_err()?;
 
         // ret_err: return -1
@@ -12792,18 +12843,17 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_conditional_branch(ready, poll_ok, ret_err)
             .or_llvm_err()?;
 
-        // poll_ok: write()
+        // poll_ok: write().
         builder.position_at_end(poll_ok);
         let buf_ptr = builder
             .build_int_to_ptr(buf_i64, ptr_type, "buf_ptr")
             .or_llvm_err()?;
-        let bytes_written = builder
-            .build_call(write_fn, &[fd.into(), buf_ptr.into(), len.into()], "nwrite")
-            .or_llvm_err()?
-            .try_as_basic_value()
-            .basic()
-            .or_internal("expected basic value")?
-            .into_int_value();
+        let bytes_written = self.call_native_i64(
+            &builder,
+            write_fn,
+            &[fd.into(), buf_ptr.into(), len.into()],
+            "nwrite",
+        )?;
         builder.build_return(Some(&bytes_written)).or_llvm_err()?;
 
         // ret_err: return -1
