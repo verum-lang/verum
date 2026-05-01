@@ -9751,15 +9751,141 @@ impl<'ctx> RuntimeLowering<'ctx> {
         module.add_function("nanosleep", fn_type, None)
     }
 
-    /// Get or declare strcmp function.
+    /// Get or declare a libc-free `strcmp` wrapper.
+    ///
+
+    /// **Libc-free**: emits an open-coded byte-compare loop.
+    /// Returns: 0 if equal, < 0 if a < b, > 0 if a > b (unsigned-byte
+    /// comparison at the first differing byte, matching libc strcmp).
+    ///
+
+    /// Body shape:
+    /// ```text
+    ///  entry: br loop_check
+    ///  loop_check:
+    ///    %i = phi i64 [0, entry], [i_next, advance]
+    ///    %ca = load i8, ptr a + i
+    ///    %cb = load i8, ptr b + i
+    ///    %eq = icmp eq i8 ca, cb
+    ///    br %eq, both_eq, differ
+    ///  both_eq:
+    ///    %nul = icmp eq i8 ca, 0
+    ///    br %nul, ret_zero, advance
+    ///  advance: i_next = i + 1; br loop_check
+    ///  differ: %da = zext i8 ca to i32; %db = zext i8 cb; ret (da - db)
+    ///  ret_zero: ret i32 0
+    /// ```
     fn get_or_declare_strcmp(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("strcmp") {
+        let wrapper_name = "verum_internal_strcmp";
+        if let Some(f) = module.get_function(wrapper_name) {
             return f;
         }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();
+        let i8_type = self.context.i8_type();
+
         let fn_type = i32_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-        module.add_function("strcmp", fn_type, None)
+        let func = module.add_function(wrapper_name, fn_type, None);
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+        let entry = self.context.append_basic_block(func, "entry");
+        let loop_check = self.context.append_basic_block(func, "loop_check");
+        let both_eq = self.context.append_basic_block(func, "both_eq");
+        let advance = self.context.append_basic_block(func, "advance");
+        let differ = self.context.append_basic_block(func, "differ");
+        let ret_zero = self.context.append_basic_block(func, "ret_zero");
+
+        let builder = self.context.create_builder();
+
+        // entry → loop_check
+        builder.position_at_end(entry);
+        builder
+            .build_unconditional_branch(loop_check)
+            .expect("strcmp entry branch");
+
+        // loop_check
+        builder.position_at_end(loop_check);
+        let phi = builder.build_phi(i64_type, "i").expect("strcmp phi");
+        phi.add_incoming(&[(&i64_type.const_zero(), entry)]);
+
+        let a_param = func
+            .get_first_param()
+            .expect("strcmp param 0")
+            .into_pointer_value();
+        let b_param = func
+            .get_nth_param(1)
+            .expect("strcmp param 1")
+            .into_pointer_value();
+        let i_val = phi.as_basic_value().into_int_value();
+
+        // SAFETY: caller-supplied null-terminated C strings; loop terminates at first NUL or differ
+        let pa = unsafe {
+            builder
+                .build_gep(i8_type, a_param, &[i_val], "pa")
+                .expect("strcmp gep a")
+        };
+        let pb = unsafe {
+            builder
+                .build_gep(i8_type, b_param, &[i_val], "pb")
+                .expect("strcmp gep b")
+        };
+        let ca = builder
+            .build_load(i8_type, pa, "ca")
+            .expect("strcmp load a")
+            .into_int_value();
+        let cb = builder
+            .build_load(i8_type, pb, "cb")
+            .expect("strcmp load b")
+            .into_int_value();
+        let eq = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, ca, cb, "eq")
+            .expect("strcmp icmp eq");
+        builder
+            .build_conditional_branch(eq, both_eq, differ)
+            .expect("strcmp br");
+
+        // both_eq: check NUL terminator
+        builder.position_at_end(both_eq);
+        let zero_i8 = i8_type.const_zero();
+        let is_nul = builder
+            .build_int_compare(verum_llvm::IntPredicate::EQ, ca, zero_i8, "is_nul")
+            .expect("strcmp icmp nul");
+        builder
+            .build_conditional_branch(is_nul, ret_zero, advance)
+            .expect("strcmp br nul");
+
+        // advance: i_next = i + 1; loop
+        builder.position_at_end(advance);
+        let one = i64_type.const_int(1, false);
+        let i_next = builder
+            .build_int_add(i_val, one, "i_next")
+            .expect("strcmp add");
+        builder
+            .build_unconditional_branch(loop_check)
+            .expect("strcmp back-edge");
+        phi.add_incoming(&[(&i_next, advance)]);
+
+        // differ: zext both to i32, return (i32)ca - (i32)cb
+        builder.position_at_end(differ);
+        let za = builder
+            .build_int_z_extend(ca, i32_type, "za")
+            .expect("strcmp zext a");
+        let zb = builder
+            .build_int_z_extend(cb, i32_type, "zb")
+            .expect("strcmp zext b");
+        let diff = builder
+            .build_int_sub(za, zb, "diff")
+            .expect("strcmp sub");
+        builder.build_return(Some(&diff)).expect("strcmp ret diff");
+
+        // ret_zero
+        builder.position_at_end(ret_zero);
+        builder
+            .build_return(Some(&i32_type.const_zero()))
+            .expect("strcmp ret zero");
+
+        func
     }
 
     /// Get or declare strlen function.
