@@ -30,6 +30,7 @@ mount core.sys.common;
 
 // Public surface — stable names, same behaviour as the backends in common.
 public mount core.sys.common.full_fsync;
+public mount core.sys.common.data_only_fsync;
 public mount core.sys.common.sync_directory;
 public mount core.sys.common.pread;
 public mount core.sys.common.pwrite;

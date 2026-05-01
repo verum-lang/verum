@@ -679,6 +679,49 @@ public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
     }
 }
 
+/// Cross-platform `data_only_fsync(fd)` — flush DATA without
+/// requiring a metadata barrier.  Called by SQLite's WAL frame
+/// append path (every committed frame), where the metadata sync
+/// happens later at WAL header / checkpoint boundaries.
+///
+/// Per-platform mapping:
+///   * Linux  → `fdatasync(fd)` (syscall 75) — skips inode-mtime
+///     update; ~5–20× faster than `fsync` on rotational + datacenter
+///     SSDs that journal metadata separately.
+///   * Darwin → `fsync(fd)` — no `fdatasync` equivalent on macOS;
+///     `fsync` is the cheapest barrier (`F_FULLFSYNC` is reserved
+///     for `full_fsync`).
+///   * Windows → `FlushFileBuffers` — NTFS journals metadata
+///     synchronously; data-only is not separately exposed.
+///
+/// **Safety**: `data_only_fsync` is only sound when the file's
+/// SIZE doesn't change between flushes (or when a separate
+/// metadata sync follows).  WAL frame append is the canonical
+/// caller — it pre-allocates frame slots, so the file size is
+/// stable across the append, and a metadata sync at the WAL
+/// header boundary catches any size growth.
+public fn data_only_fsync(fd: FileDesc) -> Result<(), OSError> {
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.fdatasync(fd); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_fsync(fd); }
+
+    @cfg(target_os = "windows")
+    {
+        let ok = unsafe {
+            super.windows.kernel32.FlushFileBuffers(
+                super.windows.kernel32.Handle(fd.0),
+            )
+        };
+        if ok == 0 {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "FlushFileBuffers failed" });
+        }
+        return Ok(());
+    }
+}
+
 /// `fsync(dirfd)` on POSIX — opens the directory read-only, syncs, closes.
 /// Required to make `rename` / `creat` / `unlink` on the contained files
 /// survive a power cut. A no-op return of `Ok(())` on Windows because
