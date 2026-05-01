@@ -769,6 +769,22 @@ pub struct TypeChecker {
     /// enforcement path falls back to the pre-existing non-dependent
     /// behaviour for those calls.
     function_param_names: Map<Text, List<Text>>,
+    /// MLS classification per parameter for every registered
+    /// function (#293 Phase 2b-Final).  Parallel structure to
+    /// `function_param_names` — index `i` of the `List<MlsLevel>`
+    /// corresponds to index `i` of `function_param_names[fn]`.
+    /// Public is the no-classification baseline so unclassified
+    /// parameters share the same default as untracked bindings
+    /// (lattice JOIN identity element).
+    ///
+    /// Populated by `register_function_signature` from each
+    /// parameter's `@classification(<level>)` attribute. Read at
+    /// call sites by `synth_call` / `check_app` to enforce the
+    /// down-flow contract: the argument expression's classification
+    /// must subsume the parameter's required level (Public is the
+    /// most-permissive sink — accepts anything).
+    function_param_classifications:
+        Map<Text, List<verum_common::mls::MlsLevel>>,
     /// Stdlib metadata loaded from stdlib.vbc.
     /// Contains type definitions, protocols, and methods for stdlib types.
     /// Used for type checking user code that uses stdlib types.
@@ -1169,6 +1185,7 @@ impl TypeChecker {
             function_required_params: Map::new(),
             function_contracts: Map::new(),
             function_param_names: Map::new(),
+            function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -1357,6 +1374,7 @@ impl TypeChecker {
             function_required_params: Map::new(),
             function_contracts: Map::new(),
             function_param_names: Map::new(),
+            function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -1987,6 +2005,7 @@ impl TypeChecker {
             function_required_params: Map::new(),
             function_contracts: Map::new(),
             function_param_names: Map::new(),
+            function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -2106,6 +2125,7 @@ impl TypeChecker {
             function_required_params: Map::new(),
             function_contracts: Map::new(),
             function_param_names: Map::new(),
+            function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -2226,6 +2246,7 @@ impl TypeChecker {
             function_required_params: Map::new(),
             function_contracts: Map::new(),
             function_param_names: Map::new(),
+            function_param_classifications: Map::new(),
             core_metadata: Maybe::None,
             lazy_resolver: None,
             session_registry: None,
@@ -6699,6 +6720,74 @@ impl TypeChecker {
         &mut self,
     ) -> std::collections::HashMap<verum_common::Text, verum_common::mls::MlsLevel> {
         std::mem::take(&mut self.classification_map)
+    }
+
+    /// Look up the parameter classification list for a registered
+    /// function (#293).  Returns `None` for unknown / unregistered
+    /// functions; callers fall back to the no-classification path
+    /// (treats every parameter as Public-required) in that case
+    /// — keeps existing call sites for unannotated functions
+    /// behaving identically.
+    pub fn function_param_classifications(
+        &self,
+        function_name: &Text,
+    ) -> Option<&List<verum_common::mls::MlsLevel>> {
+        self.function_param_classifications.get(function_name)
+    }
+
+    /// Down-flow check for a single argument-to-parameter binding
+    /// (#293).  Returns `Ok(())` when the parameter's
+    /// classification subsumes the argument's required protection
+    /// level (`param >= arg`), else `Err(TypeError::Other)`
+    /// citing the source / sink levels and the parameter index.
+    ///
+    /// **Lattice contract**: classification represents PROTECTION
+    /// REQUIREMENTS. A Secret value requires Secret-level
+    /// protection; the parameter declaration is the function's
+    /// CONTRACT for what protection it provides. The function
+    /// must provide AT LEAST the protection the data needs.
+    ///
+    /// Examples:
+    ///   - arg=Public, param=Public        → OK (no requirement)
+    ///   - arg=Public, param=Secret        → OK (over-protected)
+    ///   - arg=Secret, param=Public        → REJECT (Public
+    ///     protection insufficient for Secret data — the leak
+    ///     this gate catches)
+    ///   - arg=Secret, param=Secret        → OK (exact match)
+    ///   - arg=TopSecret, param=Secret     → REJECT
+    ///   - arg=TopSecret, param=TopSecret  → OK
+    ///
+    /// Phase 2b-FinalIntegration (separate task) calls this at
+    /// synth_call / check_app sites for every argument; this
+    /// commit lays the helper so the integration is just
+    /// "iterate args + call helper".
+    pub fn check_classification_downflow(
+        &self,
+        arg_level: verum_common::mls::MlsLevel,
+        param_level: verum_common::mls::MlsLevel,
+        function_name: &str,
+        param_index: usize,
+        param_name: &str,
+    ) -> Result<()> {
+        // The parameter must subsume (>=) the argument's
+        // classification — the function provides at least the
+        // protection the argument's data requires.
+        if param_level.subsumes(arg_level) {
+            return Ok(());
+        }
+        Err(TypeError::Other(verum_common::Text::from(format!(
+            "MLS down-flow rejected: {}-classified argument cannot flow into \
+             {}'s parameter `{}` (index {}) which provides only {} \
+             protection.  Either elevate the parameter to \
+             `@classification({})` (or higher), or wrap the call site in \
+             `@declassify {{ … }}` to explicitly accept the leak.",
+            arg_level.as_manifest_str(),
+            function_name,
+            param_name,
+            param_index,
+            param_level.as_manifest_str(),
+            arg_level.as_manifest_str(),
+        ))))
     }
 
     /// Compute the MLS classification of an expression (#292
@@ -53328,16 +53417,30 @@ impl TypeChecker {
         // separately.  Self parameters use the function's own
         // `@classification` (already handled at the safety_gate
         // surface).
+        //
+        // Phase 2b-Final (#293) also collects a parallel List<MlsLevel>
+        // for the function's parameter signature so call sites can
+        // enforce the down-flow contract: argument classification
+        // must subsume the parameter's required level.
+        let mut param_classifications: List<verum_common::mls::MlsLevel> = List::new();
         for p in func.params.iter() {
+            let level = match &p.kind {
+                FunctionParamKind::Regular { .. } | _ => read_param_classification(&p.attributes),
+            };
+            param_classifications.push(level);
             if let FunctionParamKind::Regular { pattern, .. } = &p.kind {
                 if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
-                    let level = read_param_classification(&p.attributes);
                     if level != verum_common::mls::MlsLevel::Public {
                         self.classification_map.insert(name.name.clone(), level);
                     }
                 }
             }
         }
+        // Always populate (empty list when there are no params, or
+        // all-Public list when none classified) so call-site
+        // lookups by function name produce a consistent shape.
+        self.function_param_classifications
+            .insert(func.name.name.clone(), param_classifications);
 
         // Register generic type parameters FIRST
         // Track both names AND TypeVars for explicit TypeScheme construction
@@ -57924,6 +58027,136 @@ mod mount_cycle_tests {
             checker.expr_classification(&binop),
             verum_common::mls::MlsLevel::TopSecret
         );
+    }
+
+    // ============================================================
+    // MLS Phase 2b-Final pin tests (#293) — call-site down-flow
+    // helper + parameter classification metadata registration.
+    // ============================================================
+
+    #[test]
+    fn register_function_signature_stores_param_classifications() {
+        // Pin: parameter classification metadata is stored at
+        // signature-registration time so call sites can look it up
+        // by function name. Sparse map: every function gets an
+        // entry (even if all-Public) so the lookup contract is
+        // uniform.
+        let mut params = List::new();
+        params.push(mk_param("low", None));
+        params.push(mk_param("med", Some("secret")));
+        params.push(mk_param("high", Some("top_secret")));
+        let func = mk_function_decl_2b(params);
+        let mut checker = TypeChecker::new();
+        let _ = checker.register_function_signature(&func);
+
+        let levels = checker
+            .function_param_classifications(&Text::from("test_fn"))
+            .expect("registration must populate param classifications");
+        assert_eq!(levels.len(), 3);
+        assert_eq!(levels[0], verum_common::mls::MlsLevel::Public);
+        assert_eq!(levels[1], verum_common::mls::MlsLevel::Secret);
+        assert_eq!(levels[2], verum_common::mls::MlsLevel::TopSecret);
+    }
+
+    #[test]
+    fn function_param_classifications_returns_none_for_unknown() {
+        let checker = TypeChecker::new();
+        assert!(checker
+            .function_param_classifications(&Text::from("never_registered"))
+            .is_none());
+    }
+
+    #[test]
+    fn check_classification_downflow_accepts_higher_param() {
+        // Pin: lattice subsumption — Public arg flowing into
+        // Secret param is ACCEPTED (param provides MORE protection
+        // than the unclassified data requires).
+        let checker = TypeChecker::new();
+        let result = checker.check_classification_downflow(
+            verum_common::mls::MlsLevel::Public,
+            verum_common::mls::MlsLevel::Secret,
+            "foo",
+            0,
+            "x",
+        );
+        assert!(result.is_ok(),
+            "arg=Public into param=Secret must accept (over-protection)");
+    }
+
+    #[test]
+    fn check_classification_downflow_accepts_equal() {
+        let checker = TypeChecker::new();
+        for level in [
+            verum_common::mls::MlsLevel::Public,
+            verum_common::mls::MlsLevel::Secret,
+            verum_common::mls::MlsLevel::TopSecret,
+        ] {
+            assert!(checker
+                .check_classification_downflow(level, level, "f", 0, "p")
+                .is_ok());
+        }
+    }
+
+    #[test]
+    fn check_classification_downflow_rejects_secret_to_public() {
+        // Pin: the load-bearing reject — Secret arg into Public
+        // param is the leak we're catching.
+        let checker = TypeChecker::new();
+        let result = checker.check_classification_downflow(
+            verum_common::mls::MlsLevel::Secret,
+            verum_common::mls::MlsLevel::Public,
+            "log_visible",
+            0,
+            "msg",
+        );
+        match result {
+            Err(TypeError::Other(msg)) => {
+                let s = msg.as_str();
+                assert!(s.contains("MLS down-flow"), "got: {}", s);
+                assert!(s.contains("secret"), "got: {}", s);
+                assert!(s.contains("public"), "got: {}", s);
+                assert!(s.contains("log_visible"), "got: {}", s);
+                assert!(s.contains("@declassify"), "got: {}", s);
+            }
+            other => panic!("expected TypeError::Other, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn check_classification_downflow_rejects_top_secret_to_secret() {
+        // Pin: TopSecret arg into Secret param is rejected — the
+        // param provides only Secret-level protection, but the
+        // argument requires TopSecret-level protection. Without
+        // this rejection, downstream operations on the param
+        // would handle TopSecret data under Secret-grade rules.
+        let checker = TypeChecker::new();
+        let result = checker.check_classification_downflow(
+            verum_common::mls::MlsLevel::TopSecret,
+            verum_common::mls::MlsLevel::Secret,
+            "f",
+            1,
+            "data",
+        );
+        assert!(result.is_err(),
+            "TopSecret arg into Secret param must reject (under-protection)");
+    }
+
+    #[test]
+    fn check_classification_downflow_accepts_public_to_secret() {
+        // Pin: Public arg flowing into Secret param is ACCEPTED.
+        // The parameter provides MORE protection than the
+        // unclassified argument requires — over-protection is
+        // fine, only under-protection is a leak.
+        let checker = TypeChecker::new();
+        let result = checker.check_classification_downflow(
+            verum_common::mls::MlsLevel::Public,
+            verum_common::mls::MlsLevel::Secret,
+            "f",
+            0,
+            "p",
+        );
+        assert!(result.is_ok(),
+            "Public arg into Secret param must accept (over-protection)");
     }
 
     #[test]
