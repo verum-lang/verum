@@ -94,6 +94,20 @@ pub mod proof_checker;
 // trusted base; downstream callers reach it via the explicit
 // `proof_checker::*` path so the namespace boundary stays loud.
 
+/// Kernel reflection — the meta-theory escape hatch (#158, V0 slice).
+///
+/// Exposes [`proof_checker::Term`]'s grammar + judgment shape as
+/// serializable data so non-trusted callers (audit gates, future
+/// Verum-side meta-tactics) can pattern-match on kernel terms
+/// without reaching across the trusted-base boundary.  See module
+/// docs for the V0 / V1 split and the structural-sketch contract.
+pub mod reflection;
+pub use reflection::{
+    KERNEL_RULE_NAMES, ReflectedJudgment, ReflectedKernelRule,
+    ReflectedTerm, ReflectionError, is_reflected_well_formed,
+    reflect_kernel_rule,
+};
+
 pub mod tactic_elaborator;
 // Tactic-to-proof-term elaboration: the link from Verum proof
 // bodies (`ProofBody::Tactic(TacticExpr)` / `ProofBody::Term(Expr)`)

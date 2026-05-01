@@ -132,35 +132,69 @@ fn single_segment_path_name(expr: &Expr) -> Option<&str> {
     }
 }
 
-/// If `expr` is a multi-segment `Path` (e.g.,
-/// `mathlib4.lambda.ChurchRosser`), return the dot-joined form.
-/// Used to recognise mathlib4-cited / framework-cited apply
-/// targets that the corpus uses extensively.  Single-segment paths
-/// also pass through; the caller treats both shapes uniformly.
+/// If `expr` is a multi-segment `Path` (e.g., `a::b::c`) OR a Field
+/// chain rooted at a single-segment Path (e.g., `mathlib4.lambda.ChurchRosser`,
+/// which the parser produces as nested `Field` expressions),
+/// return the dot-joined form.  Used to recognise mathlib4-cited
+/// / framework-cited apply targets that the corpus uses extensively.
 ///
-/// Returns `None` for non-`Path` shapes (Field projections, calls,
-/// closures, etc.) — those need their own classification.
+/// Returns `None` for non-resolvable shapes (calls, closures,
+/// generic-arg segments, etc.) — those need their own classification.
 fn dotted_path_text(expr: &Expr) -> Option<String> {
-    let path = match &expr.kind {
-        ExprKind::Path(p) => p,
-        _ => return None,
-    };
-    let mut parts: Vec<&str> = Vec::with_capacity(path.segments.len());
-    for seg in path.segments.iter() {
-        match seg {
-            PathSegment::Name(ident) => parts.push(ident.name.as_str()),
-            // Generic-argument segments (e.g., `foo<T>`) don't have a
-            // foreign-tool-faithful representation in tactic-mode
-            // apply — the foreign tool's unification fills in type
-            // arguments.  Return None so the caller falls back to a
-            // safer translation strategy.
+    // Path form (Verum's `::` separator + namespace paths).
+    if let ExprKind::Path(path) = &expr.kind {
+        let mut parts: Vec<&str> = Vec::with_capacity(path.segments.len());
+        for seg in path.segments.iter() {
+            match seg {
+                PathSegment::Name(ident) => parts.push(ident.name.as_str()),
+                // Generic-argument segments (e.g., `foo<T>`) — fall
+                // back; foreign-tool unification fills in implicits.
+                _ => return None,
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        return Some(parts.join("."));
+    }
+    // Field-chain form (Verum's `.` member access — the actual
+    // shape produced by the parser for `a.b.c` source).  Walk the
+    // Field nesting, collect field names, ensure the innermost
+    // receiver is a single-segment Path.
+    field_chain_text(expr)
+}
+
+/// Walk a `Field { expr, field }` chain and produce the
+/// dot-joined dotted-path text when the innermost receiver is a
+/// single-segment `Path`.  Returns `None` otherwise.
+///
+/// Example: `mathlib4.lambda.ChurchRosser` parses as
+/// `Field { expr: Field { expr: Path(mathlib4), field: lambda }, field: ChurchRosser }`
+/// and resolves to `"mathlib4.lambda.ChurchRosser"`.
+fn field_chain_text(expr: &Expr) -> Option<String> {
+    let mut tail: Vec<String> = Vec::new();
+    let mut cursor = expr;
+    loop {
+        match &cursor.kind {
+            ExprKind::Field { expr: inner, field } => {
+                tail.push(field.as_str().to_string());
+                cursor = inner.as_ref();
+            }
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                if let PathSegment::Name(ident) = &path.segments[0] {
+                    let head = ident.name.as_str();
+                    if tail.is_empty() {
+                        return Some(head.to_string());
+                    }
+                    let mut parts: Vec<String> = vec![head.to_string()];
+                    parts.extend(tail.into_iter().rev());
+                    return Some(parts.join("."));
+                }
+                return None;
+            }
             _ => return None,
         }
     }
-    if parts.is_empty() {
-        return None;
-    }
-    Some(parts.join("."))
 }
 
 /// If `expr` is the parser's representation of `<name>(args)` —
@@ -1721,6 +1755,60 @@ mod tests {
             lemma: Heap::new(dotted_path_expr(segments)),
             args: List::from(outer_args),
         })
+    }
+
+    /// Build a `Field { expr, field }` chain — the parser's actual
+    /// representation of source `a.b.c` (NOT a multi-segment Path).
+    fn field_chain_expr(segments: &[&str]) -> Expr {
+        assert!(!segments.is_empty(), "at least one segment required");
+        let head = name_path_expr(segments[0]);
+        let mut cur = head;
+        for seg in &segments[1..] {
+            cur = Expr::new(
+                ExprKind::Field {
+                    expr: Heap::new(cur),
+                    field: ident(seg),
+                },
+                span(),
+            );
+        }
+        cur
+    }
+
+    fn apply_field_chain(segments: &[&str], outer_args: Vec<Expr>) -> ProofBody {
+        ProofBody::Tactic(TacticExpr::Apply {
+            lemma: Heap::new(field_chain_expr(segments)),
+            args: List::from(outer_args),
+        })
+    }
+
+    #[test]
+    fn coq_renders_apply_with_field_chain_path() {
+        // Source: `apply mathlib4.lambda.ChurchRosser;`
+        // Parser: Apply { lemma: Field-chain, args: [] }
+        let body = apply_field_chain(&["mathlib4", "lambda", "ChurchRosser"], vec![]);
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("apply mathlib4.lambda.ChurchRosser."),
+        );
+    }
+
+    #[test]
+    fn lean_renders_apply_with_field_chain_path() {
+        let body = apply_field_chain(&["Mathlib", "Computability", "ChurchRosser"], vec![]);
+        assert_eq!(
+            LeanProofBodyRenderer::new().render(&body).text(),
+            Some("by apply Mathlib.Computability.ChurchRosser"),
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_apply_with_field_chain_path() {
+        let body = apply_field_chain(&["HOL", "List", "rev_rev"], vec![]);
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by (rule HOL.List.rev_rev)"),
+        );
     }
 
     #[test]
