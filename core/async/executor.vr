@@ -725,9 +725,25 @@ public type TimerEntry is {
 };
 
 /// Internal task entry for executor scheduling.
+///
+/// **Phase 3 (#279) SAFETY contract for `future_ptr`**:
+/// `future_ptr: &unsafe Byte` is a type-erased pointer to a
+/// heap-allocated `TaskState<F>`. The pointer is moved between
+/// threads when `AsyncRuntime.spawn` enqueues to a worker's
+/// local deque OR when work-stealing transfers the task
+/// from one worker to another. This is sound IFF the underlying
+/// future is `Send`:
+///   * `AsyncRuntime.spawn<F: Future + Send>` enforces the bound
+///     at the typed entry point (Phase 3 — pre-fix only `F.Output:
+///     Send` was required, allowing UB via `!Send` captures).
+///   * `LocalExecutor.spawn_local<F>` does NOT add a `Send` bound
+///     — its TaskEntries never leave the executor's owning thread,
+///     so the pointer is single-threaded by construction.
+/// Both paths preserve the invariant that any `TaskEntry` whose
+/// `future_ptr` may cross threads carries a `Send` future.
 type TaskEntry is {
     id: Int,
-    /// Boxed future (type-erased)
+    /// Boxed future (type-erased). See struct-level SAFETY contract.
     future_ptr: &unsafe Byte,
     /// Poll function pointer
     poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()>,
@@ -1244,7 +1260,20 @@ implement AsyncRuntime {
     /// });
     /// let res = handle.await;
     /// ```
-    public fn spawn<F: Future>(&self, future: F) -> JoinHandle<F.Output>
+    /// Spawn a future on the multi-threaded runtime.
+    ///
+    /// **Phase 3 (#279) Send/Sync correctness pin**: BOTH `F: Send`
+    /// AND `F.Output: Send` are required. Workers spawned by
+    /// `start_worker_pool` may poll the future on a different thread
+    /// than the spawning one — without `F: Send` the future could
+    /// hold a `!Send` capture (e.g. `Rc<T>`, raw thread-local
+    /// pointer) and the move-to-worker-thread is undefined behaviour.
+    ///
+    /// Programs that genuinely need `!Send` futures must use
+    /// [`LocalExecutor.spawn_local`] instead — that path retains the
+    /// single-threaded execution invariant and accepts `!Send`
+    /// futures by construction.
+    public fn spawn<F: Future + Send>(&self, future: F) -> JoinHandle<F.Output>
     where F.Output: Send
     {
         // Check shutdown
@@ -1655,7 +1684,23 @@ implement AsyncRuntime {
     /// previously 3 inline @cfg blocks each named a different
     /// concrete driver, which forced the type checker to resolve
     /// `IoDriver` even when targeting macOS where it doesn't exist.
+    ///
+    /// **Phase 3 (#279) main-thread invariant**: `wait_for_events`
+    /// must be called ONLY from the runtime-owning thread (i.e.
+    /// the thread that called `block_on`). Worker threads spawned
+    /// by `start_worker_pool` MUST NOT call this — IOEngine
+    /// internals (kqueue/io_uring/IOCP fds) are not Sync and
+    /// concurrent waiters would deadlock or corrupt the
+    /// completion-queue state. Workers stick to draining tasks +
+    /// parking on `park_cv`; the main thread is the sole I/O
+    /// poller. `current_worker_id()` is `Maybe.None` only on the
+    /// main thread, so a worker accidentally hitting this entry
+    /// point would `panic` here.
     fn wait_for_events(&self) {
+        // Phase 3 (#279) — debug-time main-thread guard.
+        if let Maybe.Some(wid) = current_worker_id() {
+            panic(f"wait_for_events called from worker thread {wid} — IOEngine is main-thread-only");
+        }
         if self.io_engine_ptr != 0 {
             let zero_cr = CompletionResult { user_data: 0, result: 0, flags: 0 };
             let mut results: [CompletionResult; 64] = [zero_cr; 64];
