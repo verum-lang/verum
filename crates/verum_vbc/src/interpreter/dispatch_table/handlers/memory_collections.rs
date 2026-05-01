@@ -246,21 +246,89 @@ pub(in super::super) fn handle_get_field(
     // is non-null. All VBC heap objects start with an ObjectHeader, so the
     // cast is layout-compatible. The reference is short-lived.
     let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-    if header.type_id.0 >= 0x8000 {
-        // This is a variant (e.g., Heap wrapper). Extract payload[0] as the inner object.
-        let payload_offset = heap::OBJECT_HEADER_SIZE + 8; // skip tag + padding
-        // SAFETY: Variant objects are laid out as [ObjectHeader, tag:u64,
-        // payload...]; payload[0] sits at `OBJECT_HEADER_SIZE + 8` and is
-        // initialized at construction. Alignment is satisfied (8 bytes).
-        let inner_value = unsafe { *(ptr.add(payload_offset) as *const Value) };
-        // The inner value should be a pointer to the actual record object
+
+    // **#338: Shared<T> auto-deref for field access**
+    //
+    // Shared<T> layout: [ObjectHeader][refcount: i64][value: Value].
+    // Field access on a Shared<T> carrier is forwarded to the
+    // inner T — same auto-deref pattern as method dispatch
+    // (method_dispatch.rs:457-560).  Without this, code like
+    // `outer.shared_field.inner_field` reads the REFCOUNT slot
+    // (field 0 of the Shared object's data section) instead of
+    // the inner T's field 0, silently corrupting the read.
+    //
+    // Pre-fix repro: `BufferPool { state: Shared<BufferPoolState> }`
+    // → `pool.state.config.buf_size` reads the Shared refcount
+    // instead of the BufferPoolState.config slot.
+    if header.type_id == TypeId::SHARED {
+        // Skip the refcount slot to reach the inner value.
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+        // SAFETY: Shared layout guarantees data_ptr.add(1) is the
+        // value slot, initialized at Shared.new(...) construction.
+        let inner_value = unsafe { *data_ptr.add(1) };
         if inner_value.is_ptr() && !inner_value.is_nil() {
             ptr = inner_value.as_ptr::<u8>();
             if ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
             }
+            // Re-read the header for the inner object.
+            if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+                return Err(InterpreterError::Panic {
+                    message: format!(
+                        "misaligned inner pointer {:p} after Shared auto-deref",
+                        ptr,
+                    ),
+                });
+            }
+        }
+        // Note: we don't re-bind `header` here because the variant
+        // check below (type_id.0 >= 0x8000) operates on the OUTER
+        // header. After Shared deref the inner can ALSO be a variant
+        // wrapper (Shared<Heap<T>>) — fall through to the existing
+        // variant unwrap which re-reads the header from the (now
+        // updated) ptr.
+    }
+
+    // SAFETY: Re-read header — `ptr` may have advanced past Shared
+    // auto-deref above; alignment was re-verified inside the Shared
+    // arm.
+    {
+        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+        if header.type_id.0 >= 0x8000 {
+            // This is a variant (e.g., Heap wrapper). Extract payload[0] as the inner object.
+            let payload_offset = heap::OBJECT_HEADER_SIZE + 8; // skip tag + padding
+            // SAFETY: Variant objects are laid out as [ObjectHeader, tag:u64,
+            // payload...]; payload[0] sits at `OBJECT_HEADER_SIZE + 8` and is
+            // initialized at construction. Alignment is satisfied (8 bytes).
+            let inner_value = unsafe { *(ptr.add(payload_offset) as *const Value) };
+            // The inner value should be a pointer to the actual record object
+            if inner_value.is_ptr() && !inner_value.is_nil() {
+                ptr = inner_value.as_ptr::<u8>();
+                if ptr.is_null() {
+                    return Err(InterpreterError::NullPointer);
+                }
+            }
         }
     }
+
+    // Re-read header AFTER any auto-deref above — the bounds check
+    // below uses `header.size`, which must reflect the FINAL `ptr`
+    // (post-Shared, post-variant unwrap).  Pre-fix the original
+    // single `header` binding (read once before the variant arm)
+    // could leave the bounds check operating on the OUTER header's
+    // size when the variant arm advanced `ptr`.
+    if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
+        return Err(InterpreterError::Panic {
+            message: format!(
+                "misaligned final pointer {:p} after auto-deref chain",
+                ptr,
+            ),
+        });
+    }
+    // SAFETY: Final ptr alignment verified immediately above; `ptr`
+    // is non-null (every auto-deref arm checks).  All VBC heap
+    // objects begin with an ObjectHeader.
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
 
     // Read field at offset — with bounds check against object data size.
     let field_offset = field_idx
@@ -594,7 +662,9 @@ pub(in super::super) fn handle_get_index(
             }
 
             // Determine element count of the source array
-            let element_count = if header.type_id == TypeId::LIST {
+            let element_count = if header.type_id.is_list_like() {
+                // LIST and BYTE_LIST share the 3-Value-header shape;
+                // `len` is at slot 0 in both layouts.
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 (unsafe { (*data_ptr).as_i64() }) as usize
             } else if header.type_id == TypeId::U8 {
@@ -642,6 +712,44 @@ pub(in super::super) fn handle_get_index(
                     unsafe {
                         *dst_data.add(i) = elem;
                     }
+                }
+                state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
+            } else if header.type_id == TypeId::BYTE_LIST {
+                // Range-slice of a packed-byte list — produce a new
+                // packed-byte list with the same layout discipline.
+                let src_header_ptr =
+                    unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                let src_backing = unsafe { (*src_header_ptr.add(2)).as_ptr::<u8>() };
+
+                // Allocate the new packed backing of `slice_len` bytes,
+                // tagged with TypeId::BYTE_LIST so the GC / CBGR scan
+                // skips Value-marking.
+                let new_backing_cap = slice_len.max(16);
+                let new_backing =
+                    state.heap.alloc(TypeId::BYTE_LIST, new_backing_cap)?;
+                state.record_allocation();
+                let new_backing_data =
+                    unsafe { (new_backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) };
+                if slice_len > 0 {
+                    let src_data = unsafe { src_backing.add(heap::OBJECT_HEADER_SIZE + start) };
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(src_data, new_backing_data, slice_len);
+                    }
+                }
+
+                // Allocate the new BYTE_LIST header.
+                let new_obj = state
+                    .heap
+                    .alloc(TypeId::BYTE_LIST, 3 * std::mem::size_of::<Value>())?;
+                state.record_allocation();
+                let new_data_ptr = unsafe {
+                    (new_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                };
+                unsafe {
+                    *new_data_ptr = Value::from_i64(slice_len as i64);
+                    *new_data_ptr.add(1) = Value::from_i64(new_backing_cap as i64);
+                    *new_data_ptr.add(2) =
+                        Value::from_ptr(new_backing.as_ptr() as *mut u8);
                 }
                 state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
             } else {
@@ -745,6 +853,21 @@ pub(in super::super) fn handle_get_index(
                 let data_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
                 let value = unsafe { *(data_ptr as *const Value) };
                 state.set_reg(dst, value);
+            } else if header.type_id == TypeId::BYTE_LIST {
+                // BYTE_LIST layout: same 3-Value header but the backing
+                // is packed `[u8; cap]` — read 1 byte and zero-extend
+                // into a NaN-boxed Value.
+                let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+                let len = unsafe { (*data_ptr).as_i64() } as usize;
+                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+
+                if index < 0 || index as usize >= len {
+                    return Err(InterpreterError::IndexOutOfBounds { index, length: len });
+                }
+
+                let elem_ptr =
+                    unsafe { backing.add(heap::OBJECT_HEADER_SIZE + index as usize) };
+                state.set_reg(dst, Value::from_i64(unsafe { *elem_ptr } as i64));
             } else {
                 // Array/Tuple - elements are stored directly in the object data
                 let element_count = header_size / std::mem::size_of::<Value>();
@@ -938,6 +1061,19 @@ pub(in super::super) fn handle_set_index(
             let elem_offset = index as usize * std::mem::size_of::<Value>();
             let data_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) };
             unsafe { *(data_ptr as *mut Value) = value };
+        } else if header.type_id == TypeId::BYTE_LIST {
+            // BYTE_LIST: write the value's low byte into the packed
+            // backing.  Mirrors the LIST branch but with 1-byte
+            // element stride.
+            let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+            let len = unsafe { (*data_ptr).as_i64() } as usize;
+            let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+            if index < 0 || index as usize >= len {
+                return Err(InterpreterError::IndexOutOfBounds { index, length: len });
+            }
+            let elem_ptr =
+                unsafe { backing.add(heap::OBJECT_HEADER_SIZE + index as usize) };
+            unsafe { *(elem_ptr as *mut u8) = (value.as_i64() & 0xFF) as u8 };
         } else {
             // Array/Tuple - elements are stored directly
             let element_count = header_size / std::mem::size_of::<Value>();
@@ -1058,11 +1194,11 @@ pub(in super::super) fn handle_array_len(
         header_size / 4
     } else if header.type_id == TypeId::U64 {
         header_size / 8
-    } else if header.type_id == TypeId::LIST {
-        // List layout: [len, cap, backing_ptr] - read len
+    } else if header.type_id.is_list_like() {
+        // LIST and BYTE_LIST share the [len, cap, backing_ptr] header
+        // shape — both read len from slot 0 of the header data.
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let len = (unsafe { (*data_ptr).as_i64() }) as usize;
-        // eprintln!("[DEBUG Len instruction] List ptr={:?}, len={}", ptr, len);
         len
     } else if header.type_id == TypeId::MAP || header.type_id == TypeId::SET {
         // Map/Set layout: [count, capacity, entries_ptr] - read count
@@ -1173,7 +1309,12 @@ pub(in super::super) fn handle_new_list(
     Ok(DispatchResult::Continue)
 }
 
-/// ListPush (0x69) - Push value to list
+/// ListPush (0x69) - Push value to list.
+///
+/// Dispatches on the list's `TypeId`:
+///   * `TypeId::LIST` — canonical 8-byte-Value-per-element backing.
+///   * `TypeId::BYTE_LIST` — packed 1-byte-per-element backing
+///     (red-team §4 fix).  Value's low byte is written directly.
 pub(in super::super) fn handle_list_push(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -1187,6 +1328,17 @@ pub(in super::super) fn handle_list_push(
 
     let value = state.get_reg(val_reg);
 
+    // Distinguish canonical LIST from packed BYTE_LIST so the
+    // backing-array stride is right.  Both layouts share the same
+    // 3-Value header `[len, cap, backing_ptr]`.
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let is_byte_list = header.type_id == TypeId::BYTE_LIST;
+    let elem_size = if is_byte_list {
+        std::mem::size_of::<u8>()
+    } else {
+        std::mem::size_of::<Value>()
+    };
+
     // Read list header
     let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
@@ -1197,8 +1349,15 @@ pub(in super::super) fn handle_list_push(
         // Grow list: double capacity (minimum 16)
         let new_cap = if cap == 0 { 16 } else { cap * 2 };
 
-        // Allocate new backing array
-        let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap)?;
+        // Allocate new backing array. For canonical LIST the backing
+        // type tag has historically been TypeId::UNIT; for BYTE_LIST
+        // we tag the backing with TypeId::BYTE_LIST so the GC / CBGR
+        // scan recognises the packed-byte shape and skips Value-marking.
+        let new_backing = if is_byte_list {
+            state.heap.alloc(TypeId::BYTE_LIST, new_cap)?
+        } else {
+            state.heap.alloc_array(TypeId::UNIT, new_cap)?
+        };
         state.record_allocation();
         let new_backing_ptr = new_backing.as_ptr() as *mut u8;
 
@@ -1207,11 +1366,7 @@ pub(in super::super) fn handle_list_push(
             let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
             let new_data = unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
             unsafe {
-                std::ptr::copy_nonoverlapping(
-                    old_data,
-                    new_data,
-                    len * std::mem::size_of::<Value>(),
-                );
+                std::ptr::copy_nonoverlapping(old_data, new_data, len * elem_size);
             }
         }
 
@@ -1224,11 +1379,17 @@ pub(in super::super) fn handle_list_push(
         backing_ptr = new_backing_ptr;
     }
 
-    // Write value to backing array
-    let elem_ptr = unsafe {
-        backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * std::mem::size_of::<Value>()) as *mut Value
-    };
-    unsafe { *elem_ptr = value };
+    // Write value to backing array.
+    if is_byte_list {
+        let elem_ptr =
+            unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size) };
+        unsafe { *elem_ptr = (value.as_i64() & 0xFF) as u8 };
+    } else {
+        let elem_ptr = unsafe {
+            backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size) as *mut Value
+        };
+        unsafe { *elem_ptr = value };
+    }
 
     // Update length
     unsafe { *data_ptr = Value::from_i64((len + 1) as i64) };
@@ -1236,7 +1397,10 @@ pub(in super::super) fn handle_list_push(
     Ok(DispatchResult::Continue)
 }
 
-/// ListPop (0x6A) - Pop value from list
+/// ListPop (0x6A) - Pop value from list.
+///
+/// Dispatches on `TypeId::LIST` (canonical Value-per-element) vs
+/// `TypeId::BYTE_LIST` (packed byte) to read the right stride.
 pub(in super::super) fn handle_list_pop(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -1247,6 +1411,9 @@ pub(in super::super) fn handle_list_pop(
     if ptr.is_null() {
         return Err(InterpreterError::NullPointer);
     }
+
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let is_byte_list = header.type_id == TypeId::BYTE_LIST;
 
     // Read list header
     let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -1259,12 +1426,18 @@ pub(in super::super) fn handle_list_pop(
 
     let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
 
-    // Read last element
-    let elem_ptr = unsafe {
-        backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1) * std::mem::size_of::<Value>())
-            as *const Value
+    // Read last element with the right stride for the layout.
+    let value = if is_byte_list {
+        let elem_ptr =
+            unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1)) };
+        Value::from_i64(unsafe { *elem_ptr } as i64)
+    } else {
+        let elem_ptr = unsafe {
+            backing_ptr.add(heap::OBJECT_HEADER_SIZE + (len - 1) * std::mem::size_of::<Value>())
+                as *const Value
+        };
+        unsafe { *elem_ptr }
     };
-    let value = unsafe { *elem_ptr };
 
     // Update length
     unsafe { *data_ptr = Value::from_i64((len - 1) as i64) };

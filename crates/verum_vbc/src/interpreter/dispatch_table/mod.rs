@@ -35,7 +35,14 @@ use crate::value::Value;
 use super::error::{InterpreterError, InterpreterResult};
 use super::state::{InterpreterState, TaskId};
 
-mod handlers;
+// `pub(crate)` so sibling modules outside `dispatch_table::` (e.g.
+// `interpreter::io_engine`) can reach into specific handlers like
+// `handlers::net_runtime` for cross-module reactor dispatch.
+// Pre-fix this was bare `mod handlers;` — a parallel-agent commit
+// added a cross-module `super::dispatch_table::handlers::net_runtime`
+// reference (io_engine.rs:679 — `async_accept` reactor dispatch)
+// without elevating the visibility, breaking the build (E0603).
+pub(crate) mod handlers;
 
 // ============================================================================
 // Extracted Handler Imports

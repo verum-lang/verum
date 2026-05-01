@@ -15,7 +15,12 @@ pub(super) mod string_helpers;
 // `wrap_in_variant` / `extract_byte_slice` / `extract_text_arg` /
 // `is_record_typed_as` / `lookup_type_id_by_name` etc.
 pub(super) mod heap_helpers;
-pub(super) mod net_runtime;
+// `pub(crate)` rather than `pub(super)` so sibling interpreter
+// modules (notably `interpreter::io_engine::async_accept`) can
+// reach `net_runtime::NET_STATUS_*` constants for reactor
+// dispatch without going through dispatch_table's private
+// orchestration.
+pub(crate) mod net_runtime;
 
 // Data movement and type conversions (0x00-0x0F)
 pub(super) mod data_movement;
