@@ -27,3 +27,4 @@ public module frontend;
 public module backend;
 public module types;
 public module codec;
+public module typed;

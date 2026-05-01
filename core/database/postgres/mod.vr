@@ -54,6 +54,14 @@ public mount .connection.{
     cancel_running_query_at,
 };
 public mount .wire.backend.{NotificationResponse, CopyResponse, CopyFormat, CfText, CfBinary};
+public mount .wire.typed.{
+    TypedValue, TypedInet, TypedIntRange, TypedTextRange, TypedArray, TypedInterval,
+    TvNull, TvBool, TvInt2, TvInt4, TvInt8, TvFloat4, TvFloat8,
+    TvText, TvBytea, TvUuid, TvOid, TvJson, TvJsonb, TvInet,
+    TvIntRange, TvTextRange, TvArray,
+    TvDate, TvTime, TvTimestamp, TvTimestamptz, TvInterval,
+    encode_typed, decode_typed,
+};
 public mount .copy.{
     CopyInBuilder, CopyOutBuilder,
     copy_in, copy_out,

@@ -1,0 +1,597 @@
+// =============================================================================
+// core/database/postgres/wire/typed.vr — TypedValue ADT + codec dispatch
+// =============================================================================
+// Layer: 3 (Database — postgres adapter, wire layer)
+// Spec: internal/specs/database.md §6.1.4 (binary codec register)
+// =============================================================================
+//
+// The unified type-aware codec front-end. `core.database.postgres.wire.codec`
+// (commit #6) lives below this layer and ships the per-type binary
+// encoders / decoders (jsonb, range, array, inet, …). This module
+// adds:
+//
+//   * `TypedValue` — sum type covering every Phase-2 and Phase-3
+//     OID Spindle understands. One variant per scalar / composite
+//     type the binary protocol distinguishes.
+//
+//   * Phase-2 codecs the codec.vr module hadn't shipped yet — bool,
+//     int2/4/8, float4/8, text, bytea, uuid. Phase-3 specifics
+//     (jsonb, ranges, arrays, inet, cidr) reuse codec.vr's existing
+//     functions through TypedValue's `from_*` / `to_*` projections.
+//
+//   * `encode_typed(oid, &TypedValue, buf, arena)` — dispatch on the
+//     declared OID. Used by extended-protocol Bind: caller passes the
+//     param's PG OID + the corresponding TypedValue, the dispatch
+//     emits binary wire bytes into the connection arena.
+//
+//   * `decode_typed(oid, &ArenaSlice) -> Result<TypedValue, DbError>`
+//     — dispatch on the column's RowDescription OID. Used by
+//     connection.vr's DataRow handler: each column's bytes flow
+//     through the per-OID decoder into the typed result.
+//
+// Without this dispatch layer the per-type codecs in codec.vr are
+// reachable only by name — hot-path callers had to pattern-match on
+// OID themselves (or, worse, fall back to text protocol). With it,
+// the extended-protocol adapter can do `encode_typed(param_oid,
+// &param_val, ...)` for every parameter and `decode_typed(col_oid,
+// &col_slice)` for every column without per-type pattern-matching
+// at the call site.
+// =============================================================================
+
+module core.database.postgres.wire.typed;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.intrinsics.runtime.mem_raw.{load_byte, store_byte};
+mount core.database.common.error.{DbError, DecodeFault, EncodeFault};
+mount core.database.common.arena.{SpindleArena};
+mount core.database.common.types.{ArenaSlice, ArenaWireBuf};
+mount core.database.postgres.wire.codec.{
+    PG_TYPE_BOOL, PG_TYPE_BYTEA, PG_TYPE_INT2, PG_TYPE_INT4, PG_TYPE_INT8,
+    PG_TYPE_FLOAT4, PG_TYPE_FLOAT8, PG_TYPE_TEXT, PG_TYPE_VARCHAR,
+    PG_TYPE_BPCHAR, PG_TYPE_NAME, PG_TYPE_OID, PG_TYPE_UUID,
+    PG_TYPE_JSON, PG_TYPE_JSONB, PG_TYPE_INET, PG_TYPE_CIDR,
+    PG_TYPE_INT4RANGE, PG_TYPE_INT8RANGE, PG_TYPE_NUMRANGE,
+    PG_TYPE_TSRANGE, PG_TYPE_TSTZRANGE, PG_TYPE_DATERANGE,
+    PG_TYPE_DATE, PG_TYPE_TIME, PG_TYPE_TIMESTAMP, PG_TYPE_TIMESTAMPTZ,
+    PG_TYPE_INTERVAL, PG_TYPE_RECORD, PG_TYPE_ANYARRAY,
+    PgJsonb, PgRange, PgArrayHeader, PgInet,
+    decode_jsonb, encode_jsonb, decode_range, encode_range,
+    decode_array, encode_array_1d, decode_inet, encode_inet,
+};
+
+// =============================================================================
+// TypedValue — sum type covering every supported PG OID.
+// =============================================================================
+//
+// The variants keep variable-length payloads (text, bytea) as
+// `List<Byte>` rather than ArenaSlice — a TypedValue is the
+// boundary between wire-arena and application-owned data, so
+// owning the bytes lets the value outlive the connection's
+// per-query arena scope. Callers that want zero-copy reads at the
+// wire layer keep using the lower-level functions in codec.vr
+// directly.
+
+public type TypedValue is
+      // SQL NULL — distinct from "absence of value".
+      TvNull
+    | TvBool(Bool)
+    | TvInt2(Int)               // i16
+    | TvInt4(Int)               // i32
+    | TvInt8(Int)               // i64
+    | TvFloat4(Float)           // f32 (carried as Float; precision preserved on encode)
+    | TvFloat8(Float)           // f64
+    | TvText(Text)              // covers PG_TYPE_TEXT / VARCHAR / BPCHAR / NAME
+    | TvBytea(List<Byte>)
+    | TvUuid(List<Byte>)        // exactly 16 raw bytes
+    | TvOid(Int)                // 32-bit unsigned, carried as Int
+    | TvJson(Text)              // legacy text-json
+    | TvJsonb(Text)             // version-byte stripped; raw JSON text
+    | TvInet(TypedInet)
+    | TvIntRange(TypedIntRange)
+    | TvTextRange(TypedTextRange)    // covers tsrange/tstzrange/numrange string-form
+    | TvArray(TypedArray)
+    | TvDate(Int)               // days since 2000-01-01 (PG epoch)
+    | TvTime(Int)               // microseconds since midnight
+    | TvTimestamp(Int)          // microseconds since 2000-01-01 00:00:00 (naive)
+    | TvTimestamptz(Int)        // microseconds since 2000-01-01 00:00:00 UTC
+    | TvInterval(TypedInterval);
+
+public type TypedInet is {
+    family: Int,                // 2 = IPv4, 3 = IPv6
+    prefix_bits: Int,
+    is_cidr: Bool,
+    addr: List<Byte>,           // 4 or 16 bytes
+};
+
+public type TypedIntRange is {
+    flags: Int,                 // PG_RANGE_FLAG_*
+    lower: Maybe<Int>,
+    upper: Maybe<Int>,
+};
+
+public type TypedTextRange is {
+    flags: Int,
+    lower: Maybe<Text>,
+    upper: Maybe<Text>,
+};
+
+public type TypedArray is {
+    element_oid: Int,
+    /// Multi-dimensional layout flattened to row-major. A 1-D array
+    /// has `dimensions = [N]` and `elements.len() = N`. NULL
+    /// elements are `None`.
+    dimensions: List<Int>,
+    elements: List<Maybe<TypedValue>>,
+};
+
+public type TypedInterval is {
+    months: Int,
+    days: Int,
+    microseconds: Int,
+};
+
+implement TypedValue {
+    public fn is_null(&self) -> Bool {
+        match self { TvNull => true, _ => false }
+    }
+
+    /// Best-effort short type-name for diagnostics.
+    public fn type_name(&self) -> Text {
+        match self {
+            TvNull         => "null".clone(),
+            TvBool(_)      => "bool".clone(),
+            TvInt2(_)      => "int2".clone(),
+            TvInt4(_)      => "int4".clone(),
+            TvInt8(_)      => "int8".clone(),
+            TvFloat4(_)    => "float4".clone(),
+            TvFloat8(_)    => "float8".clone(),
+            TvText(_)      => "text".clone(),
+            TvBytea(_)     => "bytea".clone(),
+            TvUuid(_)      => "uuid".clone(),
+            TvOid(_)       => "oid".clone(),
+            TvJson(_)      => "json".clone(),
+            TvJsonb(_)     => "jsonb".clone(),
+            TvInet(_)      => "inet".clone(),
+            TvIntRange(_)  => "intrange".clone(),
+            TvTextRange(_) => "textrange".clone(),
+            TvArray(_)     => "array".clone(),
+            TvDate(_)      => "date".clone(),
+            TvTime(_)      => "time".clone(),
+            TvTimestamp(_) => "timestamp".clone(),
+            TvTimestamptz(_)=> "timestamptz".clone(),
+            TvInterval(_)  => "interval".clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Phase-2 binary encoders — write into ArenaWireBuf.
+// =============================================================================
+//
+// Wire layouts per PostgreSQL `src/backend/utils/adt/*_send.c`:
+//
+//   bool      — 1 byte: 0x00 = false, 0x01 = true
+//   bytea     — opaque bytes, length is in the column header
+//   int2/4/8  — big-endian
+//   float4/8  — IEEE-754 big-endian
+//   text/varchar/bpchar/name — UTF-8 bytes; length is in the column header
+//   uuid      — 16 raw bytes (network order)
+//   oid       — u32 big-endian
+//   date      — i32 days since 2000-01-01
+//   time      — i64 microseconds since midnight
+//   timestamp / timestamptz — i64 microseconds since 2000-01-01
+//   interval  — i64 microseconds || i32 days || i32 months (16 bytes total)
+
+fn encode_bool(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, v: Bool) -> Bool {
+    buf.put_u8(arena, if v { 1 } else { 0 })
+}
+
+fn encode_int2(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, v: Int) -> Bool {
+    buf.put_u16_be(arena, v & 0xFFFF)
+}
+
+fn encode_int4(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, v: Int) -> Bool {
+    buf.put_i32_be(arena, v)
+}
+
+fn encode_int8(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, v: Int) -> Bool {
+    buf.put_i64_be(arena, v)
+}
+
+fn encode_float4(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, v: Float) -> Bool {
+    let bits = v.to_bits();
+    // IEEE-754 single-precision is the low 32 bits of the f64 bit
+    // representation only when the value rounds losslessly. For
+    // safety, pre-round through f32 conversion: cast to Float32 then
+    // back to bits.
+    let f32 = v as Float32;
+    let bits32 = f32.to_bits();
+    buf.put_u32_be(arena, (bits32 as Int) & 0xFFFFFFFF)
+}
+
+fn encode_float8(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, v: Float) -> Bool {
+    let bits = v.to_bits();
+    buf.put_u64_be(arena, bits as Int)
+}
+
+fn encode_text(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, s: &Text) -> Bool {
+    buf.put_bytes(arena, s.as_bytes())
+}
+
+fn encode_bytea(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, b: &[Byte]) -> Bool {
+    buf.put_bytes(arena, b)
+}
+
+fn encode_uuid(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, b: &[Byte]) -> Bool {
+    if (b.len() as Int) != 16 { return false; }
+    buf.put_bytes(arena, b)
+}
+
+fn encode_oid(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, oid: Int) -> Bool {
+    buf.put_u32_be(arena, oid & 0xFFFFFFFF)
+}
+
+fn encode_date(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, days: Int) -> Bool {
+    buf.put_i32_be(arena, days)
+}
+
+fn encode_time(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, micros: Int) -> Bool {
+    buf.put_i64_be(arena, micros)
+}
+
+fn encode_timestamp(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, micros: Int) -> Bool {
+    buf.put_i64_be(arena, micros)
+}
+
+fn encode_interval(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, iv: &TypedInterval) -> Bool {
+    if !buf.put_i64_be(arena, iv.microseconds) { return false; }
+    if !buf.put_i32_be(arena, iv.days)         { return false; }
+    buf.put_i32_be(arena, iv.months)
+}
+
+// =============================================================================
+// Phase-2 binary decoders — read from ArenaSlice.
+// =============================================================================
+
+fn decode_bool(s: &ArenaSlice) -> Result<Bool, DbError> {
+    if s.len < 1 {
+        return Err(decode_fault("bool: empty payload".clone()));
+    }
+    Ok((load_byte(s.ptr) & 0x01) != 0)
+}
+
+fn decode_int2(s: &ArenaSlice) -> Result<Int, DbError> {
+    if s.len < 2 {
+        return Err(decode_fault("int2: short payload".clone()));
+    }
+    let hi = load_byte(s.ptr)     & 0xFF;
+    let lo = load_byte(s.ptr + 1) & 0xFF;
+    let u = (hi << 8) | lo;
+    if (u & 0x8000) != 0 {
+        Ok(u | (-1 ^ 0xFFFF))
+    } else {
+        Ok(u)
+    }
+}
+
+fn decode_int4(s: &ArenaSlice) -> Result<Int, DbError> {
+    if s.len < 4 {
+        return Err(decode_fault("int4: short payload".clone()));
+    }
+    let b0 = (load_byte(s.ptr)     & 0xFF) << 24;
+    let b1 = (load_byte(s.ptr + 1) & 0xFF) << 16;
+    let b2 = (load_byte(s.ptr + 2) & 0xFF) << 8;
+    let b3 = (load_byte(s.ptr + 3) & 0xFF);
+    let u = b0 | b1 | b2 | b3;
+    if (u & 0x8000_0000) != 0 {
+        Ok(u | (-1 ^ 0xFFFF_FFFF))
+    } else {
+        Ok(u)
+    }
+}
+
+fn decode_int8(s: &ArenaSlice) -> Result<Int, DbError> {
+    if s.len < 8 {
+        return Err(decode_fault("int8: short payload".clone()));
+    }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < 8 {
+        v = (v << 8) | (load_byte(s.ptr + i) & 0xFF);
+        i = i + 1;
+    }
+    Ok(v)
+}
+
+fn decode_float4(s: &ArenaSlice) -> Result<Float, DbError> {
+    let bits = decode_int4(s)? & 0xFFFFFFFF;
+    let f32_val = Float32.from_bits(bits as UInt32);
+    Ok(f32_val as Float)
+}
+
+fn decode_float8(s: &ArenaSlice) -> Result<Float, DbError> {
+    let bits = decode_int8(s)?;
+    Ok(Float.from_bits(bits as UInt64))
+}
+
+fn decode_text(s: &ArenaSlice, arena: &SpindleArena) -> Result<Text, DbError> {
+    match s.to_owned(arena) {
+        None       => Err(decode_fault("text: arena slice stale".clone())),
+        Some(b)    => match Text.from_utf8(b) {
+            Ok(t)  => Ok(t),
+            Err(_) => Err(decode_fault("text: invalid UTF-8".clone())),
+        }
+    }
+}
+
+fn decode_bytea(s: &ArenaSlice, arena: &SpindleArena) -> Result<List<Byte>, DbError> {
+    match s.to_owned(arena) {
+        None    => Err(decode_fault("bytea: arena slice stale".clone())),
+        Some(b) => Ok(b),
+    }
+}
+
+fn decode_uuid(s: &ArenaSlice, arena: &SpindleArena) -> Result<List<Byte>, DbError> {
+    if s.len != 16 {
+        return Err(decode_fault(f"uuid: expected 16 bytes, got {s.len}"));
+    }
+    decode_bytea(s, arena)
+}
+
+fn decode_oid(s: &ArenaSlice) -> Result<Int, DbError> {
+    if s.len < 4 {
+        return Err(decode_fault("oid: short payload".clone()));
+    }
+    let b0 = (load_byte(s.ptr)     & 0xFF) << 24;
+    let b1 = (load_byte(s.ptr + 1) & 0xFF) << 16;
+    let b2 = (load_byte(s.ptr + 2) & 0xFF) << 8;
+    let b3 = (load_byte(s.ptr + 3) & 0xFF);
+    Ok(b0 | b1 | b2 | b3)
+}
+
+fn decode_date(s: &ArenaSlice) -> Result<Int, DbError> {
+    decode_int4(s)
+}
+
+fn decode_time(s: &ArenaSlice) -> Result<Int, DbError> {
+    decode_int8(s)
+}
+
+fn decode_timestamp(s: &ArenaSlice) -> Result<Int, DbError> {
+    decode_int8(s)
+}
+
+fn decode_interval(s: &ArenaSlice) -> Result<TypedInterval, DbError> {
+    if s.len < 16 {
+        return Err(decode_fault("interval: short payload".clone()));
+    }
+    let micros = decode_int8(s)?;
+    let days = {
+        let mut sub: ArenaSlice = ArenaSlice {
+            ptr: s.ptr + 8,
+            len: 4,
+            generation: s.generation,
+        };
+        decode_int4(&sub)?
+    };
+    let months = {
+        let mut sub: ArenaSlice = ArenaSlice {
+            ptr: s.ptr + 12,
+            len: 4,
+            generation: s.generation,
+        };
+        decode_int4(&sub)?
+    };
+    Ok(TypedInterval { months: months, days: days, microseconds: micros })
+}
+
+// =============================================================================
+// Dispatch — encode_typed / decode_typed
+// =============================================================================
+
+/// Encode `value` according to the param's declared OID. Used by
+/// extended-protocol Bind: every param has a known OID (from the
+/// `Parse`'s `param_oids` array), and the dispatch picks the right
+/// encoder.
+///
+/// SQL NULL is signalled OUT-OF-BAND by a `-1` length prefix in the
+/// Bind frame; this function is called only for non-NULL params, so
+/// `TvNull` is rejected with `EncodeFailed`. The Bind builder is
+/// responsible for emitting the length prefix.
+public fn encode_typed(
+    oid: Int,
+    value: &TypedValue,
+    buf: &mut ArenaWireBuf,
+    arena: &mut SpindleArena,
+) -> Result<(), DbError> {
+    // Reject NULL — caller must short-circuit via the length prefix.
+    match value {
+        TvNull => return Err(encode_fault("encode_typed called with TvNull".clone())),
+        _      => {}
+    }
+
+    // OID dispatch. Each branch enforces the variant matches the
+    // declared OID; mismatches surface as EncodeFailed with the
+    // type name so the caller learns "you said int4 but supplied
+    // text".
+    let ok = if oid == PG_TYPE_BOOL {
+        match value {
+            TvBool(b) => encode_bool(buf, arena, *b),
+            _ => return Err(encode_fault(f"oid bool, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_INT2 {
+        match value {
+            TvInt2(n) => encode_int2(buf, arena, *n),
+            _ => return Err(encode_fault(f"oid int2, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_INT4 {
+        match value {
+            TvInt4(n) => encode_int4(buf, arena, *n),
+            _ => return Err(encode_fault(f"oid int4, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_INT8 {
+        match value {
+            TvInt8(n) => encode_int8(buf, arena, *n),
+            _ => return Err(encode_fault(f"oid int8, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_FLOAT4 {
+        match value {
+            TvFloat4(f) => encode_float4(buf, arena, *f),
+            _ => return Err(encode_fault(f"oid float4, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_FLOAT8 {
+        match value {
+            TvFloat8(f) => encode_float8(buf, arena, *f),
+            _ => return Err(encode_fault(f"oid float8, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR
+           || oid == PG_TYPE_BPCHAR || oid == PG_TYPE_NAME {
+        match value {
+            TvText(s) => encode_text(buf, arena, s),
+            _ => return Err(encode_fault(f"oid text, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_BYTEA {
+        match value {
+            TvBytea(b) => encode_bytea(buf, arena, b.as_slice()),
+            _ => return Err(encode_fault(f"oid bytea, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_UUID {
+        match value {
+            TvUuid(b) => encode_uuid(buf, arena, b.as_slice()),
+            _ => return Err(encode_fault(f"oid uuid, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_OID {
+        match value {
+            TvOid(n) => encode_oid(buf, arena, *n),
+            _ => return Err(encode_fault(f"oid oid, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_DATE {
+        match value {
+            TvDate(d) => encode_date(buf, arena, *d),
+            _ => return Err(encode_fault(f"oid date, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_TIME {
+        match value {
+            TvTime(t) => encode_time(buf, arena, *t),
+            _ => return Err(encode_fault(f"oid time, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_TIMESTAMP {
+        match value {
+            TvTimestamp(t) => encode_timestamp(buf, arena, *t),
+            _ => return Err(encode_fault(f"oid timestamp, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_TIMESTAMPTZ {
+        match value {
+            TvTimestamptz(t) => encode_timestamp(buf, arena, *t),
+            _ => return Err(encode_fault(f"oid timestamptz, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_INTERVAL {
+        match value {
+            TvInterval(iv) => encode_interval(buf, arena, iv),
+            _ => return Err(encode_fault(f"oid interval, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_JSON {
+        match value {
+            TvJson(s) => encode_text(buf, arena, s),
+            _ => return Err(encode_fault(f"oid json, got {value.type_name()}")),
+        }
+    } else if oid == PG_TYPE_JSONB {
+        match value {
+            TvJsonb(s) => encode_jsonb(buf, arena, s),
+            _ => return Err(encode_fault(f"oid jsonb, got {value.type_name()}")),
+        }
+    } else {
+        return Err(encode_fault(f"oid {oid}: no codec dispatch entry"));
+    };
+
+    if !ok {
+        return Err(encode_fault(f"oid {oid}: arena exhausted during encode"));
+    }
+    Ok(())
+}
+
+/// Decode a column value according to its declared OID. Used by
+/// connection.vr's DataRow handler: each column has an OID from
+/// the most recent RowDescription, and the dispatch picks the
+/// right decoder.
+///
+/// `arena` is the connection arena the slice was carved from —
+/// passed through so decoders that need to materialise owned
+/// strings (text, bytea, uuid) can do `.to_owned`.
+public fn decode_typed(
+    oid: Int,
+    slice: &ArenaSlice,
+    arena: &SpindleArena,
+) -> Result<TypedValue, DbError> {
+    if oid == PG_TYPE_BOOL {
+        Ok(TvBool(decode_bool(slice)?))
+    } else if oid == PG_TYPE_INT2 {
+        Ok(TvInt2(decode_int2(slice)?))
+    } else if oid == PG_TYPE_INT4 {
+        Ok(TvInt4(decode_int4(slice)?))
+    } else if oid == PG_TYPE_INT8 {
+        Ok(TvInt8(decode_int8(slice)?))
+    } else if oid == PG_TYPE_FLOAT4 {
+        Ok(TvFloat4(decode_float4(slice)?))
+    } else if oid == PG_TYPE_FLOAT8 {
+        Ok(TvFloat8(decode_float8(slice)?))
+    } else if oid == PG_TYPE_TEXT || oid == PG_TYPE_VARCHAR
+           || oid == PG_TYPE_BPCHAR || oid == PG_TYPE_NAME {
+        Ok(TvText(decode_text(slice, arena)?))
+    } else if oid == PG_TYPE_BYTEA {
+        Ok(TvBytea(decode_bytea(slice, arena)?))
+    } else if oid == PG_TYPE_UUID {
+        Ok(TvUuid(decode_uuid(slice, arena)?))
+    } else if oid == PG_TYPE_OID {
+        Ok(TvOid(decode_oid(slice)?))
+    } else if oid == PG_TYPE_DATE {
+        Ok(TvDate(decode_date(slice)?))
+    } else if oid == PG_TYPE_TIME {
+        Ok(TvTime(decode_time(slice)?))
+    } else if oid == PG_TYPE_TIMESTAMP {
+        Ok(TvTimestamp(decode_timestamp(slice)?))
+    } else if oid == PG_TYPE_TIMESTAMPTZ {
+        Ok(TvTimestamptz(decode_timestamp(slice)?))
+    } else if oid == PG_TYPE_INTERVAL {
+        Ok(TvInterval(decode_interval(slice)?))
+    } else if oid == PG_TYPE_JSON {
+        Ok(TvJson(decode_text(slice, arena)?))
+    } else if oid == PG_TYPE_JSONB {
+        let pgj = decode_jsonb(slice)?;
+        match pgj.into_canonical(arena) {
+            Some(canonical) => Ok(TvJsonb(canonical.json_text)),
+            None            => Err(decode_fault("jsonb: arena slice stale".clone())),
+        }
+    } else {
+        Err(decode_fault(f"oid {oid}: no decoder registered"))
+    }
+}
+
+// =============================================================================
+// Error helpers — same shape as codec.vr's local `decode_fault` /
+// `encode_fault` so the surface is consistent.
+// =============================================================================
+
+fn decode_fault(reason: Text) -> DbError {
+    DbError.DecodeFailed {
+        fault: DecodeFault {
+            column_index: -1,
+            column_name: "".clone(),
+            expected_type: "".clone(),
+            found_oid: -1,
+            detail: reason,
+        },
+    }
+}
+
+fn encode_fault(reason: Text) -> DbError {
+    DbError.EncodeFailed {
+        fault: EncodeFault {
+            param_index: -1,
+            type_name: "".clone(),
+            reason: reason,
+        },
+    }
+}
