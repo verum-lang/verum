@@ -25,7 +25,6 @@
 //! `permissions = ["time"]` script can't quietly mutate
 //! environment that affects child-process behaviour.
 
-use crate::interpreter::heap;
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
 use crate::types::TypeId;
