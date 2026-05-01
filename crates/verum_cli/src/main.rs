@@ -1411,6 +1411,18 @@ enum Commands {
         #[clap(long = "reflection-tower")]
         reflection_tower: bool,
 
+        /// Run the ATS-V Architectural Type System discharge audit.
+        /// Walks the kernel-side architectural intrinsic registry
+        /// (capability discipline, boundary check, composition algebra,
+        /// lifecycle integrity, foundation consistency, anti-pattern
+        /// catalog, CVE-closure, end-to-end soundness witness) and
+        /// reports stable RFC error codes ATS-V-AP-001..010 from the
+        /// canonical anti-pattern catalog (10 patterns in Сезон 1; 22
+        /// remaining for Сезон 2 per `internal/specs/ats-v.md` §7).
+        /// Output: `target/audit-reports/arch-discharges.json`.
+        #[clap(long = "arch-discharges")]
+        arch_discharges: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3863,6 +3875,7 @@ fn run_command(cli: Cli) -> Result<()> {
             differential_kernel,
             differential_kernel_fuzz,
             reflection_tower,
+            arch_discharges,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -3927,6 +3940,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_differential_kernel_fuzz_with_format(output_format)
             } else if reflection_tower {
                 commands::audit::audit_reflection_tower_with_format(output_format)
+            } else if arch_discharges {
+                commands::audit::audit_arch_discharges_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {

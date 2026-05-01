@@ -1,0 +1,239 @@
+// =============================================================================
+// core.architecture.types — ATS-V architectural primitives
+// =============================================================================
+//
+// **Verum-native mirror of `verum_kernel::arch`.**
+//
+// Per `internal/specs/ats-v.md` §4 (Architectural primitives) +
+// §17 (Reuse compliance), every concept here uses canonical
+// Verum syntax — `type X is variant_list`, `type X is { fields }`,
+// `type X is protocol { ... }` — with no new grammar productions.
+//
+// Cross-side alignment with `verum_kernel::arch::*` is pinned by
+// the kernel test suite. Adding a new variant here requires
+// updating the kernel-side enum AND vice-versa.
+// =============================================================================
+
+module core.architecture.types;
+
+mount core.prelude.{Bool, Int, Maybe, List, Text};
+
+// =============================================================================
+// Resource / target / realm tags
+// =============================================================================
+
+public type ResourceTag is
+    | Database(Text)
+    | File(Text)
+    | Memory(Text)
+    | Config(Text)
+    | Logger
+    | Random
+    | CustomResource(Text);
+
+public type ExecTarget is
+    | Ffi(Text, Text)
+    | Syscall(Int)
+    | Program(Text)
+    | CustomTarget(Text);
+
+public type PrivilegeRealm is
+    | Admin
+    | Root
+    | Audit
+    | CustomRealm(Text);
+
+public type TaskLifetime is
+    | ScopedToParent
+    | Detached
+    | Deadlined(Int);
+
+public type ExpirationPolicy is
+    | AtUnixTime(Int)
+    | AfterDuration(Int)
+    | OnEvent(Text);
+
+public type PersistenceMedium is
+    | Disk(Text)
+    | DatabaseMedium(Text)
+    | DistributedLog(Text);
+
+public type NetProtocol is
+    | Tcp
+    | Udp
+    | Unix
+    | Tls
+    | Quic
+    | Http
+    | Grpc;
+
+public type NetDirection is
+    | Inbound
+    | Outbound
+    | Bidirectional;
+
+// =============================================================================
+// Capability — first-class possibility
+// =============================================================================
+
+/// First-class capability tracked at architecture level.  Per ATS-V
+/// spec §4.2.  Substructural-logic flavour (Linear / Affine /
+/// Relevant / Unrestricted) attaches via existing `@quantity(0|1|omega)`
+/// attribute at the binding site — NOT via a parallel enum here.
+public type Capability is
+    | Read(ResourceTag)
+    | Write(ResourceTag)
+    | Exec(ExecTarget)
+    | Escalate(PrivilegeRealm)
+    | Spawn(TaskLifetime)
+    | TimeBound(ExpirationPolicy)
+    | Persist(PersistenceMedium)
+    | Network(NetProtocol, NetDirection)
+    | CustomCapability(Text);
+
+// =============================================================================
+// Boundary — cross-module typed traffic discipline
+// =============================================================================
+
+public type MessageType is
+    | TypedMessage(Text, Text)
+    | CapabilityTransfer(Text)
+    | ControlFrame(Text)
+    | RawMessage;
+
+public type BoundaryInvariant is
+    | AllOrNothing
+    | DeterministicSerialisation
+    | AuthenticatedFirst
+    | BackpressureHonoured
+    | CustomInvariant(Text);
+
+public type WireEncoding is
+    | VerumNative
+    | ProtoBuf(Text)
+    | JsonEncoding(Text)
+    | MsgPack
+    | RawBytes;
+
+public type BoundaryPhysicalLayer is
+    | Intracrate
+    | Intracess
+    | Ipc
+    | NetworkLayer;
+
+/// Boundary record per spec §4.3.
+public type Boundary is {
+    messages_in: List<MessageType>,
+    messages_out: List<MessageType>,
+    capability_handoff: List<Capability>,
+    invariants: List<BoundaryInvariant>,
+    wire_encoding: WireEncoding,
+    physical_layer: BoundaryPhysicalLayer,
+};
+
+// =============================================================================
+// Lifecycle — staged status
+// =============================================================================
+
+public type ConfidenceLevel is
+    | Low
+    | Medium
+    | High;
+
+/// Lifecycle stage per spec §4.5.  Transitions form a poset:
+/// `Theorem > Conditional > Plan > Hypothesis > Obsolete`.
+/// `LifecycleRegression` (ATS-V-AP-009) flags cogs citing
+/// strictly-lower-rank cited cogs.
+public type Lifecycle is
+    | Hypothesis(ConfidenceLevel)
+    | Plan(Text)
+    | Conditional(List<Text>)
+    | Theorem(Text)
+    | Obsolete(Text, Maybe<Text>);
+
+// =============================================================================
+// Foundation — meta-theoretic profile
+// =============================================================================
+
+/// Foundation profile per spec §4.6.  Composing cogs with
+/// incompatible foundations without an explicit functor-bridge
+/// triggers `FoundationDrift` (ATS-V-AP-005).
+public type Foundation is
+    | ZfcTwoInacc
+    | Hott
+    | Cubical
+    | Cic
+    | Mltt
+    | Eff
+    | CustomFoundation(Text, Text);
+
+// =============================================================================
+// Tier — execution placement
+// =============================================================================
+
+/// Execution tier per spec §4.7.  Tier mismatches without bridge
+/// trigger `TierMixing` (ATS-V-AP-004).
+public type Tier is
+    | Interp
+    | Aot
+    | Gpu
+    | TierCheck
+    | MultiTier(List<Tier>);
+
+// =============================================================================
+// MsfsStratum — position in MSFS moduli space
+// =============================================================================
+
+/// MSFS stratum per spec §4.7 + reflection_tower.  `LAbs` is
+/// inadmissible by AFN-T α (MSFS Theorem 5.1) — declaring it
+/// triggers stratum-admissibility check.
+public type MsfsStratum is
+    | LFnd
+    | LCls
+    | LClsTop
+    | LAbs;
+
+// =============================================================================
+// CveClosure — Constructive / Verifiable / Executable triple
+// =============================================================================
+
+/// Verification strategy reuses existing `@verify(...)` ladder
+/// per grammar verum.ebnf:467+.
+public type VerifyStrategy is
+    | Runtime
+    | Static
+    | Fast
+    | Formal
+    | Proof
+    | Thorough
+    | Reliable
+    | Certified
+    | Synthesize;
+
+/// CVE-closure triple per spec §4.8 + §32 (dual-audience contract).
+public type CveClosure is {
+    constructive: Maybe<Text>,
+    verifiable_strategy: Maybe<VerifyStrategy>,
+    executable: Maybe<Text>,
+};
+
+// =============================================================================
+// Shape — main carrier of @arch_module(...)
+// =============================================================================
+
+/// Main carrier per spec §4.1.  The compiler builds a `Shape` from
+/// each `@arch_module(...)` declaration; the ATS-V phase consumes
+/// it during architectural type checking.
+public type Shape is {
+    exposes: List<Capability>,
+    requires: List<Capability>,
+    preserves: List<BoundaryInvariant>,
+    consumes: List<Text>,
+    at_tier: Tier,
+    foundation: Foundation,
+    stratum: MsfsStratum,
+    cve_closure: CveClosure,
+    lifecycle: Lifecycle,
+    composes_with: List<Text>,
+    strict: Bool,
+};

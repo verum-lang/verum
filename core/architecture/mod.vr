@@ -1,0 +1,62 @@
+// =============================================================================
+// core.architecture — ATS-V Architectural Type System library (Сезон 1)
+// =============================================================================
+//
+// **Verum-native canonical types for the Architectural Type System.**
+//
+// Per `internal/specs/ats-v.md` §17.4 (Reuse compliance), the ATS-V
+// extension is implemented as:
+//
+//   1. ONE typed attribute — `@arch_module(...)` — recognised by the
+//      compiler-internal dispatch (V8.1 META1 architectural principle,
+//      grammar/verum.ebnf:438 generic identifier(args) form).
+//
+//   2. THIS library — Verum-native `type X is variant_list` declarations
+//      that mirror the kernel-side `verum_kernel::arch` primitives.
+//      Both sides stay in sync via cross-side pin tests.
+//
+//   3. Library theorems in `anti_patterns.vr` declaring kernel-discharge
+//      bridges for the 10 canonical anti-patterns (Сезон 1; Сезон 2 lands
+//      remaining 22).
+//
+// **Architectural alignment** mirrors `core.verify.separation_soundness`
+// (#161) and `core.verify.codegen_soundness` (#162): kernel-discharge
+// pattern with `@kernel_discharge(<intrinsic>)` annotations.
+//
+// **Module roster** (Сезон 1):
+//
+//   1. `types.vr` — canonical primitives (Capability / Boundary /
+//      Composition / Lifecycle / Foundation / Tier / MsfsStratum /
+//      CveClosure / Shape).
+//   2. `capability_ontology.vr` — registered Custom capability names.
+//   3. `anti_patterns.vr` — 10 canonical anti-pattern theorems with
+//      stable error codes ATS-V-AP-001..010.
+//
+// **Future modules** (Сезон 2-3):
+//   * `composition_algebra.vr` — explicit composition operators.
+//   * `mtac_operators.vr` — modal-temporal calculus (§20-§23 spec).
+//   * `counterfactual.vr` — type-only what-if reasoning (§22 spec).
+// =============================================================================
+
+module core.architecture.mod;
+
+mount super.types.{
+    Capability,
+    Boundary,
+    Lifecycle,
+    Foundation,
+    Tier,
+    MsfsStratum,
+    CveClosure,
+    Shape,
+};
+mount super.anti_patterns.{
+    kernel_arch_capability_discipline,
+    kernel_arch_boundary_check,
+    kernel_arch_composition_check,
+    kernel_arch_lifecycle_check,
+    kernel_arch_foundation_consistency,
+    kernel_arch_anti_pattern_check,
+    kernel_arch_cve_closure,
+    kernel_arch_soundness_v0,
+};

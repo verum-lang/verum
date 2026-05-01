@@ -414,6 +414,15 @@ attribute_item  = '@' , attribute , item ;
  *   - @enact(epsilon = "...")     VVA §11 DC/Actic side annotation.
  *   - @accessibility(<lambda>)    Diakrisis Axi-4 marker.
  *   - @quantity(0 | 1 | omega)    VVA §7.6 linearity.
+ *   - @arch_module(...)           ATS-V Architectural Type System
+ *                                  declaration. Named-arg form takes
+ *                                  exposes/requires/preserves/at_tier/
+ *                                  foundation/stratum/cve_closure_C/
+ *                                  cve_closure_V_strategy/cve_closure_E/
+ *                                  lifecycle/composes_with/strict.
+ *                                  Spec: internal/specs/ats-v.md §8.
+ *                                  Dispatch: verum_kernel::arch +
+ *                                  ATS-V phase 6.5 (Сезон 1).
  *
  * META-SYSTEM ADVISORY ATTRIBUTES (parsed via the generic
  * `identifier(args)` form below; semantic validation lives in

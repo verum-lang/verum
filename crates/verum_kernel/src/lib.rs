@@ -108,6 +108,8 @@ pub mod kernel_registry; // N-kernel registry for differential testing
 pub mod differential_fuzz; // mutation-based property fuzzing over the registry
 pub mod reflection_tower; // MSFS-grounded meta-soundness reflection tower
 pub mod verdict; // canonical VerificationVerdict + DischargeMethod (ATS-V foundation)
+pub mod arch; // ATS-V architectural primitives (Capability / Boundary / Composition / ...)
+pub mod arch_anti_pattern; // ATS-V anti-pattern catalog with stable error codes
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type

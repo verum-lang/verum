@@ -1,0 +1,166 @@
+// =============================================================================
+// core.architecture.anti_patterns — ATS-V kernel-discharged anti-pattern bridges
+// =============================================================================
+//
+// **Kernel-discharge attestation surface for the ATS-V architectural
+// type system, Сезон 1.**
+//
+// Mirrors `core.verify.codegen_soundness` (#162) and
+// `core.verify.separation_soundness` (#161 V0): each axiom records a
+// kernel-discharge bridge for an architectural invariant — admitted-with-
+// citation-to-the-spec, dispatched through a stable kernel intrinsic.
+//
+// **Stable error codes**: each anti-pattern carries a stable RFC code
+// `ATS-V-AP-NNN` (per spec §32.4). Codes for Сезон 1 are 001..010;
+// remaining codes 011..032 land in Сезон 2 with the rest of the
+// canonical catalog.
+//
+// **Architectural alignment**: discharge through 8 kernel intrinsics
+// in `verum_kernel::intrinsic_dispatch`:
+//
+//   * `kernel_arch_capability_discipline` — composes AP-001 + AP-002.
+//   * `kernel_arch_boundary_check` — invariants across boundaries.
+//   * `kernel_arch_composition_check` — composition algebra (§5.3 spec).
+//   * `kernel_arch_lifecycle_check` — AP-009 LifecycleRegression.
+//   * `kernel_arch_foundation_consistency` — AP-005 FoundationDrift.
+//   * `kernel_arch_anti_pattern_check` — generic dispatcher (10 patterns).
+//   * `kernel_arch_cve_closure` — AP-010 CveIncomplete (strict mode).
+//   * `kernel_arch_soundness_v0` — composes the 7 above.
+// =============================================================================
+
+module core.architecture.anti_patterns;
+
+mount core.prelude.{Bool};
+
+// =============================================================================
+// Capability discipline (AP-001 + AP-002)
+// =============================================================================
+
+/// **ATS-V-AP-001 + ATS-V-AP-002: Capability discipline.**
+///
+/// Composes `CapabilityEscalation` (ATS-V-AP-001 — undeclared
+/// capabilities) and `CapabilityLeak` (ATS-V-AP-002 — linear
+/// capabilities escaping scope).
+///
+/// **Stable RFC codes**: ATS-V-AP-001, ATS-V-AP-002.
+@framework(ats_v, "ATS-V Anti-pattern catalog (spec internal/specs/ats-v.md §7) — AP-001 CapabilityEscalation, AP-002 CapabilityLeak. Capability flavour (Linear/Affine/Relevant/Unrestricted) reuses existing @quantity(0|1|omega) attribute (spec §17.1).")
+@kernel_discharge("kernel_arch_capability_discipline")
+public axiom kernel_arch_capability_discipline() -> Bool
+    ensures true;
+
+// =============================================================================
+// Boundary type check
+// =============================================================================
+
+/// **Boundary type check: cross-module messages + invariants.**
+///
+/// Verifies that messages crossing a boundary conform to the
+/// declared `messages_in` / `messages_out` lists, capability
+/// handoffs match `capability_handoff`, and BoundaryInvariants
+/// hold.
+@framework(ats_v, "ATS-V Boundary type check (spec internal/specs/ats-v.md §4.3 + §7 invariants). Cross-module traffic is typed; raw bytes / dangling message types / unauthenticated crossings flag respective anti-patterns.")
+@kernel_discharge("kernel_arch_boundary_check")
+public axiom kernel_arch_boundary_check() -> Bool
+    ensures true;
+
+// =============================================================================
+// Composition algebra
+// =============================================================================
+
+/// **Composition algebra: A ⊗ B per spec §5.3.**
+///
+/// Verifies that composition of cogs A and B satisfies the rules:
+///   * Capability flow valid (B.requires ⊆ A.exposes).
+///   * Foundations compatible (or explicit bridge).
+///   * Tiers compatible.
+///   * Resulting stratum is admissible (not LAbs).
+///   * No dependency cycle (AP-003).
+///   * Composition is associative + decidable (proved RT1.5).
+@framework(ats_v, "ATS-V Composition algebra (spec internal/specs/ats-v.md §4.4 + §5.3). Composition is associative; decidability per §5.4. Detects AP-003 DependencyCycle, AP-005 FoundationDrift, AP-004 TierMixing through this dispatch.")
+@kernel_discharge("kernel_arch_composition_check")
+public axiom kernel_arch_composition_check() -> Bool
+    ensures true;
+
+// =============================================================================
+// Lifecycle integrity
+// =============================================================================
+
+/// **ATS-V-AP-009: LifecycleRegression.**
+///
+/// Verifies that a cog's lifecycle stage is `≥` every cited cog's
+/// stage. `[Т]Theorem` cannot cite `[Г]Hypothesis` directly nor
+/// transitively (the check is transitive per RT1.3 refinement).
+///
+/// **Stable RFC code**: ATS-V-AP-009.
+@framework(ats_v, "ATS-V-AP-009 LifecycleRegression (spec internal/specs/ats-v.md §7 + §4.5). Lifecycle ranks: Theorem(4) > Conditional(3) > Plan(2) > Hypothesis(1) > Obsolete(0). Citing strictly-lower-rank artifacts is a defect; transitive check rejects multi-hop regressions.")
+@kernel_discharge("kernel_arch_lifecycle_check")
+public axiom kernel_arch_lifecycle_check() -> Bool
+    ensures true;
+
+// =============================================================================
+// Foundation consistency
+// =============================================================================
+
+/// **ATS-V-AP-005: FoundationDrift.**
+///
+/// Verifies that composed cogs share a foundation, OR an explicit
+/// `@framework(bridge_corpus, ...)` translates between them.
+///
+/// **Stable RFC code**: ATS-V-AP-005.
+@framework(ats_v, "ATS-V-AP-005 FoundationDrift (spec internal/specs/ats-v.md §7 + §4.6). Canonical inclusions: CIC ⊃ MLTT, Cubical ⊃ HoTT. Cross-paradigm composition (e.g. ZFC + HoTT) requires explicit functor-bridge.")
+@kernel_discharge("kernel_arch_foundation_consistency")
+public axiom kernel_arch_foundation_consistency() -> Bool
+    ensures true;
+
+// =============================================================================
+// Generic anti-pattern check
+// =============================================================================
+
+/// **Generic anti-pattern dispatcher.**
+///
+/// Walks the canonical 10-pattern roster (AP-001..010, Сезон 1) and
+/// reports any violations. Сезон 2 extends to AP-011..032.
+///
+/// Each violation surfaces as `VerificationVerdict::Rejected` with
+/// the pattern's stable code in the diagnostic metadata (per spec
+/// §32.4 dual-audience design).
+@framework(ats_v, "ATS-V anti-pattern catalog (spec internal/specs/ats-v.md §7). Сезон 1: 10 canonical patterns AP-001..010 — CapabilityEscalation, CapabilityLeak, DependencyCycle, TierMixing, FoundationDrift, RegisterMixing, TxStraddling, ResourceStraddling, LifecycleRegression, CveIncomplete. Сезон 2 lands AP-011..032.")
+@kernel_discharge("kernel_arch_anti_pattern_check")
+public axiom kernel_arch_anti_pattern_check() -> Bool
+    ensures true;
+
+// =============================================================================
+// CVE-closure check (strict mode)
+// =============================================================================
+
+/// **ATS-V-AP-010: CveIncomplete.**
+///
+/// In strict mode (`@arch_module(strict = true)`), a public theorem
+/// without complete CVE-closure (all three axes) is a defect.
+///
+/// **Stable RFC code**: ATS-V-AP-010.
+@framework(ats_v, "ATS-V-AP-010 CveIncomplete (spec internal/specs/ats-v.md §7 + §4.8 + §30 CVE-closure). Each public artifact in strict mode must declare all three CVE axes: cve_closure_C (Constructive witness), cve_closure_V_strategy (Verifiable per @verify ladder), cve_closure_E (Executable entry point).")
+@kernel_discharge("kernel_arch_cve_closure")
+public axiom kernel_arch_cve_closure() -> Bool
+    ensures true;
+
+// =============================================================================
+// End-to-end soundness witness
+// =============================================================================
+
+/// **ATS-V Сезон 1 soundness witness.**
+///
+/// Composes the 7 above kernel-discharge intrinsics into a single
+/// end-to-end discharge. Per spec §9.2 soundness statement: when
+/// `verum check` accepts a cog with `arch_type T`, all of:
+///   * Capability discipline
+///   * Composition correctness
+///   * Foundation consistency
+///   * CVE closure (strict mode)
+///   * Lifecycle integrity
+///   * Anti-pattern absence (10 canonical patterns Сезон 1)
+/// hold.
+@framework(ats_v, "ATS-V Сезон 1 soundness witness (spec internal/specs/ats-v.md §9.2). Composes 7 dispatch intrinsics. Сезон 2 expands the soundness chain to include MTAC modal operators (§20-§23 spec). Eventually self-hosted in Сезон 8 (verum_arch CVE-closed Verum cog).")
+@kernel_discharge("kernel_arch_soundness_v0")
+public axiom kernel_arch_soundness_v0() -> Bool
+    ensures true;

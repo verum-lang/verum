@@ -5301,6 +5301,22 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
+    // 11d. ATS-V Architectural Type System discharge registry.
+    //  Walks the 8 kernel-side architectural intrinsics + reports
+    //  the canonical 10-pattern anti-pattern catalog with stable
+    //  RFC error codes (ATS-V-AP-001..010). Сезон 1 registry
+    //  surface; full per-cog dispatch lands in Сезон 2.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "arch_discharges",
+        report_dir.join("arch-discharges.json"),
+        || audit_arch_discharges_with_format(AuditFormat::Json),
+    );
+    if summary.get("arch_discharges") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
     // 12. Proof-term-library — N-kernel + universe-stability +
     //  adversarial verification of the canonical certificate
     //  library at `core/verify/proof_term_examples/` (#157, #158
@@ -9931,6 +9947,187 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
 // `reflection-tower.json`. The standalone `--self-recognition`
 // command was removed as part of the verification consolidation
 // audit; consumers should call `--reflection-tower` instead.
+
+// =============================================================================
+// ATS-V Architectural Type System audit (Сезон 1)
+// =============================================================================
+
+/// `verum audit --arch-discharges` — walks every kernel intrinsic
+/// in the ATS-V architectural-type registry surface, lists discharge
+/// status, surfaces the canonical anti-pattern catalog with stable
+/// RFC error codes (ATS-V-AP-NNN), and reports the dual-audience
+/// machine-readable JSON per spec §32.4.
+///
+/// Сезон 1 scope: registry surface + structured diagnostic shape.
+/// Full per-cog dispatch (consuming Shape + DiagnosticContext) lands
+/// in Сезон 2 when the ATS-V phase is wired into the compiler
+/// pipeline.
+pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch_anti_pattern::AntiPatternCode;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V Architectural Type System — discharge registry");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("arch-discharges.json");
+
+    // Roster of ATS-V kernel intrinsics surfaced in this gate.
+    // Stable order matches `verum_kernel::intrinsic_dispatch`
+    // available_intrinsics() listing.
+    let arch_intrinsics: &[(&str, &str)] = &[
+        ("kernel_arch_capability_discipline", "Capability discipline (AP-001 + AP-002)"),
+        ("kernel_arch_boundary_check", "Boundary type check"),
+        ("kernel_arch_composition_check", "Composition algebra check"),
+        ("kernel_arch_lifecycle_check", "Lifecycle integrity (AP-009)"),
+        ("kernel_arch_foundation_consistency", "Foundation consistency (AP-005)"),
+        ("kernel_arch_anti_pattern_check", "Generic anti-pattern dispatcher"),
+        ("kernel_arch_cve_closure", "CVE-closure check (AP-010, strict mode)"),
+        ("kernel_arch_soundness_v0", "End-to-end soundness witness"),
+    ];
+
+    // Dispatch each intrinsic and collect verdicts.
+    let intrinsics_json: Vec<serde_json::Value> = arch_intrinsics
+        .iter()
+        .map(|(name, description)| {
+            let verdict = verum_kernel::intrinsic_dispatch::dispatch_intrinsic(name, &[]);
+            let (holds, reason) = match verdict {
+                Some(verum_kernel::intrinsic_dispatch::IntrinsicValue::Decision {
+                    holds,
+                    reason,
+                }) => (holds, reason),
+                _ => (false, "intrinsic not dispatched".to_string()),
+            };
+            serde_json::json!({
+                "intrinsic": name,
+                "description": description,
+                "holds": holds,
+                "reason": reason,
+            })
+        })
+        .collect();
+
+    // Anti-pattern catalog with stable RFC error codes (Сезон 1: 10).
+    let anti_patterns_json: Vec<serde_json::Value> = AntiPatternCode::full_list()
+        .iter()
+        .map(|code| {
+            serde_json::json!({
+                "code": code.code(),
+                "name": code.name(),
+                "docs_url": code.docs_url(),
+                "season": 1,
+                "stability": "v1.0",
+            })
+        })
+        .collect();
+
+    let all_intrinsics_dispatch = intrinsics_json
+        .iter()
+        .all(|j| j.get("holds").and_then(|v| v.as_bool()) == Some(true));
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_architectural_type_system",
+        "season": 1,
+        "spec": "internal/specs/ats-v.md",
+        "load_bearing": all_intrinsics_dispatch,
+        "intrinsics": intrinsics_json,
+        "anti_pattern_catalog": {
+            "total_in_season_1": 10,
+            "remaining_for_season_2": 22,
+            "patterns": anti_patterns_json,
+        },
+    });
+
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("ATS-V Architectural Type System — discharge registry");
+            println!("─────────────────────────────────────────────────────");
+            println!(
+                "  {} kernel intrinsics dispatched (Сезон 1 registry surface):",
+                arch_intrinsics.len(),
+            );
+            println!();
+            println!("  {:<40}  {:<9}  {}", "Intrinsic", "Discharge", "Description");
+            println!("  {}  {}  {}", "─".repeat(40), "─".repeat(9), "─".repeat(40));
+            for (name, description) in arch_intrinsics {
+                let verdict = verum_kernel::intrinsic_dispatch::dispatch_intrinsic(name, &[]);
+                let holds = matches!(
+                    verdict,
+                    Some(verum_kernel::intrinsic_dispatch::IntrinsicValue::Decision {
+                        holds: true,
+                        ..
+                    })
+                );
+                let glyph = if holds { "✓" } else { "✗" };
+                println!(
+                    "  {:<40}  {} {:<7}  {}",
+                    name,
+                    glyph,
+                    if holds { "yes" } else { "NO" },
+                    description,
+                );
+            }
+            println!();
+            println!(
+                "  Anti-pattern catalog: {} canonical patterns ({} remaining for Сезон 2)",
+                10, 22,
+            );
+            println!();
+            println!("  {:<14}  {:<28}  Docs URL", "Code", "Name");
+            println!("  {}  {}  {}", "─".repeat(14), "─".repeat(28), "─".repeat(40));
+            for code in AntiPatternCode::full_list().iter() {
+                println!(
+                    "  {:<14}  {:<28}  {}",
+                    code.code(),
+                    code.name(),
+                    code.docs_url(),
+                );
+            }
+            println!();
+            if all_intrinsics_dispatch {
+                println!(
+                    "{} ATS-V Сезон 1 registry surface load-bearing: all {} intrinsics \
+                     dispatch successfully.",
+                    "✓".green(),
+                    arch_intrinsics.len(),
+                );
+            } else {
+                println!(
+                    "{} ATS-V registry surface NOT fully dispatched.",
+                    "✗".red(),
+                );
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !all_intrinsics_dispatch {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "ATS-V arch-discharges audit: at least one intrinsic failed to \
+                 dispatch — see {}",
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
 
 // =============================================================================
 // Reflection-tower audit (#158) — Feferman 1989 / Pohlers / Beklemishev
