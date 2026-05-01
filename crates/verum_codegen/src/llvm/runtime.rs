@@ -3090,9 +3090,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let zero = i64_type.const_zero();
 
         // Declare free() if not present
-        let free_fn = module.get_function("free").unwrap_or_else(|| {
+        let free_fn = module.get_function("verum_internal_free").unwrap_or_else(|| {
             let ft = void_type.fn_type(&[ptr_type.into()], false);
-            module.add_function("free", ft, None)
+            module.add_function("verum_internal_free", ft, None)
         });
 
         // entry: null check
@@ -5108,10 +5108,10 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
                 builder.position_at_end(free_empty_bb);
                 // Free the read buffer before returning empty (prevent memory leak)
-                let free_fn = module.get_function("free").unwrap_or_else(|| {
+                let free_fn = module.get_function("verum_internal_free").unwrap_or_else(|| {
                     let void_type = self.context.void_type();
                     let ptr_type = self.context.ptr_type(verum_llvm::AddressSpace::default());
-                    module.add_function("free", void_type.fn_type(&[ptr_type.into()], false), None)
+                    module.add_function("verum_internal_free", void_type.fn_type(&[ptr_type.into()], false), None)
                 });
                 builder.build_call(free_fn, &[buf.into()], "").or_llvm_err()?;
                 builder.build_unconditional_branch(empty_bb).or_llvm_err()?;
@@ -5791,9 +5791,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 let builder = self.context.create_builder();
                 builder.position_at_end(entry);
                 // Delegate to free
-                let free_fn = module.get_function("free").unwrap_or_else(|| {
+                let free_fn = module.get_function("verum_internal_free").unwrap_or_else(|| {
                     let ft = void_type.fn_type(&[ptr_type.into()], false);
-                    module.add_function("free", ft, None)
+                    module.add_function("verum_internal_free", ft, None)
                 });
                 let addr = func.get_nth_param(0).or_internal("missing param 0")?.into_pointer_value();
                 builder.build_call(free_fn, &[addr.into()], "").or_llvm_err()?;
@@ -7455,9 +7455,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let recvfrom_fn_libc = self.get_or_declare_recvfrom(module);
         let memset_fn = self.get_or_declare_memset(module)?;
         let strlen_fn = self.get_or_declare_strlen(module);
-        let free_fn = module.get_function("free").unwrap_or_else(|| {
+        let free_fn = module.get_function("verum_internal_free").unwrap_or_else(|| {
             let ft = self.context.void_type().fn_type(&[ptr_type.into()], false);
-            module.add_function("free", ft, None)
+            module.add_function("verum_internal_free", ft, None)
         });
         let text_from_cstr_fn = module.get_function("verum_text_from_cstr").unwrap_or_else(|| {
             let ft = i64_type.fn_type(&[ptr_type.into()], false);
@@ -8392,8 +8392,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let close_fn = self.get_or_declare_close(module);
         let read_fn = self.get_or_declare_read(module);
         let memcpy_fn = self.get_or_declare_memcpy(module);
-        let free_fn = module.get_function("free").unwrap_or_else(|| {
-            module.add_function("free", void_type.fn_type(&[ptr_type.into()], false), None)
+        let free_fn = module.get_function("verum_internal_free").unwrap_or_else(|| {
+            module.add_function("verum_internal_free", void_type.fn_type(&[ptr_type.into()], false), None)
         });
         let waitpid_fn = self.get_or_declare_waitpid(module);
 
@@ -8589,12 +8589,14 @@ fn checked_malloc<'ctx>(
     builder.build_conditional_branch(is_null, oom_bb, ok_bb).or_llvm_err()?;
 
     builder.position_at_end(oom_bb);
-    let exit_fn = if let Some(f) = module.get_function("_exit") {
+    // Libc-free: route through verum_internal_exit_i64 wrapper
+    // (truncates i64→i32 and calls verum_os_exit).
+    let exit_fn = if let Some(f) = module.get_function("verum_internal_exit_i64") {
         f
     } else {
         let i64_type = context.i64_type();
         let fn_type = context.void_type().fn_type(&[i64_type.into()], false);
-        let f = module.add_function("_exit", fn_type, None);
+        let f = module.add_function("verum_internal_exit_i64", fn_type, None);
         f.add_attribute(
             verum_llvm::attributes::AttributeLoc::Function,
             context.create_string_attribute("noreturn", ""),
@@ -8609,6 +8611,80 @@ fn checked_malloc<'ctx>(
     Ok(raw_ptr)
 }
 
+/// Define a libc-free `verum_internal_calloc(n, size) -> ptr` wrapper.
+///
+/// **Libc-free**: the wrapper computes `n * size` and routes through
+/// `verum_os_alloc` (mmap-based on Linux/macOS; mmap with
+/// MAP_ANONYMOUS already returns zero-filled pages, so no explicit
+/// memset is needed for the calloc semantics on those platforms;
+/// VirtualAlloc on Windows likewise zero-initialises).  Internal
+/// linkage so the symbol doesn't escape into the produced object's
+/// exported table.
+///
+/// Idempotent: returns immediately if the wrapper is already defined
+/// in the module.
+///
+/// See `docs/architecture/no-libc-architecture.md`.
+pub fn define_internal_calloc<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+) -> Result<()> {
+    let wrapper_name = "verum_internal_calloc";
+    if let Some(f) = module.get_function(wrapper_name) {
+        if f.count_basic_blocks() > 0 {
+            return Ok(());
+        }
+    }
+    let i64_type = context.i64_type();
+    let ptr_type = context.ptr_type(AddressSpace::default());
+
+    let fn_type = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
+    let func = module.get_function(wrapper_name).unwrap_or_else(|| {
+        module.add_function(wrapper_name, fn_type, None)
+    });
+    if func.count_basic_blocks() > 0 {
+        return Ok(());
+    }
+    func.set_linkage(verum_llvm::module::Linkage::Internal);
+
+    // Underlying allocator.
+    let os_alloc = module.get_function("verum_os_alloc").unwrap_or_else(|| {
+        module.add_function(
+            "verum_os_alloc",
+            ptr_type.fn_type(&[i64_type.into()], false),
+            None,
+        )
+    });
+
+    let entry = context.append_basic_block(func, "entry");
+    let builder = context.create_builder();
+    builder.position_at_end(entry);
+
+    let n = func
+        .get_nth_param(0)
+        .or_internal("calloc wrapper missing param 0")?
+        .into_int_value();
+    let size = func
+        .get_nth_param(1)
+        .or_internal("calloc wrapper missing param 1")?
+        .into_int_value();
+    let total = builder
+        .build_int_mul(n, size, "total")
+        .or_llvm_err()?;
+    let ptr = builder
+        .build_call(os_alloc, &[total.into()], "ptr")
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .or_internal("verum_os_alloc returned void")?
+        .into_pointer_value();
+    builder
+        .build_return(Some(&ptr))
+        .or_llvm_err()?;
+
+    Ok(())
+}
+
 /// Emit LLVM IR function definitions for text helper functions.
 /// These replace the C runtime functions in verum_runtime.c.
 /// Call this once per module before lowering VBC instructions.
@@ -8620,18 +8696,21 @@ pub fn define_text_ir_helpers<'ctx>(
     let i8_type = context.i8_type();
     let ptr_type = context.ptr_type(AddressSpace::default());
 
-    // Ensure libc functions are declared
-    if module.get_function("malloc").is_none() {
+    // Libc-free: declare references to the internal wrappers
+    // (defined elsewhere in this module — verum_os_alloc by
+    // platform_ir.rs, verum_internal_strlen + verum_internal_memcpy
+    // by runtime.rs::get_or_declare_*).
+    if module.get_function("verum_os_alloc").is_none() {
         let malloc_ty = ptr_type.fn_type(&[i64_type.into()], false);
-        module.add_function("malloc", malloc_ty, None);
+        module.add_function("verum_os_alloc", malloc_ty, None);
     }
-    if module.get_function("strlen").is_none() {
+    if module.get_function("verum_internal_strlen").is_none() {
         let strlen_ty = i64_type.fn_type(&[ptr_type.into()], false);
-        module.add_function("strlen", strlen_ty, None);
+        module.add_function("verum_internal_strlen", strlen_ty, None);
     }
-    if module.get_function("memcpy").is_none() {
+    if module.get_function("verum_internal_memcpy").is_none() {
         let memcpy_ty = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
-        module.add_function("memcpy", memcpy_ty, None);
+        module.add_function("verum_internal_memcpy", memcpy_ty, None);
     }
 
     // --- verum_strlen_export(s: ptr) -> i64 ---
@@ -8924,14 +9003,14 @@ pub fn define_list_ir_helpers<'ctx>(
     let ptr_type = context.ptr_type(AddressSpace::default());
     let void_type = context.void_type();
 
-    // Ensure libc functions are declared
-    if module.get_function("calloc").is_none() {
-        let calloc_ty = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        module.add_function("calloc", calloc_ty, None);
-    }
-    if module.get_function("memcpy").is_none() {
+    // Libc-free: ensure verum_internal_calloc + verum_internal_memcpy
+    // wrappers are present.  Defined elsewhere in this module
+    // (calloc by `define_internal_calloc`, memcpy via the LLVM
+    // intrinsic-routing wrapper in `get_or_declare_memcpy`).
+    define_internal_calloc(context, module)?;
+    if module.get_function("verum_internal_memcpy").is_none() {
         let memcpy_ty = ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false);
-        module.add_function("memcpy", memcpy_ty, None);
+        module.add_function("verum_internal_memcpy", memcpy_ty, None);
     }
 
     // List object layout constants (48 bytes = 24-byte obj header + ptr/len/cap)
@@ -8970,7 +9049,7 @@ pub fn define_list_ir_helpers<'ctx>(
         let use_min = builder.build_int_compare(verum_llvm::IntPredicate::SLT, new_cap_2x, min_cap, "use_min").or_llvm_err()?;
         let new_cap: verum_llvm::values::IntValue = builder.build_select(use_min, min_cap, new_cap_2x, "new_cap").or_llvm_err()?.into_int_value();
         // calloc(new_cap, 8)
-        let calloc_fn = module.get_function("calloc").or_missing_fn("calloc")?;
+        let calloc_fn = module.get_function("verum_internal_calloc").or_missing_fn("verum_internal_calloc")?;
         let new_data = builder.build_call(calloc_fn, &[new_cap.into(), i64_type.const_int(8, false).into()], "new_data").or_llvm_err()?
             .try_as_basic_value().basic().or_internal("call returned void")?.into_pointer_value();
         // Load old backing ptr and len
@@ -9454,7 +9533,7 @@ pub fn define_list_ir_helpers<'ctx>(
         builder.build_conditional_branch(is_null, ret_null, do_clone).or_llvm_err()?;
 
         builder.position_at_end(do_clone);
-        let calloc_fn = module.get_function("calloc").or_missing_fn("calloc")?;
+        let calloc_fn = module.get_function("verum_internal_calloc").or_missing_fn("verum_internal_calloc")?;
         // Allocate 48-byte list object (6 * 8 = 48)
         let new_list = builder.build_call(calloc_fn, &[i64_type.const_int(6, false).into(), i64_type.const_int(8, false).into()], "new_list").or_llvm_err()?
             .try_as_basic_value().basic().or_internal("call returned void")?.into_pointer_value();
@@ -9564,14 +9643,12 @@ pub fn define_map_set_ir_helpers<'ctx>(
     let ptr_type = context.ptr_type(AddressSpace::default());
     let void_type = context.void_type();
 
-    // Ensure libc functions are declared
-    if module.get_function("calloc").is_none() {
-        let calloc_ty = ptr_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        module.add_function("calloc", calloc_ty, None);
-    }
-    if module.get_function("free").is_none() {
+    // Libc-free: route calloc through verum_internal_calloc,
+    // free through verum_internal_free (already libc-free).
+    define_internal_calloc(context, module)?;
+    if module.get_function("verum_internal_free").is_none() {
         let free_ty = void_type.fn_type(&[ptr_type.into()], false);
-        module.add_function("free", free_ty, None);
+        module.add_function("verum_internal_free", free_ty, None);
     }
 
     // Map object layout (NewG): [24B header][entries_ptr:i64][len:i64][cap:i64] = 48 bytes
@@ -9588,7 +9665,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
         let builder = context.create_builder();
         builder.position_at_end(entry);
 
-        let calloc_fn = module.get_function("calloc").or_missing_fn("calloc")?;
+        let calloc_fn = module.get_function("verum_internal_calloc").or_missing_fn("verum_internal_calloc")?;
         // Allocate VerumSet with NewG layout (6 * i64 = 48 bytes: 24B header + 3 fields)
         let set_ptr = builder.build_call(calloc_fn, &[i64_type.const_int(6, false).into(), i64_type.const_int(8, false).into()], "set").or_llvm_err()?
             .try_as_basic_value().basic().or_internal("call returned void")?.into_pointer_value();
@@ -9779,7 +9856,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
         builder.position_at_end(grow_bb);
         let old_cap = cap;
         let new_cap = builder.build_int_mul(old_cap, i64_type.const_int(2, false), "new_cap").or_llvm_err()?;
-        let calloc_fn = module.get_function("calloc").or_missing_fn("calloc")?;
+        let calloc_fn = module.get_function("verum_internal_calloc").or_missing_fn("verum_internal_calloc")?;
         let new_entries = builder.build_call(calloc_fn, &[new_cap.into(), i64_type.const_int(SET_ENTRY_SIZE, false).into()], "new_entries").or_llvm_err()?
             .try_as_basic_value().basic().or_internal("call returned void")?.into_pointer_value();
         // Rehash loop: for each old entry with non-zero hash, re-insert
@@ -9858,7 +9935,7 @@ pub fn define_map_set_ir_helpers<'ctx>(
 
         builder.position_at_end(rehash_done);
         // Free old entries
-        let free_fn = module.get_function("free").or_missing_fn("free")?;
+        let free_fn = module.get_function("verum_internal_free").or_missing_fn("free")?;
         builder.build_call(free_fn, &[data.into()], "").or_llvm_err()?;
         // Update set: cap, entries, len = rehash count
         builder.build_store(cap_gep, new_cap).or_llvm_err()?;
