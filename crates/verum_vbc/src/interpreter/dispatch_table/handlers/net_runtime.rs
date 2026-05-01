@@ -578,26 +578,33 @@ pub(in super::super) fn try_intercept_net_runtime(
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
     // Disambiguate against unrelated stdlib functions by qualifying
-    // on `core.net.tcp` / `TcpStream.` / `TcpListener.`.  This file
-    // intercepts ONLY the `core.net.tcp` high-level surface.
+    // on `core.net.{tcp,udp}` / `TcpStream.` / `TcpListener.` /
+    // `UdpSocket.`.  This file intercepts ONLY the high-level
+    // network surface in `core.net`.
     if !func_name.contains("net.tcp")
         && !func_name.contains("net::tcp")
+        && !func_name.contains("net.udp")
+        && !func_name.contains("net::udp")
         && !func_name.contains("TcpStream.")
         && !func_name.contains("TcpStream::")
+        && !func_name.contains("TcpListener.")
+        && !func_name.contains("UdpSocket.")
     {
         return Ok(None);
     }
     let bare = func_name.rsplit('.').next().unwrap_or(func_name);
+    let is_udp = func_name.contains("UdpSocket.") || func_name.contains("net.udp");
     match bare {
         // `TcpStream.connect<A: ToSocketAddrs>(addr: A) ->
-        // Result<TcpStream, IoError>` — the polymorphic top-level
-        // entry.  We accept the most common A = Text shape directly
-        // (parses "host:port"), which covers `TcpStream.connect("…")`
-        // — the canonical script idiom.  Other A shapes (SocketAddr,
-        // (Ipv4Addr, Int), ...) fall through to the bytecode body
-        // (which then calls connect_addr internally — covered below).
-        "connect" if arg_count == 1 => {
+        // Result<TcpStream, IoError>` — see `intercept_connect_text`.
+        "connect" if arg_count == 1 && !is_udp => {
             intercept_connect_text(state, args_start_reg, caller_base)
+        }
+        // `UdpSocket.bind<A: ToSocketAddrs>(addr: A) ->
+        // Result<UdpSocket, IoError>` — bypass libSystem
+        // `socket(2)` + `bind(2)` via net_runtime::udp_bind.
+        "bind" if arg_count == 1 && is_udp => {
+            intercept_udp_bind_text(state, args_start_reg, caller_base)
         }
         _ => Ok(None),
     }
@@ -656,6 +663,58 @@ fn intercept_connect_text(
     let peer_addr = build_peer_addr(state, &host, port).unwrap_or(Value::unit());
     let stream = alloc_record_n_fields(state, "TcpStream", &[fd_value, peer_addr])?;
     Ok(Some(wrap_in_variant(state, "Result", 0, &[stream])?))
+}
+
+/// Intercept `UdpSocket.bind(&Text)` — bind via std::net::UdpSocket
+/// directly, register the fd in the shared net REGISTRY, and
+/// construct the full `UdpSocket { fd, local_addr, peer_addr }`
+/// record.  Bypasses the libSystem `socket(2)` + `bind(2)` chain.
+fn intercept_udp_bind_text(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    if let Some(denied) = check_net_permission(state) {
+        return Ok(Some(denied));
+    }
+    let addr_text = extract_text_arg(state, args_start_reg, caller_base);
+    if addr_text.is_empty() || !addr_text.contains(':') {
+        return Ok(None);
+    }
+    let (host, port) = match addr_text.rsplit_once(':') {
+        Some((h, p)) => match p.parse::<u16>() {
+            Ok(n) => (
+                h.trim_matches(|c| c == '[' || c == ']').to_string(),
+                n as i64,
+            ),
+            Err(_) => return Ok(None),
+        },
+        None => return Ok(None),
+    };
+    let fd = udp_bind(port);
+    if fd < 0 {
+        return Ok(Some(build_io_err(
+            state,
+            "AddrInUse",
+            6,
+            &format!("bind: udp_bind({}:{}) failed", host, port),
+        )?));
+    }
+    // FileDesc transparent-newtype lowering — store fd as a bare Int.
+    let fd_value = Value::from_i64(fd);
+    // local_addr: best-effort SocketAddr.V4 reconstruction (matches
+    // TcpStream connect-text semantics).  IPv6 / DNS-resolved hosts
+    // fall back to Unit pending the V1 getsockname round-trip.
+    let local_addr = build_peer_addr(state, &host, port).unwrap_or(Value::unit());
+    // peer_addr: bind without connect leaves no peer — Maybe.None
+    // (tag 0, empty payload).
+    let peer_addr_none = wrap_in_variant(state, "Maybe", 0, &[])?;
+    let socket = alloc_record_n_fields(
+        state,
+        "UdpSocket",
+        &[fd_value, local_addr, peer_addr_none],
+    )?;
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[socket])?))
 }
 
 /// Best-effort `SocketAddr.V4(SocketAddrV4 { ip, port })`
@@ -827,13 +886,37 @@ pub(in super::super) fn try_intercept_tcp_method(
     } else {
         receiver
     };
-    if !method_name.contains("TcpStream.") && !is_tcpstream_value(state, receiver) {
+    // UdpSocket method dispatch — the receiver shape is the same
+    // 3-field record `[fd, local_addr, peer_addr]`, so the fd lives
+    // at field 0 just like TcpStream.  Detect via method_name OR
+    // receiver TypeId.
+    let is_udp = method_name.contains("UdpSocket.")
+        || is_record_typed_as(state, receiver, "UdpSocket");
+    if !is_udp
+        && !method_name.contains("TcpStream.")
+        && !is_tcpstream_value(state, receiver)
+    {
         return Ok(None);
     }
     let fd = match read_tcpstream_fd(receiver) {
         Some(fd) => fd,
         None => return Ok(None),
     };
+    if is_udp {
+        return match bare_method {
+            "send_to" if arg_count == 2 => {
+                intercept_udp_send_to(state, fd, args_start_reg, caller_base)
+            }
+            "recv_from" if arg_count == 1 => {
+                intercept_udp_recv_from(state, fd, args_start_reg, caller_base)
+            }
+            "close" if arg_count == 0 => {
+                let _ = udp_close(fd);
+                Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?))
+            }
+            _ => Ok(None),
+        };
+    }
     match bare_method {
         "write" if arg_count == 1 => intercept_tcp_write(state, fd, args_start_reg, caller_base),
         "read" if arg_count == 1 => intercept_tcp_read(state, fd, args_start_reg, caller_base),
@@ -846,6 +929,176 @@ pub(in super::super) fn try_intercept_tcp_method(
             Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?))
         }
         _ => Ok(None),
+    }
+}
+
+/// Generic shape probe for record types — TypeId lookup matches
+/// the canonical name.  Mirror of `is_tcpstream_value` for any
+/// type name (avoids per-type duplication).
+fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str) -> bool {
+    if !v.is_ptr() || v.is_nil() {
+        return false;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return false;
+    }
+    let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
+    state
+        .module
+        .types
+        .iter()
+        .any(|td| td.id == header.type_id && state.module.strings.get(td.name) == Some(name))
+}
+
+/// `socket.send_to(&[Byte], SocketAddr) -> Result<Int, IoError>` —
+/// extract bytes + parse SocketAddr to host:port, dispatch to
+/// net_runtime::udp_send.
+fn intercept_udp_send_to(
+    state: &mut InterpreterState,
+    fd: i64,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    if let Some(denied) = check_net_permission(state) {
+        return Ok(Some(denied));
+    }
+    let bytes = extract_byte_slice(state, args_start_reg, caller_base);
+    let addr_v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg + 1));
+    let addr_v = if super::cbgr_helpers::is_cbgr_ref(&addr_v) {
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(addr_v.as_i64());
+        state.registers.get_absolute(abs_index)
+    } else {
+        addr_v
+    };
+    let (host, port) = match read_socket_addr_value(addr_v) {
+        Some(parts) => parts,
+        None => {
+            return Ok(Some(build_io_err(
+                state,
+                "InvalidInput",
+                11,
+                "send_to: malformed SocketAddr",
+            )?));
+        }
+    };
+    let n = udp_send(fd, &bytes, &host, port);
+    if n < 0 {
+        return Ok(Some(build_io_err(
+            state,
+            "BrokenPipe",
+            8,
+            &format!("send_to: udp_send to {}:{} failed", host, port),
+        )?));
+    }
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::from_i64(n)])?))
+}
+
+/// `socket.recv_from(&mut [Byte]) -> Result<(Int, SocketAddr), IoError>`
+/// — recv into the buffer, return (bytes_recvd, source_addr).  The
+/// source address is best-effort: we currently don't have peer
+/// info from net_runtime::udp_recv (returns Option<String> only),
+/// so peer_addr falls back to a synthetic
+/// `SocketAddr.V4(SocketAddrV4 { Ipv4Addr { 0,0,0,0 }, 0 })` —
+/// callers that only need the byte count are unaffected.  V1
+/// follow-up: extend net_runtime::udp_recv to return the peer
+/// address.
+fn intercept_udp_recv_from(
+    state: &mut InterpreterState,
+    fd: i64,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    if let Some(denied) = check_net_permission(state) {
+        return Ok(Some(denied));
+    }
+    let buf_v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg));
+    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&buf_v) {
+        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(buf_v.as_i64());
+        state.registers.get_absolute(abs_index)
+    } else {
+        buf_v
+    };
+    let cap = read_buffer_capacity(unwrapped).unwrap_or(1500);
+    let cap = cap.min(64 * 1024).max(1);
+    let s = udp_recv(fd, cap as i64);
+    let n = match s {
+        Some(s) => {
+            let bytes = s.as_bytes();
+            write_into_byte_slice(unwrapped, bytes);
+            bytes.len() as i64
+        }
+        None => -1,
+    };
+    if n < 0 {
+        return Ok(Some(build_io_err(
+            state,
+            "ConnectionAborted",
+            4,
+            &format!("recv_from: udp_recv on fd {} failed", fd),
+        )?));
+    }
+    // Synthesise a placeholder peer SocketAddr.V4(0.0.0.0:0).
+    let peer_addr = build_peer_addr(state, "0.0.0.0", 0).unwrap_or(Value::unit());
+    let pair = alloc_record_n_fields(state, "Tuple", &[Value::from_i64(n), peer_addr])?;
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[pair])?))
+}
+
+/// Decode a Verum SocketAddr (sum of V4 / V6) — variant payload at
+/// `[ObjectHeader][tag:u32][n_fields:u32][payload: Value]`.  The
+/// payload pointer leads to a 2-field SocketAddrV4 record (ip,
+/// port) where the ip is a 4-byte tuple inlined as 4 Value slots.
+fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
+    if !v.is_ptr() || v.is_nil() {
+        return None;
+    }
+    let ptr = v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return None;
+    }
+    let tag = unsafe { *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const u32) };
+    let payload = unsafe {
+        *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE + 8) as *const Value)
+    };
+    if tag == 0 {
+        // V4: SocketAddrV4 { ip: Ipv4Addr { (a,b,c,d) }, port: Int }
+        if !payload.is_ptr() || payload.is_nil() {
+            return None;
+        }
+        let v4_ptr = payload.as_ptr::<u8>();
+        if v4_ptr.is_null() {
+            return None;
+        }
+        let v4_base = unsafe {
+            v4_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
+        };
+        let ip_v = unsafe { *v4_base };
+        let port_v = unsafe { *v4_base.add(1) };
+        if !ip_v.is_ptr() || ip_v.is_nil() {
+            return None;
+        }
+        let ip_ptr = ip_v.as_ptr::<u8>();
+        if ip_ptr.is_null() {
+            return None;
+        }
+        let ip_base = unsafe {
+            ip_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
+        };
+        let a = unsafe { *ip_base }.as_i64() as u8;
+        let b = unsafe { *ip_base.add(1) }.as_i64() as u8;
+        let c = unsafe { *ip_base.add(2) }.as_i64() as u8;
+        let d = unsafe { *ip_base.add(3) }.as_i64() as u8;
+        Some((format!("{}.{}.{}.{}", a, b, c, d), port_v.as_i64()))
+    } else {
+        // V6 path — defer; the SocketAddrV6 layout is the same
+        // 4-field record but ipv6 has 8 16-bit segments rather
+        // than 4 bytes.  Returning None falls through to
+        // InvalidInput; covered by VBC-NET-4 follow-up.
+        None
     }
 }
 
