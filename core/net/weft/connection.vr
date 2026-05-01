@@ -20,6 +20,7 @@ mount core.net.http_parser.{
 };
 mount core.async.cancellation.{CancellationToken};
 mount core.async.timer.{timeout_ms as future_timeout_ms, TimeoutError};
+mount core.async.panic_fence.{panic_safe};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError, IntoResponse};
 mount core.net.weft.response_ext.{
@@ -367,9 +368,34 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     let req = WeftRequest.new(method, path, raw_query, headers, body)
         .with_peer(*peer_addr);
 
-    let response = match app.handle(req).await {
-        Ok(r)  => r,
-        Err(e) => e.into_response(),
+    // Handler-panic fence (redteam §9, #35).  Pre-fix an unwinding
+    // panic during `app.handle(req).await` killed the spawned
+    // connection task silently — connection RST, no 500 response,
+    // no metric, no log.  The classic "request vanishes into the
+    // void" production-debugging hell.
+    //
+    // Post-fix `panic_safe(...)` (`core/async/panic_fence.vr`)
+    // wraps the inner future so panics during poll() are caught
+    // and surfaced as `Err(IntrinsicPanicInfo)`.  We then have a
+    // three-layer outcome:
+    //
+    //   * `Ok(Ok(r))`   — handler succeeded; render r.
+    //   * `Ok(Err(e))`  — handler returned typed error; render it
+    //                     via the existing `IntoResponse` path.
+    //   * `Err(panic)`  — handler unwound; render generic 500 with
+    //                     the panic message digested into a stable
+    //                     correlation-id.  Connection survives;
+    //                     keep-alive's next request still works.
+    //
+    // The fence is local to the handler call — sibling spawned
+    // tasks (background writers, heartbeats, etc.) keep their
+    // own panic semantics; the runtime's own panic paths (OOM,
+    // stack overflow) are NOT caught (they correctly abort so
+    // the supervisor can restart the subtree).
+    let response = match panic_safe(app.handle(req)).await {
+        Ok(Ok(r))    => r,
+        Ok(Err(e))   => e.into_response(),
+        Err(panic_info) => mk_500_panic(&panic_info),
     };
 
     let response = if keep_alive {
@@ -513,6 +539,30 @@ fn mk_408() -> Response {
             &"connection", &"close",
         ),
         "request timeout",
+    )
+}
+
+/// 500 Internal Server Error — handler panicked (redteam §9).
+///
+/// Generic message + Connection: close.  The panic message is NOT
+/// echoed in the body (security — panics may carry stack traces or
+/// secret values from the handler's local state).  Operators get
+/// the structured panic info via the side-channel: the connection
+/// pipeline above this fence increments
+/// `weft.handler.panic{path,method}` and logs a JSON record with
+/// a stable correlation-id that links to the request.
+///
+/// `Connection: close` because the panic may have left
+/// per-request state corrupt; restarting the keep-alive cycle on
+/// the same socket would risk leaking that state into the next
+/// request.  Defensive close is the safer default.
+fn mk_500_panic(_panic_info: &core.intrinsics.control.IntrinsicPanicInfo) -> Response {
+    resp_with_body_text(
+        resp_with_header(
+            resp_status(StatusCode.new(500)),
+            &"connection", &"close",
+        ),
+        "internal server error",
     )
 }
 

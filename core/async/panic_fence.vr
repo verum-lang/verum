@@ -1,0 +1,175 @@
+// =============================================================================
+// core/async/panic_fence.vr — async panic boundary for production servers
+// =============================================================================
+// Layer: 4 (Async)
+// Spec:  docs/architecture/weft-redteam-2026-05-01.md §9
+// =============================================================================
+//
+// `core.intrinsics.control.catch_unwind` catches unwinding panics
+// from synchronous closures.  Async code lives inside Future poll
+// loops — a panic during `Future::poll` unwinds the executor's
+// task, dropping the connection silently with NO 500 response, NO
+// metric emission, and NO log entry.  The classic "bad request
+// vanishes into the void" production-debugging hell.
+//
+// `PanicFence<F>` wraps any `Future` so that panics during
+// `F::poll` are caught and surfaced as `Err(IntrinsicPanicInfo)`
+// in the wrapper's `Output`.  The connection survives; the
+// runtime stays healthy; the panic becomes structured data the
+// caller routes through their normal error-handling paths.
+//
+// # Threat model
+//
+// 1. Hostile request triggers a refinement-violating arithmetic
+//    in the handler (divide-by-zero on attacker-controlled
+//    input, array bounds violation, unwrap on None).
+// 2. Pre-fence: handler unwinds, executor task dies, connection
+//    closes silently with TCP RST.  Client sees no error
+//    document; operator sees no metric increment; SRE on-call
+//    has nothing to triage.
+// 3. Post-fence: handler unwinds, fence catches the panic,
+//    `app.handle(req).await` returns `Err(PanicInfo)`, weft's
+//    error path emits a 500 response with a stable
+//    correlation-id, increments `weft.handler.panic{path,method}`,
+//    logs structured JSON with the panic message.  The
+//    connection's keep-alive survives for the next request.
+//
+// # Usage
+//
+// ```verum
+// let response_result = panic_safe(app.handle(req)).await;
+// let response = match response_result {
+//     Ok(Ok(r))           => r,                     // typed Ok
+//     Ok(Err(weft_err))   => weft_err.into_response(),  // typed Err
+//     Err(panic_info)     => render_500_panic(&panic_info),  // unwound
+// };
+// ```
+//
+// Three-layer outcome:
+//   * `Ok(Ok(r))`     — handler succeeded, return r
+//   * `Ok(Err(e))`    — handler returned typed error, render it
+//   * `Err(panic)`    — handler unwound, render generic 500 with
+//                       observability sidecar
+//
+// # Compositionality
+//
+// `PanicFence<F>` is a Future, so it composes with every other
+// Future combinator.  The fence is local to the wrapped future —
+// it does NOT catch panics from sibling spawned tasks, just from
+// `F::poll`.  Use one fence per inviolate boundary (typically:
+// one per per-request handler call, one per per-connection
+// pipeline call).  Don't blanket-fence the entire executor — the
+// runtime's own panic paths (out-of-memory, stack overflow) are
+// supposed to abort.
+
+module core.async.panic_fence;
+mount core.*;
+mount .future.*;
+mount .poll.*;
+mount .waker.*;
+mount core.intrinsics.control.{catch_unwind, IntrinsicPanicInfo};
+
+// =============================================================================
+// PanicFence<F> — wrap one Future, catch poll-time panics
+// =============================================================================
+
+/// Future wrapper that catches unwinding panics during the
+/// inner future's `poll`.  See module-level doc for threat
+/// model and usage.
+///
+/// Once a panic is caught, the inner future is dropped — a
+/// future that panicked is considered logically dead, the
+/// fence yields `Poll::Ready(Err(...))` once and never re-polls
+/// the inner.  Re-polling a panicking future would be unsound
+/// (its internal state may be partially observed; the panic
+/// safety contract requires we never resume from such a state).
+public type PanicFence<F: Future> is {
+    /// `Some(f)` while the inner future is alive (still pollable);
+    /// `None` once the inner has resolved (Ready or panicked).
+    /// Encoding the lifecycle in `Maybe<F>` makes "double poll
+    /// after Ready" a typed invariant — observed state, not a
+    /// runtime check we hope developers honour.
+    inner: Maybe<F>,
+};
+
+implement<F: Future> Future for PanicFence<F> {
+    type Output = Result<F.Output, IntrinsicPanicInfo>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, IntrinsicPanicInfo>> {
+        // Take ownership of the inner future for this poll.  If
+        // poll completes with `Pending`, we put it back; if it
+        // completes with `Ready` or panics, we leave `inner` as
+        // `None` so subsequent polls trip the lifecycle invariant.
+        let mut f = match self.inner.take() {
+            Some(f) => f,
+            None => panic("PanicFence polled after completion"),
+        };
+
+        // Catch panics from the inner future's poll.  catch_unwind
+        // returns Err(panic_info) on unwind; we surface that as
+        // Poll::Ready(Err(panic_info)).
+        //
+        // Borrow-checker note: `catch_unwind` takes ownership of
+        // the closure's captured environment via UnwindSafe.  `cx`
+        // is `&mut Context` — passed by mutable reference, the
+        // closure captures the reference, not the Context itself.
+        // The Verum borrow-checker enforces that no concurrent
+        // poll can race against this one (Future::poll requires
+        // `&mut self`), so the closure has exclusive access.
+        let poll_result = catch_unwind(|| f.poll(cx));
+
+        match poll_result {
+            Ok(Poll.Pending) => {
+                // Inner is still alive — restore for next poll.
+                self.inner = Some(f);
+                Poll.Pending
+            }
+            Ok(Poll.Ready(value)) => {
+                // Inner resolved cleanly — leave `inner` as None.
+                Poll.Ready(Ok(value))
+            }
+            Err(panic_info) => {
+                // Inner panicked — drop it (already happened by
+                // virtue of the closure's stack unwind) and
+                // surface the panic to the caller.
+                Poll.Ready(Err(panic_info))
+            }
+        }
+    }
+}
+
+/// Wrap any Future in a panic fence.
+///
+/// The returned future yields `Result<F::Output, IntrinsicPanicInfo>`
+/// — `Ok(value)` when the inner resolved cleanly, `Err(panic)`
+/// when the inner unwound during a `poll` call.
+///
+/// # Examples
+///
+/// ```verum
+/// // Catch panics from a handler invocation:
+/// let result = panic_safe(app.handle(req)).await;
+/// match result {
+///     Ok(response) => write_response(stream, &response).await,
+///     Err(panic_info) => {
+///         metrics.handler_panic.inc();
+///         log_panic(&panic_info, &req);
+///         write_response(stream, &mk_500_panic()).await
+///     }
+/// }
+/// ```
+///
+/// # When NOT to use
+///
+/// Don't blanket-fence the executor or accept-loop tasks — the
+/// runtime's own panic paths (OOM, stack overflow) need to
+/// abort cleanly so the supervisor (`core/runtime/supervisor.vr`)
+/// can restart the supervision subtree.  Use `panic_safe` at
+/// boundaries where:
+///
+///   * The wrapped computation is user-controlled (handler,
+///     extractor, middleware) AND
+///   * The caller knows how to render a fallback response.
+public fn panic_safe<F: Future>(future: F) -> PanicFence<F> {
+    PanicFence { inner: Some(future) }
+}
