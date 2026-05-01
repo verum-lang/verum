@@ -2803,9 +2803,32 @@ impl VbcCodegen {
                 }
             }
             UnOp::Not => {
-                // Check if this is a user type with a not method
+                // For built-in Bool / Int / unknown types, emit the direct
+                // `Instruction::Not` opcode — at runtime `handle_lnot`
+                // produces a logical NOT via `is_truthy`, never a bitwise
+                // complement.
+                //
+                // Method-dispatch path (CallM("not", ...)) is reserved for
+                // user types that explicitly `implement Not for MyType`.
+                // Going through method dispatch for Bool is unsound because
+                // both `Bool.not` (logical) and `Int.not` (bitwise) register
+                // under the same bare `not#1` key and the runtime picks
+                // whichever loaded first — surfacing as `!some_bool_call()`
+                // returning `-2` when `mount base.{...}` pulls in
+                // primitives.vr's `Int.not` after `Bool.not`.  Live failure
+                // mode: `if !is_valid_page_size(4096)` taking the err branch
+                // for a perfectly-valid 4 KiB page.
                 let type_name = self.extract_expr_type_name(inner);
-                let has_not_method = type_name.as_ref().is_some_and(|name| {
+                let is_builtin_not = matches!(
+                    type_name.as_deref(),
+                    None
+                        | Some("Bool")
+                        | Some("Int")
+                        | Some("Int8") | Some("Int16") | Some("Int32") | Some("Int64") | Some("Int128")
+                        | Some("UInt") | Some("UInt8") | Some("UInt16") | Some("UInt32") | Some("UInt64") | Some("UInt128")
+                        | Some("ISize") | Some("USize") | Some("Byte")
+                );
+                let has_not_method = !is_builtin_not && type_name.as_ref().is_some_and(|name| {
                     let qualified = format!("{}.not", name);
                     self.ctx.lookup_function(&qualified).is_some()
                 });
@@ -3050,9 +3073,55 @@ impl VbcCodegen {
             return Ok(result);
         }
 
+        // **Module-qualified-first lookup** for unqualified bare-name calls.
+        //
+        // Multiple stdlib modules register the same function name with the
+        // same arity but different parameter types — `is_valid_page_size#1`
+        // exists in `l1_pager/pager.vr` (taking `Int`),
+        // `journal_header_api/header.vr` (taking `&JournalHeader`),
+        // `wal_frame_layout/constants.vr` (`Int`), and
+        // `l1_pager/journal/writer.vr` (`Int`).  The function table is
+        // keyed by `(name, arity)` only — parameter type doesn't
+        // disambiguate — so whichever module loaded first wins the bare
+        // key under `prefer_existing` (stdlib loading), and a call
+        // from `pager.vr` silently dispatches to a different module's
+        // same-name function.  The mismatch surfaces only when the user
+        // adds `mount base.{Result, Ok, Err}` (transitively pulls in the
+        // conflicting modules).
+        //
+        // Fix: if we know the calling source module, prefer the
+        // module-qualified form FIRST.  Each function is registered
+        // under both bare and `<module>.<name>` qualified forms (see
+        // `register_function` at mod.rs:4855-4874), so the qualified
+        // lookup reliably finds the local-module version when it
+        // exists.  Falls back to the bare name for cross-module
+        // imports.  Architecturally honest semantics: a bare
+        // unqualified call from inside module M means "the M-local
+        // function of that name, if any; otherwise the imported one".
+        let module_qualified_lookup: Option<(String, FunctionInfo)> = {
+            let only_simple_segment = !func_name.contains("::") && !func_name.contains('.');
+            if !only_simple_segment {
+                None
+            } else if let Some(src_mod) = self.ctx.current_source_module.as_deref() {
+                if src_mod.is_empty() || src_mod == "main" {
+                    None
+                } else {
+                    let qualified = format!("{}.{}", src_mod, func_name);
+                    self.ctx
+                        .lookup_function_with_arity(&qualified, args.len())
+                        .map(|info| (qualified, info.clone()))
+                }
+            } else {
+                None
+            }
+        };
+
         // Look up function - use arity-based disambiguation when available
-        let (resolved_name, func_info) = match self.ctx.lookup_function_with_arity(&func_name, args.len()) {
-            Some(info) => (func_name.clone(), info.clone()),
+        let (resolved_name, func_info) = match module_qualified_lookup
+            .or_else(|| self.ctx.lookup_function_with_arity(&func_name, args.len())
+                .map(|info| (func_name.clone(), info.clone())))
+        {
+            Some(result) => result,
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often
