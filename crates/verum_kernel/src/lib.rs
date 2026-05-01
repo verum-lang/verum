@@ -103,6 +103,7 @@ pub const VVA_VERSION: &str = "2.6.0";
 
 pub mod proof_checker;
 pub mod proof_checker_nbe; // #159 V1 — NbE-based second algorithmic kernel
+pub mod proof_checker_meta; // #158 V1 — universe-lift mechanism for meta-mode
 // Note: `proof_checker::{check, infer, Context, Term}` deliberately
 // stay un-reexported at crate root — the names collide with
 // kernel-side `verum_kernel::infer` (the larger Verum-AST type

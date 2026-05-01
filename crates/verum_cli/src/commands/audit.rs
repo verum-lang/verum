@@ -3833,10 +3833,13 @@ fn audit_cross_format_roundtrip_inner(
 /// inductive types, etc.).
 pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::proof_checker::Certificate;
+    use verum_kernel::proof_checker_meta;
     use verum_kernel::proof_checker_nbe;
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Verifying canonical proof-term certificate library (with NbE differential)");
+        ui::step(
+            "Verifying canonical proof-term certificate library (NbE-differential + universe-stability)",
+        );
     }
 
     // Discovery: env override → workspace ancestor walk → manifest dir
@@ -3893,6 +3896,15 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     // NbE-based).  Disagreements between the two are bugs in EITHER
     // implementation; they fail the audit.
     let mut nbe_disagreements = 0usize;
+    // **#158 V1** — universe-stability check. Every certificate's
+    // verdict is computed at lifts 0..=2 via
+    // `proof_checker_meta::check_universe_stability`. The verdict
+    // must be CONSTANT across lifts — bumping the universe-hierarchy
+    // must NEVER flip the verdict. Non-stable verdicts are
+    // implementation bugs (universe-identity dependence) or
+    // soundness regressions (proof depending on a specific level).
+    let mut universe_unstable = 0usize;
+    const META_MAX_LIFT: u32 = 2;
 
     for path in &entries {
         let outcome = match std::fs::read_to_string(path) {
@@ -3914,6 +3926,17 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         .unwrap_or(false);
                     let trusted_outcome = cert.verify();
                     let nbe_outcome = proof_checker_nbe::verify_certificate(&cert);
+                    // **#158 V1 universe-stability check** — verify
+                    // the certificate's verdict is invariant under
+                    // universe-lift. Bumping every Universe(n) →
+                    // Universe(n+k) must NEVER flip accept ↔ reject.
+                    let (_, stable) = proof_checker_meta::check_universe_stability(
+                        &cert,
+                        META_MAX_LIFT,
+                    );
+                    if !stable {
+                        universe_unstable += 1;
+                    }
                     // Differential agreement check: both kernels MUST
                     // agree on accept/reject. Disagreements surface as
                     // a distinct `disagreement` outcome category that
@@ -4012,7 +4035,7 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let payload = serde_json::json!({
-        "schema_version": 3,
+        "schema_version": 4,
         "command": "audit-proof-term-library",
         "library_path": library_dir.display().to_string(),
         "total": entries.len(),
@@ -4028,6 +4051,11 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         // adversarial_unsoundly_accepted > 0 → SOUNDNESS BUG.
         "adversarial_rejected": adversarial_rejected,
         "adversarial_unsoundly_accepted": adversarial_unsoundly_accepted,
+        // #158 V1 universe-stability count — number of certificates
+        // whose verdict flipped across lift 0..=META_MAX_LIFT.
+        // Any non-zero value flips the audit gate to failure.
+        "universe_unstable": universe_unstable,
+        "meta_max_lift": META_MAX_LIFT,
         "verifications": verifications,
     });
     let _ = std::fs::write(
@@ -4038,8 +4066,12 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("Canonical proof-term certificate library (NbE-differential + adversarial)");
-            println!("──────────────────────────────────────────────────────────────────────────");
+            println!(
+                "Canonical proof-term certificate library (NbE + adversarial + universe-stability)"
+            );
+            println!(
+                "─────────────────────────────────────────────────────────────────────────────────"
+            );
             println!("  Library: {}", library_dir.display());
             println!(
                 "  ✓ {} verified · ✗ {} rejected · ✓ {} adversarial-rejected · {} {} adversarial-unsoundly-accepted",
@@ -4050,15 +4082,19 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                 adversarial_unsoundly_accepted,
             );
             println!(
-                "  ⚠ {} malformed · ✗ {} NbE-disagreement (total {})",
+                "  ⚠ {} malformed · ✗ {} NbE-disagreement · {} {} universe-unstable (lifts 0..={}, total {})",
                 malformed,
                 nbe_disagreements,
+                if universe_unstable == 0 { "✓" } else { "✗" },
+                universe_unstable,
+                META_MAX_LIFT,
                 entries.len(),
             );
             let any_failure = rejected > 0
                 || malformed > 0
                 || nbe_disagreements > 0
-                || adversarial_unsoundly_accepted > 0;
+                || adversarial_unsoundly_accepted > 0
+                || universe_unstable > 0;
             if any_failure {
                 println!();
                 for v in verifications.iter().filter(|v| {
@@ -4087,11 +4123,16 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         || malformed > 0
         || nbe_disagreements > 0
         || adversarial_unsoundly_accepted > 0
+        || universe_unstable > 0
     {
         return Err(crate::error::CliError::VerificationFailed(format!(
             "proof-term-library: {} rejected + {} malformed + {} NbE-disagreement(s) + \
-             {} adversarial-unsoundly-accepted",
-            rejected, malformed, nbe_disagreements, adversarial_unsoundly_accepted,
+             {} adversarial-unsoundly-accepted + {} universe-unstable",
+            rejected,
+            malformed,
+            nbe_disagreements,
+            adversarial_unsoundly_accepted,
+            universe_unstable,
         )));
     }
     Ok(())
