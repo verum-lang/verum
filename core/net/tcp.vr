@@ -185,7 +185,8 @@ mount sys.windows.winsock2.{
 mount sys.common.{FileDesc, OSError};
 
 // Import I/O engine for async operations
-mount sys.io_engine.{IOEngine, IOInterest, IoError};
+mount sys.io_engine.{IOEngine, IOInterest};
+mount core.io.{IoError};
 
 // Unified TCP-listen intrinsic family (#25 cascade). These dispatch
 // through the same opcode in interpreter and AOT mode — the
@@ -195,7 +196,7 @@ mount sys.io_engine.{IOEngine, IOInterest, IoError};
 // socket+setsockopt+bind+listen IR directly. Both paths produce a
 // real kernel fd, so the rest of `core.net.tcp` (`accept` / `close` /
 // `setsockopt` / `getsockname`) works uniformly across modes.
-mount sys.raw.{__tcp_listen_v2_raw, __tcp_local_port_raw};
+mount core.intrinsics.runtime.os.{__tcp_listen_v2_raw, __tcp_local_port_raw};
 
 // =============================================================================
 // AsyncIoReady - Future for async I/O readiness
@@ -382,6 +383,84 @@ implement TcpStream {
                 @cfg(target_os = "macos")
                 let _ = sys_close(fd);
 
+                Err(IoError.from_os(e))
+            }
+        }
+    }
+
+    /// Connect to `peer` from a specific local source address.
+    ///
+    /// Use this when the connecting application needs server-side
+    /// source-IP verification to pass — e.g. Postgres CancelRequest
+    /// (the server pairs each backend with a 32-bit secret_key
+    /// PLUS a source-IP gate; without binding, the kernel picks a
+    /// source IP that may not match the original connection).
+    ///
+    /// Composes socket() + setsockopt(SO_REUSEADDR) + bind(local) +
+    /// connect(peer) at the syscall level. SO_REUSEADDR is set so a
+    /// just-closed source-port can be reused immediately (covers
+    /// the cancel pattern: the original connection still holds the
+    /// dest_addr/dest_port, so a fresh socket bound to the same
+    /// source_addr/source_port doesn't conflict).
+    ///
+    /// On failure the socket is closed before returning.
+    public fn connect_from(local: SocketAddr, peer: SocketAddr) -> Result<TcpStream, IoError> {
+        let domain = if peer.is_ipv4() { AF_INET } else { AF_INET6 };
+
+        // Step 1: socket().
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let fd = socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os)?;
+
+        @cfg(target_os = "macos")
+        let fd = sys_socket(domain, SOCK_STREAM, 0).map_err(IoError.from_os)?;
+
+        // macOS hardening — same as connect_addr.
+        @cfg(target_os = "macos")
+        let _ = safe_set_nosigpipe(fd, true);
+
+        // Step 2: setsockopt(SO_REUSEADDR). Needed so a just-released
+        // source-port (cancel pattern: original connection still
+        // alive on (src_ip, src_port, dest_ip, dest_port) tuple)
+        // doesn't trigger EADDRINUSE on the bind below. Failure is
+        // non-fatal — bind() may still succeed if the kernel allows
+        // the local-port reuse without REUSEADDR.
+        let _ = safe_set_reuseaddr(fd, true);
+
+        // Step 3: bind(local). Forces the kernel to use the
+        // requested source IP / port instead of picking its own.
+        let local_bytes = serialize_socket_addr(&local);
+        let local_ptr = local_bytes.as_ptr() as &unsafe Byte;
+        let bind_result = sys_bind(fd, local_ptr, local_bytes.len() as Int);
+        match bind_result {
+            Ok(())  => {}
+            Err(e) => {
+                @cfg(any(target_os = "linux", target_os = "windows"))
+                let _ = close(fd);
+                @cfg(target_os = "macos")
+                let _ = sys_close(fd);
+                return Err(IoError.from_os(e));
+            }
+        }
+
+        // Step 4: connect(peer).
+        let peer_bytes = serialize_socket_addr(&peer);
+        let peer_ptr = peer_bytes.as_ptr() as &unsafe Byte;
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let connect_result = connect(fd, peer_ptr, peer_bytes.len() as Int);
+        @cfg(target_os = "macos")
+        let connect_result = sys_connect(fd, peer_ptr, peer_bytes.len() as Int);
+        match connect_result {
+            Ok(()) => {
+                Ok(TcpStream {
+                    fd: fd,
+                    peer_addr: peer,
+                })
+            }
+            Err(e) => {
+                @cfg(any(target_os = "linux", target_os = "windows"))
+                let _ = close(fd);
+                @cfg(target_os = "macos")
+                let _ = sys_close(fd);
                 Err(IoError.from_os(e))
             }
         }

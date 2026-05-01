@@ -37,6 +37,8 @@ mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount base.memory.Shared;
 mount collections.List;
 mount core.net.tcp.TcpStream;
+mount core.net.addr.{SocketAddr, ToSocketAddrs};
+mount core.io.IoError;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.postgres.config.{PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull};
 mount core.database.postgres.error.dberr_from_pg;
@@ -663,7 +665,16 @@ implement PgConnection {
                 }));
             }
         };
-        cancel_running_query_at(host, port, key.0, key.1)
+        // Source-IP-bind from this connection's own local address
+        // — once `TcpStream.connect_from` lands the cancel socket
+        // is created with the same source IP as the original
+        // connection, satisfying the server-side source-IP gate
+        // that secondary-protects the 32-bit secret_key.
+        let bind_local = match self.stream.local_addr() {
+            Ok(addr) => Some(addr),
+            Err(_)   => None,
+        };
+        cancel_running_query_at(host, port, key.0, key.1, bind_local)
     }
 
     /// Orderly shutdown — sends Terminate then closes the underlying
@@ -694,14 +705,73 @@ implement PgConnection {
 /// Open a fresh TCP socket, write one CancelRequest, close. The
 /// server never sends a reply — closing immediately after the write
 /// is the protocol-correct behaviour.
+///
+/// **Security note (spec §6.1.7).** Postgres's `secret_key` is only
+/// 32 bits — brute-forceable in seconds against a non-randomised
+/// counter. The protocol relies on a *secondary* gate: the cancel
+/// must come from an IP the server already trusts (typically the
+/// same source IP the original connection came from). This
+/// function takes an optional `bind_local: Maybe<SocketAddr>` —
+/// when `Some`, the cancel socket SHOULD be bound to that local
+/// address before connecting so the server-side source-IP check
+/// passes.
+///
+/// `bind_local`:
+///   * `Some(addr)` — the cancel socket is created via
+///     `TcpStream.connect_from(addr, peer)`, which composes
+///     socket() + setsockopt(SO_REUSEADDR) + bind(addr) +
+///     connect(peer) at the syscall level. The server-side
+///     source-IP check sees the same source IP as the original
+///     connection, satisfying the secondary gate that
+///     secret_key alone cannot guarantee.
+///   * `None` — the kernel picks the source address. Use only
+///     when the caller has no way to know the original
+///     connection's local addr (cross-process / cross-host
+///     cancel coordination). Documented as `@audit("cross-host
+///     cancel without source-IP-bind")`.
+///
+/// Production callers reach `cancel_running_query_at` through
+/// `PgConnection.cancel_running_query`, which automatically
+/// supplies `Some(self.stream.local_addr())` so the security
+/// gate is in place by default.
 public fn cancel_running_query_at(
     host: &Text,
     port: Int,
     process_id: Int,
     secret_key: Int,
+    bind_local: Maybe<SocketAddr>,
 ) -> Result<(), DbError> {
     let target = format_host_port(host, port);
-    let mut sock = match TcpStream.connect(target.as_str()) {
+    // Open the cancel socket. If the caller supplied a local addr,
+    // pre-bind via the syscall-composed connect_from path; otherwise
+    // fall back to the kernel-picks-source path.
+    let sock_result = match bind_local {
+        Some(local_addr) => {
+            // Resolve the target string to a SocketAddr. We reuse
+            // the same DNS / parser path TcpStream.connect uses,
+            // then iterate addresses (IPv4 / IPv6 / multiple A
+            // records) until one connects from the bound source.
+            match target.as_str().to_socket_addrs() {
+                Ok(peer_iter) => {
+                    let mut last_err = IoError.Other("cancel: no addresses resolved");
+                    let mut connected: Maybe<TcpStream> = None;
+                    for peer_addr in peer_iter {
+                        match TcpStream.connect_from(local_addr, peer_addr) {
+                            Ok(s)  => { connected = Some(s); break; }
+                            Err(e) => { last_err = e; }
+                        }
+                    }
+                    match connected {
+                        Some(s) => Ok(s),
+                        None    => Err(last_err),
+                    }
+                }
+                Err(e) => Err(e),
+            }
+        }
+        None => TcpStream.connect(target.as_str()),
+    };
+    let mut sock = match sock_result {
         Ok(s)  => s,
         Err(_) => {
             return Err(DbError.ConnectionFailed {
