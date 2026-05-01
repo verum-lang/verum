@@ -45,6 +45,7 @@ mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.database.common.error.AdapterId;
+mount core.database.common.check_codegen.{RefinementPredicate};
 
 // -----------------------------------------------------------------------------
 // ColumnSnap
@@ -66,7 +67,16 @@ public type ColumnSnap is {
     default_expr: Maybe<Text>,
     /// Verum refinement-predicate text (carried verbatim from the
     /// originating column type if the introspector recognised one).
+    /// Documentation form — use `refinement_pred` for structured
+    /// access from migration-codegen / `@table` derive.
     refinement: Maybe<Text>,
+    /// Structured refinement predicate. When present, `verum
+    /// db:plan` runs `check_codegen.to_check_sql_for_column` over
+    /// it to emit a per-dialect CHECK constraint that mirrors the
+    /// SMT-discharged client-side guarantee. `None` here means the
+    /// originating refinement is outside the CHECK-codegen-able
+    /// fragment (Z3-only enforcement, no server-side periscope).
+    refinement_pred: Maybe<RefinementPredicate>,
     /// CHECK-constraint text — multiple constraints concatenated by
     /// " AND " in declaration order.
     check_constraint: Maybe<Text>,

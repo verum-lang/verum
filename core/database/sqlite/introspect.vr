@@ -136,6 +136,7 @@ fn read_columns(conn: &mut SqliteConnection, table: &Text) -> Result<List<Column
                         autoincrement: false,
                         default_expr: default_expr,
                         refinement: None,
+                        refinement_pred: None,
                         check_constraint: None,
                     });
                 }

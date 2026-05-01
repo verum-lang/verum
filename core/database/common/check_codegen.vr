@@ -1,0 +1,524 @@
+// =============================================================================
+// core/database/common/check_codegen.vr — refinement predicate → SQL CHECK
+// =============================================================================
+// Layer: 3 (Database — common surface)
+// Spec: internal/specs/database.md §5.2 (refinement-as-CHECK), §9.7 (Z3-discharged)
+// =============================================================================
+//
+// The bridge between Verum's refinement-type predicates and SQL DDL
+// CHECK constraints. The pipeline:
+//
+//   user-typed column  →  refinement predicate AST  →  per-dialect CHECK SQL
+//
+//   type Email is Text where rx#"^[^@]+@[^@]+\..+$".matches(s) && s.len() <= 254;
+//
+//   ↓ derive(@table) emits a `RefinementPredicate` for the `email`
+//     column when `@table` materialises the User type
+//
+//   ↓ migration plan emits, per dialect:
+//     postgres: CHECK (email ~ '^[^@]+@[^@]+\..+$' AND char_length(email) <= 254)
+//     mysql   : CHECK (email REGEXP '^[^@]+@[^@]+\\..+$' AND CHAR_LENGTH(email) <= 254)
+//     sqlite  : CHECK (email REGEXP '^[^@]+@[^@]+\..+$' AND length(email) <= 254)
+//
+// What this module does:
+//
+//   * Defines `RefinementPredicate` — a small, expressive AST that
+//     captures the predicate forms the SMT layer also understands
+//     (numeric range, regex match, length bounds, set membership,
+//     boolean composition, Maybe-aware variant). Anything outside
+//     this fragment is currently NOT CHECK-codegen-able — Z3 still
+//     proves it client-side, but the server gets no defence-in-depth
+//     CHECK.
+//
+//   * `to_check_sql(pred, col, adapter)` — emits the per-dialect
+//     CHECK clause body (without the leading `CHECK (` / trailing `)`,
+//     so callers can compose multiple constraints). Properly escapes
+//     literal text values using ANSI single-quote doubling and
+//     dialect-specific regex backslash conventions.
+//
+//   * Builder helpers for the common cases — `range`, `min`, `max`,
+//     `len_max`, `len_range`, `regex`, `one_of_text`, `one_of_int`,
+//     `is_some`, `not_empty` — so derive-glue stays terse.
+//
+//   * Backwards compatible with existing `ColumnSnap.refinement:
+//     Maybe<Text>` — the structured AST lives in a separate
+//     `ColumnSnap.refinement_pred: Maybe<RefinementPredicate>` slot.
+//     Migrations that only have the text form fall back to "no
+//     CHECK; Z3-only" and emit a compile-time hint.
+//
+// What this module deliberately does NOT do:
+//
+//   * Parse the original `where`-clause Verum source. That work
+//     belongs to the type-checker / SMT integration. The job here is
+//     purely IR-to-SQL.
+//
+//   * Generate CHECK for predicates that Z3 alone can prove. The
+//     server-side CHECK is a periscope for legacy data; Z3 already
+//     guarantees the client never sends a violator.
+//
+// Spec ties: §5.2 (refinement → CHECK), §9.4 (`@check` attribute),
+// §9.7.3 (refinement-strengthening as Z3 obligation).
+// =============================================================================
+
+module core.database.common.check_codegen;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.database.common.error.{AdapterId, AdPostgres, AdMysql, AdSqlite};
+
+// -----------------------------------------------------------------------------
+// RefinementPredicate — typed AST.
+// -----------------------------------------------------------------------------
+
+/// A SQL-emittable refinement predicate. The variants mirror the
+/// SMT-discharge fragment plus a few text-specific forms (regex,
+/// length) that show up in nearly every realistic schema.
+///
+/// `column` placeholders are filled in by `to_check_sql`; predicates
+/// can therefore be authored once on a domain type and emitted
+/// against arbitrarily-named columns at the table boundary.
+public type RefinementPredicate is
+      // Atom — unconditional truth (identity element of And).
+      RpTrue
+      // Atom — unconditional falsehood (only for negative tests).
+    | RpFalse
+      // Numeric closed-interval `lo <= col <= hi`. Inclusive bounds
+      // — half-open ranges go through `RpAnd(RpGe, RpLt)`.
+    | RpIntRange { lo: Int, hi: Int }
+      // Numeric lower bound, inclusive.
+    | RpIntGe(Int)
+      // Numeric upper bound, inclusive.
+    | RpIntLe(Int)
+      // Strict numeric bounds.
+    | RpIntGt(Int)
+    | RpIntLt(Int)
+      // Equality / disequality against an integer literal.
+    | RpIntEq(Int)
+    | RpIntNe(Int)
+      // String length — `lo <= length(col) <= hi`.
+    | RpLenRange { lo: Int, hi: Int }
+      // String length — exact upper bound.
+    | RpLenLe(Int)
+    | RpLenGe(Int)
+      // Regex match. The pattern is the original Verum regex source.
+      // Per-dialect translation handles backslash conventions (PG `~`,
+      // MySQL REGEXP with double-escaped backslashes, SQLite REGEXP).
+    | RpRegexMatch(Text)
+      // Text equality / disequality against a literal.
+    | RpTextEq(Text)
+    | RpTextNe(Text)
+      // Membership — `col IN (...)`. Empty list is interpreted as
+      // `RpFalse` (no value matches the empty set).
+    | RpOneOfInt(List<Int>)
+    | RpOneOfText(List<Text>)
+      // Maybe-aware: predicate holds iff column is NULL OR (column
+      // is NOT NULL AND inner holds). Used when the underlying
+      // domain is `Maybe<Refined>`.
+    | RpOrNull(Box<RefinementPredicate>)
+      // Boolean composition. `RpAnd([])` and `RpOr([])` reduce to
+      // `RpTrue` / `RpFalse` respectively.
+    | RpAnd(List<RefinementPredicate>)
+    | RpOr(List<RefinementPredicate>)
+    | RpNot(Box<RefinementPredicate>);
+
+// -----------------------------------------------------------------------------
+// Builder helpers — terse construction at the derive call site.
+// -----------------------------------------------------------------------------
+
+/// Closed integer interval `lo <= col <= hi`.
+public fn range(lo: Int, hi: Int) -> RefinementPredicate {
+    RpIntRange { lo: lo, hi: hi }
+}
+
+/// Inclusive lower bound `col >= n`.
+public fn min(n: Int) -> RefinementPredicate { RpIntGe(n) }
+
+/// Inclusive upper bound `col <= n`.
+public fn max(n: Int) -> RefinementPredicate { RpIntLe(n) }
+
+/// Strict positive (`col > 0`) — convenience for the common case.
+public fn positive() -> RefinementPredicate { RpIntGt(0) }
+
+/// Non-negative (`col >= 0`).
+public fn non_negative() -> RefinementPredicate { RpIntGe(0) }
+
+/// String length cap (`length(col) <= n`).
+public fn len_max(n: Int) -> RefinementPredicate { RpLenLe(n) }
+
+/// String length at least n.
+public fn len_min(n: Int) -> RefinementPredicate { RpLenGe(n) }
+
+/// Closed length interval.
+public fn len_range(lo: Int, hi: Int) -> RefinementPredicate {
+    RpLenRange { lo: lo, hi: hi }
+}
+
+/// Non-empty text (`length(col) >= 1`).
+public fn not_empty() -> RefinementPredicate { RpLenGe(1) }
+
+/// Regex-match. Pattern is the original Verum regex source — per-
+/// dialect emitters handle escaping.
+public fn regex(pattern: Text) -> RefinementPredicate {
+    RpRegexMatch(pattern)
+}
+
+/// Set membership over integers (`col IN (...)`).
+public fn one_of_int(values: List<Int>) -> RefinementPredicate {
+    RpOneOfInt(values)
+}
+
+/// Set membership over text values (`col IN ('a', 'b', 'c')`).
+public fn one_of_text(values: List<Text>) -> RefinementPredicate {
+    RpOneOfText(values)
+}
+
+/// `Maybe<Refined>`-aware wrapper: `col IS NULL OR (inner with
+/// col)`. The codegen avoids emitting `OR` when the column is
+/// declared NOT NULL — see `to_check_sql_for_column`.
+public fn or_null(inner: RefinementPredicate) -> RefinementPredicate {
+    RpOrNull(Box.new(inner))
+}
+
+/// Conjunction. Empty list reduces to `RpTrue`.
+public fn all(parts: List<RefinementPredicate>) -> RefinementPredicate {
+    RpAnd(parts)
+}
+
+/// Disjunction. Empty list reduces to `RpFalse`.
+public fn any(parts: List<RefinementPredicate>) -> RefinementPredicate {
+    RpOr(parts)
+}
+
+/// Negation.
+public fn not_(p: RefinementPredicate) -> RefinementPredicate {
+    RpNot(Box.new(p))
+}
+
+// -----------------------------------------------------------------------------
+// to_check_sql — top-level emitter.
+// -----------------------------------------------------------------------------
+
+/// Render the predicate body as the inside of a CHECK clause for the
+/// given adapter and column. Returns `None` if the predicate
+/// reduces to `RpTrue` (no CHECK necessary) — caller should skip
+/// emitting `CHECK ()` in that case.
+///
+/// The returned text omits the leading `CHECK (` and trailing `)`:
+/// callers compose like `f"CHECK ({body})"` or concatenate multiple
+/// bodies with ` AND `.
+public fn to_check_sql(
+    pred: &RefinementPredicate,
+    col: &Text,
+    adapter: AdapterId,
+) -> Maybe<Text> {
+    let normalised = normalise(pred);
+    match &normalised {
+        RpTrue => None,
+        _      => Some(emit(&normalised, col, adapter)),
+    }
+}
+
+/// `to_check_sql` variant that is aware of the column's NULL-ability.
+/// When the column is declared NOT NULL, an outer `RpOrNull` wrapper
+/// is collapsed to its inner predicate (the `IS NULL` branch can
+/// never fire and would only confuse the optimiser). Recommended
+/// entry point for derive-glue.
+public fn to_check_sql_for_column(
+    pred: &RefinementPredicate,
+    col: &Text,
+    nullable: Bool,
+    adapter: AdapterId,
+) -> Maybe<Text> {
+    let stripped = if !nullable {
+        match pred {
+            RpOrNull(inner) => *(*inner).clone(),
+            _               => pred.clone(),
+        }
+    } else {
+        pred.clone()
+    };
+    to_check_sql(&stripped, col, adapter)
+}
+
+// -----------------------------------------------------------------------------
+// Normalisation — fold trivial structure (RpAnd([]) → RpTrue, etc).
+// -----------------------------------------------------------------------------
+
+fn normalise(pred: &RefinementPredicate) -> RefinementPredicate {
+    match pred {
+        RpAnd(parts) => {
+            let mut acc: List<RefinementPredicate> = List.new();
+            let mut i: Int = 0;
+            while i < parts.len() as Int {
+                let np = normalise(&parts[i]);
+                match &np {
+                    RpTrue       => { /* drop identity */ }
+                    RpFalse      => { return RpFalse; }
+                    RpAnd(inner) => {
+                        let mut j: Int = 0;
+                        while j < inner.len() as Int {
+                            acc.push(inner[j].clone());
+                            j = j + 1;
+                        }
+                    }
+                    _ => acc.push(np),
+                }
+                i = i + 1;
+            }
+            if acc.len() == 0 { RpTrue }
+            else if acc.len() == 1 { acc[0].clone() }
+            else { RpAnd(acc) }
+        }
+        RpOr(parts) => {
+            let mut acc: List<RefinementPredicate> = List.new();
+            let mut i: Int = 0;
+            while i < parts.len() as Int {
+                let np = normalise(&parts[i]);
+                match &np {
+                    RpFalse     => { /* drop identity */ }
+                    RpTrue      => { return RpTrue; }
+                    RpOr(inner) => {
+                        let mut j: Int = 0;
+                        while j < inner.len() as Int {
+                            acc.push(inner[j].clone());
+                            j = j + 1;
+                        }
+                    }
+                    _ => acc.push(np),
+                }
+                i = i + 1;
+            }
+            if acc.len() == 0 { RpFalse }
+            else if acc.len() == 1 { acc[0].clone() }
+            else { RpOr(acc) }
+        }
+        RpNot(inner) => {
+            let n = normalise(&**inner);
+            match &n {
+                RpTrue  => RpFalse,
+                RpFalse => RpTrue,
+                _       => RpNot(Box.new(n)),
+            }
+        }
+        RpOrNull(inner) => {
+            let n = normalise(&**inner);
+            match &n {
+                RpTrue => RpTrue,            // anything is fine, including NULL
+                _      => RpOrNull(Box.new(n)),
+            }
+        }
+        RpIntRange { lo, hi } => {
+            if *lo > *hi {
+                RpFalse                       // unsatisfiable interval
+            } else if *lo == *hi {
+                RpIntEq(*lo)                  // collapse degenerate range
+            } else {
+                pred.clone()
+            }
+        }
+        RpLenRange { lo, hi } => {
+            if *lo > *hi {
+                RpFalse
+            } else if *lo == 0 && *hi == 0 {
+                RpLenLe(0)
+            } else {
+                pred.clone()
+            }
+        }
+        RpOneOfInt(values) => {
+            if values.len() == 0 { RpFalse } else { pred.clone() }
+        }
+        RpOneOfText(values) => {
+            if values.len() == 0 { RpFalse } else { pred.clone() }
+        }
+        _ => pred.clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Emit — per-dialect SQL fragment.
+// -----------------------------------------------------------------------------
+
+fn emit(pred: &RefinementPredicate, col: &Text, adapter: AdapterId) -> Text {
+    match pred {
+        RpTrue                 => "TRUE".clone(),
+        RpFalse                => "FALSE".clone(),
+        RpIntRange { lo, hi }  => {
+            f"{quote_ident(col, adapter)} >= {lo} AND {quote_ident(col, adapter)} <= {hi}"
+        }
+        RpIntGe(n) => f"{quote_ident(col, adapter)} >= {n}",
+        RpIntLe(n) => f"{quote_ident(col, adapter)} <= {n}",
+        RpIntGt(n) => f"{quote_ident(col, adapter)} > {n}",
+        RpIntLt(n) => f"{quote_ident(col, adapter)} < {n}",
+        RpIntEq(n) => f"{quote_ident(col, adapter)} = {n}",
+        RpIntNe(n) => f"{quote_ident(col, adapter)} <> {n}",
+        RpLenRange { lo, hi } => {
+            let len_fn = length_fn(adapter);
+            f"{len_fn}({quote_ident(col, adapter)}) >= {lo} AND {len_fn}({quote_ident(col, adapter)}) <= {hi}"
+        }
+        RpLenLe(n) => f"{length_fn(adapter)}({quote_ident(col, adapter)}) <= {n}",
+        RpLenGe(n) => f"{length_fn(adapter)}({quote_ident(col, adapter)}) >= {n}",
+        RpRegexMatch(pat)     => emit_regex(col, pat, adapter),
+        RpTextEq(s)           => f"{quote_ident(col, adapter)} = {quote_text(s)}",
+        RpTextNe(s)           => f"{quote_ident(col, adapter)} <> {quote_text(s)}",
+        RpOneOfInt(values)    => emit_in_int(col, values, adapter),
+        RpOneOfText(values)   => emit_in_text(col, values, adapter),
+        RpOrNull(inner)       => {
+            let inner_sql = emit(&**inner, col, adapter);
+            f"{quote_ident(col, adapter)} IS NULL OR ({inner_sql})"
+        }
+        RpAnd(parts)          => emit_join(parts, " AND ", col, adapter),
+        RpOr(parts)           => emit_join(parts, " OR ", col, adapter),
+        RpNot(inner)          => {
+            let inner_sql = emit(&**inner, col, adapter);
+            f"NOT ({inner_sql})"
+        }
+    }
+}
+
+fn emit_join(
+    parts: &List<RefinementPredicate>,
+    sep: &Text,
+    col: &Text,
+    adapter: AdapterId,
+) -> Text {
+    let mut out: Text = "".clone();
+    let mut i: Int = 0;
+    let n = parts.len() as Int;
+    while i < n {
+        if i > 0 { out.push_str(sep); }
+        let body = emit(&parts[i], col, adapter);
+        // Wrap children only when they would ambiguously bind.
+        let wrap = needs_paren(&parts[i]);
+        if wrap { out.push_str(&"(".clone()); }
+        out.push_str(&body);
+        if wrap { out.push_str(&")".clone()); }
+        i = i + 1;
+    }
+    out
+}
+
+fn needs_paren(p: &RefinementPredicate) -> Bool {
+    match p {
+        RpAnd(_) | RpOr(_) | RpOrNull(_) | RpNot(_) => true,
+        _ => false,
+    }
+}
+
+fn emit_in_int(col: &Text, values: &List<Int>, adapter: AdapterId) -> Text {
+    let mut out: Text = quote_ident(col, adapter);
+    out.push_str(&" IN (".clone());
+    let mut i: Int = 0;
+    let n = values.len() as Int;
+    while i < n {
+        if i > 0 { out.push_str(&", ".clone()); }
+        out.push_str(&f"{values[i]}");
+        i = i + 1;
+    }
+    out.push_str(&")".clone());
+    out
+}
+
+fn emit_in_text(col: &Text, values: &List<Text>, adapter: AdapterId) -> Text {
+    let mut out: Text = quote_ident(col, adapter);
+    out.push_str(&" IN (".clone());
+    let mut i: Int = 0;
+    let n = values.len() as Int;
+    while i < n {
+        if i > 0 { out.push_str(&", ".clone()); }
+        out.push_str(&quote_text(&values[i]));
+        i = i + 1;
+    }
+    out.push_str(&")".clone());
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Per-dialect helpers — identifier quoting, length function, regex.
+// -----------------------------------------------------------------------------
+
+/// Quote a column identifier for the given dialect.
+///
+///   postgres / sqlite — `"col"` (ANSI, double-quote)
+///   mysql            — `` `col` `` (backticks)
+///
+/// Embedded double-quote / backtick characters are doubled.
+fn quote_ident(col: &Text, adapter: AdapterId) -> Text {
+    match adapter {
+        AdMysql => {
+            let escaped = double_char(col, '`');
+            f"`{escaped}`"
+        }
+        _ => {
+            let escaped = double_char(col, '"');
+            f"\"{escaped}\""
+        }
+    }
+}
+
+fn double_char(s: &Text, c: Char) -> Text {
+    let mut out: Text = "".clone();
+    let bytes = s.as_bytes();
+    let target = c as Int;
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    while i < n {
+        let b = bytes[i] as Int;
+        if b == target {
+            out.push_char(c);
+            out.push_char(c);
+        } else {
+            out.push_char(b as Char);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+/// Single-quote a literal text value with ANSI escape rules. Embedded
+/// single quotes are doubled (`O'Brien` → `'O''Brien'`).
+fn quote_text(s: &Text) -> Text {
+    let escaped = double_char(s, '\'');
+    f"'{escaped}'"
+}
+
+/// Per-dialect length function name. Postgres uses `char_length`
+/// (Unicode code points; `length` would yield byte count); MySQL has
+/// `CHAR_LENGTH`; SQLite has `length`.
+fn length_fn(adapter: AdapterId) -> Text {
+    match adapter {
+        AdPostgres => "char_length".clone(),
+        AdMysql    => "CHAR_LENGTH".clone(),
+        AdSqlite   => "length".clone(),
+    }
+}
+
+/// Per-dialect regex match operator + escape conventions.
+///
+///   postgres : `col ~ 'pattern'`
+///   mysql    : `col REGEXP 'pattern'` (backslashes get doubled in
+///              the literal because MySQL applies string-escape AND
+///              regex-escape to the same source).
+///   sqlite   : `col REGEXP 'pattern'` (requires the `regexp()`
+///              function — bundled with the native engine but
+///              available as an extension on stock libsqlite3).
+fn emit_regex(col: &Text, pattern: &Text, adapter: AdapterId) -> Text {
+    match adapter {
+        AdPostgres => {
+            let lit = quote_text(pattern);
+            f"{quote_ident(col, AdPostgres)} ~ {lit}"
+        }
+        AdMysql => {
+            // Double the backslashes so the regex engine sees the
+            // intended pattern after MySQL's string-literal layer.
+            let mysql_safe = double_char(pattern, '\\');
+            let lit = quote_text(&mysql_safe);
+            f"{quote_ident(col, AdMysql)} REGEXP {lit}"
+        }
+        AdSqlite => {
+            let lit = quote_text(pattern);
+            f"{quote_ident(col, AdSqlite)} REGEXP {lit}"
+        }
+    }
+}
