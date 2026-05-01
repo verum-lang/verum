@@ -744,12 +744,11 @@ mod tests {
 
 use crate::interpreter::permission::{PermissionDecision, PermissionScope};
 use crate::interpreter::state::InterpreterState;
-use crate::types::TypeId;
 use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{
-    alloc_byte_list, alloc_record_n_fields, extract_byte_slice, extract_text_arg,
-    is_record_typed_as, read_buffer_capacity, wrap_in_variant, write_into_byte_slice,
+    alloc_record_n_fields, extract_byte_slice, extract_text_arg, is_record_typed_as,
+    read_buffer_capacity, wrap_in_variant, write_into_byte_slice,
 };
 use super::string_helpers::alloc_string_value;
 

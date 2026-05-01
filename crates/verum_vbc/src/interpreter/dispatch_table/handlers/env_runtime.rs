@@ -30,7 +30,10 @@ use crate::interpreter::state::InterpreterState;
 use crate::types::TypeId;
 use crate::value::Value;
 use super::super::super::error::InterpreterResult;
-use super::string_helpers::{alloc_string_value, extract_string};
+use super::heap_helpers::{
+    alloc_byte_list, alloc_record_n_fields, extract_text_arg, wrap_in_variant,
+};
+use super::string_helpers::alloc_string_value;
 
 pub(in super::super) fn try_intercept_env_runtime(
     state: &mut InterpreterState,
@@ -318,92 +321,3 @@ fn alloc_text_list(
     Ok(Value::from_ptr(list.as_ptr() as *mut u8))
 }
 
-fn alloc_record_n_fields(
-    state: &mut InterpreterState,
-    type_name: &str,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x9000));
-    let payload_size = fields.len() * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc(type_id, payload_size)?;
-    state.record_allocation();
-    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    for (i, v) in fields.iter().enumerate() {
-        unsafe { *data_ptr.add(i) = *v; }
-    }
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
-
-// ============================================================================
-// Helpers (mirror file_runtime.rs)
-// ============================================================================
-
-fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
-    extract_string(&unwrapped, state)
-}
-
-fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let len = bytes.len();
-    let cap = if len < 16 { 16 } else { len };
-    let backing = state.heap.alloc(TypeId::LIST, cap)?;
-    state.record_allocation();
-    if !bytes.is_empty() {
-        let backing_data = unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) };
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), backing_data, len); }
-    }
-    let list = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
-    state.record_allocation();
-    let data_ptr = unsafe { (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    unsafe {
-        *data_ptr = Value::from_i64(len as i64);
-        *data_ptr.add(1) = Value::from_i64(cap as i64);
-        *data_ptr.add(2) = Value::from_ptr(backing.as_ptr() as *mut u8);
-    }
-    Ok(Value::from_ptr(list.as_ptr() as *mut u8))
-}
-
-fn wrap_in_variant(
-    state: &mut InterpreterState,
-    type_name: &str,
-    tag: u32,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x8000 + tag));
-    let field_count = fields.len() as u32;
-    let data_size = 8 + (fields.len() * std::mem::size_of::<Value>());
-    let obj = state.heap.alloc(type_id, data_size)?;
-    state.record_allocation();
-    let base = obj.as_ptr() as *mut u8;
-    unsafe {
-        let tag_ptr = base.add(OBJECT_HEADER_SIZE) as *mut u32;
-        *tag_ptr = tag;
-        *tag_ptr.add(1) = field_count;
-        let payload_ptr = base.add(OBJECT_HEADER_SIZE + 8) as *mut Value;
-        for (i, v) in fields.iter().enumerate() {
-            *payload_ptr.add(i) = *v;
-        }
-    }
-    Ok(Value::from_ptr(base))
-}
-
-fn lookup_type_id_by_name(state: &InterpreterState, name: &str) -> Option<TypeId> {
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| {
-            state.module.strings.get(td.name) == Some(name)
-                && !matches!(td.kind, crate::types::TypeKind::Protocol)
-        })
-        .map(|td| td.id)
-}
