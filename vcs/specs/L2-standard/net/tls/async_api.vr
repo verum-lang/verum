@@ -19,14 +19,15 @@ mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancellationError};
 
-// Shape: AsyncRead/AsyncWrite on TlsStream
-fn typecheck_poll_read(stream: &mut TlsStream, cx: &mut Context, buf: &mut List<Int>)
+// Shape: AsyncRead/AsyncWrite on TlsStream.  buf is `List<Byte>`
+// end-to-end after the #316/#321 transport-buffer migration.
+fn typecheck_poll_read(stream: &mut TlsStream, cx: &mut Context, buf: &mut List<Byte>)
     -> Poll<Result<Int, IoError>>
 {
     stream.poll_read(cx, buf)
 }
 
-fn typecheck_poll_write(stream: &mut TlsStream, cx: &mut Context, buf: &List<Int>)
+fn typecheck_poll_write(stream: &mut TlsStream, cx: &mut Context, buf: &List<Byte>)
     -> Poll<Result<Int, IoError>>
 {
     stream.poll_write(cx, buf)
