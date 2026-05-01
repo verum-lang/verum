@@ -149,6 +149,7 @@ pub type Heap<T> = Box<T>;
 // Core modules
 pub mod cbgr; // CBGR runtime types (headers, validation, allocation)
 pub mod const_value; // Unified compile-time constant values
+pub mod mls; // Multi-Level Security classification lattice (#282 Phase 2a)
 pub mod conversions; // Type conversions (std ↔ verum)
 pub mod formatting; // Centralized formatting utilities
 pub mod promotion; // Unified reference promotion system
