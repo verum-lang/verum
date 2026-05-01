@@ -1,0 +1,300 @@
+// =============================================================================
+// separation.vr — Separation Logic primitives for stateful verification (#161)
+// =============================================================================
+//
+
+// Layer: Standard Library / Logic
+//
+
+// User-facing surface for the separation-logic kernel
+// (`verum_kernel::separation_logic`). Reynolds 2002 / O'Hearn 2007
+// style: heap-shaped propositions + separating conjunction +
+// frame rule + Hoare triples.
+//
+
+// ## Connective summary
+//
+
+// ```text
+//  emp                empty-heap predicate (heap is empty)
+//  addr ↦ value       points-to (singleton heap binding)
+//  P ∗ Q              separating conjunction (heap splits disjointly)
+//  P ∧ Q              ordinary heap-stable conjunction (same heap)
+//  pure(P)            heap-irrelevant proposition (lifted)
+//  named(N, …)        custom user-defined heap predicate
+// ```
+//
+
+// ## Architectural alignment
+//
+
+// Verum's separation-logic surface is *complementary* to:
+//
+//  * **Context System** (DI: `using [Database, Logger]`) — runtime
+//    resource injection, not heap-shape reasoning.
+//  * **Computational Properties** (`Pure`/`IO`/`Async`/...) —
+//    compile-time effect classification, also separate.
+//
+// Separation logic occupies a third axis: *spatial* reasoning over
+// the heap. A function with `using [FileSystem]` describes its
+// resource environment; a `requires emp ensures result ↦ value`
+// triple describes what shape of heap it transforms into what.
+// The two compose orthogonally in the same proof body.
+//
+
+// ## Frame rule (the load-bearing primitive)
+//
+
+// ```text
+//  { P } c { Q }
+//  ─────────────────       (no free variables of c clash with R)
+//  { P ∗ R } c { Q ∗ R }
+// ```
+//
+
+// Local reasoning: a command's effect on its footprint doesn't
+// disturb invariants on disjoint heap fragments. Verum's verifier
+// applies the frame rule via
+// `verum_kernel::separation_logic::execute_frame_rule` when a Hoare
+// triple's pre/post is canonical separating-conjunction shape.
+//
+
+// ## Example (mutating function with separation pre/post)
+//
+
+// ```verum
+// // `swap(a, b)` swaps two heap cells. The pre/post condition
+// // describes the heap shape EXACTLY; the frame rule lets callers
+// // wrap surrounding state without weakening.
+// @verify(formal)
+// public fn swap(a: &mut Cell, b: &mut Cell)
+//     requires sep_points_to(a, av) * sep_points_to(b, bv)
+//     ensures  sep_points_to(a, bv) * sep_points_to(b, av)
+// {
+//     let tmp = *a;
+//     *a = *b;
+//     *b = tmp;
+// };
+// ```
+//
+
+// ## Trust delegation
+//
+
+// All decision procedures over [`HeapPredicate`] live in the kernel
+// (`verum_kernel::separation_logic::dispatch_separation_goal`). This
+// module provides ONLY the propositional surface — smart constructors
+// + classification predicates — that user proof bodies cite. The
+// dispatcher's verdict is what closes a separation goal.
+// =============================================================================
+
+module core.logic.separation;
+
+mount core.prelude.{Bool, Heap, Maybe, Text};
+mount core.logic.linear.{LinForm};
+
+// =============================================================================
+// 1. HeapPredicate — heap-shaped proposition
+// =============================================================================
+
+/// A heap-shaped proposition. Conceptually `Heap → Prop`; mirrors
+/// `verum_kernel::separation_logic::HeapPredicate` so the .vr-side
+/// and kernel-side surfaces stay structurally aligned.
+///
+/// Standard combinators are surfaced explicitly so the verification
+/// dispatcher can pattern-match on them without having to peek
+/// inside opaque function bodies:
+///
+///  * `Emp` — true exactly when the heap is empty.
+///  * `PointsTo { addr, value }` — true when the heap is a single
+///    binding `addr ↦ value`. The dispatcher's points-to constructor.
+///  * `Sep { lhs, rhs }` — separating conjunction `P ∗ Q`. The heap
+///    splits disjointly.
+///  * `And { lhs, rhs }` — ordinary heap-stable conjunction `P ∧ Q`.
+///    Both hold at the same heap.
+///  * `Pure { prop }` — heap-irrelevant proposition; true at every
+///    heap. Lifts a Bool into the heap-predicate language.
+///  * `Named { name, args }` — user-defined heap predicate (e.g.
+///    `list(p, vs)` for "p is a linked list of values vs").
+///
+/// `addr` and `value` carry text representations so the .vr-side
+/// matches the kernel-side serialisation. The kernel uses `Term`
+/// (its proof-term representation); the .vr surface uses `Text`
+/// since user code can construct heap predicates from any
+/// expression-shaped value.
+public type HeapPredicate is
+    | Emp
+    | PointsTo { addr: Text, value: Text }
+    | Sep { lhs: Heap<HeapPredicate>, rhs: Heap<HeapPredicate> }
+    | And { lhs: Heap<HeapPredicate>, rhs: Heap<HeapPredicate> }
+    | Pure { prop: Text }
+    | Named { name: Text, args: Text };
+
+// =============================================================================
+// 2. Smart constructors — the user-facing surface
+// =============================================================================
+
+/// `emp` — the empty-heap predicate. True exactly when the heap is
+/// empty. Identity for [`sep_conj`].
+public fn emp() -> HeapPredicate {
+    HeapPredicate.Emp
+}
+
+/// `addr ↦ value` — singleton heap binding. The points-to constructor.
+/// True iff the heap is exactly the single mapping from `addr` to
+/// `value`.
+public fn points_to(addr: Text, value: Text) -> HeapPredicate {
+    HeapPredicate.PointsTo { addr, value }
+}
+
+/// `P ∗ Q` — separating conjunction. The heap splits into disjoint
+/// parts; `P` holds in one, `Q` in the other. Builds the
+/// `HeapPredicate.Sep` node.
+public fn sep_conj(lhs: HeapPredicate, rhs: HeapPredicate) -> HeapPredicate {
+    HeapPredicate.Sep { lhs: Heap(lhs), rhs: Heap(rhs) }
+}
+
+/// `P ∧ Q` — ordinary heap-stable conjunction. Both `P` and `Q`
+/// hold at the same heap.
+public fn heap_and(lhs: HeapPredicate, rhs: HeapPredicate) -> HeapPredicate {
+    HeapPredicate.And { lhs: Heap(lhs), rhs: Heap(rhs) }
+}
+
+/// Lift a Bool-valued proposition into the heap-predicate language.
+/// `pure(P)` is true at every heap iff `P` is true.
+public fn pure(prop: Text) -> HeapPredicate {
+    HeapPredicate.Pure { prop }
+}
+
+/// User-defined heap predicate. Use for inductive heap-shape
+/// definitions like `list(p, vs)` or `tree(t, shape)`.
+public fn named(name: Text, args: Text) -> HeapPredicate {
+    HeapPredicate.Named { name, args }
+}
+
+// =============================================================================
+// 3. Classification predicates
+// =============================================================================
+
+/// True iff `p` is the empty-heap predicate. Recognises the
+/// identity of [`sep_conj`] for normalisation.
+public fn is_emp(p: HeapPredicate) -> Bool {
+    match p {
+        HeapPredicate.Emp => true,
+        _ => false,
+    }
+}
+
+/// True iff `p` is heap-stable — its truth doesn't depend on the
+/// shape of the heap. The lifted `pure(P)` predicate is the
+/// canonical heap-stable form; ordinary conjunction of heap-stable
+/// predicates is heap-stable too.
+public fn is_pure(p: HeapPredicate) -> Bool {
+    match p {
+        HeapPredicate.Pure { .. } => true,
+        HeapPredicate.And { lhs, rhs } => {
+            is_pure(lhs.deref()) && is_pure(rhs.deref())
+        },
+        _ => false,
+    }
+}
+
+/// True iff `p`'s outermost connective is the separating
+/// conjunction. Used by the frame-rule recognition in the
+/// verification dispatcher: a Hoare triple whose precondition has
+/// `sep_conj(P, R)` shape can have `R` framed out via the frame rule.
+public fn is_separating_conjunction(p: HeapPredicate) -> Bool {
+    match p {
+        HeapPredicate.Sep { .. } => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// 4. Hoare triple
+// =============================================================================
+
+/// `{ pre } command { post }` — the verification surface for stateful
+/// operations. `command` is the function / expression being verified;
+/// `pre` is the heap shape it requires; `post` is the heap shape it
+/// guarantees.
+///
+/// Mirrors `verum_kernel::separation_logic::HoareTriple`. The kernel
+/// consumes this via [`from_hoare_triple`] adapter to surface as a
+/// generic `VerificationGoal`.
+public type HoareTriple is {
+    pre: HeapPredicate,
+    command: Text,
+    post: HeapPredicate,
+};
+
+/// Construct a Hoare triple. The smart constructor: the .vr-side
+/// callers don't see the internal field-order discipline.
+public fn hoare(pre: HeapPredicate, command: Text, post: HeapPredicate) -> HoareTriple {
+    HoareTriple { pre, command, post }
+}
+
+// =============================================================================
+// 5. Capability — heap permission tier
+// =============================================================================
+
+/// Heap permission for the three-tier reference model.
+///
+/// Mirrors `verum_kernel::separation_logic::Capability` so user code
+/// can talk about reference-tier permissions in proof bodies.
+///
+///  * `Read` — the function may dereference the heap location but
+///    not modify it. Pairs with `&T` (Tier-0 reference).
+///  * `Write` — the function may modify the binding. Pairs with
+///    `&mut T`.
+///  * `Own` — the function owns the binding (may move out, drop, etc.).
+///    Pairs with affine ownership transfer.
+///  * `None` — no permission. Used for negative claims like "this
+///    function cannot touch this region".
+public type Capability is
+    | Read
+    | Write
+    | Own
+    | NoCap;
+
+/// True iff the capability allows reading. `Read`, `Write`, and `Own`
+/// all admit reading; only `NoCap` rejects.
+public fn can_read(c: Capability) -> Bool {
+    match c {
+        Capability.Read => true,
+        Capability.Write => true,
+        Capability.Own => true,
+        Capability.NoCap => false,
+    }
+}
+
+/// True iff the capability allows writing. Only `Write` and `Own`.
+public fn can_write(c: Capability) -> Bool {
+    match c {
+        Capability.Write => true,
+        Capability.Own => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// 6. Connection to linear logic (#161 cross-reference)
+// =============================================================================
+
+/// Bridge: the multiplicative tensor `A ⊗ B` of linear logic
+/// corresponds to the separating conjunction `P ∗ Q` of separation
+/// logic. Both express "two resources held simultaneously, drawn
+/// from disjoint footprints".
+///
+/// This bridge lets users who already declared resource invariants
+/// in linear-logic vocabulary lift them into separation-logic
+/// vocabulary for heap-shape reasoning. The reverse direction
+/// (separation → linear) is omitted because heap-stable predicates
+/// don't have a faithful linear-logic reading — `pure(P)` is a
+/// classical proposition, not a linear resource.
+public fn linear_to_separation(_f: LinForm) -> Maybe<HeapPredicate> {
+    // V0: stub. The full encoding (Atom → named, MTensor → sep_conj,
+    // One → emp, …) lands in the next #161 increment along with
+    // the kernel-side decision procedure.
+    Maybe.None
+}
