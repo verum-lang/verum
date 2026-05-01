@@ -157,15 +157,34 @@ public fn apply_engine() -> ApplyEngine { ApplyEngine { unit: true } }
 
 /// One-shot apply of a changeset against a synthetic target.
 ///
-/// The `target_check` callback returns `Some(conflict)` when the
-/// requested change conflicts with the target's current state, or
-/// `None` to indicate "apply cleanly". This indirection keeps the
-/// engine independent of any actual storage impl — tests and
-/// production code share the same dispatch.
+/// Two callbacks compose the storage adapter:
+///
+///   * `target_check(change) -> Maybe<Conflict>` — returns
+///     `Some(conflict)` when the change diverges from the
+///     target's current state; `None` to indicate "apply cleanly".
+///   * `target_apply(change) -> Bool` — actually persists the
+///     change.  Returns `true` on success, `false` on a
+///     storage-level rejection (the engine then surfaces this as
+///     `CfReplaceFailed`).  Called for both fresh applies and
+///     `CrReplace` resolutions.
+///
+/// Pre-fix `apply` only had `target_check` — it identified
+/// conflicts but never persisted any change, leaving the
+/// "applied" counter incremented while storage saw nothing.  Now
+/// the storage adapter receives both probes; production callers
+/// pass `Connection.set_rows_at`-shaped closures, tests pass
+/// in-memory mock probes.
+///
+/// This indirection keeps the engine independent of any concrete
+/// storage impl — tests and production code share the same
+/// dispatch.  The companion `apply_to_connection` (in
+/// `l7_api/session_apply.vr`, follow-up) wires both callbacks to
+/// a real `Connection`.
 pub fn apply(
     cs: &ChangeSet,
     resolver: &mut Heap<dyn ConflictResolver>,
     mut target_check: fn(&Change) -> Maybe<Conflict>,
+    mut target_apply: fn(&Change) -> Bool,
 ) -> (ApplyReport, List<ApplyDecision>) {
     let mut report = report_zero();
     let mut decisions: List<ApplyDecision> = List.new();
@@ -176,8 +195,39 @@ pub fn apply(
         let conflict = (target_check)(&cur);
         match conflict {
             None => {
-                report.applied = report.applied + 1;
-                decisions.push(AdApplied(cur));
+                if (target_apply)(&cur) {
+                    report.applied = report.applied + 1;
+                    decisions.push(AdApplied(cur));
+                } else {
+                    // Storage rejected a clean apply — surface as a
+                    // post-resolution conflict so the resolver can
+                    // arbitrate.
+                    let k = CfReplaceFailed;
+                    let resolution = (&mut **resolver).resolve(&cur, clone_conflict(&k));
+                    match resolution {
+                        CrSkip    => { report.skipped = report.skipped + 1; decisions.push(AdSkipped(cur, k)); }
+                        CrReplace => {
+                            // Caller asked us to retry as REPLACE; if storage
+                            // rejects again we abort.
+                            if (target_apply)(&cur) {
+                                report.replaced = report.replaced + 1;
+                                decisions.push(AdReplaced(cur));
+                            } else {
+                                report.aborted = true;
+                                report.abort_reason = Some(clone_conflict(&k));
+                                decisions.push(AdAborted(cur, k));
+                                break;
+                            }
+                        }
+                        CrOmit  => { decisions.push(AdOmitted(cur, k)); }
+                        CrAbort => {
+                            report.aborted = true;
+                            report.abort_reason = Some(clone_conflict(&k));
+                            decisions.push(AdAborted(cur, k));
+                            break;
+                        }
+                    }
+                }
             }
             Some(k) => {
                 let resolution = (&mut **resolver).resolve(&cur, clone_conflict(&k));
@@ -187,8 +237,19 @@ pub fn apply(
                         decisions.push(AdSkipped(cur, k));
                     }
                     CrReplace => {
-                        report.replaced = report.replaced + 1;
-                        decisions.push(AdReplaced(cur));
+                        // Replace = persist on top of existing row.
+                        if (target_apply)(&cur) {
+                            report.replaced = report.replaced + 1;
+                            decisions.push(AdReplaced(cur));
+                        } else {
+                            // Replace itself failed — abort to keep
+                            // the changeset semantics consistent.
+                            let kf = CfReplaceFailed;
+                            report.aborted = true;
+                            report.abort_reason = Some(clone_conflict(&kf));
+                            decisions.push(AdAborted(cur, kf));
+                            break;
+                        }
                     }
                     CrOmit => {
                         decisions.push(AdOmitted(cur, k));

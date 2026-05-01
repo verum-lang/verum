@@ -225,11 +225,12 @@ fn test_strip_table() {
 
 fn no_conflict(_c: &Change) -> Maybe<Conflict> { None }
 fn always_conflict(_c: &Change) -> Maybe<Conflict> { Some(CfConflict) }
+fn always_apply_ok(_c: &Change) -> Bool { true }
 
 fn test_apply_clean() {
     let cs = build_three_change_set();
     let mut resolver: Heap<dyn ConflictResolver> = Heap.new(abort_always());
-    let (report, _decisions) = apply(&cs, &mut resolver, no_conflict);
+    let (report, _decisions) = apply(&cs, &mut resolver, no_conflict, always_apply_ok);
     assert_eq(report.applied, 3);
     assert(!report.aborted);
 }
@@ -237,7 +238,7 @@ fn test_apply_clean() {
 fn test_apply_skip_resolver() {
     let cs = build_three_change_set();
     let mut resolver: Heap<dyn ConflictResolver> = Heap.new(skip_on_conflict());
-    let (report, _decisions) = apply(&cs, &mut resolver, always_conflict);
+    let (report, _decisions) = apply(&cs, &mut resolver, always_conflict, always_apply_ok);
     assert_eq(report.skipped, 3);
     assert(!report.aborted);
 }
@@ -245,7 +246,7 @@ fn test_apply_skip_resolver() {
 fn test_apply_abort_resolver() {
     let cs = build_three_change_set();
     let mut resolver: Heap<dyn ConflictResolver> = Heap.new(abort_always());
-    let (report, _decisions) = apply(&cs, &mut resolver, always_conflict);
+    let (report, _decisions) = apply(&cs, &mut resolver, always_conflict, always_apply_ok);
     assert(report.aborted);
     match report.abort_reason { Some(_) => {}, None => panic("abort reason set") };
 }
@@ -253,7 +254,7 @@ fn test_apply_abort_resolver() {
 fn test_apply_replace_on_pk_conflict() {
     let cs = build_three_change_set();
     let mut resolver: Heap<dyn ConflictResolver> = Heap.new(replace_on_pk_conflict());
-    let (report, _) = apply(&cs, &mut resolver, always_conflict);
+    let (report, _) = apply(&cs, &mut resolver, always_conflict, always_apply_ok);
     assert_eq(report.replaced, 3);
     assert(!report.aborted);
 }
