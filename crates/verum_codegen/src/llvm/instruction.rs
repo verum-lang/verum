@@ -14836,11 +14836,15 @@ fn lower_call_method<'ctx>(
             }
             if type_ok {
                 if let Some(llvm_fn_candidate) = ctx.get_module().get_function(&fname) {
-                    let pc = llvm_fn_candidate.count_params() as u32;
-                    let ac = args.count as u32;
-                    if pc == ac || pc == ac + 1 {
-                        resolved_func_name = Some(fname);
-                        resolved_return_type = Some(func_desc.return_type.clone());
+                    // Reject bodyless FFI externs from method dispatch
+                    // (parallels the rejection in Strategy 3 below).
+                    if llvm_fn_candidate.count_basic_blocks() > 0 {
+                        let pc = llvm_fn_candidate.count_params() as u32;
+                        let ac = args.count as u32;
+                        if pc == ac || pc == ac + 1 {
+                            resolved_func_name = Some(fname);
+                            resolved_return_type = Some(func_desc.return_type.clone());
+                        }
                     }
                 }
             }
@@ -15044,6 +15048,14 @@ fn lower_call_method<'ctx>(
                 }
             }
             if let Some(llvm_fn_candidate) = ctx.get_module().get_function(fname) {
+                // Reject bodyless FFI externs from method dispatch.
+                // Same rationale as Strategies 1 / 3 — a bare libSystem
+                // / kernel32 / ntdll symbol is not a valid method-dispatch
+                // target.  See #90 for the original miscompile (`Hasher.write`
+                // → libSystem `write(fd, buf, count)`).
+                if llvm_fn_candidate.count_basic_blocks() == 0 {
+                    continue;
+                }
                 let pc = llvm_fn_candidate.count_params() as u32;
                 let ac = args.count as u32;
                 if pc == ac || pc == ac + 1 {
@@ -15062,28 +15074,50 @@ fn lower_call_method<'ctx>(
 
     // Strategy 3: Try exact method name as function name
     // Skip Text.* methods for non-text receivers or non-compilable methods
+    //
+    // **Rejection criterion**: an FFI extern (bodyless `declare i64
+    // @write(...)`) is NOT a valid method-dispatch target.  Pre-fix
+    // a bare method name like `write` resolved to libSystem's
+    // `write(fd, buf, count)` here, then the caller built a 2-arg
+    // call site (because the user's method was 1-arg `&[Byte]`)
+    // against a 3-arg declaration — undefined behaviour at the LLVM
+    // level, occasionally manifesting as `SIGSEGV in CodeGenPrepare`
+    // during `verum build` (#90).  The fix: require that the LLVM
+    // module function we're about to dispatch through has a body
+    // (`count_basic_blocks() > 0`) — i.e., is a real Verum-side
+    // function and not a bodyless extern.  FFI externs remain
+    // callable through `lower_call` (function call by id) but not
+    // through method dispatch by bare name.
+    //
+    // This closes the architectural collision between Verum-side
+    // method names (`Hasher.write`, `Text.read_to_end`, …) and
+    // libSystem / kernel32 / ntdll symbol names that share the
+    // bare suffix (`write`, `read`, `close`, `open`, …).
     if !skip_compiled_lookup && resolved_func_name.is_none() && !method_name_str.is_empty() {
         let skip_text_method = method_name_str.starts_with("Text.")
             && (!ctx.is_text_register(receiver.0) && !ctx.is_string_register(receiver.0)
                 || !str_method_compilable);
         if !skip_text_method {
-            if ctx.get_module().get_function(&method_name_str).is_some() {
-                resolved_func_name = Some(method_name_str.clone());
-                // Look up return type from VBC function table (O(1) via index)
-                if let Some(index) = ctx.func_name_index() {
-                    if let Some(entry) = index.find_by_name(&method_name_str) {
-                        if let Some(func_desc) =
-                            ctx.vbc_module().and_then(|m| m.functions.get(entry.index))
-                        {
-                            resolved_return_type = Some(func_desc.return_type.clone());
+            if let Some(candidate) = ctx.get_module().get_function(&method_name_str) {
+                // Reject bodyless FFI externs (declare-only, no body).
+                if candidate.count_basic_blocks() > 0 {
+                    resolved_func_name = Some(method_name_str.clone());
+                    // Look up return type from VBC function table (O(1) via index)
+                    if let Some(index) = ctx.func_name_index() {
+                        if let Some(entry) = index.find_by_name(&method_name_str) {
+                            if let Some(func_desc) =
+                                ctx.vbc_module().and_then(|m| m.functions.get(entry.index))
+                            {
+                                resolved_return_type = Some(func_desc.return_type.clone());
+                            }
                         }
-                    }
-                } else if let Some(vbc_mod) = ctx.vbc_module() {
-                    for func_desc in &vbc_mod.functions {
-                        let fname = vbc_mod.get_string(func_desc.name).unwrap_or("");
-                        if fname == method_name_str {
-                            resolved_return_type = Some(func_desc.return_type.clone());
-                            break;
+                    } else if let Some(vbc_mod) = ctx.vbc_module() {
+                        for func_desc in &vbc_mod.functions {
+                            let fname = vbc_mod.get_string(func_desc.name).unwrap_or("");
+                            if fname == method_name_str {
+                                resolved_return_type = Some(func_desc.return_type.clone());
+                                break;
+                            }
                         }
                     }
                 }
@@ -15845,9 +15879,12 @@ fn lower_call_method<'ctx>(
     // Strategy 4b: Try bare method name for non-list receivers
     // Method names may be type-prefixed (e.g., "Text.len") — also check bare name
     if resolved_func_name.is_none() && bare_method != method_name_str {
-        // Try searching for bare method name as function
-        if ctx.get_module().get_function(bare_method).is_some() {
-            resolved_func_name = Some(bare_method.to_string());
+        // Try searching for bare method name as function.
+        // Reject bodyless FFI externs (parallels Strategies 1 / 2 / 3).
+        if let Some(candidate) = ctx.get_module().get_function(bare_method) {
+            if candidate.count_basic_blocks() > 0 {
+                resolved_func_name = Some(bare_method.to_string());
+            }
         }
     }
 
