@@ -922,27 +922,35 @@ implement AtomicBool {
     }
 
     // Swap value, returning old value.
-    // Uses u32-aligned CAS loop for true atomicity.
+    //
+    // Direct `atomic_exchange_u8` intrinsic (#333 architectural
+    // fix).  Earlier revision used a u32-aligned CAS loop with
+    // byte-masking — the bitwise-arithmetic on the field pointer
+    // (`(byte_ptr & !3) as *mut UInt32`) tripped the VBC
+    // interpreter's NaN-boxed Value model: `&self.value as *const
+    // Byte as Int` produced a Pointer-tagged Value that survived
+    // `try_compile_struct_field_addr`, but the subsequent bitwise
+    // AND with `!3` operated on the NaN-boxed bit pattern rather
+    // than the address payload, producing a junk address that
+    // `atomic_cas_u32` (opcode 0xE5) rejected as null
+    // (`Null pointer dereference`).  Live evidence:
+    // `AsyncRuntime.block_on()`'s `running.swap(true, AcqRel)`
+    // crashed at the very first instruction after `block_on`
+    // entry.  Same architectural pattern AtomicU8.swap shipped
+    // for #34 ("structural-soundness hazard now closed").
     public fn swap(&self, val: Bool, order: MemoryOrdering) -> Bool {
-        let order_u8 = ordering_to_u8(order);
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let new_byte: UInt32 = if val { 1 } else { 0 };
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, order_u8);
-            let new_word = (word & !mask) | (new_byte << shift);
-            let (old_word, success) = atomic_cas_u32(aligned_ptr, word, new_word, order_u8, ORDERING_RELAXED);
-            if success {
-                return ((old_word >> shift) & 0xFF) != 0;
-            }
-        }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        let new_byte: UInt8 = if val { 1 } else { 0 };
+        let old = atomic_exchange_u8(ptr, new_byte, ordering_to_u8(order));
+        old != 0
     }
 
     // Compare && swap. Returns Ok(current) if successful, Err(actual) otherwise.
-    // Uses u32-aligned word-level CAS for true atomicity.
+    //
+    // Direct `atomic_cas_u8` intrinsic (#333 architectural fix —
+    // same pattern as `swap` above).  Earlier u32-aligned word-
+    // level CAS with byte masking suffered the same NaN-boxed-
+    // pointer-arithmetic hazard.
     public fn compare_exchange(
         &self,
         current: Bool,
@@ -950,26 +958,20 @@ implement AtomicBool {
         success: MemoryOrdering,
         failure: MemoryOrdering
     ) -> Result<Bool, Bool> {
-        let current_byte: UInt32 = if current { 1 } else { 0 };
-        let new_byte: UInt32 = if new { 1 } else { 0 };
-        let byte_ptr = &self.value as *const Byte as Int;
-        let aligned_ptr = (byte_ptr & !3) as *mut UInt32;
-        let byte_offset = (byte_ptr & 3) as UInt32;
-        let shift = byte_offset * 8;
-        let mask: UInt32 = 0xFF << shift;
-        let success_u8 = ordering_to_u8(success);
-        let failure_u8 = ordering_to_u8(failure);
-        loop {
-            let word = atomic_load_u32(aligned_ptr as *const UInt32, failure_u8);
-            let actual_byte = (word >> shift) & 0xFF;
-            if actual_byte != current_byte {
-                return Err(actual_byte != 0);
-            }
-            let new_word = (word & !mask) | (new_byte << shift);
-            let (_, did_swap) = atomic_cas_u32(aligned_ptr, word, new_word, success_u8, failure_u8);
-            if did_swap {
-                return Ok(current);
-            }
+        let ptr = &self.value as *const Byte as *mut UInt8;
+        let current_byte: UInt8 = if current { 1 } else { 0 };
+        let new_byte: UInt8 = if new { 1 } else { 0 };
+        let (actual, did_swap) = atomic_cas_u8(
+            ptr,
+            current_byte,
+            new_byte,
+            ordering_to_u8(success),
+            ordering_to_u8(failure),
+        );
+        if did_swap {
+            Ok(current)
+        } else {
+            Err(actual != 0)
         }
     }
 

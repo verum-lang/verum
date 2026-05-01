@@ -1,0 +1,54 @@
+// @test: run-interpreter
+// @level: L1
+// @tier: 0
+// @tags: atomic, sync, primitives
+// @expected-stdout: atomic-bool ok
+//
+// Pin (#333) — AtomicBool's read-modify-write operations work in
+// interpreter mode.  Pre-fix `AtomicBool.swap` used a u32-aligned
+// CAS loop with byte-masking pointer arithmetic
+// (`(byte_ptr & !3) as *mut UInt32`) that tripped the VBC
+// interpreter's NaN-boxed Value model — `&self.value as *const
+// Byte as Int` survived `try_compile_struct_field_addr` as a
+// Pointer Value, but the bitwise AND with `!3` operated on the
+// NaN-boxed bit pattern, producing a junk address that
+// `atomic_cas_u32` rejected as null.  Live evidence:
+// `AsyncRuntime.block_on()`'s `running.swap(true, AcqRel)`
+// crashed at the very first instruction.  Architectural fix:
+// migrate AtomicBool to direct `atomic_exchange_u8` /
+// `atomic_cas_u8` typed intrinsics — same pattern AtomicU8
+// already uses (closed under #34 with the same wording:
+// "structural-soundness hazard, now closed").
+
+mount core.sync.AtomicBool;
+mount core.sync.atomic.MemoryOrdering;
+
+fn main() {
+    // swap: false → true, returns false (the pre-swap value).
+    let a = AtomicBool.new(false);
+    let old = a.swap(true, MemoryOrdering.AcqRel);
+    assert_eq(old, false);
+    // After swap, the load returns true.
+    assert_eq(a.load(MemoryOrdering.Acquire), true);
+
+    // swap: true → false, returns true.
+    let prev = a.swap(false, MemoryOrdering.AcqRel);
+    assert_eq(prev, true);
+    assert_eq(a.load(MemoryOrdering.Acquire), false);
+
+    // compare_exchange: succeed when expected matches.
+    let b = AtomicBool.new(false);
+    match b.compare_exchange(false, true, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
+        Ok(_) => {},
+        Err(_) => panic("CAS should have succeeded"),
+    };
+    assert_eq(b.load(MemoryOrdering.Acquire), true);
+
+    // compare_exchange: fail when expected doesn't match.
+    match b.compare_exchange(false, true, MemoryOrdering.AcqRel, MemoryOrdering.Acquire) {
+        Ok(_) => panic("CAS should have failed"),
+        Err(actual) => assert_eq(actual, true),
+    };
+
+    print("atomic-bool ok");
+}
