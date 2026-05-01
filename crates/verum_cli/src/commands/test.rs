@@ -235,6 +235,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         property_testing: manifest.test.property_testing,
         proptest_cases: manifest.test.proptest_cases,
         differential: manifest.test.differential,
+        fuzzing: manifest.test.fuzzing,
     };
 
     let total = filtered.len();
@@ -250,23 +251,23 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         ));
     }
 
-    // Surface remaining inert TestConfig fields.  After #298 +
-    // #273 the `property_testing` / `proptest_cases` /
-    // `differential` fields are all load-bearing through
-    // `TestRunCfg`.  Only `fuzzing` (cargo-fuzz integration)
-    // remains forward-looking — pending #286-fuzz.
-    if manifest.test.fuzzing {
-        tracing::debug!(
-            "test runner: fuzzing={} — forward-looking; current `verum test` \
-             harness has no cargo-fuzz integration yet (pending #286-fuzz)",
-            manifest.test.fuzzing,
-        );
-    }
+    // After #298 + #273 + #299 every [test].* manifest field is
+    // load-bearing through `TestRunCfg`: property_testing /
+    // proptest_cases / differential / fuzzing all flow through to
+    // a real consumer.  Surface the load-bearing modes when set
+    // so embedders see the runner observed their setting.
     if manifest.test.differential && !quiet {
         ui::output(
             "  [differential] every non-property test runs through both \
              Tier 0 (interpreter) and Tier 1 (AOT) — disagreement is itself \
              a test failure",
+        );
+    }
+    if manifest.test.fuzzing && !quiet {
+        ui::output(
+            "  [fuzzing] cargo-fuzz targets under `fuzz/` will be exercised \
+             after the regular test suite — new crash artifacts count as \
+             test failures (per-target budget VERUM_FUZZ_BUDGET_SECS or 30s)",
         );
     }
 
@@ -424,8 +425,77 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         ui::output("  Use `llvm-cov report` to generate detailed reports");
     }
 
-    if failed > 0 {
-        Err(CliError::TestsFailed { passed, failed })
+    // Fuzz orchestration (#299): when [test].fuzzing = true, after
+    // the @test / @property suite finishes, discover cargo-fuzz
+    // targets under `fuzz/` and exercise each.  New crash artifacts
+    // count as additional failures — the run is GREEN only when
+    // both regular tests pass AND no fuzz target produces a fresh
+    // artifact.  Cargo-fuzz absent → hint message + zero outcomes
+    // (best-effort: missing toolchain shouldn't fail CI).
+    let mut fuzz_failures: usize = 0;
+    if cfg.fuzzing {
+        let budget = std::env::var("VERUM_FUZZ_BUDGET_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(30);
+        let report = crate::commands::fuzz::run(
+            &manifest_dir,
+            std::time::Duration::from_secs(budget),
+        );
+        if !quiet {
+            ui::output("");
+            ui::output(&format!("{}", "fuzz:".bold()));
+            if let Some(hint) = &report.hint {
+                ui::output(&format!("  {}", hint));
+            }
+            ui::output(&format!(
+                "  Discovered {} fuzz target(s); per-target budget {}s",
+                report.discovered, budget
+            ));
+            for o in &report.outcomes {
+                let label = match &o.status {
+                    crate::commands::fuzz::FuzzStatus::Clean => "ok".green().bold(),
+                    crate::commands::fuzz::FuzzStatus::Crashed => "CRASHED".red().bold(),
+                    crate::commands::fuzz::FuzzStatus::HarnessError(_) => {
+                        "HARNESS-ERROR".red().bold()
+                    }
+                    crate::commands::fuzz::FuzzStatus::Timeout => "TIMEOUT".yellow().bold(),
+                };
+                ui::output(&format!(
+                    "    [{}] {} ({})",
+                    label,
+                    o.target,
+                    format_duration(o.duration),
+                ));
+                if !o.new_crash_artifacts.is_empty() {
+                    for a in &o.new_crash_artifacts {
+                        ui::output(&format!("      crash: {}", a));
+                    }
+                }
+                if let crate::commands::fuzz::FuzzStatus::HarnessError(msg) = &o.status {
+                    ui::output(&format!("      stderr: {}", msg.lines().next().unwrap_or("")));
+                }
+            }
+        }
+        fuzz_failures = report
+            .outcomes
+            .iter()
+            .filter(|o| {
+                matches!(
+                    o.status,
+                    crate::commands::fuzz::FuzzStatus::Crashed
+                        | crate::commands::fuzz::FuzzStatus::HarnessError(_)
+                )
+            })
+            .count();
+    }
+
+    let total_failed = failed + fuzz_failures;
+    if total_failed > 0 {
+        Err(CliError::TestsFailed {
+            passed,
+            failed: total_failed,
+        })
     } else {
         Ok(())
     }
@@ -610,6 +680,16 @@ struct TestRunCfg {
     /// (per-iteration Value construction is impractical under
     /// per-binary respawn) and are passed through unchanged.
     differential: bool,
+    /// Mirror of `[test].fuzzing` — when `true`, after the
+    /// regular @test / @property suite finishes, the runner
+    /// discovers every cargo-fuzz target under `fuzz/` (workspace
+    /// root + `crates/*/fuzz/`) and exercises each via
+    /// `cargo fuzz run <target> -- -max_total_time=<N>`.  New
+    /// crash artifacts under `fuzz/artifacts/<target>/` count as
+    /// test failures.  Cargo-fuzz absent → the runner emits a
+    /// hint and continues (best-effort observability rather than
+    /// a hard CI gate).  See `commands/fuzz.rs`.
+    fuzzing: bool,
 }
 
 enum TestResult {
@@ -1868,6 +1948,7 @@ mod tests {
             property_testing,
             proptest_cases,
             differential: false,
+            fuzzing: false,
         }
     }
 
@@ -1885,6 +1966,7 @@ mod tests {
             property_testing: true,
             proptest_cases: 256,
             differential,
+            fuzzing: false,
         }
     }
 
