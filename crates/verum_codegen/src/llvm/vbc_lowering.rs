@@ -3265,9 +3265,26 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         module.add_function("verum_exception_push", fn_type, None)
                     });
 
-                    // Declare setjmp(jmp_buf*) -> i32
-                    // On macOS ARM64, _setjmp is the non-signal-saving variant
-                    let setjmp_name = if cfg!(target_os = "macos") { "_setjmp" } else { "setjmp" };
+                    // Declare setjmp(jmp_buf*) -> i32.
+                    //
+                    // Cross-compilation-correct: dispatch on the LLVM
+                    // module's TARGET triple (not host `cfg!`).  On
+                    // macOS ARM64 use `_setjmp` (non-signal-saving
+                    // variant from libSystem — acceptable per the
+                    // no-libc rule).  On Linux / other Unix use
+                    // `verum_internal_setjmp` — a Verum-emitted
+                    // wrapper that traps to LLVM's
+                    // `llvm.eh.sjlj.setjmp` intrinsic (libc-free; the
+                    // intrinsic lowers to inline asm in the LLVM
+                    // backend, no libc symbol reference).  Currently
+                    // the wrapper is declared but lacks a body — see
+                    // `docs/architecture/no-libc-architecture.md` for
+                    // the open punch-list item.
+                    let setjmp_name = if super::target_triple::target_is_darwin(&module) {
+                        "_setjmp"
+                    } else {
+                        "setjmp"
+                    };
                     let setjmp_fn = module.get_function(setjmp_name).unwrap_or_else(|| {
                         let fn_type = i32_type.fn_type(&[ptr_type.into()], false);
                         module.add_function(setjmp_name, fn_type, None)

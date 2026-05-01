@@ -3532,13 +3532,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     /// Get or declare strtol(str: ptr, endptr: ptr, base: i32) -> i64
+    /// Forward-declare `verum_internal_strtol` (defined in
+    /// `instruction.rs::get_or_declare_internal_strtol`) so callers
+    /// in runtime.rs can resolve the libc-free wrapper.  Same
+    /// signature as libc strtol — `(ptr, ptr, i32) -> i64`.
     fn get_or_declare_strtol(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        if let Some(f) = module.get_function("strtol") { return f; }
+        let name = "verum_internal_strtol";
+        if let Some(f) = module.get_function(name) { return f; }
         let i64_type = self.context.i64_type();
         let i32_type = self.context.i32_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into(), i32_type.into()], false);
-        module.add_function("strtol", fn_type, None)
+        module.add_function(name, fn_type, None)
     }
 
     /// Get or declare strtod(str: ptr, endptr: ptr) -> f64
