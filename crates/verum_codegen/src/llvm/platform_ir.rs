@@ -3280,7 +3280,10 @@ impl<'ctx> PlatformIR<'ctx> {
                 // Overflow path: write diagnostic then abort
                 builder.position_at_end(overflow_bb);
 
-                // Emit write(2, msg, len) to stderr before exiting
+                // Emit verum_internal_write(2, msg, len) to stderr before exiting.
+                // **No libc** — route through the canonical wrapper which
+                // dispatches to direct syscall (Linux) / libSystem (macOS) /
+                // kernel32 (Windows).  See `runtime.rs::get_or_declare_write`.
                 let msg = "CBGR fatal: epoch counter overflow (>65535)\n";
                 let msg_global = builder
                     .build_global_string_ptr(msg, "epoch_overflow_msg")
@@ -3288,8 +3291,10 @@ impl<'ctx> PlatformIR<'ctx> {
                 let write_fn_type =
                     i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false);
                 let write_fn = module
-                    .get_function("write")
-                    .unwrap_or_else(|| module.add_function("write", write_fn_type, None));
+                    .get_function("verum_internal_write")
+                    .unwrap_or_else(|| {
+                        module.add_function("verum_internal_write", write_fn_type, None)
+                    });
                 builder
                     .build_call(
                         write_fn,
@@ -10714,8 +10719,13 @@ impl<'ctx> PlatformIR<'ctx> {
             return Ok(());
         }
 
-        let close_fn =
-            self.get_or_declare_fn(module, "close", i64_type.fn_type(&[i64_type.into()], false));
+        // **No libc**: route through `verum_internal_close` wrapper.
+        // See note at the analogous `verum_internal_read` site.
+        let close_fn = self.get_or_declare_fn(
+            module,
+            "verum_internal_close",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
         let dealloc_fn = self.get_or_declare_fn(
             module,
             "verum_dealloc",
@@ -12431,9 +12441,17 @@ impl<'ctx> PlatformIR<'ctx> {
                 false,
             ),
         );
+        // **No libc** (per `docs/architecture/no-libc-architecture.md`):
+        // route through `verum_internal_read` wrapper which dispatches
+        // to direct syscall on Linux / libSystem on macOS / kernel32+
+        // ntdll on Windows.  Pre-fix this site declared bare `read`
+        // with i64 ABI, conflicting with `runtime.rs::libsys_extern`'s
+        // POSIX-correct `read(i32, ptr, i64) -> i64` declaration —
+        // visible as "Call parameter type does not match function
+        // signature!" verifier errors (#96).
         let read_fn = self.get_or_declare_fn(
             module,
-            "read",
+            "verum_internal_read",
             i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
         );
         let alloc_fn = self.get_or_declare_fn(
@@ -12583,9 +12601,11 @@ impl<'ctx> PlatformIR<'ctx> {
                 false,
             ),
         );
+        // **No libc**: route through `verum_internal_write` wrapper.
+        // See note at the analogous `verum_internal_read` site.
         let write_fn = self.get_or_declare_fn(
             module,
-            "write",
+            "verum_internal_write",
             i64_type.fn_type(&[i64_type.into(), ptr_type.into(), i64_type.into()], false),
         );
         let alloc_fn = self.get_or_declare_fn(
