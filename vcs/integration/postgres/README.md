@@ -98,3 +98,6 @@ Test list per `internal/specs/database.md` follow-up:
   IDENTIFY_SYSTEM → CREATE_REPLICATION_SLOT → START_REPLICATION →
   drain XLogData → decode_pgoutput → assert Begin/Relation/Insert/
   Commit observed; relation cache resolves Insert relid (spec §6.1.7)
+- `t12_async_pool.vr` — AsyncPgPool fan-out: 32 concurrent tasks
+  on 4 connections; wall-clock falsifies the "actor serialises
+  callers" failure mode (spec §6.1.8 async surface)

@@ -1,0 +1,124 @@
+// =============================================================================
+// t12_async_pool.vr — async actor + pool fan-out
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.8 (async surface), §4.3 (pool).
+// =============================================================================
+//
+// Proves the async PG actor is genuinely parallel:
+//
+//   1. AsyncPgPool.launch eagerly opens 4 connections.
+//   2. Spawn 32 concurrent tasks, each `acquire().simple_query("SELECT
+//      pg_sleep(0.1)")` (100 ms server-side sleep). Wall-clock for
+//      the join must be CLOSE to 0.1 × ceil(32/4) ≈ 0.8 s, i.e.
+//      ≪ 32 × 0.1 = 3.2 s. If the actor were serialising callers
+//      onto a single thread the join would land near 3.2 s.
+//   3. Pool.tracked() reports a value bounded by max_size.
+//
+// Wall-clock check uses a tolerant ceiling (1.6 s) so a slow CI
+// box doesn't false-positive — the point is to falsify the
+// "completely-serialised" failure mode, not to benchmark.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgConnection, AsyncPgPool, AsyncPoolConfig,
+};
+mount core.async.task.spawn;
+mount core.async.executor.block_on;
+mount core.time.SystemClock;
+
+const FANOUT: Int = 32;
+const MAX_CONNS: Int = 4;
+const SLEEP_MS: Int = 100;
+const WALL_CEIL_MS: Int = 1600;     // ≪ FANOUT × SLEEP_MS = 3200ms
+
+fn pool_config() -> AsyncPoolConfig {
+    AsyncPoolConfig.default()
+        .with_size(MAX_CONNS, MAX_CONNS)
+        .with_mailbox_capacity(8)
+}
+
+async fn one_query(pool: &AsyncPgPool, idx: Int) -> Result<Int, Text> {
+    let guard = match pool.acquire().await {
+        Ok(g)  => g,
+        Err(e) => { return Err(f"acquire #{idx} failed: {e}"); }
+    };
+    let conn = guard.conn();
+    let r = conn.simple_query(&"SELECT pg_sleep(0.1), 1::int4".clone()).await;
+    match r {
+        Ok(rs) => Ok(rs.rows.len() as Int),
+        Err(e) => Err(f"query #{idx} failed: {e}"),
+    }
+}
+
+fn main() {
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let pool = expect_ok(
+            AsyncPgPool.launch(cfg, pool_config()).await,
+            &"AsyncPgPool.launch failed".clone(),
+        );
+        expect(
+            pool.tracked() == MAX_CONNS,
+            &f"tracked={pool.tracked()} != min={MAX_CONNS} after launch",
+        );
+
+        let started = SystemClock.now();
+
+        // Fan-out: spawn FANOUT concurrent tasks, each holding the
+        // pool by reference (the pool itself is Send via Shared).
+        let pool_shared = Shared.new(pool);
+        let mut joins: List<core.async.task.JoinHandle<Result<Int, Text>>> = List.new();
+        let mut i: Int = 0;
+        while i < FANOUT {
+            let p = pool_shared.clone();
+            let idx = i;
+            let jh = spawn(async move {
+                one_query(&*p, idx).await
+            });
+            joins.push(jh);
+            i = i + 1;
+        }
+
+        // Join them all.
+        let mut ok_count: Int = 0;
+        let mut k: Int = 0;
+        while k < joins.len() as Int {
+            let res = joins[k].join().await;
+            match res {
+                Ok(Ok(n)) => { ok_count = ok_count + n; }
+                Ok(Err(e)) => { expect(false, &f"task {k} returned Err: {e}"); }
+                Err(_) => { expect(false, &f"task {k} join failed"); }
+            }
+            k = k + 1;
+        }
+        expect(
+            ok_count == FANOUT,
+            &f"ok_count={ok_count} != FANOUT={FANOUT}",
+        );
+
+        let elapsed_ms = started.elapsed().as_milliseconds();
+        expect(
+            elapsed_ms <= WALL_CEIL_MS,
+            &f"wall-clock {elapsed_ms}ms exceeds {WALL_CEIL_MS}ms — actor is serialising callers",
+        );
+
+        // Drain pool — best-effort.
+        // (V0 has no .drain(); guard drops returned connections.)
+
+        pass(&"t12_async_pool".clone());
+    });
+}

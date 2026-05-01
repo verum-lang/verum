@@ -1,0 +1,281 @@
+// =============================================================================
+// core/database/postgres/async_connection.vr — async wrapper over sync wire
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.8 (async surface).
+// =============================================================================
+//
+// Design — actor-per-connection pattern (matches `tokio_postgres`'s
+// internal model). The sync `PgConnection` stays canonical and
+// unchanged; an async wrapper is layered on top via:
+//
+//   1. A `spawn_blocking` task that takes ownership of one
+//      `PgConnection` and runs a blocking request loop. Blocking
+//      I/O on the dedicated blocking-pool thread is correct
+//      (`spawn_blocking`'s pool exists exactly for this).
+//
+//   2. A bounded mpsc channel of `PgRequest` enum values from the
+//      caller(s) into the actor.
+//
+//   3. Each request carries a oneshot `reply` channel. The actor
+//      dispatches the request synchronously, sends the response
+//      back, and loops. The caller awaits the oneshot —
+//      genuinely yielding to the executor while the actor works.
+//
+// Pre-this module the only PG surface was sync (`conn.simple_query`
+// blocks the calling thread). Production handlers serving 10K
+// concurrent queries cannot afford 10K blocked threads. The actor
+// pattern caps blocked threads at `(connection_count)` while
+// caller fan-out runs entirely on the async executor.
+//
+// V0 surface — covers the canonical operations used by every
+// AsyncDatabase consumer:
+//
+//   * `simple_query(sql)`  → `Future<Result<PgSimpleQueryResult, …>>`
+//   * `execute(sql)`       → `Future<Result<Text, …>>` (command_tag)
+//   * `ping()`             → `Future<Result<(), …>>`
+//   * `close()`            → `Future<Result<(), …>>` (terminates actor,
+//                            joins, closes the wire cleanly)
+//
+// Out of V0 (each follow-up):
+//   * `prepare` / `execute_prepared` (PG extended-query is
+//     scaffolded; needs PgRequest::Prepare + Execute variants).
+//   * Pipeline (sync `PgPipeline` keeps being the only path).
+//   * Replication / COPY / NOTIFY (each its own sub-protocol —
+//     async dispatch loop differs and gets its own actor tier).
+//
+// Lifetime — `AsyncPgConnection` is reference-counted via the
+// `Sender` clone. Closing one handle does NOT shut down the
+// actor; only `close()` (or all senders dropping) tears the
+// session down.
+// =============================================================================
+
+module core.database.postgres.async_connection;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.postgres.connection.{
+    PgConnection, PgSimpleQueryResult, connect as sync_connect,
+};
+mount core.database.postgres.config.PgConfig;
+mount core.async.channel.{
+    Sender, Receiver, OneshotSender, OneshotReceiver,
+    bounded_channel, oneshot,
+};
+mount core.async.task.{spawn_blocking, JoinHandle};
+
+// =============================================================================
+// Request / response ADTs
+// =============================================================================
+
+/// One unit of work the actor will run synchronously on its owned
+/// `PgConnection`. New variants are additive — keep the existing
+/// reply types stable so older async clients keep working.
+type PgRequest is
+      ReqSimpleQuery {
+        sql: Text,
+        reply: OneshotSender<Result<PgSimpleQueryResult, DbError>>,
+    }
+    | ReqExecute {
+        sql: Text,
+        reply: OneshotSender<Result<Text, DbError>>,
+    }
+    | ReqPing {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | ReqShutdown {
+        reply: OneshotSender<Result<(), DbError>>,
+    };
+
+// =============================================================================
+// Public handle
+// =============================================================================
+
+/// Caller-side handle. Cheaply cloneable — every clone shares the
+/// same actor / underlying connection. Concurrent calls from
+/// different clones serialise inside the actor (one connection,
+/// one wire — same as sync PG).
+public type AsyncPgConnection is {
+    tx: Sender<PgRequest>,
+    /// Join handle for the actor task — kept so `close()` can
+    /// await the actor's clean shutdown after dispatching
+    /// `ReqShutdown`.
+    join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
+};
+
+implement AsyncPgConnection {
+    public fn clone(&self) -> AsyncPgConnection {
+        AsyncPgConnection {
+            tx: self.tx.clone(),
+            join: self.join.clone(),
+        }
+    }
+
+    /// Drive `simple_query` on the actor's owned connection. The
+    /// returned future yields to the executor while the actor's
+    /// blocking-pool thread runs the wire round-trip.
+    public async fn simple_query(&self, sql: &Text)
+        -> Result<PgSimpleQueryResult, DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqSimpleQuery {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("simple_query")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("simple_query reply")),
+        }
+    }
+
+    /// Run a single statement that produces no rows; returns the
+    /// `command_tag` from CommandComplete.
+    public async fn execute(&self, sql: &Text) -> Result<Text, DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqExecute {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("execute")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("execute reply")),
+        }
+    }
+
+    /// Async health-check — issues `simple_query("SELECT 1")` on
+    /// the actor and reports the round-trip success.
+    public async fn ping(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqPing { reply: rs }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("ping")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("ping reply")),
+        }
+    }
+
+    /// Tear down the actor cleanly — sends `ReqShutdown`, awaits
+    /// the actor's `Terminate` reply, then joins the actor task.
+    /// Subsequent calls on any clone fail with
+    /// `ACTOR_CLOSED`.
+    public async fn close(&self) -> Result<(), DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqShutdown { reply: rs }).await {
+            Ok(())  => {}
+            Err(_)  => { return Err(actor_dropped("close")); }
+        }
+        let _ = rr.await;     // clean response
+        // Take the JoinHandle and await it (best-effort — actor
+        // may have already exited).
+        let mut guard = self.join.lock().unwrap_or_else(|p| p.into_inner());
+        match guard.take() {
+            Some(jh) => { let _ = jh.join().await; }
+            None     => {}
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Constructor — connect + spawn actor
+// =============================================================================
+
+/// Establish a sync `PgConnection`, hand it to a `spawn_blocking`
+/// actor task, return the caller-side handle.
+///
+/// `mailbox_capacity` bounds how many requests can sit in-flight
+/// before `simple_query`/`execute` start to backpressure the
+/// caller (their `send_async` future stays Pending until a slot
+/// frees). 64 is a sane default for handler-fan-out workloads.
+public async fn connect(
+    cfg: &PgConfig,
+    mailbox_capacity: Int,
+) -> Result<AsyncPgConnection, DbError> {
+    // Connection setup is itself a sync call; offload to a
+    // blocking pool thread so the caller doesn't block.
+    let cfg_owned = cfg.clone();
+    let conn_jh = spawn_blocking(move || -> Result<PgConnection, DbError> {
+        sync_connect(&cfg_owned)
+    });
+    let conn = match conn_jh.join().await {
+        Ok(r)  => r?,
+        Err(_) => { return Err(actor_dropped("connect: blocking-pool join")); }
+    };
+
+    let cap = if mailbox_capacity < 1 { 1 } else { mailbox_capacity };
+    let (tx, rx) = bounded_channel::<PgRequest>(cap);
+
+    let join = spawn_blocking(move || -> () {
+        run_actor(conn, rx);
+    });
+
+    Ok(AsyncPgConnection {
+        tx: tx,
+        join: Shared.new(sync.mutex.Mutex.new(Some(join))),
+    })
+}
+
+// =============================================================================
+// Actor body — sync loop on the blocking pool
+// =============================================================================
+
+/// Owns the `PgConnection` for its lifetime. Pulls requests from
+/// the mailbox synchronously (futex-block per `Receiver.recv`),
+/// dispatches one at a time, sends the response back. Exits on
+/// `ReqShutdown` or when the mailbox drops (every `Sender` gone).
+fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
+    loop {
+        let req = match rx.recv() {
+            Some(r) => r,
+            None    => { break; }       // every sender dropped — shut down
+        };
+        match req {
+            ReqSimpleQuery { sql, reply } => {
+                let r = conn.simple_query(&sql);
+                let _ = reply.send(r);
+            }
+            ReqExecute { sql, reply } => {
+                let r = conn.execute(&sql);
+                let _ = reply.send(r);
+            }
+            ReqPing { reply } => {
+                let r = match conn.simple_query(&"SELECT 1".clone()) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqShutdown { reply } => {
+                // Clean wire shutdown — best-effort.
+                let r = conn.close();
+                let _ = reply.send(r);
+                break;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn actor_dropped(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "ACTOR_CLOSED".clone(),
+        message: f"async PG actor unavailable during {what}",
+        retryable: false,
+    })
+}

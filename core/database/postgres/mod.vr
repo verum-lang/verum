@@ -45,6 +45,8 @@ public module transaction;
 public module copy;
 public module replication;
 public module pgoutput;
+public module async_connection;
+public module async_pool;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -90,6 +92,13 @@ public mount .pgoutput.{
     PgoRelationCache,
     decode_pgoutput,
     PG_EPOCH_OFFSET_US,
+};
+public mount .async_connection.{
+    AsyncPgConnection,
+    connect as async_connect,
+};
+public mount .async_pool.{
+    AsyncPgPool, AsyncPoolConfig, AsyncPgPoolGuard,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;
