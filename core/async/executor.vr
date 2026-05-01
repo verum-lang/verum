@@ -331,6 +331,108 @@ implement<F: Future> TaskState<F> {
 /// (#325) — holds the configured worker count, lifecycle flag,
 /// the spawned join handles, and the park_mu / park_cv pair
 /// workers wait on when their queues empty.
+/// Phase 2 (#278): per-worker scheduling slot. Owns a local
+/// `Deque<Heap<TaskEntry>>` that the slot's worker pushes to
+/// (LIFO, cache-hot for recursive spawn) and pops from (LIFO).
+/// Foreign workers (work-stealers) pop from the FRONT (FIFO) so
+/// they pick up older tasks that the owner is least likely to
+/// re-touch — minimises cache-line ping-pong vs. stealing
+/// LIFO-end where the owner is currently working.
+///
+/// **Concurrency model — v2 (Mutex-protected)**:
+///   * Owner: `local_deque.lock().push_back(task)` /
+///     `local_deque.lock().pop_back()`.
+///   * Stealer: `local_deque.try_lock()` (non-blocking) →
+///     `pop_front()`. `try_lock` failure aborts the steal
+///     attempt; the stealer rotates to the next victim.
+///
+/// **v3 forward-compatibility**: the API surface (push_back /
+/// pop_back / pop_front) maps 1-to-1 onto the Chase-Lev
+/// lock-free deque planned for #280 Phase 4. v2 → v3 is a
+/// transparent backend swap; no caller-side change.
+public type WorkerSlot is {
+    /// Worker's id (index into `WorkerPool.slots`). Stable for
+    /// the lifetime of the pool — assigned by `start_worker_pool`
+    /// and observed via the `CURRENT_WORKER_ID` thread-local.
+    worker_id: Int,
+    /// LIFO local deque. Owner pushes/pops back; foreign workers
+    /// steal from the front. `Heap` because Mutex has no `Copy`
+    /// and the slot lives inside a `List` that may need to be
+    /// moved during initialisation.
+    local_deque: Heap<Mutex<Deque<Heap<TaskEntry>>>>,
+    /// Last-victim hint for the steal-rotation strategy. Workers
+    /// keep this hint to retry the same victim that previously
+    /// fed them (locality), and rotate only on steal failure.
+    /// `AtomicInt` because reads are non-atomic-relevant (best-
+    /// effort hint, not a correctness gate).
+    steal_hint: AtomicInt,
+};
+
+implement WorkerSlot {
+    /// Construct an empty slot for the given worker id.
+    public fn empty(id: Int) -> WorkerSlot {
+        WorkerSlot {
+            worker_id: id,
+            local_deque: Heap.new(Mutex.new(Deque.new())),
+            steal_hint: AtomicInt.new(0),
+        }
+    }
+
+    /// Owner-side push (LIFO, cache-hot). Brief lock; no
+    /// blocking on contention since only the owner pushes.
+    public fn push_local(&self, task: Heap<TaskEntry>) {
+        let mut dq = self.local_deque.lock().unwrap_or_else(|p| p.into_inner());
+        dq.push_back(task);
+    }
+
+    /// Owner-side pop (LIFO, cache-hot). Returns None when the
+    /// local deque is empty; caller falls through to the global
+    /// injector or steal path.
+    public fn pop_local(&self) -> Maybe<Heap<TaskEntry>> {
+        let mut dq = self.local_deque.lock().unwrap_or_else(|p| p.into_inner());
+        dq.pop_back()
+    }
+
+    /// Stealer-side pop (FIFO). Non-blocking — returns None on
+    /// lock contention so the caller rotates to the next victim
+    /// rather than blocking the steal attempt. FIFO end is
+    /// preferred to minimise cache-line ping-pong with the
+    /// owner's LIFO-end activity.
+    public fn try_steal(&self) -> Maybe<Heap<TaskEntry>> {
+        match self.local_deque.try_lock() {
+            Ok(mut dq) => dq.pop_front(),
+            Err(_) => Maybe.None,
+        }
+    }
+
+    /// Diagnostic — current local-deque length.
+    public fn local_len(&self) -> Int {
+        let dq = self.local_deque.lock().unwrap_or_else(|p| p.into_inner());
+        dq.len()
+    }
+}
+
+/// Phase 2 (#278): thread-local cell holding the calling
+/// worker's slot id. `0` is reserved for "outside any worker"
+/// (main thread / signal handler / FFI callback) so positive
+/// ids 1..=num_workers map to slots[id-1]. Set by `worker_main`
+/// before entering the poll loop.
+@thread_local
+static mut CURRENT_WORKER_ID: Int = 0;
+
+/// Read the calling thread's worker id, or `Maybe.None` if not
+/// running inside a worker. Used by `spawn` to dispatch the
+/// affinity decision: inside a worker → push to local deque,
+/// outside → push to global injector.
+public fn current_worker_id() -> Maybe<Int> {
+    let id = unsafe { CURRENT_WORKER_ID };
+    if id == 0 {
+        Maybe.None
+    } else {
+        Maybe.Some(id - 1) // map 1-indexed cell to 0-indexed slot.
+    }
+}
+
 public type WorkerPool is {
     /// Number of workers configured for this pool (resolved from
     /// manifest `async_worker_threads`, or `num_cpus()-1` when the
@@ -374,6 +476,12 @@ public type WorkerPool is {
     /// Phase 1B (#325): condition variable workers wait on. See
     /// `park_mu` for the protocol.
     park_cv: Heap<Condvar>,
+    /// Phase 2 (#278): per-worker scheduling slots, indexed by
+    /// 0-based worker id. Allocated to length `num_workers` at
+    /// `WorkerPool.empty(...)` time so `slots[id]` is always valid
+    /// for any spawned worker. Each slot owns a local deque +
+    /// steal-rotation hint; see [`WorkerSlot`].
+    slots: List<WorkerSlot>,
 };
 
 implement WorkerPool {
@@ -382,6 +490,18 @@ implement WorkerPool {
     /// — `AsyncRuntime.start_worker_pool` populates `handles`
     /// after spawning.
     public fn empty(num: Int) -> WorkerPool {
+        // Phase 2 (#278): allocate per-worker slots up-front so
+        // `slots[id]` is always valid for any spawned worker.
+        // Even when `num` is 0 (configured but disabled at runtime
+        // — start_worker_pool will return 0), the empty list is
+        // harmless: no worker is spawned, no slot is accessed.
+        let mut slots: List<WorkerSlot> = List.with_capacity(num);
+        let mut i = 0;
+        while i < num {
+            slots.push(WorkerSlot.empty(i));
+            i = i + 1;
+        }
+
         WorkerPool {
             num_workers: num,
             is_running: AtomicBool.new(false),
@@ -390,6 +510,7 @@ implement WorkerPool {
             handles: List.new(),
             park_mu: Heap.new(Mutex.new(())),
             park_cv: Heap.new(Condvar.new()),
+            slots: slots,
         }
     }
 
@@ -429,6 +550,73 @@ implement WorkerPool {
     /// idle after a workload.
     public fn parked(&self) -> Int {
         self.parked_count.load(MemoryOrdering.Relaxed)
+    }
+
+    /// Phase 2 (#278): borrow a specific worker's slot for
+    /// owner-side push/pop. Returns `Maybe.None` when the worker
+    /// id is out of range (defensive — production callers always
+    /// pass `current_worker_id()` which is bounded by
+    /// `num_workers`).
+    public fn slot(&self, worker_id: Int) -> Maybe<&WorkerSlot> {
+        if worker_id < 0 || worker_id >= self.slots.len() {
+            return Maybe.None;
+        }
+        Maybe.Some(self.slots.index(worker_id))
+    }
+
+    /// Phase 2 (#278): pick a steal victim. Round-robins through
+    /// peer workers starting from the caller's `steal_hint`. The
+    /// caller's own slot is skipped. Returns the first victim
+    /// whose `try_steal()` succeeded; otherwise None.
+    ///
+    /// **Strategy**: deterministic round-robin keyed by
+    /// `steal_hint` is cheaper than a true random victim and
+    /// preserves locality (a worker that previously stole from
+    /// peer X is likely to steal from X again). On steal failure,
+    /// `steal_hint` advances to (X+1) so the next attempt
+    /// rotates.
+    pub fn try_steal_for(&self, thief_id: Int) -> Maybe<Heap<TaskEntry>> {
+        let n = self.slots.len();
+        if n <= 1 {
+            return Maybe.None; // nobody to steal from.
+        }
+
+        let thief_slot = match self.slot(thief_id) {
+            Maybe.Some(s) => s,
+            Maybe.None => return Maybe.None,
+        };
+
+        let start = thief_slot.steal_hint.load(MemoryOrdering.Relaxed);
+        let mut tried = 0;
+        while tried < n - 1 {
+            let candidate = ((start + tried) % n);
+            tried = tried + 1;
+            if candidate == thief_id {
+                continue;
+            }
+            let victim = match self.slot(candidate) {
+                Maybe.Some(s) => s,
+                Maybe.None => continue,
+            };
+            match victim.try_steal() {
+                Maybe.Some(task) => {
+                    // Successful steal — pin the hint to this
+                    // victim so the next steal attempt retries
+                    // it first (locality).
+                    thief_slot.steal_hint.store(candidate, MemoryOrdering.Relaxed);
+                    return Maybe.Some(task);
+                }
+                Maybe.None => {},
+            };
+        }
+
+        // Every peer's steal attempt failed — advance hint by 1
+        // so the next call starts from a different victim.
+        thief_slot.steal_hint.store(
+            (start + 1) % n,
+            MemoryOrdering.Relaxed,
+        );
+        Maybe.None
     }
 }
 
@@ -644,11 +832,16 @@ implement AsyncRuntime {
         let mut spawn_failed = false;
         let mut i = 0;
         while i < configured {
+            // Capture per-iteration values for the spawn closure —
+            // each worker thread receives its OWN `worker_id` (Phase
+            // 2 #278: used to set CURRENT_WORKER_ID + index into
+            // `pool.slots`) plus the shared runtime pointer.
+            let worker_id = i;
             let result = ThreadBuilder.new()
-                .name(f"verum-worker-{i}")
+                .name(f"verum-worker-{worker_id}")
                 .stack_size(self.config.task_stack_size)
                 .spawn(fn() {
-                    worker_main(runtime_addr);
+                    worker_main(runtime_addr, worker_id);
                 });
             match result {
                 Ok(handle) => {
@@ -789,6 +982,87 @@ implement AsyncRuntime {
         let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
         if let Maybe.Some(ref pool) = *guard {
             pool.parked_count.fetch_sub(1, MemoryOrdering.Relaxed);
+        }
+    }
+
+    // =========================================================================
+    // Phase 2 (#278) — work-stealing helpers
+    // =========================================================================
+
+    /// Phase 2 (#278): pop a task from the calling worker's
+    /// local deque (LIFO, cache-hot for recursive spawn).
+    /// Returns Maybe.None when the local deque is empty OR the
+    /// worker_pool has been extracted by shutdown.
+    ///
+    /// **Lock discipline**: holds `worker_pool` briefly to access
+    /// `pool.slots[worker_id].local_deque`; releases before the
+    /// caller polls. Matches Hazard 1 ordering — workers never
+    /// hold worker_pool across `poll_one_task`.
+    fn pop_local_task(&self, worker_id: Int) -> Maybe<Heap<TaskEntry>> {
+        let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+        match *guard {
+            Maybe.Some(ref pool) => match pool.slot(worker_id) {
+                Maybe.Some(slot) => slot.pop_local(),
+                Maybe.None => Maybe.None,
+            },
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    /// Phase 2 (#278): try to steal a task from a peer worker's
+    /// deque (FIFO, owner's least-recent task — minimises
+    /// cache-line ping-pong). Returns Maybe.None when no peer
+    /// has stealable work OR the worker_pool has been extracted.
+    fn try_steal(&self, thief_id: Int) -> Maybe<Heap<TaskEntry>> {
+        let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+        match *guard {
+            Maybe.Some(ref pool) => pool.try_steal_for(thief_id),
+            Maybe.None => Maybe.None,
+        }
+    }
+
+    /// Phase 2 (#278): poll a single TaskEntry. Mirrors the
+    /// per-task body of `process_ready_tasks` so workers can
+    /// drive both their local deque AND stolen tasks through
+    /// the same waker / completion / re-park bookkeeping.
+    fn poll_one_task(&self, mut entry: Heap<TaskEntry>) {
+        if entry.completed {
+            return;
+        }
+
+        // Create or reuse waker for this task.
+        let waker = match &entry.waker {
+            Some(w) => w.clone(),
+            None => {
+                let w = create_runtime_waker(entry.id, self);
+                entry.waker = Some(w.clone());
+                w
+            }
+        };
+        let mut cx = Context.from_waker(&waker);
+
+        let poll_result = (entry.poll_fn)(entry.future_ptr, &mut cx);
+        self.total_polls.fetch_add(1, MemoryOrdering.Relaxed);
+
+        match poll_result {
+            Poll.Ready(()) => {
+                entry.completed = true;
+                self.task_count.fetch_sub(1, MemoryOrdering.Relaxed);
+                self.total_completions.fetch_add(1, MemoryOrdering.Relaxed);
+                (entry.drop_fn)(entry.future_ptr);
+            }
+            Poll.Pending => {
+                // Re-enqueue to the global `task_queue` (the same
+                // path single-threaded `process_ready_tasks` uses
+                // for pending work). Stolen tasks DON'T return to
+                // the original owner — they live on the global
+                // queue until their waker fires, after which the
+                // wake path puts them in `ready_queue` for the
+                // next worker to pick up. Maintains the property
+                // that no task is duplicated across deques.
+                let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
+                queue.push(entry);
+            }
         }
     }
 
@@ -1035,10 +1309,49 @@ implement AsyncRuntime {
             completed: false,
         });
 
-        // Add to task queue
-        {
+        // Phase 2 (#278) — affine dispatch:
+        //   * Inside a worker → push to that worker's local deque
+        //     (LIFO). Recursive spawn stays cache-hot; the worker
+        //     pops its own pushed task next iteration.
+        //   * Outside a worker (main thread, signal handler, FFI
+        //     callback) → push to the global injector
+        //     (`task_queue`), which workers drain in tier 2 of the
+        //     three-tier worker_main loop.
+        // Also wakes one parked worker so the new task gets picked
+        // up promptly even before the next 50 ms park-timeout fires
+        // (Phase 1B-2's notify-after-spawn integration).
+        //
+        // Move-discipline: `entry_slot` holds the task in transit;
+        // each push path consumes it via `take()`. The fall-through
+        // path runs ONLY when the local-slot push path didn't fire,
+        // so each task is enqueued exactly once.
+        let mut entry_slot: Maybe<Heap<TaskEntry>> = Maybe.Some(entry);
+        match current_worker_id() {
+            Maybe.Some(wid) => {
+                let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+                if let Maybe.Some(ref pool) = *guard {
+                    if let Maybe.Some(slot) = pool.slot(wid) {
+                        if let Maybe.Some(e) = entry_slot.take() {
+                            slot.push_local(e);
+                        }
+                    }
+                }
+            }
+            Maybe.None => {},
+        };
+        if let Maybe.Some(e) = entry_slot.take() {
+            // Fall-through to the global injector path.
             let mut queue = self.task_queue.lock().unwrap_or_else(|p| p.into_inner());
-            queue.push(entry);
+            queue.push(e);
+        }
+        // Wake one parked worker — covers the lost-wakeup window
+        // between a producer pushing and a worker about to park.
+        // No-op when no pool is configured.
+        {
+            let guard = self.worker_pool.lock().unwrap_or_else(|p| p.into_inner());
+            if let Maybe.Some(ref pool) = *guard {
+                pool.notify_one();
+            }
         }
 
         JoinHandle { task: task }
@@ -1930,8 +2243,27 @@ fn time_now_ns() -> UInt64 {
 //
 // Therefore the unsafe deref is sound for the entire
 // `worker_main` body.
-fn worker_main(runtime_ptr: &unsafe Byte) {
+//
+// **Phase 2 (#278)**: each worker now also carries its own
+// `worker_id` so the work-stealing scheduler can:
+//   * stamp the `CURRENT_WORKER_ID` thread-local for affine
+//     spawning (`spawn` reads this to decide local-deque vs.
+//     global-injector dispatch).
+//   * index into `WorkerPool.slots[worker_id]` to drain its
+//     local deque LIFO before falling through to the global
+//     queues, then to `try_steal_for(worker_id)` to take work
+//     from a peer's deque FRONT.
+fn worker_main(runtime_ptr: &unsafe Byte, worker_id: Int) {
     let runtime = unsafe { &*(runtime_ptr as &AsyncRuntime) };
+
+    // Phase 2 (#278): publish the worker id to the thread-local
+    // cell. Encoded as `id + 1` because `0` is reserved for "not
+    // a worker" (main thread / FFI callback). Read back by
+    // `current_worker_id()` from the `spawn` path to decide
+    // local-vs-injector dispatch.
+    unsafe {
+        CURRENT_WORKER_ID = worker_id + 1;
+    }
 
     loop {
         // Promptly check the shutdown flag at every iteration —
@@ -1941,24 +2273,76 @@ fn worker_main(runtime_ptr: &unsafe Byte) {
             break;
         }
 
-        // Drain any ready / pending tasks. `process_ready_tasks`
-        // is thread-safe via per-queue Mutex + atomic counters —
-        // workers compete for queue popping under the lock, then
-        // poll their owned task without holding any lock.
-        let _completed = runtime.process_ready_tasks();
+        // Phase 2 (#278) — three-tier drain order:
+        //   1. Local deque LIFO (cache-hot for recursive spawn)
+        //   2. Global injector / ready queues (existing path)
+        //   3. Steal from a peer's deque FRONT
+        // First non-None task is polled. When all three return
+        // empty, the worker proceeds to `try_park`.
+        let mut polled_any = false;
+
+        // Tier 1: local deque LIFO drain (own worker's slot).
+        loop {
+            let task_opt = runtime.pop_local_task(worker_id);
+            match task_opt {
+                Maybe.Some(task) => {
+                    runtime.poll_one_task(task);
+                    polled_any = true;
+                }
+                Maybe.None => break,
+            };
+            if runtime.shutdown.load(MemoryOrdering.Acquire) {
+                break;
+            }
+        }
+
+        // Tier 2: global injector + ready queues. Same path the
+        // single-threaded loop uses; thread-safe via per-queue
+        // Mutex.
+        let completed = runtime.process_ready_tasks();
+        if completed > 0 {
+            polled_any = true;
+        }
 
         if runtime.shutdown.load(MemoryOrdering.Acquire) {
             break;
         }
 
-        // No tasks to poll → park. `try_park` re-checks the
+        // Tier 3: steal from a peer worker. Only attempted when
+        // tiers 1+2 produced nothing — opportunistic load
+        // balance.
+        if !polled_any {
+            match runtime.try_steal(worker_id) {
+                Maybe.Some(task) => {
+                    runtime.poll_one_task(task);
+                    polled_any = true;
+                }
+                Maybe.None => {},
+            };
+        }
+
+        if runtime.shutdown.load(MemoryOrdering.Acquire) {
+            break;
+        }
+
+        // All three tiers empty → park. `try_park` re-checks the
         // queues UNDER park_mu (Hazard 2 lost-wakeup mitigation)
         // and waits with a 50 ms timeout (Phase 1B-1 safety net
         // — Phase 1B-2 will replace with notify-after-spawn).
-        match runtime.try_park() {
-            ParkAction.Stop => break,
-            ParkAction.Continue => {},
-        };
+        if !polled_any {
+            match runtime.try_park() {
+                ParkAction.Stop => break,
+                ParkAction.Continue => {},
+            };
+        }
+    }
+
+    // Clear the thread-local on exit for cleanliness — the OS
+    // would zero the TLS slot when the thread joins anyway, but
+    // explicit clear matches the pre-Phase-2 invariant that
+    // `CURRENT_WORKER_ID == 0` outside any worker.
+    unsafe {
+        CURRENT_WORKER_ID = 0;
     }
 }
 
