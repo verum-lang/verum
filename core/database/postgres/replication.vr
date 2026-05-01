@@ -247,6 +247,14 @@ public type IdentifySystemRow is {
     dbname: Text,
 };
 
+/// Result of `TIMELINE_HISTORY <tli>`. `filename` is the canonical
+/// `00000003.history` form; `content` is the raw bytes the standby
+/// would write to its own pg_wal directory verbatim.
+public type TimelineHistoryRow is {
+    filename: Text,
+    content: List<Byte>,
+};
+
 // =============================================================================
 // Affine replication connection
 // =============================================================================
@@ -330,6 +338,117 @@ implement PgReplicationConnection {
         let wait_clause = if wait { " WAIT".clone() } else { "".clone() };
         let sql = f"DROP_REPLICATION_SLOT {slot}{wait_clause}";
         let _ = self.conn.simple_query(&sql)?;
+        Ok(())
+    }
+
+    /// CREATE_REPLICATION_SLOT slot PHYSICAL [RESERVE_WAL].
+    /// `reserve_wal=true` pins WAL from slot creation forward so a
+    /// subsequent START_REPLICATION can resume from a known LSN
+    /// without losing segments to checkpoint cleanup.
+    public fn create_physical_slot(
+        &mut self,
+        slot: &Text,
+        reserve_wal: Bool,
+    ) -> Result<(), DbError> {
+        if self.streaming {
+            return Err(streaming_state_error("CREATE_REPLICATION_SLOT after START"));
+        }
+        let reserve_clause = if reserve_wal { " RESERVE_WAL".clone() } else { "".clone() };
+        let sql = f"CREATE_REPLICATION_SLOT {slot} PHYSICAL{reserve_clause}";
+        let _ = self.conn.simple_query(&sql)?;
+        Ok(())
+    }
+
+    /// TIMELINE_HISTORY <tli> — server returns one row with
+    /// (filename text, content bytea). Standby uses to find branch
+    /// points across timelines after a failover. Pre-PG 12 the
+    /// content was returned as text; modern PG ships bytea — we
+    /// surface raw bytes either way.
+    public fn timeline_history(&mut self, tli: Int)
+        -> Result<TimelineHistoryRow, DbError>
+    {
+        if self.streaming {
+            return Err(streaming_state_error("TIMELINE_HISTORY after START"));
+        }
+        let sql = f"TIMELINE_HISTORY {tli}";
+        let r = self.conn.simple_query(&sql)?;
+        if r.rows.len() != 1 {
+            return Err(bad_replication("TIMELINE_HISTORY produced no row"));
+        }
+        let row = &r.rows[0];
+        if row.len() < 2 {
+            return Err(bad_replication("TIMELINE_HISTORY row has fewer than 2 columns"));
+        }
+        let filename = wire_text(&row[0])?;
+        let content = wire_bytes(&row[1])?;
+        Ok(TimelineHistoryRow {
+            filename: filename,
+            content: content,
+        })
+    }
+
+    /// START_REPLICATION SLOT slot PHYSICAL X/Y [TIMELINE n].
+    /// Server enters CopyBoth and streams raw WAL via the same
+    /// XLogData wire format as logical mode (the only difference
+    /// is what's INSIDE the WAL payload — physical = raw on-disk
+    /// records, logical = decoded by output plugin). Reuses
+    /// `next_message` / `send_standby_status`.
+    public fn start_physical(
+        &mut self,
+        slot: &Text,
+        start_lsn: Lsn,
+        timeline: Maybe<Int>,
+    ) -> Result<(), DbError> {
+        if self.streaming {
+            return Err(streaming_state_error("START_REPLICATION already streaming"));
+        }
+        match self.mode {
+            RmPhysical => {}
+            _ => {
+                return Err(bad_replication("start_physical requires RmPhysical config"));
+            }
+        }
+        let lsn = start_lsn.format();
+        let mut sql: Text = if slot.len() > 0 {
+            f"START_REPLICATION SLOT {slot} PHYSICAL {lsn}"
+        } else {
+            f"START_REPLICATION PHYSICAL {lsn}"
+        };
+        match timeline {
+            Some(t) => { sql.push_str(&f" TIMELINE {t}"); }
+            None    => {}
+        }
+
+        match self.conn.state() {
+            PcsReady => {}
+            _ => {
+                return Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
+            }
+        }
+        let payload = fe_simple_query(&sql);
+        self.conn.write_replication_frame(payload.as_slice())?;
+
+        // Same CopyBoth-entry handshake as start_logical.
+        loop {
+            let msg = self.conn.read_replication_message()?;
+            match msg {
+                BmCopyOutResponse(_) => { break; }
+                BmCopyInResponse(_)  => { break; }
+                BmCopyData { .. } => {
+                    self.conn.push_back_replication(msg)?;
+                    break;
+                }
+                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmNotice(_) => {}
+                BmParameterStatus(_) => {}
+                BmReadyForQuery(_) => {
+                    return Err(bad_replication("START_REPLICATION (physical) did not enter CopyBoth"));
+                }
+                _ => {}
+            }
+        }
+
+        self.streaming = true;
         Ok(())
     }
 
@@ -586,6 +705,13 @@ fn wire_text(v: &core.database.common.types.WireValue) -> Result<Text, DbError> 
                 Err(_) => Err(bad_replication("non-UTF8 in replication metadata column")),
             }
         }
+    }
+}
+
+fn wire_bytes(v: &core.database.common.types.WireValue) -> Result<List<Byte>, DbError> {
+    match v {
+        core.database.common.types.WvNull => Err(bad_replication("required bytes column was NULL")),
+        core.database.common.types.WvPresent { bytes, .. } => Ok(bytes.clone()),
     }
 }
 

@@ -45,6 +45,7 @@ public module transaction;
 public module copy;
 public module replication;
 public module pgoutput;
+public module base_backup;
 public module async_connection;
 public module async_pool;
 public module async_transaction;
@@ -81,6 +82,7 @@ public mount .replication.{
     LogicalReplicationOptions,
     Lsn, ReplicationMessage, RmXLogData, RmKeepalive, RmOther,
     XLogData, PrimaryKeepalive, IdentifySystemRow,
+    TimelineHistoryRow,
     connect_replication,
 };
 public mount .pgoutput.{
@@ -94,6 +96,15 @@ public mount .pgoutput.{
     PgoRelationCache,
     decode_pgoutput,
     PG_EPOCH_OFFSET_US,
+};
+public mount .base_backup.{
+    BaseBackupOptions, BaseBackupSession, BaseBackupState,
+    BackupTablespace, BaseBackupTarget, BaseBackupManifest,
+    BbtClient, BbtBlackhole,
+    BbmYes, BbmNo, BbmForceEncode,
+    BbsPreTablespaces, BbsInTablespaceData, BbsBetweenTablespaces,
+    BbsInManifestData, BbsDone,
+    start as base_backup_start,
 };
 public mount .async_connection.{
     AsyncPgConnection,
