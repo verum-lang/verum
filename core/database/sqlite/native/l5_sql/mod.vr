@@ -32,6 +32,7 @@ public module parser;
 public module planner;
 public module resolver;
 public module codegen;
+public module cost_annotated;
 public module compile;
 
 public mount .lexer.{
@@ -85,4 +86,12 @@ public mount .resolver.{
 
 public mount .compile.{
     CompileError, compile, compile_raw, compile_with_schema,
+    CompileOptions, CompileOutput,
+    compile_options_default, compile_options_cost_aware,
+    compile_with_options,
+};
+
+public mount .cost_annotated.{
+    CostAnnotatedPlan, StatsCatalogue,
+    annotate_with_cost, stats_catalogue_new, explain_annotated,
 };

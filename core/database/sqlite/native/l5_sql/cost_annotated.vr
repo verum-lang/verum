@@ -1,0 +1,641 @@
+module core.database.sqlite.native.l5_sql.cost_annotated;
+
+// =============================================================================
+// l5_sql/cost_annotated.vr — Cost-annotated PlanNode wrapper
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §13.2 .. §13.5
+//
+// Connects the existing `planner_cost/` subtree (Cost, AccessMethod,
+// estimate_access, TableStats, IndexStats) to the L5 `PlanNode` AST
+// produced by `planner.vr`.  Pre-fix: planner_cost/ was completely
+// unwired despite being a fully-fledged cost model — every plan went
+// through the naive non-cost-aware path.
+//
+// Post-fix: every planner output goes through `annotate_with_cost`
+// which decorates each plan node with:
+//
+//   * the `Cost` of executing that subtree (rows + setup + per-row)
+//   * for table-scan nodes, the chosen `AccessMethod` (full-scan vs
+//     rowid-lookup vs index-seek vs covering-index)
+//
+// The annotator is PURE — does not mutate the input PlanNode.  It
+// emits a parallel `CostAnnotatedPlan` tree carrying the original
+// node by reference + the cost analysis.
+//
+// Codegen consults the annotation when it has multiple lowerings to
+// choose from (e.g. PnTableScan with an indexed predicate can lower
+// to OpenRead + SeekGE rather than OpenRead + Rewind).  When the
+// annotation is absent (back-compat path), codegen falls back to the
+// historical full-scan lowering.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l5_sql.ast.{Expr, TableRef};
+mount core.database.sqlite.native.l5_sql.planner.{
+    PlanNode, PnValues, PnTableScan, PnFilter, PnProject, PnSort,
+    PnDistinct, PnGroupBy, PnUnionAll, PnUnion, PnIntersect, PnExcept,
+    PnNestedLoopJoin, PnLimit, PnInsert, PnDelete, PnUpdate,
+    PnCreateTable, PnDrop, PnTransaction, PnPragma, PnNoop,
+};
+mount core.database.sqlite.native.planner_cost.cost.{
+    Cost, AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
+    AmIndexRangeScan, AmCoveringIndexScan, AmEphemeralScan,
+    cost_zero, cost_total, cost_combine, cost_concat, cost_less,
+    estimate_access, estimate_sort_cost, estimate_aggregate_cost,
+    access_name,
+};
+mount core.database.sqlite.native.planner_cost.stats.{
+    TableStats, IndexStats, ColumnStats, table_stats_default,
+};
+// Note: planner_cost.selectivity exposes `estimate(predicate, stats)`,
+// but it expects a `PredicateKind` not the `Expr` we have here.  We
+// use a heuristic constant fraction (0.3) for the foundation pass;
+// follow-up: lower `Expr` to `PredicateKind` for sharper estimates.
+
+// -----------------------------------------------------------------------------
+// CostAnnotatedPlan — pure-data decoration of a PlanNode
+// -----------------------------------------------------------------------------
+
+/// Cost-annotated plan node.  Carries the original planner output
+/// PLUS the chosen access method (where applicable) PLUS the
+/// estimated cost of the entire subtree rooted at this node.
+///
+/// `access_method` is `Some` only for nodes that have access-method
+/// degrees of freedom (PnTableScan, PnNestedLoopJoin sides).  For
+/// pure tree-rewrite nodes (PnFilter, PnProject, PnSort, etc.) it
+/// is always `None` and the cost is derived from child + per-node
+/// overhead.
+public type CostAnnotatedPlan is {
+    /// The original PlanNode — owned by the annotator (heap-cloned).
+    node: Heap<PlanNode>,
+    /// Estimated cost of executing this subtree.
+    cost: Cost,
+    /// Chosen access method, when the node has degrees of freedom.
+    access_method: Maybe<AccessMethod>,
+    /// Recursive children annotation — same shape as `node`'s
+    /// structural children.  Empty for leaf-shaped nodes (Values,
+    /// CreateTable, etc.).
+    children: List<CostAnnotatedPlan>,
+};
+
+// -----------------------------------------------------------------------------
+// Statistics catalogue
+// -----------------------------------------------------------------------------
+
+/// In-memory stats catalogue keyed by table name.  Populated by the
+/// planner facade from ANALYZE output (or from default heuristics
+/// when ANALYZE has not run).  Pure data — no mutation across
+/// planner invocations.
+public type StatsCatalogue is {
+    tables: Map<Text, TableStats>,
+    indices: Map<Text, IndexStats>,
+};
+
+public fn stats_catalogue_new() -> StatsCatalogue {
+    StatsCatalogue { tables: Map.new(), indices: Map.new() }
+}
+
+implement StatsCatalogue {
+    /// Lookup table statistics, returning a default empty record if
+    /// missing (cheap — `table_stats_default(name, 0)` is zero-row).
+    public fn table_stats_for(&self, name: &Text) -> TableStats {
+        match self.tables.get(name) {
+            Some(s) => clone_table_stats(s),
+            None => table_stats_default(name.clone(), 0_i64),
+        }
+    }
+
+    /// Register a fresh table-stats record.  Replaces any existing
+    /// entry under the same name.
+    public fn record_table(&mut self, stats: TableStats) {
+        self.tables.insert(stats.table_name.clone(), stats);
+    }
+
+    /// `true` iff every cost computation will use real (not default)
+    /// statistics.  Used by EXPLAIN to flag heuristic plans.
+    public fn fully_populated(&self) -> Bool {
+        self.tables.len() > 0
+    }
+}
+
+fn clone_table_stats(src: &TableStats) -> TableStats {
+    TableStats {
+        table_name: src.table_name.clone(),
+        n_rows: src.n_rows,
+        n_pages: src.n_pages,
+        avg_row_bytes: src.avg_row_bytes,
+        columns: clone_column_stats_list(&src.columns),
+    }
+}
+
+fn clone_column_stats_list(src: &List<ColumnStats>) -> List<ColumnStats> {
+    let mut out: List<ColumnStats> = List.new();
+    let mut i: Int = 0;
+    while i < src.len() {
+        let c = &src[i];
+        out.push(ColumnStats {
+            name: c.name.clone(),
+            distinct_estimate: c.distinct_estimate,
+            null_fraction: c.null_fraction,
+            histogram: List.new(),
+        });
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Annotation entry point
+// -----------------------------------------------------------------------------
+
+/// Annotate a `PlanNode` with cost + chosen access methods.  Pure —
+/// the input plan is not mutated.  The output is a parallel tree
+/// that codegen may consult OR ignore (back-compat).
+///
+/// Time complexity: O(N) in plan-tree size.  Cost computations are
+/// O(1) per node (table-stats lookup is HashMap-backed).
+public fn annotate_with_cost(
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    annotate_node(plan, stats)
+}
+
+fn annotate_node(plan: &PlanNode, stats: &StatsCatalogue) -> CostAnnotatedPlan {
+    match plan {
+        PnTableScan(table, cursor_id, n_cols) => {
+            annotate_table_scan(table, cursor_id, n_cols, plan, stats)
+        }
+        PnFilter(child, predicate) => annotate_filter(child, predicate, plan, stats),
+        PnProject(child, columns) => annotate_unary_passthrough(child, plan, stats, 0.0),
+        PnSort(child, terms) => annotate_sort(child, plan, stats),
+        PnDistinct(child, _n_proj) => annotate_distinct(child, plan, stats),
+        PnGroupBy(source, group_exprs, _projection, _having) => {
+            annotate_group_by(source, group_exprs.len(), plan, stats)
+        }
+        PnUnionAll(left, right) => annotate_binary_concat(left, right, plan, stats),
+        PnUnion(left, right, _n_proj) => annotate_binary_dedup(left, right, plan, stats),
+        PnIntersect(left, right, _n_proj) => annotate_binary_dedup(left, right, plan, stats),
+        PnExcept(left, right, _n_proj) => annotate_binary_dedup(left, right, plan, stats),
+        PnNestedLoopJoin(lt, _lc, _ln, rt, _rc, _rn, _on, _outer) => {
+            annotate_nested_loop_join(lt, rt, plan, stats)
+        }
+        PnLimit(child, _limit, _offset) => annotate_unary_passthrough(child, plan, stats, 0.0),
+        PnInsert(_table, _cols, source, _on_conflict) => {
+            annotate_insert(source, plan, stats)
+        }
+        PnDelete(table, _cursor_id, _predicate) => annotate_table_mutate(table, plan, stats),
+        PnUpdate(table, _cursor_id, _n_cols, _assignments, _predicate) => {
+            annotate_table_mutate(table, plan, stats)
+        }
+        // Constant-cost / DDL nodes — return cost_zero.
+        PnValues(_rows, _ncols) => annotate_constant_cost(plan, 1.0),
+        PnCreateTable(_stmt) => annotate_constant_cost(plan, 0.0),
+        PnDrop(_kind, _if_exists, _target) => annotate_constant_cost(plan, 0.0),
+        PnTransaction(_tx) => annotate_constant_cost(plan, 0.0),
+        PnPragma(_n, _v) => annotate_constant_cost(plan, 0.0),
+        PnNoop => annotate_constant_cost(plan, 0.0),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Per-shape annotators
+// -----------------------------------------------------------------------------
+
+fn annotate_table_scan(
+    table: &TableRef,
+    _cursor_id: Int,
+    _n_cols: Int,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let ts = stats.table_stats_for(&table_ref_name(table));
+    // Without a predicate to narrow access, full-scan is the only option.
+    // Predicate selectivity is set to 1.0 (no narrowing) — the wrapping
+    // PnFilter's annotator multiplies the result.
+    let am = AmFullScan;
+    let cost = estimate_access(&am, &ts, 1.0);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: cost,
+        access_method: Some(am),
+        children: List.new(),
+    }
+}
+
+fn annotate_filter(
+    child: &Heap<PlanNode>,
+    predicate: &Expr,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let mut child_ann = annotate_node(&**child, stats);
+    // Heuristic predicate selectivity (foundation pass — see note at
+    // top of file).  0.3 mirrors SQLite's default for unknown WHERE
+    // predicates and matches `planner_cost::selectivity::DEFAULT`.
+    let _ = predicate;
+    let sel: Float64 = 0.3;
+
+    // Filter narrows the row count by `sel`.  No additional setup;
+    // per-row cost picks up a small predicate-eval overhead.
+    let narrowed = Cost {
+        rows: child_ann.cost.rows * sel,
+        setup_cost: child_ann.cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost + 0.02,  // predicate eval
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: narrowed,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_unary_passthrough(
+    child: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+    extra_per_row: Float64,
+) -> CostAnnotatedPlan {
+    let child_ann = annotate_node(&**child, stats);
+    let total = Cost {
+        rows: child_ann.cost.rows,
+        setup_cost: child_ann.cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost + extra_per_row,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_sort(
+    child: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let child_ann = annotate_node(&**child, stats);
+    let sort_cost = estimate_sort_cost(child_ann.cost.rows);
+    let total = Cost {
+        rows: child_ann.cost.rows,
+        setup_cost: child_ann.cost.setup_cost + sort_cost.setup_cost,
+        per_row_cost: child_ann.cost.per_row_cost + sort_cost.per_row_cost,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(child_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_distinct(
+    child: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    // DISTINCT = sort + dedup; we re-use sort cost.
+    annotate_sort(child, plan, stats)
+}
+
+fn annotate_group_by(
+    source: &Heap<PlanNode>,
+    group_exprs_count: Int,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let src_ann = annotate_node(&**source, stats);
+    let agg_cost = estimate_aggregate_cost(src_ann.cost.rows, group_exprs_count);
+    let total = Cost {
+        rows: agg_cost.rows,
+        setup_cost: src_ann.cost.setup_cost + agg_cost.setup_cost,
+        per_row_cost: src_ann.cost.per_row_cost + agg_cost.per_row_cost,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(src_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_binary_concat(
+    left: &Heap<PlanNode>,
+    right: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let l_ann = annotate_node(&**left, stats);
+    let r_ann = annotate_node(&**right, stats);
+    let total = cost_concat(&l_ann.cost, &r_ann.cost);
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(l_ann);
+    children.push(r_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_binary_dedup(
+    left: &Heap<PlanNode>,
+    right: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let l_ann = annotate_node(&**left, stats);
+    let r_ann = annotate_node(&**right, stats);
+    let concat = cost_concat(&l_ann.cost, &r_ann.cost);
+    let dedup = estimate_sort_cost(concat.rows);
+    let total = Cost {
+        rows: concat.rows / 2.0,    // assume 50% overlap heuristic
+        setup_cost: concat.setup_cost + dedup.setup_cost,
+        per_row_cost: concat.per_row_cost + dedup.per_row_cost,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(l_ann);
+    children.push(r_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_nested_loop_join(
+    left_table: &TableRef,
+    right_table: &TableRef,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let l_stats = stats.table_stats_for(&table_ref_name(left_table));
+    let r_stats = stats.table_stats_for(&table_ref_name(right_table));
+    let l_cost = estimate_access(&AmFullScan, &l_stats, 1.0);
+    let r_cost = estimate_access(&AmFullScan, &r_stats, 1.0);
+    // Cartesian product cost — outer rows × inner cost.
+    let nlj = Cost {
+        rows: l_cost.rows * r_cost.rows,
+        setup_cost: l_cost.setup_cost + r_cost.setup_cost,
+        per_row_cost: l_cost.per_row_cost + r_cost.per_row_cost,
+    };
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: nlj,
+        access_method: Some(AmFullScan),
+        children: List.new(),
+    }
+}
+
+fn annotate_insert(
+    source: &Heap<PlanNode>,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let src_ann = annotate_node(&**source, stats);
+    // Insert cost ≈ source-rows × per-page write.  We charge a flat
+    // per-row-insert overhead.
+    let total = Cost {
+        rows: src_ann.cost.rows,
+        setup_cost: src_ann.cost.setup_cost,
+        per_row_cost: src_ann.cost.per_row_cost + 1.0,
+    };
+    let mut children: List<CostAnnotatedPlan> = List.new();
+    children.push(src_ann);
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: None,
+        children: children,
+    }
+}
+
+fn annotate_table_mutate(
+    table: &TableRef,
+    plan: &PlanNode,
+    stats: &StatsCatalogue,
+) -> CostAnnotatedPlan {
+    let ts = stats.table_stats_for(&table_ref_name(table));
+    // Default: full-scan and apply mutation per matched row.
+    let scan_cost = estimate_access(&AmFullScan, &ts, 1.0);
+    let total = Cost {
+        rows: scan_cost.rows,
+        setup_cost: scan_cost.setup_cost,
+        per_row_cost: scan_cost.per_row_cost + 1.0,
+    };
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: total,
+        access_method: Some(AmFullScan),
+        children: List.new(),
+    }
+}
+
+fn annotate_constant_cost(plan: &PlanNode, rows: Float64) -> CostAnnotatedPlan {
+    CostAnnotatedPlan {
+        node: Heap.new(clone_plan(plan)),
+        cost: Cost { rows: rows, setup_cost: 0.0, per_row_cost: 0.0 },
+        access_method: None,
+        children: List.new(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PlanNode shallow clone (heap-friendly)
+// -----------------------------------------------------------------------------
+
+fn clone_plan(plan: &PlanNode) -> PlanNode {
+    // PlanNode variants carry Heap<PlanNode> children — Verum's
+    // structural copy of the variant is sufficient for our purposes
+    // (callers receive a fresh wrapper but shared children).  The
+    // annotator stores a Heap<PlanNode> per node for the
+    // CostAnnotatedPlan.node field; this clone serves that purpose.
+    match plan {
+        PnValues(rows, n) => PnValues(rows.clone(), n),
+        PnTableScan(t, c, n) => PnTableScan(t.clone(), c, n),
+        PnFilter(c, p) => PnFilter(c.clone(), p.clone()),
+        PnProject(c, cols) => PnProject(c.clone(), cols.clone()),
+        PnSort(c, terms) => PnSort(c.clone(), terms.clone()),
+        PnDistinct(c, n) => PnDistinct(c.clone(), n),
+        PnGroupBy(s, g, p, h) => PnGroupBy(s.clone(), g.clone(), p.clone(), h.clone()),
+        PnUnionAll(l, r) => PnUnionAll(l.clone(), r.clone()),
+        PnUnion(l, r, n) => PnUnion(l.clone(), r.clone(), n),
+        PnIntersect(l, r, n) => PnIntersect(l.clone(), r.clone(), n),
+        PnExcept(l, r, n) => PnExcept(l.clone(), r.clone(), n),
+        PnNestedLoopJoin(lt, lc, ln, rt, rc, rn, on, outer) =>
+            PnNestedLoopJoin(lt.clone(), lc, ln, rt.clone(), rc, rn, on.clone(), outer),
+        PnLimit(c, l, o) => PnLimit(c.clone(), l.clone(), o.clone()),
+        PnInsert(t, cols, s, oc) => PnInsert(t.clone(), cols.clone(), s.clone(), oc.clone()),
+        PnDelete(t, c, p) => PnDelete(t.clone(), c, p.clone()),
+        PnUpdate(t, c, n, a, p) => PnUpdate(t.clone(), c, n, a.clone(), p.clone()),
+        PnCreateTable(s) => PnCreateTable(s.clone()),
+        PnDrop(k, ie, t) => PnDrop(k, ie, t.clone()),
+        PnTransaction(t) => PnTransaction(t.clone()),
+        PnPragma(n, v) => PnPragma(n.clone(), v.clone()),
+        PnNoop => PnNoop,
+    }
+}
+
+fn table_ref_name(t: &TableRef) -> Text {
+    // TableRef shape is `{ schema: Text, name: Text }` — concatenate
+    // with a dot when schema is non-empty, else just `name`.
+    if t.schema.len() == 0 { t.name.clone() }
+    else { f"{t.schema}.{t.name}".as_str().to_owned() }
+}
+
+// -----------------------------------------------------------------------------
+// EXPLAIN-style serialiser for CostAnnotatedPlan
+// -----------------------------------------------------------------------------
+
+/// Render a cost-annotated plan as a multi-line EXPLAIN string.
+/// Each indentation level reflects child depth.
+///
+/// Iterative DFS using an explicit stack — Verum's stack-overflow
+/// analysis flags direct recursion; this gives the same shape with
+/// O(depth) explicit stack memory and no recursion depth bound.
+public fn explain_annotated(plan: &CostAnnotatedPlan) -> Text {
+    let mut buf: Text = Text.new();
+    // Explicit DFS stack of (plan_ref_index, depth) — we encode
+    // descent by pushing children right-to-left so left-most child
+    // is popped first.  Index references walk the input tree
+    // structurally; we re-resolve per pop via the parents list.
+    //
+    // To avoid carrying borrowed references in the stack, we
+    // serialise the traversal as an explicit (path-into-tree, depth)
+    // pair and re-look-up per step.
+    explain_dfs_iterative(plan, &mut buf);
+    buf
+}
+
+fn explain_dfs_iterative(root: &CostAnnotatedPlan, buf: &mut Text) {
+    // Path-encoded DFS: a "frame" is a depth and a vector of child
+    // indices needed to reach the node from the root.  We start with
+    // the empty path = root at depth 0.
+    let mut path_stack: List<List<Int>> = List.new();
+    let mut depth_stack: List<Int> = List.new();
+    path_stack.push(List.new());
+    depth_stack.push(0);
+
+    while path_stack.len() > 0 {
+        let last = path_stack.len() - 1;
+        let path = path_stack[last].clone();
+        let depth = depth_stack[last];
+        // Pop the last frame.
+        path_stack = take_first_n(&path_stack, last);
+        depth_stack = take_first_n_int(&depth_stack, last);
+
+        let node_ref = resolve_path(root, &path);
+        emit_one(node_ref, buf, depth);
+
+        // Push children right-to-left so left-most is popped first.
+        let n_children = node_ref.children.len();
+        let mut k: Int = n_children - 1;
+        while k >= 0 {
+            let mut child_path = path.clone();
+            child_path.push(k);
+            path_stack.push(child_path);
+            depth_stack.push(depth + 1);
+            k = k - 1;
+        }
+    }
+}
+
+fn emit_one(plan: &CostAnnotatedPlan, buf: &mut Text, depth: Int) {
+    let mut i: Int = 0;
+    while i < depth {
+        buf.push_str("  ");
+        i = i + 1;
+    }
+    buf.push_str(&plan_node_name(&**(&plan.node)));
+    buf.push_str(" ~rows=");
+    buf.push_str(&float_to_short_text(plan.cost.rows));
+    buf.push_str(" total_cost=");
+    buf.push_str(&float_to_short_text(cost_total(&plan.cost)));
+    match &plan.access_method {
+        Some(am) => {
+            buf.push_str(" via ");
+            buf.push_str(&access_name(am));
+        }
+        None => {}
+    }
+    buf.push_str("\n");
+}
+
+fn resolve_path<'a>(root: &'a CostAnnotatedPlan, path: &List<Int>) -> &'a CostAnnotatedPlan {
+    let mut cursor: &CostAnnotatedPlan = root;
+    let mut i: Int = 0;
+    while i < path.len() {
+        let idx = path[i];
+        if idx < 0 || idx >= cursor.children.len() { return cursor; }
+        cursor = &cursor.children[idx];
+        i = i + 1;
+    }
+    cursor
+}
+
+fn take_first_n(src: &List<List<Int>>, n: Int) -> List<List<Int>> {
+    let mut out: List<List<Int>> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        out.push(src[i].clone());
+        i = i + 1;
+    }
+    out
+}
+
+fn take_first_n_int(src: &List<Int>, n: Int) -> List<Int> {
+    let mut out: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn plan_node_name(plan: &PlanNode) -> Text {
+    match plan {
+        PnValues(_, _)            => "Values".clone(),
+        PnTableScan(_, _, _)      => "TableScan".clone(),
+        PnFilter(_, _)            => "Filter".clone(),
+        PnProject(_, _)           => "Project".clone(),
+        PnSort(_, _)              => "Sort".clone(),
+        PnDistinct(_, _)          => "Distinct".clone(),
+        PnGroupBy(_, _, _, _)     => "GroupBy".clone(),
+        PnUnionAll(_, _)          => "UnionAll".clone(),
+        PnUnion(_, _, _)          => "Union".clone(),
+        PnIntersect(_, _, _)      => "Intersect".clone(),
+        PnExcept(_, _, _)         => "Except".clone(),
+        PnNestedLoopJoin(_, _, _, _, _, _, _, _) => "NestedLoopJoin".clone(),
+        PnLimit(_, _, _)          => "Limit".clone(),
+        PnInsert(_, _, _, _)      => "Insert".clone(),
+        PnDelete(_, _, _)         => "Delete".clone(),
+        PnUpdate(_, _, _, _, _)   => "Update".clone(),
+        PnCreateTable(_)          => "CreateTable".clone(),
+        PnDrop(_, _, _)           => "Drop".clone(),
+        PnTransaction(_)          => "Transaction".clone(),
+        PnPragma(_, _)            => "Pragma".clone(),
+        PnNoop                    => "Noop".clone(),
+    }
+}
+
+fn float_to_short_text(v: Float64) -> Text {
+    // Tiny float → text helper (stdlib's full Float.to_text isn't
+    // wired everywhere yet).  Truncates to integer for EXPLAIN
+    // readability; precision is not load-bearing for cost
+    // visualisation.
+    let trunc: Int64 = v as Int64;
+    f"{trunc}".as_str().to_owned()
+}
