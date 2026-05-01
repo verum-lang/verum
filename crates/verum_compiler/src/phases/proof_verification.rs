@@ -1542,13 +1542,16 @@ pub fn verify_proof_body_with_aliases_and_graph(
         // present — a theorem with NO requires AND NO ensures has
         // no Hoare-shape obligation worth routing.
         if !pre_clauses.is_empty() || !post_clauses.is_empty() {
+            // **V6 — homogeneous-separation fast path**.  When every
+            // clause is a syntactic separation predicate, route the
+            // entire obligation through the SepLogicEncoder.
             match verum_smt::separation_recognizer::verify_separation_obligation_multi(
                 &pre_clauses,
                 &post_clauses,
             ) {
                 verum_smt::separation_recognizer::SepObligationOutcome::Valid => {
                     return ProofVerificationResult::Verified(ProofCertificate {
-                        theorem_name,
+                        theorem_name: theorem_name.clone(),
                         steps: List::new(),
                         total_duration: proof_start.elapsed(),
                         has_incomplete_steps: false,
@@ -1576,13 +1579,80 @@ pub fn verify_proof_body_with_aliases_and_graph(
                         unproved,
                     };
                 }
-                // Unknown / NotSeparationGoal → fall through to the
-                // generic SMT path. NotSeparationGoal is the dominant
-                // case (most theorems aren't pure-separation goals);
-                // Unknown means the encoder couldn't decide and the
-                // generic SMT may have better luck via Z3's general
-                // tactics.
+                // Unknown / NotSeparationGoal → not a homogeneous
+                // separation goal.  Try the V8 mixed-clause splitter
+                // below before falling through to generic SMT.
                 _ => {}
+            }
+
+            // **V8 — mixed separation+pure splitter** (#161 V7+V8).
+            // The clauses aren't all separation predicates, but
+            // SOME of them might be.  Partition into separation /
+            // pure cohorts; verify the separation portion through
+            // the encoder; let the pure portion fall through to the
+            // generic SMT path that follows (the separation clauses
+            // there will translate as opaque UF, which is acceptable
+            // because their semantic content has already been
+            // discharged via the encoder).
+            //
+            // Soundness: the obligation
+            //   `(P_sep ∗ P_pure) ⊢ (Q_sep ∗ Q_pure)`
+            // proves separately as `P_sep ⊢ Q_sep` AND
+            // `P_pure ⊢ Q_pure`.  V8 discharges the first via the
+            // encoder; the generic SMT path discharges the second.
+            // BOTH must succeed for the conjunction to hold; if
+            // V8 says Invalid, the whole obligation fails outright.
+            match verum_smt::separation_recognizer::split_separation_obligation(
+                &pre_clauses,
+                &post_clauses,
+            ) {
+                verum_smt::separation_recognizer::SeparationSplitOutcome::Split {
+                    separation_outcome,
+                    pure_pre: _,
+                    pure_post: _,
+                } => match separation_outcome {
+                    verum_smt::separation_recognizer::SepObligationOutcome::Invalid {
+                        counterexample_summary,
+                    } => {
+                        // Separation portion is unsound — whole
+                        // obligation fails. The pure portion's
+                        // truth is irrelevant because the
+                        // conjunction is false.
+                        let mut suggestions = List::new();
+                        suggestions.push(Text::from(format!(
+                            "separation-logic portion REJECTED — counterexample: {}",
+                            counterexample_summary,
+                        )));
+                        let mut unproved = List::new();
+                        unproved.push(UnprovedSubgoal {
+                            goal: Text::from(format!(
+                                "separation-logic portion of mixed obligation \
+                                 REJECTED by SepLogicEncoder",
+                            )),
+                            hypotheses: List::new(),
+                            suggestions,
+                        });
+                        return ProofVerificationResult::Failed {
+                            verified_steps: List::new(),
+                            unproved,
+                        };
+                    }
+                    // Valid / Unknown → fall through to generic SMT
+                    // for the pure portion.  When Valid, the
+                    // separation portion is discharged; when
+                    // Unknown, generic SMT may decide via Z3's
+                    // general tactics.  Either way, the existing
+                    // setup picks up theorem.requires/ensures
+                    // (which include the separation clauses as UF
+                    // — harmless once their semantic content is
+                    // already discharged or under generic
+                    // verification).
+                    _ => {}
+                },
+                verum_smt::separation_recognizer::SeparationSplitOutcome::NotSeparationGoal => {
+                    // No separation clauses at all — pure-only
+                    // obligation; generic SMT handles it.
+                }
             }
         }
     }
