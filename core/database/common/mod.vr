@@ -45,6 +45,7 @@ public module types;
 public module query;
 public module protocol;
 public module capability;
+public module db_handle;
 public module retry;
 public module retry_run;
 public module pool;

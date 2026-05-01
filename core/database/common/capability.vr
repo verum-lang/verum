@@ -122,3 +122,215 @@ public type DbReadWriteTx   is ();
 public type DbAdmin         is ();
 public type DbReplication   is ();
 public type DbNotify        is ();
+
+/// Read + write + COPY FROM/TO bulk-ingest channel. Bulk ETL paths
+/// declare `using [Database<DbCopy>]`; ordinary handlers cannot
+/// accidentally fire a COPY without escalating their context.
+public type DbCopy          is ();
+
+/// Universal escape hatch — implements every `Can*` protocol.
+/// Call sites MUST be marked `@unsafe` AND `@audit(reason)` per
+/// spec §8.9; the type-system allows the operation but the lint
+/// surface forces a code-review trail.
+public type DbUnsafe        is ();
+
+// -----------------------------------------------------------------------------
+// Capability protocol bounds — gate `implement<C: ...> Database<C>`.
+// -----------------------------------------------------------------------------
+//
+// Every method that touches the wire is gated on one of these
+// protocols. Marker types implement EXACTLY the protocols matching
+// their capability set; misuse compiles into a "method not in scope"
+// error rather than a runtime guard.
+//
+// The protocol functions return `Bool` for documentation / runtime
+// introspection (e.g. metric labels) but are NEVER called on the hot
+// path — the compile-time bound does all the work.
+//
+// Hierarchy lattice (reading top-down: marker → protocols implemented):
+//
+//   DbAdmin       → CanRead, CanWrite, CanTx, CanDdl
+//   DbReadWriteTx → CanRead, CanWrite, CanTx
+//   DbCopy        → CanRead, CanWrite, CanCopy
+//   DbReplication → CanRead, CanRepl
+//   DbNotify      → CanRead, CanNotify
+//   DbRead        → CanRead
+//   DbUnsafe      → every protocol — escape hatch only
+//
+// All markers also implement the universal `Capability` for diagnostic
+// dispatch.
+// -----------------------------------------------------------------------------
+
+/// Universal capability protocol — every marker implements this so
+/// generic `Database<C: Capability>` methods (`stats`, `path`, …)
+/// stay reachable independent of authority.
+public type Capability is protocol {
+    fn cap_name() -> Text;
+    fn cap_mask() -> Int;
+}
+
+/// Permits SELECT / RETURNING / cursors. Bound on `query` /
+/// `query_one` / `query_stream`.
+public type CanRead is protocol {
+    fn _cap_can_read() -> Bool;
+}
+
+/// Permits INSERT / UPDATE / DELETE. Bound on `execute`.
+public type CanWrite is protocol {
+    fn _cap_can_write() -> Bool;
+}
+
+/// Permits BEGIN / SAVEPOINT / commit / rollback orchestration.
+/// Bound on `begin` / `run_with_retry`.
+public type CanTx is protocol {
+    fn _cap_can_tx() -> Bool;
+}
+
+/// Permits CREATE / ALTER / DROP / TRUNCATE / SET ROLE — anything
+/// that modifies the schema or session privilege.
+public type CanDdl is protocol {
+    fn _cap_can_ddl() -> Bool;
+}
+
+/// Permits logical replication / binlog consumer streaming.
+public type CanRepl is protocol {
+    fn _cap_can_repl() -> Bool;
+}
+
+/// Permits LISTEN / NOTIFY / pg_notify. Bound on
+/// `Database.listen_channel`.
+public type CanNotify is protocol {
+    fn _cap_can_notify() -> Bool;
+}
+
+/// Permits COPY FROM STDIN BINARY / COPY TO STDOUT BINARY bulk
+/// ingest channels.
+public type CanCopy is protocol {
+    fn _cap_can_copy() -> Bool;
+}
+
+/// Marker for the `Sql.unsafe_raw` escape hatch. Bound on
+/// `execute_raw` / `query_raw`; the call site MUST also carry an
+/// `@audit(reason)` lint annotation per spec §8.9.
+public type CanUnsafe is protocol {
+    fn _cap_can_unsafe() -> Bool;
+}
+
+// -----------------------------------------------------------------------------
+// DbRead — pure read.
+// -----------------------------------------------------------------------------
+
+implement Capability for DbRead {
+    fn cap_name() -> Text { "read".clone() }
+    fn cap_mask() -> Int  { CAP_READ }
+}
+implement CanRead for DbRead {
+    fn _cap_can_read() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// DbReadWriteTx — read + write + transactions (DML, no DDL).
+// -----------------------------------------------------------------------------
+
+implement Capability for DbReadWriteTx {
+    fn cap_name() -> Text { "read_write_tx".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_WRITE | CAP_TX }
+}
+implement CanRead  for DbReadWriteTx {
+    fn _cap_can_read() -> Bool { true }
+}
+implement CanWrite for DbReadWriteTx {
+    fn _cap_can_write() -> Bool { true }
+}
+implement CanTx    for DbReadWriteTx {
+    fn _cap_can_tx() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// DbAdmin — full DDL authority.
+// -----------------------------------------------------------------------------
+
+implement Capability for DbAdmin {
+    fn cap_name() -> Text { "admin".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN }
+}
+implement CanRead  for DbAdmin {
+    fn _cap_can_read() -> Bool { true }
+}
+implement CanWrite for DbAdmin {
+    fn _cap_can_write() -> Bool { true }
+}
+implement CanTx    for DbAdmin {
+    fn _cap_can_tx() -> Bool { true }
+}
+implement CanDdl   for DbAdmin {
+    fn _cap_can_ddl() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// DbReplication — replication consumer (read + repl-stream).
+// -----------------------------------------------------------------------------
+
+implement Capability for DbReplication {
+    fn cap_name() -> Text { "replication".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_REPL }
+}
+implement CanRead for DbReplication {
+    fn _cap_can_read() -> Bool { true }
+}
+implement CanRepl for DbReplication {
+    fn _cap_can_repl() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// DbNotify — read + LISTEN/NOTIFY.
+// -----------------------------------------------------------------------------
+
+implement Capability for DbNotify {
+    fn cap_name() -> Text { "notify".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_NOTIFY }
+}
+implement CanRead   for DbNotify {
+    fn _cap_can_read() -> Bool { true }
+}
+implement CanNotify for DbNotify {
+    fn _cap_can_notify() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// DbCopy — read + write + COPY bulk channel.
+// -----------------------------------------------------------------------------
+
+implement Capability for DbCopy {
+    fn cap_name() -> Text { "copy".clone() }
+    fn cap_mask() -> Int  { CAP_READ | CAP_WRITE | CAP_COPY }
+}
+implement CanRead  for DbCopy {
+    fn _cap_can_read() -> Bool { true }
+}
+implement CanWrite for DbCopy {
+    fn _cap_can_write() -> Bool { true }
+}
+implement CanCopy  for DbCopy {
+    fn _cap_can_copy() -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// DbUnsafe — escape hatch implementing every protocol. Use only
+// behind `@unsafe` + `@audit(reason)` per spec §8.9.
+// -----------------------------------------------------------------------------
+
+implement Capability for DbUnsafe {
+    fn cap_name() -> Text { "unsafe".clone() }
+    fn cap_mask() -> Int  {
+        CAP_READ | CAP_WRITE | CAP_TX | CAP_ADMIN | CAP_REPL | CAP_NOTIFY | CAP_COPY | CAP_UNSAFE
+    }
+}
+implement CanRead   for DbUnsafe { fn _cap_can_read()   -> Bool { true } }
+implement CanWrite  for DbUnsafe { fn _cap_can_write()  -> Bool { true } }
+implement CanTx     for DbUnsafe { fn _cap_can_tx()     -> Bool { true } }
+implement CanDdl    for DbUnsafe { fn _cap_can_ddl()    -> Bool { true } }
+implement CanRepl   for DbUnsafe { fn _cap_can_repl()   -> Bool { true } }
+implement CanNotify for DbUnsafe { fn _cap_can_notify() -> Bool { true } }
+implement CanCopy   for DbUnsafe { fn _cap_can_copy()   -> Bool { true } }
+implement CanUnsafe for DbUnsafe { fn _cap_can_unsafe() -> Bool { true } }
