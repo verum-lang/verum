@@ -204,6 +204,12 @@ pub enum DischargeMethod {
     /// ATS-V anti-pattern absence — discharged when none of the
     /// 26+ canonical anti-patterns match the cog's `arch_type`.
     AtsVAntiPatternCheck { pattern_tag: &'static str },
+    /// Multi-level meta-mode stability — discharged when the
+    /// reflection-tower's constructive witness pattern is invariant
+    /// across `[0, max_lift]` universe-ascent indices (MSFS Theorem
+    /// 9.6(b) idempotence).  Surfaces from
+    /// [`crate::reflection_tower::walk_stability_up_to`].
+    MetaModeStability { max_lift: u32 },
 }
 
 impl DischargeMethod {
@@ -223,6 +229,7 @@ impl DischargeMethod {
             DischargeMethod::AtsVBoundaryCheck => "ats_v_boundary_check",
             DischargeMethod::AtsVCompositionCheck => "ats_v_composition_check",
             DischargeMethod::AtsVAntiPatternCheck { .. } => "ats_v_anti_pattern_check",
+            DischargeMethod::MetaModeStability { .. } => "meta_mode_stability",
         }
     }
 
@@ -580,11 +587,12 @@ mod tests {
             DischargeMethod::AtsVAntiPatternCheck {
                 pattern_tag: "capability_escalation",
             },
+            DischargeMethod::MetaModeStability { max_lift: 10 },
         ];
         let tags: std::collections::BTreeSet<_> = probes.iter().map(|m| m.tag()).collect();
         assert_eq!(
             tags.len(),
-            13,
+            14,
             "every DischargeMethod variant must have a distinct tag",
         );
     }
