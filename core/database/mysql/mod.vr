@@ -37,6 +37,7 @@ public module async_connection;
 public module async_pool;
 public module async_transaction;
 public module async_typed_database;
+public module binlog;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -106,4 +107,18 @@ public mount .async_typed_database.{
     async_mysql_database_from_pool,
     async_mysql_admin_database_from_pool,
     async_mysql_readonly_database_from_pool,
+};
+public mount .binlog.{
+    BinlogConfig, BinlogChecksum, BcNone, BcCrc32,
+    BinlogStartFrom, BfFilePosition, BfGtidSet,
+    BinlogStream, BinlogEventHeader,
+    BinlogEvent, BeQuery, BeXid, BeRotate, BeFormatDescription,
+    BeGtid, BeHeartbeat, BeOther,
+    QueryEventBody, RotateEventBody, FormatDescriptionBody,
+    GtidEventBody,
+    connect_binlog,
+    BINLOG_DUMP_NON_BLOCK, BINLOG_THROUGH_GTID,
+    ET_QUERY, ET_XID, ET_ROTATE, ET_FORMAT_DESCRIPTION,
+    ET_GTID, ET_ANONYMOUS_GTID, ET_HEARTBEAT,
+    ET_TABLE_MAP, ET_WRITE_ROWS_V2, ET_UPDATE_ROWS_V2, ET_DELETE_ROWS_V2,
 };

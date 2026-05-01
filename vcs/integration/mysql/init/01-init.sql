@@ -22,6 +22,12 @@ GRANT SELECT ON spindle_test.* TO 'spindle_ro'@'%';
 -- Admin already has every privilege via MYSQL_USER + MYSQL_PASSWORD.
 GRANT ALL PRIVILEGES ON spindle_test.* TO 'spindle_admin'@'%';
 
+-- REPLICATION SLAVE allows COM_BINLOG_DUMP[_GTID] and the
+-- companion replication helpers used by the binlog module
+-- (P-PROD-MYSQL-BINLOG-V0). Without this, the dump command
+-- returns ER_SPECIFIC_ACCESS_DENIED.
+GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'spindle_admin'@'%';
+
 FLUSH PRIVILEGES;
 
 -- Phase-2 type-coverage smoke table.

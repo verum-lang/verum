@@ -38,6 +38,13 @@ services:
         --max-connections=64
         --general-log=1
         --general-log-file=/tmp/general.log
+        --server-id=42
+        --log-bin=mysql-bin
+        --binlog-format=ROW
+        --binlog-row-image=FULL
+        --gtid-mode=ON
+        --enforce-gtid-consistency=ON
+        --binlog-checksum=NONE
     tmpfs:
       - /var/lib/mysql:rw,size=512m
     healthcheck:

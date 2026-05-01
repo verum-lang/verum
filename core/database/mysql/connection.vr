@@ -684,6 +684,45 @@ implement MysqlConnection {
         self.state = McsClosed;
         Ok(())
     }
+
+    // -------------------------------------------------------------------------
+    // Binlog wire hooks
+    // -------------------------------------------------------------------------
+    //
+    // After COM_BINLOG_DUMP[_GTID] the server stops accepting any
+    // further commands and pushes binlog event packets indefinitely.
+    // The wire is single-direction streaming. The `binlog` module
+    // owns the lifecycle; these hooks expose only what it needs.
+
+    /// Send a raw command packet (resets sequence to 0 like every
+    /// other COM_*). Returns to caller after the wire write — no
+    /// reply consumption (binlog dump produces a stream, not an
+    /// ACK).
+    public fn binlog_send_command(&mut self, payload: &[Byte]) -> Result<(), DbError> {
+        match self.state {
+            McsReady => {}
+            _ => { return Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdMysql,
+                code: "BAD_STATE".clone(),
+                message: "binlog_send_command requires Ready state".clone(),
+                retryable: false,
+            })); }
+        }
+        self.sequence = 0;
+        send_packet(self, payload)?;
+        // After dump, no further commands are accepted. Mark the
+        // connection McsBusy so high-level callers don't try.
+        self.state = McsBusy;
+        Ok(())
+    }
+
+    /// Read one wire packet — the binlog event payload sits inside.
+    /// Returns the raw payload bytes for the binlog module's
+    /// decoder.
+    public fn binlog_recv_packet(&mut self) -> Result<List<Byte>, DbError> {
+        let pkt = recv_packet(self)?;
+        Ok(pkt.into_payload())
+    }
 }
 
 // -----------------------------------------------------------------------------
