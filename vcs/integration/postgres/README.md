@@ -114,3 +114,6 @@ Test list per `internal/specs/database.md` follow-up:
   (AsyncCopyOutReader; chunk-by-chunk drain); proves the actor
   sub-loop pattern works without buffering rows in memory
   (spec §6.1.6 / §6.1.8)
+- `t16_prepared.vr` — sync + async prepared statements: PgConnection
+  prepare / execute_prepared / close_prepared; AsyncPgConnection
+  same flow via actor (spec §6.1.4 extended-query / prepared)

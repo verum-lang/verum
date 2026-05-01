@@ -1,0 +1,118 @@
+// =============================================================================
+// t16_prepared.vr — sync + async prepared statements V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (extended-query / prepared).
+// =============================================================================
+//
+// Two scenarios — sync and async surfaces both:
+//
+//   1. Sync: connect → prepare("SELECT $1::int4 + $2::int4") →
+//      execute_prepared with text-formatted params → assert
+//      result row + close_prepared.
+//   2. Async: AsyncPgConnection → prepare → execute_prepared →
+//      close_prepared. Same query.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    PgConnection, PgPreparedStatement, PgSimpleQueryResult,
+    AsyncPgConnection, AsyncPgPreparedStatement,
+    async_connect,
+};
+mount core.async.executor.block_on;
+
+fn text_param(s: &str) -> Maybe<List<Byte>> {
+    let mut bytes: List<Byte> = List.new();
+    let raw = s.as_bytes();
+    let mut i: Int = 0;
+    while i < (raw.len() as Int) {
+        bytes.push(raw[i]);
+        i = i + 1;
+    }
+    Some(bytes)
+}
+
+fn main() {
+    // -------------------------------------------------------------------------
+    // Sync surface.
+    // -------------------------------------------------------------------------
+    let mut sconn = expect_ok(
+        connect_app(),
+        &"sync connect_app failed".clone(),
+    );
+    let stmt = expect_ok(
+        sconn.prepare(&"SELECT $1::int4 + $2::int4 AS sum".clone()),
+        &"sync prepare failed".clone(),
+    );
+    expect(
+        stmt.param_oids().len() >= 2,
+        &f"sync prepare returned {stmt.param_oids().len()} params, want ≥2",
+    );
+
+    let mut params: List<Maybe<List<Byte>>> = List.new();
+    params.push(text_param("17"));
+    params.push(text_param("25"));
+
+    let res = expect_ok(
+        sconn.execute_prepared(&stmt, &params),
+        &"sync execute_prepared failed".clone(),
+    );
+    expect_eq_int(res.rows.len() as Int, 1, &"sync exec row count".clone());
+
+    expect_ok(
+        sconn.close_prepared(&stmt),
+        &"sync close_prepared failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // Async surface — same query through the actor.
+    // -------------------------------------------------------------------------
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-aprep".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let aconn = expect_ok(
+            async_connect(&cfg, 8).await,
+            &"async_connect failed".clone(),
+        );
+        let astmt = expect_ok(
+            aconn.prepare(&"SELECT $1::int4 * $2::int4 AS product".clone()).await,
+            &"async prepare failed".clone(),
+        );
+        expect(
+            astmt.param_oids().len() >= 2,
+            &f"async prepare returned {astmt.param_oids().len()} params, want ≥2",
+        );
+
+        let mut aparams: List<Maybe<List<Byte>>> = List.new();
+        aparams.push(text_param("6"));
+        aparams.push(text_param("7"));
+
+        let ares = expect_ok(
+            aconn.execute_prepared(&astmt, aparams).await,
+            &"async execute_prepared failed".clone(),
+        );
+        expect_eq_int(ares.rows.len() as Int, 1, &"async exec row count".clone());
+
+        expect_ok(
+            aconn.close_prepared(astmt).await,
+            &"async close_prepared failed".clone(),
+        );
+
+        let _ = aconn.close().await;
+
+        pass(&"t16_prepared".clone());
+    });
+}

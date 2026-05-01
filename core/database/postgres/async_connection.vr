@@ -59,7 +59,8 @@ mount core.database.common.error.{
     DbError, AdapterId, AdPostgres, AdapterSpecific,
 };
 mount core.database.postgres.connection.{
-    PgConnection, PgSimpleQueryResult, connect as sync_connect,
+    PgConnection, PgSimpleQueryResult, PgPreparedStatement,
+    connect as sync_connect,
 };
 mount core.database.postgres.config.PgConfig;
 mount core.async.channel.{
@@ -129,6 +130,24 @@ public type PgRequest is
         chunk_tx: Sender<core.database.postgres.async_copy.CopyOutEvent>,
         ack: OneshotSender<Result<(), DbError>>,
     }
+    /// Prepare a server-side statement. Reply carries the
+    /// `PgPreparedStatement` handle (server-allocated name + param
+    /// OIDs + result columns).
+    | ReqPrepare {
+        sql: Text,
+        reply: OneshotSender<Result<PgPreparedStatement, DbError>>,
+    }
+    /// Execute a previously-prepared statement with bound params.
+    | ReqExecutePrepared {
+        stmt: PgPreparedStatement,
+        params: List<Maybe<List<Byte>>>,
+        reply: OneshotSender<Result<PgSimpleQueryResult, DbError>>,
+    }
+    /// Free the server-side slot for a prepared statement.
+    | ReqClosePrepared {
+        stmt: PgPreparedStatement,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
     | ReqShutdown {
         reply: OneshotSender<Result<(), DbError>>,
     };
@@ -156,6 +175,23 @@ public type AsyncPgConnection is {
     /// `ReqShutdown`.
     join: Shared<sync.mutex.Mutex<Maybe<JoinHandle<()>>>>,
 };
+
+/// Async wrapper over the sync `PgPreparedStatement`. Holds the
+/// server-allocated name + descriptor so the actor can dispatch
+/// execute/close requests by value. V0 — handle is plain (not
+/// affine); caller MUST call `close_prepared` to free the slot
+/// before the connection actor shuts down or the slot leaks
+/// until session close.
+public type AsyncPgPreparedStatement is {
+    inner: PgPreparedStatement,
+};
+
+implement AsyncPgPreparedStatement {
+    public fn inner(&self) -> &PgPreparedStatement { &self.inner }
+    public fn name(&self) -> &Text { self.inner.name() }
+    public fn sql(&self) -> &Text { self.inner.sql() }
+    public fn param_oids(&self) -> &List<Int> { self.inner.param_oids() }
+}
 
 implement AsyncPgConnection {
     public fn clone(&self) -> AsyncPgConnection {
@@ -223,6 +259,71 @@ implement AsyncPgConnection {
         match rr.await {
             Ok(r)  => r,
             Err(_) => Err(actor_dropped("ping reply")),
+        }
+    }
+
+    /// Prepare a server-side statement. Returns a handle the
+    /// caller passes to `execute_prepared` / `close_prepared`.
+    /// Server-side slot is auto-named (`s0`, `s1`, …) and lives
+    /// until `close_prepared` or actor shutdown.
+    public async fn prepare(&self, sql: &Text)
+        -> Result<AsyncPgPreparedStatement, DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqPrepare {
+            sql: sql.clone(),
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("prepare")); }
+        }
+        match rr.await {
+            Ok(Ok(stmt)) => Ok(AsyncPgPreparedStatement {
+                inner: stmt,
+            }),
+            Ok(Err(e))   => Err(e),
+            Err(_)       => Err(actor_dropped("prepare reply")),
+        }
+    }
+
+    /// Execute a previously-prepared statement with bound params.
+    /// `params` is one entry per `$N` placeholder; `None` for
+    /// SQL NULL, `Some(bytes)` for the wire-formatted value.
+    public async fn execute_prepared(
+        &self,
+        stmt: &AsyncPgPreparedStatement,
+        params: List<Maybe<List<Byte>>>,
+    ) -> Result<PgSimpleQueryResult, DbError> {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqExecutePrepared {
+            stmt: stmt.inner.clone(),
+            params: params,
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("execute_prepared")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("execute_prepared reply")),
+        }
+    }
+
+    /// Free the server-side slot for the prepared statement.
+    public async fn close_prepared(&self, stmt: AsyncPgPreparedStatement)
+        -> Result<(), DbError>
+    {
+        let (rs, rr) = oneshot();
+        match self.tx.send_async(ReqClosePrepared {
+            stmt: stmt.inner,
+            reply: rs,
+        }).await {
+            Ok(()) => {}
+            Err(_) => { return Err(actor_dropped("close_prepared")); }
+        }
+        match rr.await {
+            Ok(r)  => r,
+            Err(_) => Err(actor_dropped("close_prepared reply")),
         }
     }
 
@@ -367,6 +468,18 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
             }
             ReqCopyOutOpen { sql, chunk_tx, ack } => {
                 run_copy_out_subloop(&mut conn, &sql, chunk_tx, ack);
+            }
+            ReqPrepare { sql, reply } => {
+                let r = conn.prepare(&sql);
+                let _ = reply.send(r);
+            }
+            ReqExecutePrepared { stmt, params, reply } => {
+                let r = conn.execute_prepared(&stmt, &params);
+                let _ = reply.send(r);
+            }
+            ReqClosePrepared { stmt, reply } => {
+                let r = conn.close_prepared(&stmt);
+                let _ = reply.send(r);
             }
             ReqShutdown { reply } => {
                 // Clean wire shutdown — best-effort.

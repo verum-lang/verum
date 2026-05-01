@@ -560,7 +560,34 @@ public type BackendMessage is
     | BmCloseComplete
     | BmNoData
     | BmPortalSuspend
+    | BmParameterDescription(ParameterDescription)
     | BmUnknown { tag: Byte };
+
+/// `t` ParameterDescription — sent in response to Describe(S, name)
+/// before the matching RowDescription. Carries the OID for each
+/// `$N` placeholder in the prepared statement.
+public type ParameterDescription is { type_oids: List<Int> };
+
+public fn parse_parameter_description(payload: List<Byte>)
+    -> Result<ParameterDescription, BackendDecodeError>
+{
+    let mut r = WireReader.new(payload);
+    let n = match r.read_u16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+    };
+    let mut oids: List<Int> = List.with_capacity(n);
+    let mut i: Int = 0;
+    while i < n {
+        let oid = match r.read_i32_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        };
+        oids.push(oid);
+        i = i + 1;
+    }
+    Ok(ParameterDescription { type_oids: oids })
+}
 
 /// Dispatch a `PgFrame` to the right parser. The DataRow path needs the
 /// per-column format vector from a preceding RowDescription, which is
@@ -588,6 +615,7 @@ public fn parse_backend(frame: PgFrame, data_row_formats: &List<Int>) -> Result<
     if tag == BE_CLOSE_COMPLETE   { return Ok(BmCloseComplete); }
     if tag == BE_NO_DATA          { return Ok(BmNoData); }
     if tag == BE_PORTAL_SUSPEND   { return Ok(BmPortalSuspend); }
+    if tag == BE_PARAMETER_DESC   { return Ok(BmParameterDescription(parse_parameter_description(payload)?)); }
     Ok(BmUnknown { tag: tag })
 }
 
@@ -629,6 +657,7 @@ public type BackendMessageArena is
     | BmaCloseComplete
     | BmaNoData
     | BmaPortalSuspend
+    | BmaParameterDescription(ParameterDescription)
     | BmaUnknown { tag: Byte };
 
 /// Same as `parse_backend`, except DataRow is decoded via
@@ -664,5 +693,6 @@ public fn parse_backend_arena(
     if tag == BE_CLOSE_COMPLETE   { return Ok(BmaCloseComplete); }
     if tag == BE_NO_DATA          { return Ok(BmaNoData); }
     if tag == BE_PORTAL_SUSPEND   { return Ok(BmaPortalSuspend); }
+    if tag == BE_PARAMETER_DESC   { return Ok(BmaParameterDescription(parse_parameter_description(payload)?)); }
     Ok(BmaUnknown { tag: tag })
 }

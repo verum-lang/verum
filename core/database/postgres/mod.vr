@@ -60,6 +60,7 @@ public mount .config.{
 public mount .connection.{
     PgConnection, PgConnState, SimpleQueryResult,
     PgSimpleQueryResult, PgSimpleQueryArenaResult,
+    PgPreparedStatement,
     PcsConnecting, PcsAuthenticating, PcsReady, PcsBusy, PcsClosed, PcsFailed,
     connect,
     cancel_running_query_at,
@@ -108,7 +109,7 @@ public mount .base_backup.{
     start as base_backup_start,
 };
 public mount .async_connection.{
-    AsyncPgConnection,
+    AsyncPgConnection, AsyncPgPreparedStatement,
     connect as async_connect,
 };
 public mount .async_pool.{
