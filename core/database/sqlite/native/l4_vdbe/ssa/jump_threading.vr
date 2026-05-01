@@ -1,0 +1,249 @@
+module core.database.sqlite.native.l4_vdbe.ssa.jump_threading;
+
+// =============================================================================
+// l4_vdbe/ssa/jump_threading.vr — SSA-level jump threading + branch fold
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4 ("SSA-форма разрешает ... peephole-
+//       optimization ... на уровне VDBE до emission")
+//
+// Two transformations:
+//
+//   1. **Jump threading** — when block A's terminator is `IJump(B)`
+//      and B's body is empty + B's terminator is `IJump(C)`, rewrite
+//      A's terminator to `IJump(C)`.  Iterate until stable.
+//
+//   2. **Constant-condition branch fold** — when an `IBranch(cond,
+//      then, else)` has `cond` produced by `IIntImm(0|1)` or `INull`,
+//      replace with `IJump(then|else)` per the truthiness of the
+//      constant.
+//
+// Both transformations preserve SSA semantics — they don't introduce
+// or remove SSA values, just rewrite terminators.  After the
+// pipeline runs, blocks made unreachable can be cleaned up by a
+// follow-up pass that walks reachability from the entry block.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{
+    SsaValue, ValueId, value_id_raw, value_id_eq,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{
+    SsaInst,
+    IIntImm, INull, IConst,
+    IBranch, IJump, IHalt, IReturn, IYield,
+    inst_dst, inst_is_terminator,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{
+    BasicBlock, BlockId, block_id, block_id_raw, block_id_eq,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.Cfg;
+mount core.database.sqlite.native.l4_vdbe.ssa.program.SsaProgram;
+
+// -----------------------------------------------------------------------------
+// Public entry point
+// -----------------------------------------------------------------------------
+
+pub type JumpThreadReport is {
+    threaded_jumps: Int,
+    folded_branches: Int,
+    iterations: Int,
+}
+
+/// Run jump threading + branch folding to fixed point (max 8 iter).
+pub fn run_jump_threading(prog: &mut SsaProgram) -> JumpThreadReport {
+    let mut report = JumpThreadReport {
+        threaded_jumps: 0,
+        folded_branches: 0,
+        iterations: 0,
+    };
+    let max_iter: Int = 8;
+    let mut iter: Int = 0;
+
+    while iter < max_iter {
+        iter = iter + 1;
+        let const_map = build_const_map(prog);
+        let mut iter_changes: Int = 0;
+
+        // Pass A — fold constant-condition branches.
+        let folded = fold_constant_branches(prog, &const_map);
+        report.folded_branches = report.folded_branches + folded;
+        iter_changes = iter_changes + folded;
+
+        // Pass B — thread jumps through empty blocks.
+        let threaded = thread_empty_jumps(prog);
+        report.threaded_jumps = report.threaded_jumps + threaded;
+        iter_changes = iter_changes + threaded;
+
+        if iter_changes == 0 { break; }
+    }
+    report.iterations = iter;
+    report
+}
+
+// -----------------------------------------------------------------------------
+// Constant map — ValueId → constant value (foundation handles
+// IIntImm + INull only; IConst payload requires constant-pool
+// inspection which we defer).
+// -----------------------------------------------------------------------------
+
+type ConstKind is CkInt(Int64) | CkNull;
+
+fn build_const_map(prog: &SsaProgram) -> Map<Int, ConstKind> {
+    let mut m: Map<Int, ConstKind> = Map.new();
+    let mut b: Int = 0;
+    while b < prog.cfg.blocks.len() {
+        let blk = &prog.cfg.blocks[b];
+        let mut i: Int = 0;
+        while i < blk.insts.len() {
+            match &blk.insts[i] {
+                IIntImm(d, v) => { m.insert(value_id_raw(&d.id), CkInt(v)); }
+                INull(d)      => { m.insert(value_id_raw(&d.id), CkNull); }
+                _ => {}
+            }
+            i = i + 1;
+        }
+        b = b + 1;
+    }
+    m
+}
+
+fn lookup_const(m: &Map<Int, ConstKind>, id: &ValueId) -> Maybe<ConstKind> {
+    m.get(&value_id_raw(id))
+}
+
+// -----------------------------------------------------------------------------
+// Pass A — fold branches whose condition is a constant
+// -----------------------------------------------------------------------------
+
+fn fold_constant_branches(prog: &mut SsaProgram, const_map: &Map<Int, ConstKind>) -> Int {
+    let mut count: Int = 0;
+    let mut b: Int = 0;
+    while b < prog.cfg.blocks.len() {
+        let new_term = match &prog.cfg.blocks[b].terminator {
+            IBranch(cond, then_blk, else_blk) => {
+                match lookup_const(const_map, &cond.id) {
+                    Some(CkInt(v)) => {
+                        if v != 0_i64 {
+                            Some(IJump(then_blk.clone()))
+                        } else {
+                            Some(IJump(else_blk.clone()))
+                        }
+                    }
+                    Some(CkNull) => {
+                        // Null is falsy in SQLite condition semantics.
+                        Some(IJump(else_blk.clone()))
+                    }
+                    None => None,
+                }
+            }
+            _ => None,
+        };
+        match new_term {
+            Some(t) => {
+                prog.cfg.blocks[b].terminator = t;
+                count = count + 1;
+            }
+            None => {}
+        }
+        b = b + 1;
+    }
+    if count > 0 {
+        prog.cfg.compute_preds();
+    }
+    count
+}
+
+// -----------------------------------------------------------------------------
+// Pass B — thread jumps through empty intermediate blocks
+// -----------------------------------------------------------------------------
+
+fn thread_empty_jumps(prog: &mut SsaProgram) -> Int {
+    let mut count: Int = 0;
+    let n = prog.cfg.blocks.len();
+
+    // Build a (block_no → eventual target via jump-chain) map.
+    let mut chain_target: List<Int> = List.new();
+    let mut k: Int = 0;
+    while k < n {
+        chain_target.push(k);
+        k = k + 1;
+    }
+
+    let mut i: Int = 0;
+    while i < n {
+        let resolved = resolve_jump_chain(prog, i);
+        chain_target[i] = resolved;
+        i = i + 1;
+    }
+
+    // Apply: rewrite IJump targets via the chain map.  IBranch arms
+    // also benefit (each arm threads independently).
+    let mut b: Int = 0;
+    while b < n {
+        let new_term = match &prog.cfg.blocks[b].terminator {
+            IJump(t) => {
+                let raw = block_id_raw(t);
+                if raw < 0 || raw >= n {
+                    None
+                } else if chain_target[raw] != raw {
+                    Some(IJump(block_id(chain_target[raw])))
+                } else {
+                    None
+                }
+            }
+            IBranch(cond, then_blk, else_blk) => {
+                let then_raw = block_id_raw(then_blk);
+                let else_raw = block_id_raw(else_blk);
+                let then_thr = if then_raw >= 0 && then_raw < n { chain_target[then_raw] } else { then_raw };
+                let else_thr = if else_raw >= 0 && else_raw < n { chain_target[else_raw] } else { else_raw };
+                if then_thr != then_raw || else_thr != else_raw {
+                    Some(IBranch(cond.clone(), block_id(then_thr), block_id(else_thr)))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        match new_term {
+            Some(t) => {
+                prog.cfg.blocks[b].terminator = t;
+                count = count + 1;
+            }
+            None => {}
+        }
+        b = b + 1;
+    }
+
+    if count > 0 {
+        prog.cfg.compute_preds();
+    }
+    count
+}
+
+/// Walk the jump chain from `start_block` until a non-empty block
+/// or a non-jump terminator is reached.  Returns the final block id.
+/// Cycle-safe: hard cap of 64 hops.
+fn resolve_jump_chain(prog: &SsaProgram, start_block: Int) -> Int {
+    let mut cur: Int = start_block;
+    let mut hops: Int = 0;
+    let max_hops: Int = 64;
+    while hops < max_hops {
+        let blk = &prog.cfg.blocks[cur];
+        // Block must be EMPTY (no phi/insts) for transparent threading.
+        if blk.phi_nodes.len() > 0 || blk.insts.len() > 0 { return cur; }
+        match &blk.terminator {
+            IJump(target) => {
+                let t = block_id_raw(target);
+                if t < 0 || t >= prog.cfg.blocks.len() { return cur; }
+                if t == cur { return cur; }
+                cur = t;
+            }
+            _ => return cur,
+        }
+        hops = hops + 1;
+    }
+    cur
+}
