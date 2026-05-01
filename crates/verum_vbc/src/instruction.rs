@@ -5143,6 +5143,38 @@ pub enum FfiSubOpcode {
     /// `internal/specs/tls-quic-security-audit.md` §2 (zeroise on
     /// drop) Action #2.
     CSecureZero = 0xA3,
+
+    // ========================================================================
+    // Synchronization Primitives (0xB0-0xBF)
+    // ========================================================================
+    /// Futex-style wait on a 32-bit memory address.
+    ///
+    /// Format: `dst:reg, addr:reg, expected:reg, timeout_ns:reg`
+    /// VBC ABI: `(addr: i64, expected: i64, timeout_ns: i64) -> i64` —
+    /// returns 0 on wake, -EAGAIN if `*addr != expected`, -ETIMEDOUT on
+    /// timeout. AOT lowering routes to the `verum_futex_wait` runtime
+    /// helper (Linux: futex syscall; macOS: __ulock_wait; Windows:
+    /// WaitOnAddress). Interpreter mode parks via `std::thread::park`
+    /// keyed by address — sufficient for green-thread cooperation.
+    FutexWait = 0xB0,
+
+    /// Futex-style wake of N waiters on a 32-bit memory address.
+    ///
+    /// Format: `dst:reg, addr:reg, count:reg`
+    /// VBC ABI: `(addr: i64, count: i64) -> i64` — returns the number
+    /// of waiters actually woken. AOT lowers to `verum_futex_wake`
+    /// runtime helper. Interpreter unparks at most `count` threads
+    /// blocked on `addr` via the same wait queue used by `FutexWait`.
+    FutexWake = 0xB1,
+
+    /// Spinlock acquire (test-and-set with backoff).
+    ///
+    /// Format: `dst:reg, lock_addr:reg`
+    /// VBC ABI: `(lock_addr: i64) -> i64` — `dst` always set to 0
+    /// after the lock is held. AOT lowers to `verum_spinlock_lock`
+    /// (CAS loop with `pause`/`yield` backoff). Interpreter spins via
+    /// AtomicU8::compare_exchange + `std::thread::yield_now`.
+    SpinlockLock = 0xB2,
 }
 
 impl FfiSubOpcode {
@@ -5234,6 +5266,10 @@ impl FfiSubOpcode {
             0xA1 => Some(Self::CbgrAllocZeroed),
             0xA2 => Some(Self::CbgrDealloc),
             0xA3 => Some(Self::CSecureZero),
+            // Synchronization Primitives
+            0xB0 => Some(Self::FutexWait),
+            0xB1 => Some(Self::FutexWake),
+            0xB2 => Some(Self::SpinlockLock),
             _ => None,
         }
     }
@@ -5320,6 +5356,9 @@ impl FfiSubOpcode {
             Self::CbgrAllocZeroed => "CBGR_ALLOC_ZEROED",
             Self::CbgrDealloc => "CBGR_DEALLOC",
             Self::CSecureZero => "FFI_C_SECURE_ZERO",
+            Self::FutexWait => "SYNC_FUTEX_WAIT",
+            Self::FutexWake => "SYNC_FUTEX_WAKE",
+            Self::SpinlockLock => "SYNC_SPINLOCK_LOCK",
         }
     }
 
@@ -5336,6 +5375,8 @@ impl FfiSubOpcode {
             0x70..=0x7F => "Time Operations",
             0x80..=0x8F => "System Call Operations",
             0x90..=0x9F => "Mach Kernel Operations",
+            0xA0..=0xAF => "CBGR Memory Operations",
+            0xB0..=0xBF => "Synchronization Primitives",
             _ => "Unknown",
         }
     }
