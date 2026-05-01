@@ -3958,7 +3958,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing first param")?
             .into_int_value();
         let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         let result = builder
             .build_call(close_fn, &[fd32.into()], "r")
             .or_llvm_err()?
@@ -4087,7 +4087,7 @@ impl<'ctx> PlatformIR<'ctx> {
             "verum_text_from_cstr",
             i64_type.fn_type(&[ptr_type.into()], false),
         );
-        let read_fn = module.get_function("read").or_missing_fn("read")?;
+        let read_fn = module.get_function("verum_internal_read").or_missing_fn("verum_internal_read")?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -4245,7 +4245,7 @@ impl<'ctx> PlatformIR<'ctx> {
             "strlen",
             i64_type.fn_type(&[ptr_type.into()], false),
         );
-        let write_fn = module.get_function("write").or_missing_fn("write")?;
+        let write_fn = module.get_function("verum_internal_write").or_missing_fn("verum_internal_write")?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -4353,8 +4353,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let open_fn = module
             .get_function("verum_raw_open3")
             .or_missing_fn("verum_raw_open3")?;
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
-        let read_fn = module.get_function("read").or_missing_fn("read")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
+        let read_fn = module.get_function("verum_internal_read").or_missing_fn("verum_internal_read")?;
 
         let builder = ctx.create_builder();
 
@@ -4589,8 +4589,8 @@ impl<'ctx> PlatformIR<'ctx> {
             "strlen",
             i64_type.fn_type(&[ptr_type.into()], false),
         );
-        let write_fn = module.get_function("write").or_missing_fn("write")?;
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let write_fn = module.get_function("verum_internal_write").or_missing_fn("verum_internal_write")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
 
         // O_WRONLY|O_CREAT|O_TRUNC — target-aware per #70.
         let open_flags: u64 = if super::target_triple::target_is_linux(module) {
@@ -4707,8 +4707,8 @@ impl<'ctx> PlatformIR<'ctx> {
             "strlen",
             i64_type.fn_type(&[ptr_type.into()], false),
         );
-        let write_fn = module.get_function("write").or_missing_fn("write")?;
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let write_fn = module.get_function("verum_internal_write").or_missing_fn("verum_internal_write")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
 
         // O_WRONLY|O_CREAT|O_APPEND — target-aware per #70.
         let open_flags: u64 = if super::target_triple::target_is_linux(module) {
@@ -5382,7 +5382,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 .erase_from_basic_block();
         }
         builder.position_at_end(ret_fail);
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         // Only close if fd >= 0 (may come from entry or sock_ok)
         // ABI bridge: POSIX close(int fd) expects i32 fd; Verum-side fd is i64.
         let fd_i32 = self.fd_to_i32(&builder, fd)?;
@@ -5447,7 +5447,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(ret_fail);
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         // ABI bridge: POSIX close(int fd).
         let fd_i32_close = self.fd_to_i32(&builder, fd)?;
         builder
@@ -6368,7 +6368,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing first param")?
             .into_int_value();
         let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         let r = builder
             .build_call(close_fn, &[fd32.into()], "r")
             .or_llvm_err()?
@@ -6741,7 +6741,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_internal("missing first param")?
             .into_int_value();
         let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         let r = builder
             .build_call(close_fn, &[fd32.into()], "r")
             .or_llvm_err()?
@@ -6865,7 +6865,7 @@ impl<'ctx> PlatformIR<'ctx> {
             "memcpy",
             ptr_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false),
         );
-        let read_fn = module.get_function("read").or_missing_fn("read")?;
+        let read_fn = module.get_function("verum_internal_read").or_missing_fn("verum_internal_read")?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
@@ -7058,7 +7058,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         builder.position_at_end(do_close);
         let fd32 = fd; // i64 Verum ABI — no truncation needed
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         builder
             .build_call(close_fn, &[fd32.into()], "")
             .or_llvm_err()?;
@@ -13965,7 +13965,7 @@ impl<'ctx> PlatformIR<'ctx> {
         let fork_fn = module.get_function("fork").or_missing_fn("fork")?;
         let dup2_fn = module.get_function("dup2").or_missing_fn("dup2")?;
         let execvp_fn = module.get_function("execvp").or_missing_fn("execvp")?;
-        let close_fn = module.get_function("close").or_missing_fn("close")?;
+        let close_fn = module.get_function("verum_internal_close").or_missing_fn("verum_internal_close")?;
         let exit_fn = module
             .get_function("verum_internal_exit_i64")
             .or_missing_fn("_exit")?;
