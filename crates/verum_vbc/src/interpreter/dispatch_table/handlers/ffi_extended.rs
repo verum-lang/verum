@@ -1504,6 +1504,38 @@ pub(in super::super) fn handle_ffi_extended(
             // symbols — see `ffi_symbol_permission_scope`.
             check_ffi_permission(state, symbol_idx)?;
 
+            // **#330 runtime-bridge intercept**: catch
+            // `verum_get_runtime_*` getter calls before they hit
+            // dlsym (the symbols don't exist as native FFI; under
+            // AOT they're LLVM-folded reads from
+            // `__verum_runtime_*` globals).  Mirror the
+            // calls.rs orchestration but at the FfiExtended layer
+            // since the codegen routes `extern fn`-declared
+            // getters through `CallFfiC`, not `Call`.
+            {
+                let symbol_id_lookup = FfiSymbolId(symbol_idx);
+                let getter_name = state
+                    .module
+                    .get_ffi_symbol(symbol_id_lookup)
+                    .map(|sym| state.module.strings.get(sym.name).unwrap_or("").to_string())
+                    .unwrap_or_default();
+                let bare = getter_name.rsplit('.').next().unwrap_or(&getter_name);
+                if matches!(
+                    bare,
+                    "verum_get_runtime_async_worker_threads"
+                        | "verum_get_runtime_task_stack_size"
+                ) && arg_count == 0
+                {
+                    // Both default to 0 — the documented "use the
+                    // built-in default" sentinel. AOT replaces these
+                    // with manifest values via `__verum_runtime_*`
+                    // globals; the interpreter ships the
+                    // manifest-default behaviour.
+                    state.set_reg(ret_reg, Value::from_i64(0));
+                    return Ok(DispatchResult::Continue);
+                }
+            }
+
             #[cfg(feature = "ffi")]
             {
                 let symbol_id = FfiSymbolId(symbol_idx);
