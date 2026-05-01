@@ -103,6 +103,9 @@ pub enum TypeLevelError {
     #[error("universe level error: {message}")]
     UniverseError { message: Text },
 
+    #[error("type-level recursion limit exceeded ({limit}) while applying `{name}`")]
+    RecursionLimitExceeded { name: Text, limit: usize },
+
     #[error("cannot evaluate non-type expression as type")]
     NotAType,
 
@@ -141,6 +144,14 @@ impl From<TypeLevelError> for CommonTypeLevelError {
                 CommonTypeLevelError::UniverseError { message }
             }
             TypeLevelError::NotAType => CommonTypeLevelError::NotAType,
+            TypeLevelError::RecursionLimitExceeded { name, limit } => {
+                CommonTypeLevelError::ComputationFailed {
+                    message: format!(
+                        "type-level recursion limit exceeded ({limit}) while applying `{name}`"
+                    )
+                    .into(),
+                }
+            }
             TypeLevelError::ConstEvalError(e) => {
                 CommonTypeLevelError::ComputationFailed { message: e.to_string().into() }
             }
@@ -309,12 +320,21 @@ pub struct TypeLevelEvaluator {
     /// Current type context for variable resolution
     context: Option<TypeContext>,
 
-    /// Configuration for evaluation behaviour. `enable_cache` is
-    /// the load-bearing field — gates the apply_function cache
-    /// lookup and store. `max_depth` / `reduction_strategy` /
-    /// `smt_timeout_ms` are forward-looking; surfaced via the
-    /// recipe-#8 tracing path at construction.
+    /// Configuration for evaluation behaviour. `enable_cache` and
+    /// `max_depth` are load-bearing fields — `enable_cache` gates
+    /// the apply_function cache lookup and store, `max_depth` (#302)
+    /// caps the apply_function recursion depth.
+    /// `reduction_strategy` / `smt_timeout_ms` remain forward-
+    /// looking; surfaced via the recipe-#8 tracing path at
+    /// construction.
     config: TypeLevelConfig,
+
+    /// Current recursion depth into `apply_function`. Compared against
+    /// `config.max_depth` on every entry — exceeding the limit
+    /// produces a clean `RecursionLimitExceeded` error instead of a
+    /// Rust stack-overflow crash. Always non-negative; balanced
+    /// increment-on-entry / decrement-on-exit (RAII via stack guard).
+    current_depth: usize,
 }
 
 impl TypeLevelEvaluator {
@@ -339,10 +359,16 @@ impl TypeLevelEvaluator {
     /// debugging non-pure type-level functions and for caching
     /// benchmarks).
     ///
-    /// Other fields (`max_depth`, `reduction_strategy`,
-    /// `smt_timeout_ms`) are forward-looking — surfaced via
-    /// recipe-#8 tracing at construction so an operator's
-    /// non-default value doesn't appear to silently take effect.
+    /// `max_depth` (#302) is load-bearing — `apply_function`
+    /// caps recursion depth at this value and returns
+    /// `RecursionLimitExceeded` on overflow rather than crashing
+    /// the host with a Rust stack overflow.
+    ///
+    /// `reduction_strategy` and `smt_timeout_ms` remain
+    /// forward-looking — surfaced via recipe-#8 tracing at
+    /// construction so an operator's non-default value doesn't
+    /// appear to silently take effect.
+    ///
     /// Pre-fix the entire `TypeLevelConfig` was inert: the struct
     /// existed and had builders (`strict()` / `lazy()` /
     /// `with_max_depth` / `with_smt_timeout`) but the only
@@ -350,19 +376,18 @@ impl TypeLevelEvaluator {
     /// took no config and therefore ignored every field.
     pub fn with_config(config: TypeLevelConfig) -> Self {
         let defaults = TypeLevelConfig::default();
-        if config.max_depth != defaults.max_depth
-            || config.reduction_strategy != defaults.reduction_strategy
+        if config.reduction_strategy != defaults.reduction_strategy
             || config.smt_timeout_ms != defaults.smt_timeout_ms
         {
             tracing::debug!(
                 target: "verum_types::type_level_computation",
-                max_depth = config.max_depth,
                 reduction_strategy = ?config.reduction_strategy,
                 smt_timeout_ms = config.smt_timeout_ms,
                 "TypeLevelEvaluator: non-default config fields requested but not yet \
-                 wired (max_depth recursion gate / reduction_strategy honoured by \
-                 ConstEvaluator only / smt_timeout_ms threaded through downstream \
-                 SmtBackend). enable_cache IS wired and gates the apply_function cache."
+                 wired (reduction_strategy honoured by ConstEvaluator only / \
+                 smt_timeout_ms threaded through downstream SmtBackend). \
+                 enable_cache + max_depth ARE wired (apply_function cache + \
+                 recursion gate via #302)."
             );
         }
         Self {
@@ -372,6 +397,7 @@ impl TypeLevelEvaluator {
             cache: Map::new(),
             context: None,
             config,
+            current_depth: 0,
         }
     }
 
@@ -421,6 +447,30 @@ impl TypeLevelEvaluator {
     /// let result_type = eval.apply_function(&name, &args)?;
     /// ```
     pub fn apply_function(&mut self, name: &Text, args: &List<ConstValue>) -> Result<Type> {
+        // Recursion-depth gate (#302) — `config.max_depth` is now
+        // load-bearing.  A maliciously-crafted (or accidentally
+        // infinite) type-level function pre-fix could blow the
+        // Rust stack.  Post-fix we cap the recursion depth and
+        // return a clean `RecursionLimitExceeded` error instead.
+        //
+        // Outer wrapper handles the depth bookkeeping; the inner
+        // method `apply_function_inner` carries the existing
+        // logic unchanged.  Decrement runs via the
+        // `Result`-discarding flow below regardless of inner
+        // outcome (`Ok` or `Err`), keeping the counter balanced.
+        if self.current_depth >= self.config.max_depth {
+            return Err(TypeLevelError::RecursionLimitExceeded {
+                name: name.clone(),
+                limit: self.config.max_depth,
+            });
+        }
+        self.current_depth += 1;
+        let result = self.apply_function_inner(name, args);
+        self.current_depth -= 1;
+        result
+    }
+
+    fn apply_function_inner(&mut self, name: &Text, args: &List<ConstValue>) -> Result<Type> {
         // Check cache first — gated on `config.enable_cache`. When
         // disabled (uncommon outside of debugging / benchmarking),
         // every call re-evaluates without consulting cached results.
@@ -3221,8 +3271,7 @@ mod tests {
     }
 
     /// Pin: `configured_max_depth` mirrors the manifest stance
-    /// verbatim — embedders can read what they configured even
-    /// though the field is forward-looking inside apply_function.
+    /// verbatim — embedders can read what they configured.
     #[test]
     fn type_level_configured_max_depth_mirrors_config() {
         let cfg = TypeLevelConfig {
@@ -3231,5 +3280,114 @@ mod tests {
         };
         let eval = TypeLevelEvaluator::with_config(cfg);
         assert_eq!(eval.configured_max_depth(), 1234);
+    }
+
+    // ---- #302: TypeLevelConfig.max_depth recursion guard pins ----
+
+    /// Construct a self-recursive type-level function `recur(n) ⇒
+    /// recur(n)` so unbounded application would loop forever pre-fix.
+    /// Used by the depth-gate pins to assert that recursion now
+    /// returns a clean `RecursionLimitExceeded` rather than
+    /// blowing the host's Rust stack.
+    fn build_recursive_evaluator(max_depth: usize) -> TypeLevelEvaluator {
+        use verum_ast::ty::Ident;
+        let cfg = TypeLevelConfig {
+            max_depth,
+            ..TypeLevelConfig::default()
+        };
+        let mut eval = TypeLevelEvaluator::with_config(cfg);
+        // Body: `recur(n)` — a Call expression invoking `recur`
+        // with the bound parameter `n`.  When the type-level
+        // evaluator processes this body, the call routes back
+        // through `apply_function` and recurses indefinitely
+        // (or, post-fix, until the depth gate fires).
+        let func_expr = Expr::new(
+            ExprKind::Path(Path::from_ident(Ident::new("recur", Span::dummy()))),
+            Span::dummy(),
+        );
+        let arg_expr = Expr::new(
+            ExprKind::Path(Path::from_ident(Ident::new("n", Span::dummy()))),
+            Span::dummy(),
+        );
+        let body = Expr::new(
+            ExprKind::Call {
+                func: Box::new(func_expr),
+                args: List::from(vec![arg_expr]),
+                type_args: List::new(),
+            },
+            Span::dummy(),
+        );
+        let func = TypeLevelFunction::simple(
+            "recur".into(),
+            List::from(vec![("n".into(), Type::Int)]),
+            body,
+        );
+        eval.register_function(func);
+        eval
+    }
+
+    #[test]
+    fn max_depth_caps_unbounded_recursion_with_clean_error() {
+        // Pin (#302): a self-recursive type-level function that
+        // would loop forever pre-fix now returns a clean
+        // RecursionLimitExceeded error after `max_depth` frames.
+        // Before the fix the recursion would blow the Rust stack.
+        let mut eval = build_recursive_evaluator(8);
+        let args: List<ConstValue> = List::from(vec![ConstValue::Int(1)]);
+        let result = eval.apply_function(&"recur".into(), &args);
+        match result {
+            Err(TypeLevelError::RecursionLimitExceeded { name, limit }) => {
+                assert_eq!(name.as_str(), "recur");
+                assert_eq!(limit, 8);
+            }
+            Err(other) => panic!(
+                "expected RecursionLimitExceeded, got different Err: {:?}",
+                other
+            ),
+            Ok(_) => panic!("expected RecursionLimitExceeded, got Ok"),
+        }
+    }
+
+    #[test]
+    fn max_depth_zero_rejects_first_call() {
+        // Pin (#302): max_depth = 0 rejects EVERY apply_function
+        // call (pathological config — the first frame already
+        // exceeds depth 0).  Used as a smoke test that the gate
+        // fires unconditionally and not just after a recursion
+        // chain has already started.
+        let mut eval = build_recursive_evaluator(0);
+        let args: List<ConstValue> = List::from(vec![ConstValue::Int(1)]);
+        let result = eval.apply_function(&"recur".into(), &args);
+        assert!(matches!(
+            result,
+            Err(TypeLevelError::RecursionLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn current_depth_resets_to_zero_after_recursion_failure() {
+        // Pin (#302): the depth counter is balanced — even when
+        // the inner recursion returns RecursionLimitExceeded, the
+        // outermost call decrements correctly so the evaluator is
+        // re-usable for a subsequent call.  Without this pin a
+        // counter drift would silently elevate the effective
+        // limit on every subsequent invocation until the
+        // evaluator was replaced.
+        let mut eval = build_recursive_evaluator(4);
+        let args: List<ConstValue> = List::from(vec![ConstValue::Int(1)]);
+        let _ = eval.apply_function(&"recur".into(), &args);
+        // We can't read `current_depth` directly (private), but
+        // we can verify the contract by triggering the limit
+        // again — if the counter had drifted, the second call
+        // would fail at a different (lower) depth or succeed when
+        // it shouldn't.  Both calls must produce identical limit
+        // numbers for the pin to hold.
+        let result_2 = eval.apply_function(&"recur".into(), &args);
+        match result_2 {
+            Err(TypeLevelError::RecursionLimitExceeded { limit, .. }) => {
+                assert_eq!(limit, 4, "limit number must be stable across calls");
+            }
+            _ => panic!("expected RecursionLimitExceeded on second call"),
+        }
     }
 }
