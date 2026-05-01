@@ -3051,6 +3051,160 @@ pub fn audit_differential_kernel_with_format(format: AuditFormat) -> Result<()> 
 }
 
 // =============================================================================
+// audit --differential-kernel-fuzz — mutation-based property fuzzing
+// =============================================================================
+
+/// Default iteration count for the fuzz audit gate.  Bounded for
+/// CI-friendly runtime; the campaign is deterministic so the same
+/// number of iterations always produces the same coverage.
+const DIFFERENTIAL_FUZZ_DEFAULT_ITERATIONS: usize = 500;
+
+/// Default base seed.  Kept stable so the fuzz output is
+/// reproducible across audit runs — a disagreement found at audit
+/// time is bisectable by simply re-running locally with the
+/// recorded seed.
+const DIFFERENTIAL_FUZZ_DEFAULT_SEED: u64 = 0xA174_F022_5EE7_DEAD;
+
+/// Property-based fuzz audit gate over the kernel registry.
+///
+/// Runs `DIFFERENTIAL_FUZZ_DEFAULT_ITERATIONS` mutation-based fuzz
+/// iterations against the default kernel registry. Every mutant
+/// must produce a unanimous agreement; any disagreement is a
+/// kernel-implementation bug and flips the gate to failure.
+///
+/// **Architectural pin**: the canonical-certificate roster covers
+/// the curated surface; this gate covers the long tail. Together
+/// they form the differential-kernel testing discipline at scale.
+pub fn audit_differential_kernel_fuzz_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::differential_fuzz::run_fuzz_campaign;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Differential-kernel fuzz — mutation-based property testing");
+    }
+
+    let report = run_fuzz_campaign(
+        DIFFERENTIAL_FUZZ_DEFAULT_ITERATIONS,
+        DIFFERENTIAL_FUZZ_DEFAULT_SEED,
+    );
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("differential-kernel-fuzz.json");
+
+    let disagreement_summaries: Vec<serde_json::Value> = report
+        .disagreements
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "iteration": d.iteration,
+                "seed_index": d.seed_index,
+                "mutation": d.mutation_tag,
+                "agreement": d.agreement_tag(),
+                "outcomes": d.verdict.outcomes.iter().map(|o| {
+                    serde_json::json!({
+                        "kernel": o.kernel_name,
+                        "accepted": o.accepted,
+                        "error": o.error_summary,
+                    })
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "differential_kernel_property_fuzz",
+        "campaign": {
+            "iterations": report.total_iterations,
+            "base_seed": format!("{:#x}", DIFFERENTIAL_FUZZ_DEFAULT_SEED),
+            "registered_kernels": report.registered_kernels,
+        },
+        "outcome": {
+            "unanimous_accept": report.unanimous_accept,
+            "unanimous_reject": report.unanimous_reject,
+            "disagreements": report.disagreements.len(),
+        },
+        "load_bearing": report.is_sound(),
+        "disagreement_details": disagreement_summaries,
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Differential-kernel fuzz — mutation-based property testing");
+            println!("──────────────────────────────────────────────────────────");
+            println!("Iterations:            {}", report.total_iterations);
+            println!(
+                "Base seed:             {:#x}",
+                DIFFERENTIAL_FUZZ_DEFAULT_SEED,
+            );
+            println!(
+                "Registered kernels:    {}",
+                report.registered_kernels.join(", "),
+            );
+            println!("Unanimous accept:      {}", report.unanimous_accept);
+            println!("Unanimous reject:      {}", report.unanimous_reject);
+            println!(
+                "{} Disagreements:         {}",
+                if report.is_sound() { "✓" } else { "✗" },
+                report.disagreements.len(),
+            );
+            println!();
+            if report.is_sound() {
+                println!(
+                    "{} All {} mutants produced unanimous verdicts — \
+                     kernel implementations consistent under mutation.",
+                    "✓".green(),
+                    report.total_iterations,
+                );
+            } else {
+                println!(
+                    "{} {} disagreement(s) detected — kernel-implementation bug surfaced.",
+                    "✗".red(),
+                    report.disagreements.len(),
+                );
+                for d in report.disagreements.iter().take(5) {
+                    println!(
+                        "    iter {} seed {} mutation={} agreement={}",
+                        d.iteration, d.seed_index, d.mutation_tag, d.agreement_tag(),
+                    );
+                }
+                if report.disagreements.len() > 5 {
+                    println!("    ... ({} more)", report.disagreements.len() - 5);
+                }
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+
+    if !report.is_sound() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "differential-kernel fuzz audit: {} disagreement(s) over {} iterations \
+                 (seed {:#x}) — see {}",
+                report.disagreements.len(),
+                report.total_iterations,
+                DIFFERENTIAL_FUZZ_DEFAULT_SEED,
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // audit --bridge-discharge — task #134 / MSFS-L4.1 entry point
 // =============================================================================
 
@@ -5107,6 +5261,24 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         || audit_differential_kernel_with_format(AuditFormat::Json),
     );
     if summary.get("differential_kernel") != Some(&"passed") {
+        overall_l4 = false;
+    }
+
+    // 11b. Differential-kernel fuzz — mutation-based property
+    //  fuzzing over the kernel registry. Bounded campaign (default
+    //  500 iterations, deterministic seed) walks structurally
+    //  mutated certificates through every registered kernel; every
+    //  disagreement is a kernel-implementation bug and fails the
+    //  gate. Complements the canonical-certificate roster: roster
+    //  covers the curated surface, fuzz covers the long tail.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "differential_kernel_fuzz",
+        report_dir.join("differential-kernel-fuzz.json"),
+        || audit_differential_kernel_fuzz_with_format(AuditFormat::Json),
+    );
+    if summary.get("differential_kernel_fuzz") != Some(&"passed") {
         overall_l4 = false;
     }
 
