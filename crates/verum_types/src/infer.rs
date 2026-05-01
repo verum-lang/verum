@@ -210,6 +210,42 @@ const SIZE_OF_BOOL: u64 = 1;
 const SIZE_OF_CHAR: u64 = 4;
 const SIZE_OF_POINTER: u64 = 8;
 
+/// Read the highest `@classification(<level>)` annotation from a
+/// list of AST attributes (#291 Phase 2b-Integration).  Mirrors
+/// the same logic in `verum_compiler::phases::safety_gate::
+/// read_classification` — kept in sync; both consumers duplicate
+/// the small AST walk so neither crate depends on the other's
+/// implementation.
+///
+/// Returns `MlsLevel::Public` (the safe default) when no
+/// `@classification` attribute is present. Multiple attributes on
+/// the same item produce the highest declared level — matching
+/// the lattice's join semantics.
+pub(crate) fn read_param_classification(
+    attrs: &List<verum_ast::attr::Attribute>,
+) -> verum_common::mls::MlsLevel {
+    use verum_common::mls::MlsLevel;
+    let mut found = MlsLevel::Public;
+    for attr in attrs.iter() {
+        if !attr.is_named("classification") {
+            continue;
+        }
+        if let Maybe::Some(args) = &attr.args {
+            for arg in args.iter() {
+                if let verum_ast::expr::ExprKind::Path(path) = &arg.kind {
+                    if let Some(ident) = path.as_ident() {
+                        let parsed = MlsLevel::from_manifest_str(ident.as_str());
+                        if parsed > found {
+                            found = parsed;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
 use verum_ast::decl::{FunctionBody, FunctionParamKind};
 use verum_ast::expr::{BinOp, Block, Expr, ExprKind, TypeProperty, UnOp};
 use verum_ast::literal::Literal;
@@ -53205,6 +53241,34 @@ impl TypeChecker {
         self.function_param_names
             .insert(func.name.name.clone(), collected_param_names);
 
+        // Phase 2b-Integration (#291) — seed the MLS classification
+        // sidecar from per-parameter `@classification(<level>)`
+        // attributes.  This is the load-bearing wire that lets the
+        // unifier consult parameter classifications during
+        // synth/check arms.  Pre-fix the sidecar was storage-only
+        // (#289 Phase 2b-Foundation); now it's seeded from the AST
+        // at signature-registration time so downstream let-bindings,
+        // call sites, and the existing safety_gate Phase 3a sink
+        // detector all see consistent classification state.
+        //
+        // Architectural note: only `Regular` parameters with `Ident`
+        // patterns get sidecar entries — destructuring patterns
+        // (Tuple, Record) carry classification at a different
+        // granularity that Phase 2b-Integration-Patterns covers
+        // separately.  Self parameters use the function's own
+        // `@classification` (already handled at the safety_gate
+        // surface).
+        for p in func.params.iter() {
+            if let FunctionParamKind::Regular { pattern, .. } = &p.kind {
+                if let verum_ast::pattern::PatternKind::Ident { name, .. } = &pattern.kind {
+                    let level = read_param_classification(&p.attributes);
+                    if level != verum_common::mls::MlsLevel::Public {
+                        self.classification_map.insert(name.name.clone(), level);
+                    }
+                }
+            }
+        }
+
         // Register generic type parameters FIRST
         // Track both names AND TypeVars for explicit TypeScheme construction
         // This is critical for phantom type parameters (e.g., `fn foo<T>()` where T isn't used)
@@ -57481,6 +57545,192 @@ mod mount_cycle_tests {
             .binding_classification(&Text::from("source"))
             .join(other);
         assert_eq!(combined, verum_common::mls::MlsLevel::TopSecret);
+    }
+
+    // ============================================================
+    // MLS Phase 2b-Integration pin tests (#291) — sidecar seeding
+    // from parameter @classification attributes at function-
+    // signature registration time.
+    // ============================================================
+
+    /// Build a `@classification(<level>)` attribute for tests.
+    fn mk_classification_attr_2b(level: &str) -> verum_ast::attr::Attribute {
+        use verum_ast::expr::{Expr, ExprKind};
+        let path = verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new(level, Span::default()),
+        );
+        let arg = Expr::new(
+            ExprKind::Path(path),
+            Span::default(),
+        );
+        let mut args = List::new();
+        args.push(arg);
+        verum_ast::attr::Attribute::new(
+            Text::from("classification"),
+            Maybe::Some(args),
+            Span::default(),
+        )
+    }
+
+    /// Build a Regular FunctionParam with a single Ident pattern
+    /// and an optional `@classification` attribute.
+    fn mk_param(name: &str, classification: Option<&str>) -> verum_ast::decl::FunctionParam {
+        use verum_ast::pattern::{Pattern, PatternKind};
+        use verum_ast::decl::FunctionParamKind;
+        let mut attrs = List::new();
+        if let Some(level) = classification {
+            attrs.push(mk_classification_attr_2b(level));
+        }
+        verum_ast::decl::FunctionParam {
+            kind: FunctionParamKind::Regular {
+                pattern: Pattern {
+                    kind: PatternKind::Ident {
+                        by_ref: false,
+                        mutable: false,
+                        name: verum_ast::ty::Ident::new(name, Span::default()),
+                        subpattern: Maybe::None,
+                    },
+                    span: Span::default(),
+                },
+                ty: verum_ast::ty::Type {
+                    kind: verum_ast::ty::TypeKind::Path(
+                        verum_ast::ty::Path::single(
+                            verum_ast::ty::Ident::new("Int", Span::default()),
+                        ),
+                    ),
+                    span: Span::default(),
+                },
+                default_value: Maybe::None,
+            },
+            attributes: attrs,
+            span: Span::default(),
+        }
+    }
+
+    /// Build a FunctionDecl with the given parameters for sidecar
+    /// seeding tests.
+    fn mk_function_decl_2b(
+        params: List<verum_ast::decl::FunctionParam>,
+    ) -> verum_ast::FunctionDecl {
+        verum_ast::FunctionDecl {
+            visibility: Default::default(),
+            name: verum_ast::ty::Ident::new("test_fn", Span::default()),
+            generics: List::new(),
+            params,
+            return_type: Maybe::None,
+            throws_clause: Maybe::None,
+            body: None,
+            attributes: List::new(),
+            is_async: false,
+            is_meta: false,
+            is_unsafe: false,
+            span: Span::default(),
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_transparent: false,
+            extern_abi: Maybe::None,
+            is_variadic: false,
+            std_attr: Maybe::None,
+            contexts: List::new(),
+        }
+    }
+
+    #[test]
+    fn read_param_classification_returns_public_for_no_attr() {
+        // Pin: helper returns Public when no @classification is
+        // present — matches the safe-default semantic.
+        let attrs: List<verum_ast::attr::Attribute> = List::new();
+        let level = super::read_param_classification(&attrs);
+        assert_eq!(level, verum_common::mls::MlsLevel::Public);
+    }
+
+    #[test]
+    fn read_param_classification_extracts_secret() {
+        let mut attrs = List::new();
+        attrs.push(mk_classification_attr_2b("secret"));
+        let level = super::read_param_classification(&attrs);
+        assert_eq!(level, verum_common::mls::MlsLevel::Secret);
+    }
+
+    #[test]
+    fn read_param_classification_takes_max_when_multiple() {
+        // Pin: multiple @classification attributes take the highest
+        // (lattice join). Pathological but legal AST.
+        let mut attrs = List::new();
+        attrs.push(mk_classification_attr_2b("secret"));
+        attrs.push(mk_classification_attr_2b("top_secret"));
+        let level = super::read_param_classification(&attrs);
+        assert_eq!(level, verum_common::mls::MlsLevel::TopSecret);
+    }
+
+    #[test]
+    fn register_function_signature_seeds_sidecar_for_classified_param() {
+        // Pin: after register_function_signature, the sidecar
+        // contains an entry for each Regular Ident parameter whose
+        // attributes carry a non-Public classification.
+        let mut params = List::new();
+        params.push(mk_param("data", Some("secret")));
+        let func = mk_function_decl_2b(params);
+
+        let mut checker = TypeChecker::new();
+        let _ = checker.register_function_signature(&func);
+
+        assert_eq!(
+            checker.binding_classification(&Text::from("data")),
+            verum_common::mls::MlsLevel::Secret,
+            "register_function_signature must seed sidecar for classified params"
+        );
+    }
+
+    #[test]
+    fn register_function_signature_does_not_seed_unclassified_params() {
+        // Pin: parameters without @classification do NOT seed the
+        // sidecar — keeps the map sparse (only classified
+        // bindings are tracked).
+        let mut params = List::new();
+        params.push(mk_param("plain", None));
+        let func = mk_function_decl_2b(params);
+
+        let mut checker = TypeChecker::new();
+        let _ = checker.register_function_signature(&func);
+
+        // Unclassified binding returns Public via the default path
+        // but should NOT have an explicit entry.
+        assert!(
+            checker.binding_classification_explicit(&Text::from("plain")).is_none(),
+            "unclassified params must not produce a sidecar entry"
+        );
+    }
+
+    #[test]
+    fn register_function_signature_seeds_multiple_classified_params() {
+        // Pin: every classified parameter gets its own sidecar
+        // entry. Multi-parameter functions track each binding
+        // independently.
+        let mut params = List::new();
+        params.push(mk_param("low", None));
+        params.push(mk_param("med", Some("secret")));
+        params.push(mk_param("high", Some("top_secret")));
+        let func = mk_function_decl_2b(params);
+
+        let mut checker = TypeChecker::new();
+        let _ = checker.register_function_signature(&func);
+
+        assert!(checker.binding_classification_explicit(&Text::from("low")).is_none());
+        assert_eq!(
+            checker.binding_classification(&Text::from("med")),
+            verum_common::mls::MlsLevel::Secret
+        );
+        assert_eq!(
+            checker.binding_classification(&Text::from("high")),
+            verum_common::mls::MlsLevel::TopSecret
+        );
     }
 }
 
