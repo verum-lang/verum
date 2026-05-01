@@ -69,63 +69,62 @@ public fn empty() -> Context {
     return Context { types: List.new() };
 }
 
-/// Return the number of bound variables (i.e., the stack depth).
-public fn depth(ctx: &Context) -> Int{>= 0}
-    ensures result == ctx.types.len()
-{
-    return ctx.types.len();
-}
-
-/// Extend the context with a new binder of type `ty`. Returns a
-/// fresh Context — the input is unchanged.
-///
-
-/// **Compositionality**: returning a fresh value (not mutating in
-/// place) means typing rules can be expressed declaratively without
-/// thread-through-state. Matches the Rust-side `Context::extend`
-/// signature.
-public fn extend(ctx: &Context, ty: CoreTerm) -> Context
-    ensures result.types.len() == ctx.types.len() + 1
-{
-    let mut out = ctx.types.clone();
-    out.push(ty);
-    return Context { types: out };
-}
-
-/// Look up the type of de Bruijn index `i` in the context. Returns
-/// `Maybe::None` if `i` is out of bounds (free variable rejected by
-/// the elaborator).
-///
-
-/// **Crucially**: the returned type IS NOT yet shifted. Callers
-/// that need the type in the OUTER frame (most do) must shift_up
-/// by `i + 1`. This is the same contract as the Rust-side
-/// `Context::lookup`. The shift is delegated to the term-ops
-/// module so the context here is purely structural.
-public fn lookup(ctx: &Context, i: Int{>= 0}) -> Maybe<CoreTerm>
-    requires i < ctx.types.len() || i >= ctx.types.len()
-{
-    let len = ctx.types.len();
-    if i >= len {
-        return Maybe.None;
+implement Context {
+    /// Return the number of bound variables (i.e., the stack depth).
+    public fn depth(&self) -> Int{>= 0}
+        ensures result == self.types.len()
+    {
+        return self.types.len();
     }
-    // Stack-to-de-Bruijn inversion: types is innermost-LAST in the
-    // List, but index 0 = innermost binder.
-    let raw = ctx.types[len - 1 - i].clone();
-    return Maybe.Some(raw);
-}
 
-/// Look up + shift in one step. Mirrors the Rust-side
-/// `Context::lookup` which performs the shift internally. Used by
-/// the T-Var inference rule: `ctx ⊢ Var(i) : shift_up(ctx[i], i+1)`.
-///
+    /// Extend the context with a new binder of type `ty`. Returns a
+    /// fresh Context — the input is unchanged.
+    ///
+    /// **Compositionality**: returning a fresh value (not mutating in
+    /// place) means typing rules can be expressed declaratively without
+    /// thread-through-state. Matches the Rust-side `Context::extend`
+    /// signature.
+    public fn extend(&self, ty: CoreTerm) -> Context
+        ensures result.types.len() == self.types.len() + 1
+    {
+        let mut out = self.types.clone();
+        out.push(ty);
+        return Context { types: out };
+    }
 
-/// (The shift is the standard de Bruijn move-into-context-frame
-/// operation. Defined in core_term_ops.vr; this signature documents
-/// the contract.)
-public fn lookup_shifted(ctx: &Context, i: Int{>= 0}) -> Maybe<CoreTerm> {
-    // Implementation calls into core_term_ops::shift_up after the
-    // raw lookup. Composed here so consumers can use either form
-    // depending on whether they need the raw or shifted view.
-    return ctx.lookup(i);  // Forward to raw lookup; shift is V0 deferred.
+    /// Look up the type of de Bruijn index `i` in the context. Returns
+    /// `Maybe::None` if `i` is out of bounds (free variable rejected by
+    /// the elaborator).
+    ///
+    /// **Crucially**: the returned type IS NOT yet shifted. Callers
+    /// that need the type in the OUTER frame (most do) must shift_up
+    /// by `i + 1`. This is the same contract as the Rust-side
+    /// `Context::lookup`. The shift is delegated to the term-ops
+    /// module so the context here is purely structural.
+    public fn lookup(&self, i: Int{>= 0}) -> Maybe<CoreTerm>
+        requires i < self.types.len() || i >= self.types.len()
+    {
+        let len = self.types.len();
+        if i >= len {
+            return Maybe.None;
+        }
+        // Stack-to-de-Bruijn inversion: types is innermost-LAST in the
+        // List, but index 0 = innermost binder.
+        let raw = self.types[len - 1 - i].clone();
+        return Maybe.Some(raw);
+    }
+
+    /// Look up + shift in one step. Mirrors the Rust-side
+    /// `Context::lookup` which performs the shift internally. Used by
+    /// the T-Var inference rule: `ctx ⊢ Var(i) : shift_up(ctx[i], i+1)`.
+    ///
+    /// (The shift is the standard de Bruijn move-into-context-frame
+    /// operation. Defined in core_term_ops.vr; this signature documents
+    /// the contract.)
+    public fn lookup_shifted(&self, i: Int{>= 0}) -> Maybe<CoreTerm> {
+        // Implementation calls into core_term_ops::shift_up after the
+        // raw lookup. Composed here so consumers can use either form
+        // depending on whether they need the raw or shifted view.
+        return self.lookup(i);  // Forward to raw lookup; shift is deferred to core_term_ops.
+    }
 }

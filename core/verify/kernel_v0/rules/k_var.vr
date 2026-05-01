@@ -46,7 +46,7 @@ module core.verify.kernel_v0.rules.k_var;
 
 mount core.prelude.{Heap, Maybe};
 mount super.super.core_term.{CoreTerm};
-mount super.super.context.{Context, lookup};
+mount super.super.context.{Context};
 mount super.super.judgment.{Derivation};
 
 /// Construct a T-Var derivation when the context lookup succeeds.
