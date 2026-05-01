@@ -190,7 +190,6 @@ pub mod repl;
 pub mod session;
 pub mod unified_dashboard;
 pub mod linker_config;
-pub mod verification_config;
 pub mod verification_profiler;
 pub mod verify_cmd;
 
@@ -253,7 +252,6 @@ pub use linker_config::{
     LinkerSection, LinkerTomlConfig, CogSection, PlatformLinkerSection, ProfileConfig,
     ProjectConfig,
 };
-pub use verification_config::{VerificationConfig, VerifySection};
 pub use verification_profiler::{
     CacheStatistics as ProfilerCacheStats, FileLocation, ProfileEntry, SmtSolver,
     VerificationProfiler, VerificationReport as ProfilerReport,
