@@ -217,19 +217,23 @@ fn build_err_spawn_failed(
 ///
 /// Layout matches the codegen's List representation:
 ///   [ObjectHeader] [len:Value(i64)] [cap:Value(i64)] [backing_ptr:Value]
-/// Backing array layout: [ObjectHeader] [byte data...].
+/// Backing array layout: [ObjectHeader] [Value;cap] — one Value per
+/// element (each byte boxed as `Value::from_i64(b as i64)`).  This
+/// matches the canonical List<T> shape (see `method_dispatch::
+/// handle_call_method` empty-List path) so script-side `bytes[i]`
+/// reads the byte rather than header bits.
 fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> InterpreterResult<Value> {
     use crate::interpreter::heap::OBJECT_HEADER_SIZE;
     let len = bytes.len();
     let cap = if len < 16 { 16 } else { len };
 
-    // Allocate the backing array (raw bytes, not Values).
-    let backing = state.heap.alloc(TypeId::LIST, cap)?;
+    let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
     state.record_allocation();
-    if !bytes.is_empty() {
-        let backing_data = unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) };
+    let backing_data =
+        unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    for (i, b) in bytes.iter().enumerate() {
         unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), backing_data, len);
+            *backing_data.add(i) = Value::from_i64(*b as i64);
         }
     }
 

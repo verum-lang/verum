@@ -494,9 +494,15 @@ fn extract_byte_list_arg(state: &InterpreterState, reg: u16, caller_base: u32) -
         if backing_ptr.is_null() {
             return Vec::new();
         }
-        let backing_data = backing_ptr.add(heap::OBJECT_HEADER_SIZE);
-        let slice = std::slice::from_raw_parts(backing_data, len);
-        slice.to_vec()
+        // Backing is one Value-slot per element (List<Byte> stores
+        // each byte as a NaN-boxed integer); unpack by truncating
+        // each slot to u8.  Mirrors `alloc_byte_list`.
+        let backing_data = backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value;
+        let mut out = Vec::with_capacity(len);
+        for i in 0..len {
+            out.push((*backing_data.add(i)).as_i64() as u8);
+        }
+        out
     }
 }
 
@@ -573,11 +579,17 @@ fn alloc_byte_list(state: &mut InterpreterState, bytes: &[u8]) -> InterpreterRes
     use crate::interpreter::heap::OBJECT_HEADER_SIZE;
     let len = bytes.len();
     let cap = if len < 16 { 16 } else { len };
-    let backing = state.heap.alloc(TypeId::LIST, cap)?;
+    // List<T> backing in Verum is one Value-slot per element regardless of
+    // T (see `method_dispatch::handle_call_method` empty-List path).  Pack
+    // each byte as a NaN-boxed integer; readers (`bytes[i]`) extract via
+    // `as_i64() as u8`.  Writing raw 1-byte data here would make `bytes[i]`
+    // read header bits as Values and surface as all-zero reads.
+    let backing = state.heap.alloc_array(TypeId::LIST, cap)?;
     state.record_allocation();
-    if !bytes.is_empty() {
-        let backing_data = unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) };
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), backing_data, len); }
+    let backing_data =
+        unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    for (i, b) in bytes.iter().enumerate() {
+        unsafe { *backing_data.add(i) = Value::from_i64(*b as i64); }
     }
     let list = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();

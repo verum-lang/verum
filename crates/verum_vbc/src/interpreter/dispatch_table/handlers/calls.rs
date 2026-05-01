@@ -102,6 +102,16 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            if let Some(result) = super::process_runtime::try_intercept_process_runtime(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 

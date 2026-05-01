@@ -318,6 +318,98 @@ implement Text {
         Ok(Text.from_utf8_unchecked(bytes))
     }
 
+    /// Create text from a byte slice, replacing any invalid UTF-8
+    /// sequences with the Unicode replacement character (U+FFFD).
+    /// Mirrors Rust's `String::from_utf8_lossy` semantics: well-formed
+    /// inputs pass through verbatim; ill-formed inputs decode lossily
+    /// rather than raise an error.  Used by `core.io.process.Output`'s
+    /// `stdout()` / `stderr()` accessors and by any caller that needs
+    /// best-effort textification of arbitrary byte streams.
+    public fn from_utf8_lossy(bytes: &[Byte]) -> Text {
+        if utf8_validate(bytes) {
+            return Text.from_utf8_unchecked(bytes);
+        }
+        // Slow path: walk the bytes, replacing invalid sequences.
+        // Each invalid byte (or maximal subpart of an invalid
+        // sequence) becomes a single U+FFFD replacement character
+        // (3 bytes UTF-8 = 0xEF 0xBF 0xBD).  This matches the
+        // WHATWG Encoding Standard's "replacement" behaviour, which
+        // is what `String::from_utf8_lossy` implements.
+        let mut buf: List<Byte> = [];
+        let mut i: Int = 0;
+        let len = bytes.len();
+        while i < len {
+            let b = bytes[i];
+            // 1-byte ASCII: 0xxxxxxx.
+            if b < 0x80 as Byte {
+                buf.push(b);
+                i = i + 1;
+                continue;
+            }
+            // 2-byte: 110xxxxx 10xxxxxx.
+            if b >= 0xC2 as Byte && b <= 0xDF as Byte && i + 1 < len {
+                let b1 = bytes[i + 1];
+                if b1 >= 0x80 as Byte && b1 <= 0xBF as Byte {
+                    buf.push(b);
+                    buf.push(b1);
+                    i = i + 2;
+                    continue;
+                }
+            }
+            // 3-byte: 1110xxxx 10xxxxxx 10xxxxxx (with surrogate
+            // exclusion + overlong rejection).
+            if b >= 0xE0 as Byte && b <= 0xEF as Byte && i + 2 < len {
+                let b1 = bytes[i + 1];
+                let b2 = bytes[i + 2];
+                let valid_b1 = if b == 0xE0 as Byte {
+                    b1 >= 0xA0 as Byte && b1 <= 0xBF as Byte
+                } else if b == 0xED as Byte {
+                    b1 >= 0x80 as Byte && b1 <= 0x9F as Byte
+                } else {
+                    b1 >= 0x80 as Byte && b1 <= 0xBF as Byte
+                };
+                if valid_b1 && b2 >= 0x80 as Byte && b2 <= 0xBF as Byte {
+                    buf.push(b);
+                    buf.push(b1);
+                    buf.push(b2);
+                    i = i + 3;
+                    continue;
+                }
+            }
+            // 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx (with
+            // overlong + > U+10FFFF rejection).
+            if b >= 0xF0 as Byte && b <= 0xF4 as Byte && i + 3 < len {
+                let b1 = bytes[i + 1];
+                let b2 = bytes[i + 2];
+                let b3 = bytes[i + 3];
+                let valid_b1 = if b == 0xF0 as Byte {
+                    b1 >= 0x90 as Byte && b1 <= 0xBF as Byte
+                } else if b == 0xF4 as Byte {
+                    b1 >= 0x80 as Byte && b1 <= 0x8F as Byte
+                } else {
+                    b1 >= 0x80 as Byte && b1 <= 0xBF as Byte
+                };
+                if valid_b1
+                    && b2 >= 0x80 as Byte && b2 <= 0xBF as Byte
+                    && b3 >= 0x80 as Byte && b3 <= 0xBF as Byte
+                {
+                    buf.push(b);
+                    buf.push(b1);
+                    buf.push(b2);
+                    buf.push(b3);
+                    i = i + 4;
+                    continue;
+                }
+            }
+            // Invalid byte / truncated sequence — emit U+FFFD.
+            buf.push(0xEF as Byte);
+            buf.push(0xBF as Byte);
+            buf.push(0xBD as Byte);
+            i = i + 1;
+        }
+        Text.from_utf8_unchecked(&buf)
+    }
+
     /// Create text from bytes without validation.
     /// # Safety
     /// The bytes must be valid UTF-8.
@@ -330,10 +422,23 @@ implement Text {
         if is_null(ptr) {
             panic(f"Text.from_utf8_unchecked: allocator returned null for {len + 1} bytes");
         }
-        memcpy(ptr, bytes.as_ptr(), len);
-        // Null-terminate via `memset` (single-byte write): `ptr_write<Byte>`
-        // lowers to a generic `DerefMut` that writes 8 bytes regardless of
-        // T and would corrupt 7 bytes past the end of the allocation.
+        // Walk the source byte-by-byte instead of `memcpy`-ing the
+        // raw `bytes.as_ptr()`.  When the source slice is backed by
+        // a `List<Byte>` (the common case from FFI / file / process
+        // intercepts), the backing storage is one NaN-boxed Value
+        // per element, NOT packed bytes — so a bulk memcpy would
+        // copy NaN-box header bits instead of payload.  Using
+        // `bytes[i]` lets the runtime's `GetE` handler unbox each
+        // slot to a single byte, so this works for both packed-byte
+        // (raw `[Byte; N]`) and Value-per-element (List<Byte>) source
+        // shapes.  `memset(_, _, 1)` is the only single-byte write
+        // primitive — `ptr_write<Byte>` lowers to a generic 8-byte
+        // store regardless of T and would corrupt adjacent bytes.
+        let mut i: Int = 0;
+        while i < len {
+            memset(ptr_offset(ptr, i), bytes[i], 1);
+            i = i + 1;
+        }
         memset(ptr_offset(ptr, len), 0 as Byte, 1);
         Text {
             ptr: ptr,
