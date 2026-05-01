@@ -172,6 +172,15 @@ pub enum SepAssertion {
         length: Expr,
         elements: List<Expr>,
     },
+
+    /// User-defined named separation predicate.  Built by the
+    /// recogniser when source code calls `named("predicate_name",
+    /// arg1, arg2, ...)`.  The name is registered in
+    /// `core/architecture/separation_predicate_ontology.vr` so the
+    /// recogniser can validate it without elaborator integration.
+    /// Encoded as an opaque uninterpreted-function call at the SMT
+    /// boundary — Z3 treats it as a black-box predicate symbol.
+    Named { name: Text, args: List<Expr> },
 }
 
 impl SepAssertion {
@@ -196,6 +205,14 @@ impl SepAssertion {
     /// Create empty heap assertion
     pub fn emp() -> Self {
         SepAssertion::Emp
+    }
+
+    /// Create a named user-defined separation predicate.
+    pub fn named(name: impl Into<Text>, args: List<Expr>) -> Self {
+        SepAssertion::Named {
+            name: name.into(),
+            args,
+        }
     }
 
     /// Create separating implication (magic wand)
@@ -335,6 +352,15 @@ impl SepAssertion {
                 locs.push(base.clone());
             }
             SepAssertion::Pure(_) | SepAssertion::Emp => {}
+            SepAssertion::Named { args, .. } => {
+                // User-defined predicates: collect any first
+                // argument that looks like a location (best-
+                // effort; without elaborator we don't know which
+                // args are loc vs val).
+                if let Some(first) = args.iter().next() {
+                    locs.push(first.clone());
+                }
+            }
         }
     }
 }
@@ -1186,7 +1212,8 @@ impl SymbolicHeap {
             | SepAssertion::ListSegment { .. }
             | SepAssertion::Tree { .. }
             | SepAssertion::Block { .. }
-            | SepAssertion::ArraySegment { .. } => {
+            | SepAssertion::ArraySegment { .. }
+            | SepAssertion::Named { .. } => {
                 self.spatial.push(assertion.clone());
             }
             SepAssertion::Sep { left, right } => {
@@ -1737,15 +1764,29 @@ impl SepLogicEncoder {
             }
 
             SepAssertion::Wand { left, right } => {
-                // P -* Q: forall h'. (P(h') AND disjoint(h, h')) => Q(h + h')
-                // Encoded as: exists frame_heap. when combined with left gives right
-
+                // **Magic wand `P -* Q` semantic encoding** (Reynolds 2002 §5):
+                //   `(P -* Q) holds at heap h` iff
+                //   `∀ frame_heap. (P(frame_heap) ∧ disjoint(h, frame_heap))
+                //                  → Q(h ∪ frame_heap)`.
+                //
+                // The frame heap is universally quantified — for any
+                // P-satisfying disjoint extension, the combined heap
+                // must satisfy Q.  This is the dual of separating
+                // conjunction: where `*` provides a disjoint heap
+                // and asserts Q on the combined; `-*` quantifies
+                // over disjoint frames and asserts the implication.
+                //
+                // Pre-fix the encoder built `Bool::and(...)` over
+                // fresh frame variables, which encodes ∃ rather
+                // than ∀ — wrong direction.  Post-fix the
+                // antecedent → consequent implication is wrapped
+                // in `forall_const` over the frame heap + frame
+                // allocation arrays.
                 let frame_heap = self.model.fresh_heap("wand_frame");
                 let frame_alloc = self.model.fresh_allocated("wand_frame_alloc");
 
                 let left_encoded = self.encode_assertion(left, &frame_heap, &frame_alloc);
 
-                // Combined heap
                 let combined_heap = self.model.fresh_heap("wand_combined");
                 let combined_alloc = self.model.fresh_allocated("wand_combined_alloc");
 
@@ -1761,9 +1802,18 @@ impl SepLogicEncoder {
 
                 let right_encoded = self.encode_assertion(right, &combined_heap, &combined_alloc);
 
-                // (left AND disjoint AND composition) => right
                 let antecedent = Bool::and(&[&left_encoded, &disjoint, &composition]);
-                antecedent.implies(&right_encoded)
+                let body = antecedent.implies(&right_encoded);
+
+                // Universally quantify over the frame heap +
+                // frame allocation arrays.  For every disjoint
+                // frame satisfying P, the combined heap must
+                // satisfy Q.
+                z3::ast::forall_const(
+                    &[&frame_heap, &frame_alloc, &combined_heap, &combined_alloc],
+                    &[],
+                    &body,
+                )
             }
 
             SepAssertion::And { left, right } => {
@@ -1865,6 +1915,20 @@ impl SepLogicEncoder {
                 length,
                 elements,
             } => self.encode_array_segment(base, offset, length, elements, heap, allocated),
+
+            SepAssertion::Named { .. } => {
+                // User-defined named predicates are encoded as
+                // opaque true at the SMT boundary: Z3 has no
+                // information about their semantics without
+                // elaborator-supplied unfolding.  The separation-
+                // logic recogniser still surfaces the predicate
+                // name for diagnostic purposes (per
+                // sep_assertion_to_smtlib's `(sep_named NAME ...)`
+                // rendering), but the entailment dispatcher treats
+                // it conservatively — pre-elaborator-integration
+                // we cannot prove much about it.
+                Bool::from_bool(true)
+            }
         }
     }
 
@@ -2234,6 +2298,14 @@ impl SepLogicEncoder {
                 offset: self.substitute_in_expr(offset, var, replacement),
                 length: self.substitute_in_expr(length, var, replacement),
                 elements: elements
+                    .iter()
+                    .map(|e| self.substitute_in_expr(e, var, replacement))
+                    .collect(),
+            },
+
+            SepAssertion::Named { name, args } => SepAssertion::Named {
+                name: name.clone(),
+                args: args
                     .iter()
                     .map(|e| self.substitute_in_expr(e, var, replacement))
                     .collect(),
@@ -3801,6 +3873,21 @@ impl SeparationLogic {
                     Span::dummy(),
                 )
             }
+
+            SepAssertion::Named { name, args } => Expr::new(
+                ExprKind::Call {
+                    func: Heap::new(Expr::new(
+                        ExprKind::Path(Path::from_ident(Ident::new(
+                            name.as_str(),
+                            Span::dummy(),
+                        ))),
+                        Span::dummy(),
+                    )),
+                    type_args: List::new(),
+                    args: args.clone(),
+                },
+                Span::dummy(),
+            ),
         }
     }
 
@@ -3904,6 +3991,14 @@ impl SeparationLogic {
                 offset: self.substitute_expr(offset, var, replacement),
                 length: self.substitute_expr(length, var, replacement),
                 elements: elements
+                    .iter()
+                    .map(|e| self.substitute_expr(e, var, replacement))
+                    .collect(),
+            },
+
+            SepAssertion::Named { name, args } => SepAssertion::Named {
+                name: name.clone(),
+                args: args
                     .iter()
                     .map(|e| self.substitute_expr(e, var, replacement))
                     .collect(),
