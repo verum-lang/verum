@@ -43,7 +43,7 @@ mount sys.windows.kernel32.{
 // =============================================================================
 
 /// How to handle a standard I/O stream for a child process.
-type Stdio is
+public type Stdio is
     /// Inherit parent's stream (default).
     | Inherit
     /// Capture the stream into a pipe.
@@ -66,13 +66,13 @@ implement ExitStatus {
     /// A child terminated by a signal — even SIGTERM — is *not* a success;
     /// callers that treat such a child as having exited 0 will mis-classify
     /// SIGSEGV / SIGKILL as "succeeded", masking real crashes.
-    fn success(&self) -> Bool {
+    public fn success(&self) -> Bool {
         self.is_exited() && self.code() == 0
     }
 
     /// Returns true iff the process exited normally (POSIX WIFEXITED).
     /// On Windows there is no signal/exit distinction, so this is always true.
-    fn is_exited(&self) -> Bool {
+    public fn is_exited(&self) -> Bool {
         @cfg(any(target_os = "linux", target_os = "macos"))
         { (self.raw & 0x7F) == 0 }
 
@@ -82,7 +82,7 @@ implement ExitStatus {
 
     /// Returns true iff the process was terminated by a signal (POSIX WIFSIGNALED).
     /// Always false on Windows.
-    fn is_signaled(&self) -> Bool {
+    public fn is_signaled(&self) -> Bool {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
             let low = self.raw & 0x7F;
@@ -95,7 +95,7 @@ implement ExitStatus {
 
     /// Returns the signal number that terminated the process (POSIX WTERMSIG),
     /// or 0 if the process was not signal-terminated. Always 0 on Windows.
-    fn signal(&self) -> Int {
+    public fn signal(&self) -> Int {
         @cfg(any(target_os = "linux", target_os = "macos"))
         {
             if self.is_signaled() { self.raw & 0x7F } else { 0 }
@@ -108,7 +108,7 @@ implement ExitStatus {
     /// Returns the WEXITSTATUS exit code. Only meaningful when
     /// `is_exited()` is true; for signal-terminated processes the
     /// caller should consult `signal()` instead.
-    fn code(&self) -> Int {
+    public fn code(&self) -> Int {
         // Unix: raw is waitpid status — WEXITSTATUS = (status >> 8) & 0xFF
         // Windows: raw is the exit code directly
         @cfg(any(target_os = "linux", target_os = "macos"))
@@ -159,12 +159,12 @@ public type Output is {
 
 implement Output {
     /// Returns stdout as a Text string.
-    fn stdout(&self) -> Text {
+    public fn stdout(&self) -> Text {
         Text.from_utf8_lossy(&self.stdout_bytes)
     }
 
     /// Returns stderr as a Text string.
-    fn stderr(&self) -> Text {
+    public fn stderr(&self) -> Text {
         Text.from_utf8_lossy(&self.stderr_bytes)
     }
 }
@@ -175,7 +175,7 @@ implement Output {
 
 /// A process builder, providing fine-grained control over how a new process
 /// should be spawned.
-type Command is {
+public type Command is {
     /// Program to execute.
     program: Text,
     /// Arguments to pass to the program.
@@ -194,7 +194,7 @@ type Command is {
 
 implement Command {
     /// Creates a new Command for the given program.
-    fn new(program: Text) -> Command {
+    public fn new(program: Text) -> Command {
         Command {
             program: program,
             args: [],
@@ -207,13 +207,13 @@ implement Command {
     }
 
     /// Adds an argument.
-    fn arg(&mut self, arg: Text) -> &mut Command {
+    public fn arg(&mut self, arg: Text) -> &mut Command {
         self.args.push(arg);
         self
     }
 
     /// Adds multiple arguments.
-    fn args(&mut self, new_args: &[Text]) -> &mut Command {
+    public fn args(&mut self, new_args: &[Text]) -> &mut Command {
         let mut i = 0;
         while i < new_args.len() {
             self.args.push(new_args[i]);
@@ -223,51 +223,51 @@ implement Command {
     }
 
     /// Sets an environment variable.
-    fn env(&mut self, key: Text, val: Text) -> &mut Command {
+    public fn env(&mut self, key: Text, val: Text) -> &mut Command {
         self.env_vars.push((key, val));
         self
     }
 
     /// Sets the working directory.
-    fn current_dir(&mut self, dir: Text) -> &mut Command {
+    public fn current_dir(&mut self, dir: Text) -> &mut Command {
         self.working_dir = Some(dir);
         self
     }
 
     /// Configures stdout handling.
-    fn stdout(&mut self, cfg: Stdio) -> &mut Command {
+    public fn stdout(&mut self, cfg: Stdio) -> &mut Command {
         self.stdout_cfg = cfg;
         self
     }
 
     /// Configures stderr handling.
-    fn stderr(&mut self, cfg: Stdio) -> &mut Command {
+    public fn stderr(&mut self, cfg: Stdio) -> &mut Command {
         self.stderr_cfg = cfg;
         self
     }
 
     /// Configures stdin handling.
-    fn stdin(&mut self, cfg: Stdio) -> &mut Command {
+    public fn stdin(&mut self, cfg: Stdio) -> &mut Command {
         self.stdin_cfg = cfg;
         self
     }
 
     /// Executes the command, waits for it to finish, and collects output.
     /// Stdout and stderr are captured (overrides any previous stdio config).
-    fn output(&mut self) -> Result<Output, Text> {
+    public fn output(&mut self) -> Result<Output, Text> {
         self.stdout_cfg = Stdio.Piped;
         self.stderr_cfg = Stdio.Piped;
         self.spawn_and_wait_with_output()
     }
 
     /// Executes the command and returns just the exit status.
-    fn status(&mut self) -> Result<ExitStatus, Text> {
+    public fn status(&mut self) -> Result<ExitStatus, Text> {
         let child = self.spawn()?;
         child.wait()
     }
 
     /// Spawns the command as a child process.
-    fn spawn(&self) -> Result<Child, Text> {
+    public fn spawn(&self) -> Result<Child, Text> {
         spawn_child(self)
     }
 
@@ -282,7 +282,7 @@ implement Command {
 // =============================================================================
 
 /// A handle to a running child process.
-type Child is {
+public type Child is {
     /// Process ID.
     pid: Int,
     /// Pipe fd for reading child's stdout (if piped).
@@ -295,16 +295,16 @@ type Child is {
 
 implement Child {
     /// Returns the OS process id (PID on Unix, handle-as-int on Windows).
-    fn id(&self) -> Int { self.pid }
+    public fn id(&self) -> Int { self.pid }
 
     /// Waits for the child to finish and returns its exit status.
-    fn wait(&self) -> Result<ExitStatus, Text> {
+    public fn wait(&self) -> Result<ExitStatus, Text> {
         wait_for_child(self.pid)
     }
 
     /// Writes bytes to the child's stdin. Returns the number of bytes written.
     /// Returns Err if stdin was not configured as Piped during spawn.
-    fn write_stdin(&self, data: &[Byte]) -> Result<Int, Text> {
+    public fn write_stdin(&self, data: &[Byte]) -> Result<Int, Text> {
         match self.stdin_fd {
             Some(fd) => write_all_to_fd(fd, data),
             None => Err("child was not spawned with piped stdin"),
@@ -313,7 +313,7 @@ implement Child {
 
     /// Closes the child's stdin pipe. Required to signal EOF to programs
     /// that read until EOF (cat, sort, jq, …).
-    fn close_stdin(&mut self) {
+    public fn close_stdin(&mut self) {
         match self.stdin_fd {
             Some(fd) => {
                 close_fd(fd);
@@ -325,7 +325,7 @@ implement Child {
 
     /// Sends a signal to the child process. On Unix translates to kill(2);
     /// on Windows uses TerminateProcess for SIGKILL/SIGTERM, ignores others.
-    fn signal(&self, sig: Int) -> Result<(), Text> {
+    public fn signal(&self, sig: Int) -> Result<(), Text> {
         @cfg(any(target_os = "linux", target_os = "macos"))
         { native_kill(self.pid, sig) }
         @cfg(target_os = "windows")
@@ -336,20 +336,20 @@ implement Child {
     }
 
     /// Sends SIGKILL (Unix) / TerminateProcess (Windows) — unconditional.
-    fn kill(&self) -> Result<(), Text> {
+    public fn kill(&self) -> Result<(), Text> {
         // SIGKILL = 9 on POSIX. On Windows, the kill bridge maps any non-zero
         // signal to TerminateProcess(handle, signal as exit code).
         self.signal(9)
     }
 
     /// Sends SIGTERM — graceful termination request.
-    fn terminate(&self) -> Result<(), Text> {
+    public fn terminate(&self) -> Result<(), Text> {
         // SIGTERM = 15 on POSIX.
         self.signal(15)
     }
 
     /// Waits and collects all output.
-    fn wait_with_output(&self) -> Result<Output, Text> {
+    public fn wait_with_output(&self) -> Result<Output, Text> {
         // Read stdout and stderr before waiting
         let mut out_bytes: List<Byte> = [];
         let mut err_bytes: List<Byte> = [];
@@ -811,7 +811,7 @@ fn quote_arg(arg: &Text) -> Text {
 
 /// Runs a command string and returns its output.
 /// Example: `let out = run("ls", ["-la", "/tmp"])?;`
-fn run(program: Text, args: List<Text>) -> Result<Output, Text> {
+public fn run(program: Text, args: List<Text>) -> Result<Output, Text> {
     let mut cmd = Command.new(program);
     cmd.args(&args);
     cmd.output()
