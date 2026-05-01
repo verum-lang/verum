@@ -263,9 +263,18 @@ fn main() {
 /// Helper to compile a stdlib file and report any errors.
 ///
 
-/// Uses simple compile_module() without mount resolution.
-/// Cross-module functions/constants are pre-registered via
-/// register_stdlib_constants() and register_stdlib_intrinsics().
+/// Compile a stdlib `.vr` file with mount resolution.
+///
+/// Auto-derives `core_root` by walking up from `path` until a
+/// directory whose final component is `core` is found.  Always uses
+/// `compile_module_with_mounts` — symmetric whether or not the file
+/// uses `mount` directives, removing the historical
+/// `compile_stdlib_file` vs `compile_stdlib_file_with_mounts` split
+/// that caused recurring breakages (e.g. tcp.vr added a `mount
+/// sys.raw.{...}` and the without-mounts variant silently broke its
+/// test until #49 closed the gap).  Mount resolution is purely
+/// additive — files without mounts walk an empty mount tree at
+/// negligible cost.
 #[cfg(test)]
 fn compile_stdlib_file(path: &str) -> Result<(), String> {
     let source =
@@ -276,24 +285,41 @@ fn compile_stdlib_file(path: &str) -> Result<(), String> {
         .parse_module()
         .map_err(|e| format!("Parse error in {}: {:?}", path, e))?;
 
+    let core_root = derive_core_root(path).ok_or_else(|| {
+        format!(
+            "compile_stdlib_file: could not derive core/ root from path {}",
+            path
+        )
+    })?;
+
     let config = CodegenConfig::new(path).with_validation();
     let mut codegen = VbcCodegen::with_config(config);
 
     codegen
-        .compile_module(&module)
+        .compile_module_with_mounts(&module, path, &core_root)
         .map_err(|e| format!("Codegen error in {}: {}", path, e))?;
 
     Ok(())
 }
 
-/// Helper that compiles a stdlib file with mount resolution.
-///
+/// Walk up from `path`'s directory until a directory whose final
+/// component is exactly `core` is found; return that path.  Used by
+/// `compile_stdlib_file` so test sites don't have to thread a
+/// `core_root` separately.
+#[cfg(test)]
+fn derive_core_root(path: &str) -> Option<String> {
+    let mut p = std::path::PathBuf::from(path);
+    while p.pop() {
+        if p.file_name().and_then(|n| n.to_str()) == Some("core") {
+            return p.into_os_string().into_string().ok();
+        }
+    }
+    None
+}
 
-/// Use this for files that bring cross-module symbols in via `mount`
-/// declarations — `compile_module_with_mounts` parses each mount source
-/// from `core_root` and registers its declarations before the main
-/// module is compiled. Files that don't use `mount` should prefer the
-/// cheaper `compile_stdlib_file` helper.
+/// Backwards-compat wrapper retained for call sites that explicitly
+/// thread a `core_root`.  Delegates to `compile_module_with_mounts`
+/// directly with the supplied root.
 #[cfg(test)]
 fn compile_stdlib_file_with_mounts(path: &str, core_root: &str) -> Result<(), String> {
     let source =
@@ -962,12 +988,20 @@ fn test_compile_stdlib_net_addr() {
     }
 }
 
-/// Tests compilation of core/net/tcp.vr
+/// Tests compilation of core/net/tcp.vr.
+///
+/// Uses `compile_stdlib_file_with_mounts` because `tcp.vr` pulls in
+/// the unified TCP listen intrinsics from `core/sys/raw.vr` via
+/// `mount sys.raw.{__tcp_listen_v2_raw, __tcp_local_port_raw}`.
+/// Without mount resolution, those references are undefined and
+/// codegen fails with `E_FUNCTION_UNDEFINED` — symmetric with the
+/// `net_udp` test below.
 #[test]
 fn test_compile_stdlib_net_tcp() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core/net/tcp.vr");
+    let core_root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../core");
     if std::path::Path::new(path).exists() {
-        compile_stdlib_file(path).expect("Failed to compile net/tcp.vr");
+        compile_stdlib_file_with_mounts(path, core_root).expect("Failed to compile net/tcp.vr");
     }
 }
 

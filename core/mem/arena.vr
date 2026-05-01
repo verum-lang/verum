@@ -111,10 +111,10 @@
 module arena;
 
 mount super.header.{AllocationHeader, HEADER_SIZE, FLAG_ARENA};
-mount super.raw_ops.{memcpy, memset, memzero, load_i64, store_i64};
+mount core.intrinsics.runtime.mem_raw.{memcpy, memset, memzero, load_i64, store_i64};
 
 // Platform-level raw allocation intrinsics
-mount core.sys.raw.{__alloc_raw, __alloc_zeroed_raw, __dealloc_raw};
+mount core.intrinsics.runtime.os.{__alloc_raw, __alloc_zeroed_raw, __dealloc_raw};
 
 // =============================================================================
 // Constants

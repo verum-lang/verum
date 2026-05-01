@@ -65,3 +65,102 @@ public fn cbgr_advance_epoch();
 /// Requires: CBGR runtime
 @intrinsic("cbgr_get_generation")
 public unsafe fn cbgr_get_generation(ptr: *const Byte) -> UInt32;
+
+// =============================================================================
+// SECTION 4: Allocation / Deallocation Bridge (#67 Phase 3 Tier A)
+// =============================================================================
+// Closes the AOT extern gap — these symbols are referenced by
+// `module.add_function("verum_cbgr_*")` calls in
+// `crates/verum_codegen/src/llvm/`; without matching `@intrinsic`
+// declarations, AOT-compiled CBGR-using code (every program with
+// `Heap<T>`, `Shared<T>`, references) failed to link.
+//
+// AOT lowering — direct syscalls per target_triple:
+//   * Linux: mmap(2) syscall #9 with PROT_READ|PROT_WRITE, MAP_PRIVATE|ANONYMOUS
+//   * macOS: mach_vm_allocate via libSystem
+//   * Windows: VirtualAlloc with PAGE_READWRITE, MEM_COMMIT|MEM_RESERVE
+//
+// Generation/epoch metadata stored in 32-byte AllocationHeader prefix.
+
+/// Allocate `size` bytes of CBGR-tracked memory, aligned to `align`.
+/// Returns a user-data pointer (32 bytes past the AllocationHeader),
+/// or 0 on failure.  Generation counter assigned atomically from a
+/// process-global atomic.
+@intrinsic("cbgr_allocate")
+public unsafe fn cbgr_allocate(size: Int, align: Int) -> Int;
+
+/// Free a CBGR allocation.  No-op on null.
+@intrinsic("cbgr_deallocate")
+public unsafe fn cbgr_deallocate(user_ptr: Int);
+
+/// Reallocate a CBGR allocation to `new_size` bytes.  Preserves
+/// `min(old, new)` bytes; returns new user pointer or 0 on failure.
+@intrinsic("cbgr_realloc")
+public unsafe fn cbgr_realloc(user_ptr: Int, new_size: Int) -> Int;
+
+/// Validate that `user_ptr`'s generation+epoch match the expected
+/// values packed in `expected_gen_epoch` (low 32: generation, mid 16:
+/// epoch).  Returns 1 if reference is live, 0 if dangling.
+@intrinsic("cbgr_validate_ref")
+public unsafe fn cbgr_validate_ref(user_ptr: Int, expected_gen_epoch: Int) -> Int;
+
+/// Bump the generation counter on `user_ptr`'s allocation, invalidating
+/// every existing `ThinRef` that points into it.  Used at scope exit
+/// to revoke borrowed references without immediate deallocation.
+@intrinsic("cbgr_invalidate")
+public unsafe fn cbgr_invalidate(user_ptr: Int);
+
+/// Begin a new epoch — increments global epoch counter atomically.
+/// Returns the new epoch value.  Threads in flight pick up the new
+/// epoch on their next `cbgr_current_epoch` read.
+@intrinsic("cbgr_epoch_begin")
+public fn cbgr_epoch_begin() -> Int;
+
+/// Get the current global epoch.  Lock-free atomic read.
+@intrinsic("cbgr_get_epoch")
+public fn cbgr_get_epoch() -> Int;
+
+/// Advance the global generation counter — invalidates ALL
+/// outstanding references with the previous generation.  Heavy
+/// hammer; use sparingly (e.g. arena reset).
+@intrinsic("cbgr_new_generation")
+public fn cbgr_new_generation() -> Int;
+
+/// Revoke a CBGR allocation — combined `invalidate` + `deallocate`
+/// in one atomic step, avoiding the window where another thread
+/// could observe a half-revoked reference.
+@intrinsic("cbgr_revoke")
+public unsafe fn cbgr_revoke(user_ptr: Int);
+
+/// Register `user_ptr` as a GC root — keeps it alive across epoch
+/// transitions until explicitly unregistered.  Used by global statics
+/// and long-lived async tasks.
+@intrinsic("cbgr_register_root")
+public unsafe fn cbgr_register_root(user_ptr: Int);
+
+/// Validate a thin reference (16-byte: ptr + generation + epoch_caps).
+/// Cheaper than `cbgr_validate_ref` — single 64-bit compare.
+@intrinsic("cbgr_check")
+public unsafe fn cbgr_check(thin_ref_ptr: Int) -> Int;
+
+/// Validate a fat reference (32-byte: thin + metadata + offset).
+/// Includes bounds-check on the slice metadata.
+@intrinsic("cbgr_check_fat")
+public unsafe fn cbgr_check_fat(fat_ref_ptr: Int) -> Int;
+
+/// Validate a write capability — ensures the reference is mutable
+/// AND not in a frozen epoch.  Distinct from `cbgr_check` because
+/// read-only references pass `cbgr_check` but fail `cbgr_check_write`.
+@intrinsic("cbgr_check_write")
+public unsafe fn cbgr_check_write(thin_ref_ptr: Int) -> Int;
+
+/// Get the current refcount on a `Shared<T>` allocation.  Used by
+/// the borrow-checker for runtime shared-borrow validation.
+@intrinsic("cbgr_ref_count")
+public unsafe fn cbgr_ref_count(user_ptr: Int) -> Int;
+
+/// Decrement the refcount on a `Shared<T>` allocation.  Returns the
+/// new count.  When count reaches 0, the allocation is freed via
+/// `cbgr_deallocate`.
+@intrinsic("cbgr_ref_release")
+public unsafe fn cbgr_ref_release(user_ptr: Int) -> Int;

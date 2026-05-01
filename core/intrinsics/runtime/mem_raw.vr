@@ -1,23 +1,25 @@
 // =============================================================================
-// mem/raw_ops.vr - Raw Memory Operations (replaces libc memcpy/memset/strlen)
+// core/intrinsics/runtime/mem_raw.vr — Raw Memory Operations
 // =============================================================================
-// Layer: 0 (Core)
+// Layer: Stdlib (1)
 // Dependencies: None
+//
+// Migrated from `core/mem/raw_ops.vr` (#64 Phase 1.4) per the
+// architectural invariant that ALL `@intrinsic` declarations live
+// under `core/intrinsics/`.
+//
+// Provides raw-address (`Int`-pointer) API for memory operations.
+// For the typed-reference variant (`memcpy(dst: &mut Byte, ...)`) see
+// `core/intrinsics/memory.vr`.
+//
+// # Performance
+//
+// `@intrinsic` annotations let LLVM lower these to hardware-specific
+// instructions (`rep movsb` on x86, NEON loads on ARM); the function
+// bodies are interpreter fallbacks for Tier 0.
 // =============================================================================
-//
 
-// Pure Verum implementations of fundamental memory operations.
-// These use @intrinsic annotations so LLVM can lower them to optimal
-// hardware-specific instructions (e.g., rep movsb, NEON, SVE).
-//
-
-// Performance: LLVM's MemCpy/MemSet intrinsics are used, which generate
-// code equivalent to or better than libc on modern hardware.
-//
-
-// =============================================================================
-
-module raw_ops;
+module core.intrinsics.runtime.mem_raw;
 
 // =============================================================================
 // memcpy — Uses LLVM's llvm.memcpy intrinsic for maximum performance

@@ -856,15 +856,15 @@ implement UnixStream {
         const SO_PEERCRED: Int32 = 17;
         let mut buf = [0_u8; 12];
         let mut len: UInt32 = 12;
-        // C: `int getsockopt(int sockfd, int level, int optname,
-        //  void *optval, socklen_t *optlen);`
-        // T0.4.2 Phase 2 — `int` → Int32, `socklen_t *` → &mut UInt32.
-        @intrinsic("libc.getsockopt")
-        fn getsockopt(fd: Int32, level: Int32, optname: Int32, val: &mut Byte, len: &mut UInt32) -> Int32;
-        let rc = getsockopt(self.fd, SOL_SOCKET, SO_PEERCRED,
-                            &mut buf[0], &mut len);
-        if rc != 0 {
-            return Err(UnixError.IoError("SO_PEERCRED failed".into()));
+        // No-libc policy (#72): use the direct-syscall getsockopt from
+        // `core/sys/linux/syscall.vr` — it issues SYS_GETSOCKOPT (#54)
+        // via inline asm, no glibc dependency.
+        match super.linux.syscall.getsockopt(
+            self.fd, SOL_SOCKET as Int, SO_PEERCRED as Int,
+            &mut buf, &mut len,
+        ) {
+            Ok(()) => {}
+            Err(_) => return Err(UnixError.IoError("SO_PEERCRED failed".into())),
         }
         let pid = ((buf[0] as Int32)
                  | ((buf[1] as Int32) << 8)
@@ -896,12 +896,16 @@ implement UnixStream {
         const LOCAL_PEEREPID:  Int32 = 0x003;
         let mut buf = [0_u8; 76];
         let mut len: UInt32 = 76;
-        @intrinsic("libc.getsockopt")
-        fn getsockopt(fd: Int32, level: Int32, optname: Int32, val: &mut Byte, len: &mut UInt32) -> Int32;
-        let rc = getsockopt(self.fd, SOL_LOCAL, LOCAL_PEERCRED,
-                            &mut buf[0], &mut len);
-        if rc != 0 {
-            return Err(UnixError.IoError("LOCAL_PEERCRED failed".into()));
+        // No-libc policy (#72): use safe_getsockopt from
+        // `core/sys/darwin/libsystem.vr` which routes through
+        // libSystem.B.dylib — Apple-required boundary, NOT libc in
+        // the glibc/musl sense.
+        match super.darwin.libsystem.safe_getsockopt(
+            FileDesc(self.fd), SOL_LOCAL, LOCAL_PEERCRED,
+            &mut buf, &mut len,
+        ) {
+            Ok(()) => {}
+            Err(_) => return Err(UnixError.IoError("LOCAL_PEERCRED failed".into())),
         }
         // We accept any xucred version; fields at offset 4 (uid) and 12
         // (gid_t cr_groups[0] = effective gid) have been stable since

@@ -50,8 +50,12 @@ mount core.intrinsics.atomic.{
     ORDERING_RELAXED, ORDERING_ACQUIRE, ORDERING_RELEASE, ORDERING_ACQ_REL,
 };
 
-// Popcount intrinsic wrapper
-fn popcnt_u64(x: UInt64) -> UInt64 { @intrinsic("ctpop", x) }
+// Popcount — centralised in `core/intrinsics/bitwise.vr` (#64).
+// The centralised intrinsic returns `Int`; local wrapper preserves
+// the historical `UInt64` return type used by the segment-mask
+// arithmetic below.
+mount core.intrinsics.bitwise.{popcnt_u64 as __popcnt_u64};
+fn popcnt_u64(x: UInt64) -> UInt64 { __popcnt_u64(x) as UInt64 }
 
 // Platform-specific memory operations
 @cfg(target_os = "linux")

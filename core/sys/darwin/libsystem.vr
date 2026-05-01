@@ -738,6 +738,15 @@ public type DarwinSockaddrIn is {
     sin_zero: [Byte; 8],
 };
 
+/// Cross-platform alias — Linux defines its own `SockaddrIn` in
+/// `core/sys/linux/syscall.vr` (no sin_len byte; 16-byte total).
+/// macOS prefixes with `sin_len` (BSD heritage).  Layout differs but
+/// the platform-specific socket helpers in `safe_*` consume the
+/// platform-native variant; `SockaddrIn` here is the canonical name
+/// downstream callers use.  `core/net/tcp.vr` mounts this name and
+/// the @cfg(target_os = "macos") branch resolves to DarwinSockaddrIn.
+public type SockaddrIn = DarwinSockaddrIn;
+
 /// sockaddr_in6 (IPv6)
 public type DarwinSockaddrIn6 is {
     sin6_len: UInt8,

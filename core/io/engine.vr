@@ -76,34 +76,17 @@ public const IO_ENGINE_MAX_CAPACITY: Int = 65536;
 /// just stall the caller longer — capping keeps tail latency bounded.
 public const IO_ENGINE_MAX_POLL_EVENTS: Int = 4096;
 
-// Raw intrinsics
-@intrinsic("io_engine_new")
-fn __io_engine_new_raw(capacity: Int) -> Int;
-
-@intrinsic("io_engine_destroy")
-fn __io_engine_destroy_raw(engine: Int) -> Int;
-
-@intrinsic("io_submit")
-fn __io_submit_raw(engine: Int, fd: Int, events: Int) -> Int;
-
-@intrinsic("io_poll")
-fn __io_poll_raw(engine: Int, max: Int, timeout_ns: Int) -> Int;
-
-@intrinsic("io_remove")
-fn __io_remove_raw(engine: Int, fd: Int) -> Int;
-
-@intrinsic("io_modify")
-fn __io_modify_raw(engine: Int, fd: Int, events: Int) -> Int;
-
-// VBC-IO-ENGINE-1 — non-consuming and consuming readiness queries
-// against the session's ready queue.  Pre-fix the `AsyncIoReady`
-// Future in core/net/tcp.vr called `is_ready` against a method that
-// didn't exist; these intrinsics close that gap.
-@intrinsic("io_is_ready")
-fn __io_is_ready_raw(engine: Int, fd: Int, events: Int) -> Int;
-
-@intrinsic("io_take_ready")
-fn __io_take_ready_raw(engine: Int, fd: Int, events: Int) -> Int;
+// Raw intrinsics — centralised in core/intrinsics/runtime/io.vr (#63).
+mount core.intrinsics.runtime.io.{
+    __io_engine_new_raw,
+    __io_engine_destroy_raw,
+    __io_submit_raw,
+    __io_poll_raw,
+    __io_remove_raw,
+    __io_modify_raw,
+    __io_is_ready_raw,
+    __io_take_ready_raw,
+};
 
 implement IoEngine {
     /// Create a new I/O engine with the default event capacity (256).
@@ -219,32 +202,19 @@ implement IoEngine {
 /// Socket configuration utilities.
 public type Socket is ();
 
-@intrinsic("socket_set_nonblocking")
-fn __socket_set_nonblocking_raw(fd: Int) -> Int;
-
-@intrinsic("socket_set_blocking")
-fn __socket_set_blocking_raw(fd: Int) -> Int;
-
-@intrinsic("socket_set_reuseaddr")
-fn __socket_set_reuseaddr_raw(fd: Int) -> Int;
-
-@intrinsic("socket_set_nodelay")
-fn __socket_set_nodelay_raw(fd: Int) -> Int;
-
-@intrinsic("socket_set_keepalive")
-fn __socket_set_keepalive_raw(fd: Int) -> Int;
-
-@intrinsic("socket_get_error")
-fn __socket_get_error_raw(fd: Int) -> Int;
-
-@intrinsic("async_accept")
-fn __async_accept_raw(engine: Int, listen_fd: Int, timeout_ns: Int) -> Int;
-
-@intrinsic("async_read")
-fn __async_read_raw(engine: Int, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int;
-
-@intrinsic("async_write")
-fn __async_write_raw(engine: Int, fd: Int, buf: Int, len: Int, timeout_ns: Int) -> Int;
+// Socket option + async I/O intrinsics — centralised in
+// core/intrinsics/runtime/io.vr (#63).
+mount core.intrinsics.runtime.io.{
+    __socket_set_nonblocking_raw,
+    __socket_set_blocking_raw,
+    __socket_set_reuseaddr_raw,
+    __socket_set_nodelay_raw,
+    __socket_set_keepalive_raw,
+    __socket_get_error_raw,
+    __async_accept_raw,
+    __async_read_raw,
+    __async_write_raw,
+};
 
 implement Socket {
     /// Set a socket to non-blocking mode.

@@ -967,8 +967,29 @@ impl<'ctx> FfiLowering<'ctx> {
         Ok(wrapper)
     }
 
+    /// Get or declare the errno-location function for the **target**
+    /// platform (NOT the host).  Routes via `module.get_triple()` so
+    /// `verum --target T build` emits IR keyed off T even when run
+    /// from a different host OS.  Closes #70 cross-compile invariant.
     fn get_or_declare_errno_location(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
-        self.get_or_declare_errno_location_for_target(module, TargetPlatform::current())
+        use super::target_triple::{
+            target_is_darwin, target_is_freebsd, target_is_linux, target_is_windows,
+        };
+        let target = if target_is_linux(module) {
+            TargetPlatform::Linux
+        } else if target_is_darwin(module) {
+            TargetPlatform::MacOS
+        } else if target_is_windows(module) {
+            TargetPlatform::Windows
+        } else if target_is_freebsd(module) {
+            TargetPlatform::FreeBSD
+        } else {
+            // Default fallback for unrecognised triples — use the host
+            // platform as a reasonable best-effort.  Production builds
+            // should always set an explicit `--target T`.
+            TargetPlatform::current()
+        };
+        self.get_or_declare_errno_location_for_target(module, target)
     }
 
     /// Get or declare errno location function for a specific target platform.

@@ -147,8 +147,11 @@ public mount .size_class.{
     LARGE_SIZE_MAX, HUGE_SIZE_THRESHOLD,
 };
 
-/// Raw memory operations (memcpy, memmove, memset, strlen, strcmp).
-public mount .raw_ops.*;
+/// Raw memory operations (memcpy, memmove, memset, strlen, strcmp) —
+/// migrated to `core/intrinsics/runtime/mem_raw.vr` (#64 Phase 1.4).
+/// Re-exported here for callers that mount `core.mem.{...}` directly;
+/// new code should mount from `core.intrinsics.runtime.mem_raw.*`.
+public mount core.intrinsics.runtime.mem_raw.*;
 
 /// Thread-local heap with lock-free fast path.
 public mount .heap.{

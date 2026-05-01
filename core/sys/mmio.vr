@@ -93,42 +93,14 @@ public type AccessMode is ReadOnly | WriteOnly | ReadWrite | ReadWriteOnce | Wri
 /// Read from volatile memory location.
 ///
 
-/// This is the primitive operation for MMIO reads. It:
-/// - Prevents load elimination
-/// - Emits a single memory read instruction
-/// - Does NOT provide memory ordering (use with barriers if needed)
-@inline(always)
-@intrinsic("volatile_load")
-public fn volatile_load<T: Copy>(ptr: *volatile T) -> T;
-
-/// Write to volatile memory location.
-///
-
-/// This is the primitive operation for MMIO writes. It:
-/// - Prevents store elimination
-/// - Emits a single memory write instruction
-/// - Does NOT provide memory ordering (use with barriers if needed)
-@inline(always)
-@intrinsic("volatile_store")
-public fn volatile_store<T: Copy>(ptr: *volatile mut T, value: T);
-
-/// Read with acquire semantics.
-///
-
-/// Ensures all subsequent reads and writes happen after this read.
-/// Use for acquiring locks or reading synchronization flags.
-@inline(always)
-@intrinsic("volatile_load_acquire")
-public fn volatile_load_acquire<T: Copy>(ptr: *volatile T) -> T;
-
-/// Write with release semantics.
-///
-
-/// Ensures all previous reads and writes happen before this write.
-/// Use for releasing locks or signaling completion.
-@inline(always)
-@intrinsic("volatile_store_release")
-public fn volatile_store_release<T: Copy>(ptr: *volatile mut T, value: T);
+/// MMIO volatile load/store primitives — centralised in
+/// `core/intrinsics/lowlevel/mmio.vr` (#66 Phase 1.6).
+public mount core.intrinsics.lowlevel.mmio.{
+    volatile_load,
+    volatile_store,
+    volatile_load_acquire,
+    volatile_store_release,
+};
 
 // =============================================================================
 // MEMORY BARRIERS
@@ -145,15 +117,9 @@ public type BarrierKind is
 /// Insert a memory barrier.
 ///
 
-/// Use barriers to enforce ordering between memory operations:
-/// - Compiler: Prevents compiler reordering, no CPU fence
-/// - Acquire: Ensures loads before are visible before loads/stores after
-/// - Release: Ensures stores after are visible after loads/stores before
-/// - AcqRel: Both acquire and release semantics
-/// - SeqCst: Full sequential consistency (most expensive)
-@inline(always)
-@intrinsic("memory_barrier")
-public fn barrier(kind: BarrierKind);
+/// Memory barrier primitives — centralised in
+/// `core/intrinsics/lowlevel/mmio.vr` (#66 Phase 1.6).
+public mount core.intrinsics.lowlevel.mmio.{barrier, dsb, isb};
 
 /// Compiler-only barrier (prevents optimization across this point).
 @inline(always)
@@ -166,16 +132,6 @@ public fn compiler_barrier() {
 public fn dmb() {
     barrier(BarrierKind.AcqRel);
 }
-
-/// Data synchronization barrier (ARM terminology).
-@inline(always)
-@intrinsic("dsb")
-public fn dsb();
-
-/// Instruction synchronization barrier (ARM terminology).
-@inline(always)
-@intrinsic("isb")
-public fn isb();
 
 // =============================================================================
 // REGISTER TYPE

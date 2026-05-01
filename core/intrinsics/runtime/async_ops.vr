@@ -233,3 +233,18 @@ public fn middleware_chain_empty() -> RawMiddlewareChainOpaque;
 /// Block on a future with single-threaded executor.
 @intrinsic("single_thread_block_on")
 public fn single_thread_block_on(executor: RawSingleThreadExecutorOpaque, future: RawFutureHandle) -> *const Byte;
+
+// =============================================================================
+// Generator iteration — migrated from `core/async/generator.vr`
+// (#65 Phase 1.5).  `gen_close` lives in `core/intrinsics/runtime/os.vr`
+// because closing reclaims kernel-side coroutine state; the next/has_next
+// pair is pure async-runtime.
+// =============================================================================
+
+/// Advance the generator and return the yielded value (or sentinel).
+@intrinsic("gen_next")
+public fn __gen_next_raw(handle: Int) -> Int;
+
+/// Non-blocking check: does the generator have more values?
+@intrinsic("gen_has_next")
+public fn __gen_has_next_raw(handle: Int) -> Int;

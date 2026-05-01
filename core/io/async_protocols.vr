@@ -32,7 +32,7 @@ module async_protocols;
 mount core.*;
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
-mount core.io.protocols.{IoResult, IoErrorKind, StreamError};
+public mount core.io.protocols.{IoResult, IoErrorKind, StreamError};
 
 // =============================================================================
 // AsyncRead Protocol
