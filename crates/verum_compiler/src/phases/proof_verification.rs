@@ -1503,7 +1503,7 @@ pub fn verify_proof_body_with_aliases_and_graph(
     }
 
     // ----------------------------------------------------------------
-    // Separation-logic fast path (#161 V5 → V6)
+    // Separation-logic fast path
     // ----------------------------------------------------------------
     //
     // Before falling into the generic SMT engine, attempt to route
@@ -1512,20 +1512,18 @@ pub fn verify_proof_body_with_aliases_and_graph(
     // separation predicates (calls to `core/logic/separation.vr`
     // smart constructors).
     //
-    // Routing rules (V6 — multi-clause):
+    // Routing rules:
     //   * Walk every `requires` clause; recognise each as a
     //     separation predicate; combine via `sep_conj` (associative,
     //     emp-identity).  Same for every `ensures` clause.
     //   * Empty side defaults to `emp` (the identity element).
     //   * If EVERY clause recognises, route through
     //     `SepLogicEncoder::verify_entailment`.
-    //   * Any unrecognised clause → fall through to generic SMT.
-    //
-    // V5 was restricted to exactly-one-of-each; V6 generalises to
-    // any N as long as ALL clauses are separation predicates.
+    //   * Any unrecognised clause → fall through to the descent
+    //     splitter below.
     //
     // **Architectural rationale**: separation-logic obligations are
-    // a NATURAL FIT for the encoder's array-theory-backed Z3 setup
+    // a natural fit for the encoder's array-theory-backed Z3 setup
     // (`SepLogicEncoder::verify_entailment`). Routing through the
     // generic SMT path treats `sep_conj`/`points_to` as opaque UF,
     // which Z3's CEGAR loop almost always falsifies. The fast path
@@ -1542,9 +1540,9 @@ pub fn verify_proof_body_with_aliases_and_graph(
         // present — a theorem with NO requires AND NO ensures has
         // no Hoare-shape obligation worth routing.
         if !pre_clauses.is_empty() || !post_clauses.is_empty() {
-            // **V6 — homogeneous-separation fast path**.  When every
-            // clause is a syntactic separation predicate, route the
-            // entire obligation through the SepLogicEncoder.
+            // Homogeneous-separation fast path. When every clause
+            // is a syntactic separation predicate, route the entire
+            // obligation through the SepLogicEncoder.
             match verum_smt::separation_recognizer::verify_separation_obligation_multi(
                 &pre_clauses,
                 &post_clauses,
@@ -1580,29 +1578,37 @@ pub fn verify_proof_body_with_aliases_and_graph(
                     };
                 }
                 // Unknown / NotSeparationGoal → not a homogeneous
-                // separation goal.  Try the V8 mixed-clause splitter
-                // below before falling through to generic SMT.
+                // separation goal.  Try the conjunction-descent
+                // splitter below before falling through to generic
+                // SMT.
                 _ => {}
             }
 
-            // **V8 — mixed separation+pure splitter** (#161 V7+V8).
-            // The clauses aren't all separation predicates, but
-            // SOME of them might be.  Partition into separation /
-            // pure cohorts; verify the separation portion through
-            // the encoder; let the pure portion fall through to the
-            // generic SMT path that follows (the separation clauses
-            // there will translate as opaque UF, which is acceptable
-            // because their semantic content has already been
-            // discharged via the encoder).
+            // Conjunction-descent splitter. The clauses aren't all
+            // separation predicates, but SOME of them might be —
+            // possibly buried inside `&&` chains within a single
+            // clause.  Flatten each clause's `&&` chain and classify
+            // each atom independently before partition.  This
+            // handles theorem shapes like
+            //   `requires points_to(a, av) && x > 0`
+            // where the whole-clause classifier sees `Binary{And}`
+            // and misses the separation predicate inside.
             //
-            // Soundness: the obligation
+            // Soundness: the descent rests on the standard
+            // pure-conjunction lemma
+            //   `Sep_a && Pure_b ≡ Sep_a * Pure_b`
+            // (Reynolds 2002 §2.4) for sep+pure conjuncts, and
+            // heap-stable conjunction `heap_and(Sep_a, Sep_b)` for
+            // multiple separation atoms in the same `&&` chain
+            // (NOT `sep_conj`, which would require disjoint
+            // subheaps).
+            //
+            // The combined obligation
             //   `(P_sep ∗ P_pure) ⊢ (Q_sep ∗ Q_pure)`
             // proves separately as `P_sep ⊢ Q_sep` AND
-            // `P_pure ⊢ Q_pure`.  V8 discharges the first via the
-            // encoder; the generic SMT path discharges the second.
-            // BOTH must succeed for the conjunction to hold; if
-            // V8 says Invalid, the whole obligation fails outright.
-            match verum_smt::separation_recognizer::split_separation_obligation(
+            // `P_pure ⊢ Q_pure`. The encoder discharges the first;
+            // the generic SMT path discharges the second.
+            match verum_smt::separation_recognizer::split_separation_obligation_with_descent(
                 &pre_clauses,
                 &post_clauses,
             ) {
