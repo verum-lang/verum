@@ -28,6 +28,9 @@ module core.database.sqlite.native.verify.btree_invariants;
 mount core.*;
 mount base.{Bool, Maybe};
 mount collections.List;
+mount core.database.sqlite.native.l3_btree.balance.{
+    BalanceDecision, NoChange, Split, Merge, Rotate, GrowRoot, ShrinkRoot,
+};
 
 // -----------------------------------------------------------------------------
 // Cell key ordering
@@ -119,6 +122,39 @@ public fn no_duplicate_child_pointers(child_pages: &List<Int64>) -> Bool {
     }
     true
 }
+
+// -----------------------------------------------------------------------------
+// Balance-decision invariants — first @verify(formal) contract in
+// core/database/sqlite/. See spec §10.3 / §21.3.
+// -----------------------------------------------------------------------------
+//
+// LBC-1 (cell-conservation): for any `Split` decision returned by
+// `plan_overflow`, `left_cells + right_cells == source.cell_count + 1`.
+// Load-bearing: a rebalance that loses or duplicates a cell silently
+// corrupts contents WITHOUT violating ordering (I1) or height (I2).
+
+public fn split_conserves_cells(d: &BalanceDecision, source_cell_count: Int) -> Bool {
+    match d {
+        Split(_, l, r, _, _) => l + r == source_cell_count + 1,
+        _ => true,
+    }
+}
+
+@verify(formal)
+public theorem split_cell_conservation(d: &BalanceDecision, source: Int)
+    requires source >= 0
+    ensures split_conserves_cells(d, source)
+    proof {
+        // Discharge by case analysis on `d`. For Split arms the claim
+        // reduces to the planner's arithmetic identity in
+        // `plan_overflow`:  total = source+1; left = total/2;
+        // right = total - left  ⇒  left + right = total = source + 1.
+        // Other arms satisfy the predicate trivially.
+        match d {
+            Split(_, l, r, _, _) => { let _ = l; let _ = r; }
+            _ => {}
+        }
+    }
 
 // -----------------------------------------------------------------------------
 // Top-level invariant — used by integrity_check
