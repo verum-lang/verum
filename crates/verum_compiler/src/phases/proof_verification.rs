@@ -1381,6 +1381,27 @@ pub fn verify_proof_body_with_aliases(
     theorem: &TheoremDecl,
     alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
 ) -> ProofVerificationResult {
+    verify_proof_body_with_aliases_and_graph(engine, smt_ctx, theorem, alias_map, None)
+}
+
+/// Same as [`verify_proof_body_with_aliases`] but accepts an optional
+/// workspace-wide [`ApplyGraph`](verum_kernel::soundness::apply_graph::ApplyGraph).
+/// When provided, kernel-bridge discharge failures are enriched with a
+/// dependent-theorems note listing every theorem whose transitive
+/// proof depends on the failing axiom.
+///
+/// **Why an `Option`** (#188 / #318): single-file `verum check` flows
+/// don't have a workspace graph; only the orchestrator
+/// (`pipeline::theorem_proofs::verify_theorem_proofs`) builds one.
+/// The optional shape keeps the legacy entry zero-overhead while
+/// enabling the rich-diagnostic path when context is available.
+pub fn verify_proof_body_with_aliases_and_graph(
+    engine: &mut ProofSearchEngine,
+    smt_ctx: &Context,
+    theorem: &TheoremDecl,
+    alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    apply_graph: Option<&verum_kernel::soundness::apply_graph::ApplyGraph>,
+) -> ProofVerificationResult {
     let proof_start = Instant::now();
     let theorem_name = theorem.name.name.clone();
 
@@ -1425,15 +1446,27 @@ pub fn verify_proof_body_with_aliases(
     // invocation, no kernel re-check round-trip. Microsecond-scale
     // per proof body, so adding this pre-pass to every theorem is
     // negligible.
-    let bridge_errors = crate::phases::bridge_discharge_check::validate_proof_body_bridges(
-        proof_body,
-        &theorem_name,
-        // Theorem AST doesn't carry the source path directly; pass an
-        // empty path here. The pipeline's surrounding diagnostic
-        // surface attaches the actual file context when it surfaces
-        // the verification result.
-        std::path::Path::new(""),
-    );
+    let bridge_errors = match apply_graph {
+        Some(graph) => {
+            // #188 / #318: graph-aware path — every dispatcher
+            // rejection gets enriched with a dependent-theorems note.
+            crate::phases::bridge_discharge_check::validate_proof_body_bridges_with_graph(
+                proof_body,
+                &theorem_name,
+                std::path::Path::new(""),
+                graph,
+            )
+        }
+        None => {
+            // Legacy path — single-file flows don't have a workspace
+            // graph; the diagnostic gets the dispatcher reason only.
+            crate::phases::bridge_discharge_check::validate_proof_body_bridges(
+                proof_body,
+                &theorem_name,
+                std::path::Path::new(""),
+            )
+        }
+    };
     if !bridge_errors.is_empty() {
         let unproved: List<UnprovedSubgoal> = bridge_errors
             .into_iter()
@@ -1444,14 +1477,22 @@ pub fn verify_proof_body_with_aliases(
                     e.args_rendered.join(", "),
                 );
                 let suggestion = format!("kernel `{}` reports: {}", e.bridge_name, e.reason,);
+                let mut suggestions = List::new();
+                suggestions.push(Text::from(suggestion));
+                // #188 / #318: when the orchestrator pre-built an
+                // ApplyGraph and called the graph-aware variant
+                // (`validate_proof_body_bridges_with_graph`), the
+                // error carries a pre-rendered "downstream theorems"
+                // note. Push it as an additional suggestion so the
+                // diagnostic surface displays the full transitive
+                // impact alongside the dispatcher's stated reason.
+                if !e.dependents_note.is_empty() {
+                    suggestions.push(Text::from(e.dependents_note));
+                }
                 UnprovedSubgoal {
                     goal: Text::from(goal_text),
                     hypotheses: List::new(),
-                    suggestions: {
-                        let mut s = List::new();
-                        s.push(Text::from(suggestion));
-                        s
-                    },
+                    suggestions,
                 }
             })
             .collect();

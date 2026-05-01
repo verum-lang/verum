@@ -79,6 +79,13 @@ pub struct BridgeDischargeError {
     /// Source path, surfaced to the diagnostic builder. May be empty
     /// when the verification phase didn't carry a path through.
     pub source_path: PathBuf,
+    /// Pre-rendered "downstream theorems transitively depend on this
+    /// axiom" note (#188 / #318). Populated when the verification
+    /// phase passes a workspace-wide [`ApplyGraph`] into
+    /// [`validate_proof_body_bridges_with_graph`]; otherwise empty.
+    /// Multi-line newline-separated string ready to push into the
+    /// diagnostic's suggestion list.
+    pub dependents_note: String,
 }
 
 /// Walk a theorem's proof body and accumulate any kernel-bridge
@@ -104,6 +111,56 @@ pub fn validate_proof_body_bridges(
         source_path: source_path.to_path_buf(),
     };
     walk_proof_body(proof_body, &ctx, &mut errors);
+    errors
+}
+
+/// Like [`validate_proof_body_bridges`] but also enriches each
+/// resulting [`BridgeDischargeError`]'s `dependents_note` with the
+/// list of downstream theorems that transitively depend on the
+/// failing axiom. Pulled from the workspace-wide [`ApplyGraph`] the
+/// caller pre-built (see
+/// [`verum_kernel::soundness::apply_graph::build_apply_graph_from_modules`]).
+///
+/// **Why split into two entry points** (#188 / #318): the legacy
+/// [`validate_proof_body_bridges`] is consumed by single-file
+/// verification flows that don't have a workspace graph. Forcing
+/// every caller to pass `Option<&ApplyGraph>` would either break the
+/// existing API or coerce empty Nones at every call site. The
+/// dual-entry shape keeps the no-graph path zero-overhead and lets
+/// the orchestrator opt-in to graph-aware enrichment.
+///
+/// **Performance**: per-error graph lookup is O(N + E) reverse-BFS
+/// where N = workspace symbol count, E = total apply-edges — sub-
+/// millisecond for the MSFS corpus. Only runs when the dispatcher
+/// has already rejected, so the hot path (passing discharge) sees
+/// zero cost.
+pub fn validate_proof_body_bridges_with_graph(
+    proof_body: &ProofBody,
+    item_name: &Text,
+    source_path: &std::path::Path,
+    graph: &verum_kernel::soundness::apply_graph::ApplyGraph,
+) -> Vec<BridgeDischargeError> {
+    let mut errors = validate_proof_body_bridges(proof_body, item_name, source_path);
+    for err in &mut errors {
+        // Try the bare bridge name first (the form the dispatcher
+        // table uses), then the `_strict` form — the apply-graph
+        // walker indexes targets by the name as written in source,
+        // which is usually `kernel_<verb>_strict`.
+        let candidates = [
+            format!("{}_strict", err.bridge_name),
+            err.bridge_name.clone(),
+        ];
+        for cand in &candidates {
+            if let Some(note) =
+                verum_kernel::soundness::apply_graph::render_dependent_theorems_note(
+                    graph, cand, None,
+                )
+            {
+                err.dependents_note = note;
+                break;
+            }
+        }
+    }
     errors
 }
 
@@ -256,6 +313,7 @@ fn check_apply_callsite(
                 args_rendered,
                 reason,
                 source_path: ctx.source_path.clone(),
+                dependents_note: String::new(),
             });
         }
         Some(IntrinsicValue::Bool(false)) => {
@@ -265,6 +323,7 @@ fn check_apply_callsite(
                 args_rendered,
                 reason: "dispatcher returned Bool(false) for the supplied args".to_string(),
                 source_path: ctx.source_path.clone(),
+                dependents_note: String::new(),
             });
         }
         // None / Decision{holds: true} / Bool(true) / other: accept.
@@ -504,5 +563,135 @@ mod tests {
         );
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].args_rendered, vec!["0".to_string()]);
+    }
+
+    // -------------------------------------------------------------
+    // #188 / #318 — graph-aware enrichment with dependent-theorems
+    // -------------------------------------------------------------
+
+    #[test]
+    fn graph_aware_validate_decorates_failure_with_dependents_note() {
+        use verum_kernel::soundness::apply_graph::{ApplyGraph, SymbolEntry};
+
+        // Build a tiny graph: two upstream theorems both apply the
+        // failing bridge transitively.
+        //   thm_a -> kernel_grothendieck_construction_strict
+        //   thm_b -> thm_a
+        let mut graph = ApplyGraph::new();
+        graph.insert(
+            "thm_a",
+            SymbolEntry::Theorem {
+                apply_targets: vec![
+                    "kernel_grothendieck_construction_strict".to_string(),
+                ],
+            },
+        );
+        graph.insert(
+            "thm_b",
+            SymbolEntry::Theorem {
+                apply_targets: vec!["thm_a".to_string()],
+            },
+        );
+        graph.insert(
+            "kernel_grothendieck_construction_strict",
+            SymbolEntry::KernelBridge,
+        );
+
+        // Failing body: apply the bridge with a zero arg → dispatcher
+        // rejects.
+        let body = structured_proof_body(vec![make_apply_step(
+            "kernel_grothendieck_construction_strict",
+            vec![int_literal_expr(0)],
+        )]);
+
+        let errors = validate_proof_body_bridges_with_graph(
+            &body,
+            &Text::from("test_failing_thm"),
+            std::path::Path::new("test.vr"),
+            &graph,
+        );
+
+        assert_eq!(errors.len(), 1);
+        let e = &errors[0];
+        assert_eq!(e.bridge_name, "kernel_grothendieck_construction");
+        assert!(
+            !e.dependents_note.is_empty(),
+            "graph-aware variant must populate dependents_note when graph has dependents",
+        );
+        assert!(
+            e.dependents_note.contains("thm_a"),
+            "directly-dependent theorem must appear in note: {}",
+            e.dependents_note,
+        );
+        assert!(
+            e.dependents_note.contains("thm_b"),
+            "transitively-dependent theorem must appear in note: {}",
+            e.dependents_note,
+        );
+        assert!(
+            e.dependents_note.contains("transitively depend"),
+            "note must explain it's about transitive dependence",
+        );
+    }
+
+    #[test]
+    fn graph_aware_validate_with_no_dependents_leaves_note_empty() {
+        use verum_kernel::soundness::apply_graph::{ApplyGraph, SymbolEntry};
+        // Graph with the bridge but no theorems applying it.
+        let mut graph = ApplyGraph::new();
+        graph.insert(
+            "kernel_grothendieck_construction_strict",
+            SymbolEntry::KernelBridge,
+        );
+        let body = structured_proof_body(vec![make_apply_step(
+            "kernel_grothendieck_construction_strict",
+            vec![int_literal_expr(0)],
+        )]);
+        let errors = validate_proof_body_bridges_with_graph(
+            &body,
+            &Text::from("test_failing_thm"),
+            std::path::Path::new("test.vr"),
+            &graph,
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].dependents_note.is_empty(),
+            "no dependents → note stays empty; the diagnostic falls back to dispatcher reason only",
+        );
+    }
+
+    #[test]
+    fn graph_aware_falls_back_to_bare_name_when_strict_form_absent() {
+        // Some upstream paths apply the bare bridge name, not the
+        // _strict form. The graph-aware enricher must try both forms.
+        use verum_kernel::soundness::apply_graph::{ApplyGraph, SymbolEntry};
+        let mut graph = ApplyGraph::new();
+        graph.insert(
+            "thm_using_bare",
+            SymbolEntry::Theorem {
+                // Note: bare name (without _strict).
+                apply_targets: vec!["kernel_grothendieck_construction".to_string()],
+            },
+        );
+        graph.insert(
+            "kernel_grothendieck_construction",
+            SymbolEntry::KernelBridge,
+        );
+        let body = structured_proof_body(vec![make_apply_step(
+            "kernel_grothendieck_construction_strict",
+            vec![int_literal_expr(0)],
+        )]);
+        let errors = validate_proof_body_bridges_with_graph(
+            &body,
+            &Text::from("test_failing_thm"),
+            std::path::Path::new("test.vr"),
+            &graph,
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].dependents_note.contains("thm_using_bare"),
+            "enricher must find dependents under bare bridge name when _strict form is absent: {}",
+            errors[0].dependents_note,
+        );
     }
 }

@@ -1053,6 +1053,17 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         self.modules.read().get(&file_id).cloned()
     }
 
+    /// Snapshot every cached module currently in the session as a
+    /// `Vec` of [`Shared<Module>`] handles. Order is unspecified.
+    ///
+    /// **Use case** (#188 / #318): the apply-graph builder consumes
+    /// every parsed module in the workspace to build a dependency
+    /// view. Returning a `Vec` keeps the read-lock window short —
+    /// callers iterate after the lock drops.
+    pub fn iter_cached_modules(&self) -> Vec<Shared<Module>> {
+        self.modules.read().values().cloned().collect()
+    }
+
     /// Emit a diagnostic.
     ///
 

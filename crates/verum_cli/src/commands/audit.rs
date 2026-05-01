@@ -4886,17 +4886,14 @@ fn classify_axiom_entry(
     decl_attrs: &verum_common::List<verum_ast::attr::Attribute>,
     item_attrs: &verum_common::List<verum_ast::attr::Attribute>,
 ) -> verum_kernel::soundness::apply_graph::SymbolEntry {
-    use verum_kernel::soundness::apply_graph::SymbolEntry;
-    if name.starts_with("kernel_") {
-        return SymbolEntry::KernelBridge;
-    }
-    let has_framework = decl_attrs.iter().any(|a| a.is_named("framework"))
-        || item_attrs.iter().any(|a| a.is_named("framework"));
-    if has_framework {
-        SymbolEntry::FrameworkAxiom
-    } else {
-        SymbolEntry::PlaceholderAxiom
-    }
+    // Single canonical implementation lives in
+    // `verum_kernel::soundness::apply_graph::classify_axiom_entry_for_attrs`
+    // (#188 / #318). Both audit-time and compile-time graph builders
+    // route through it so leaf classification is identical across
+    // contexts.
+    verum_kernel::soundness::apply_graph::classify_axiom_entry_for_attrs(
+        name, decl_attrs, item_attrs,
+    )
 }
 
 fn print_apply_graph_plain(
