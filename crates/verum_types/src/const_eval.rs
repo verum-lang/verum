@@ -230,16 +230,42 @@ pub struct ConstEvaluator {
     functions: Map<Text, MetaFunction>,
     /// Current recursion depth for meta function calls
     recursion_depth: usize,
+    /// Maximum permitted recursion depth (#303).  Pre-fix the limit
+    /// was hardcoded to `MAX_RECURSION_DEPTH = 256` — embedders
+    /// running compile-time-heavy meta programs could not relax it,
+    /// and security-conscious embedders could not tighten it.
+    /// `MAX_RECURSION_DEPTH` remains as the default; `with_max_depth`
+    /// lets callers override.  Mirrors the parallel
+    /// `TypeLevelConfig.max_depth` knob wired in #302 — both
+    /// evaluators now honour caller-supplied recursion budgets.
+    max_depth: usize,
 }
 
 impl ConstEvaluator {
-    /// Create a new const evaluator
+    /// Create a new const evaluator with the default
+    /// `MAX_RECURSION_DEPTH = 256` recursion budget.
     pub fn new() -> Self {
         Self {
             env: Map::new(),
             functions: Map::new(),
             recursion_depth: 0,
+            max_depth: MAX_RECURSION_DEPTH,
         }
+    }
+
+    /// Override the recursion-depth budget (#303).  Useful when an
+    /// embedder either trusts deep meta programs (raise the cap)
+    /// or wants to harden compile-time evaluation against
+    /// pathological recursion (lower the cap).  Setting `0`
+    /// effectively rejects every meta function call.
+    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    /// Read mirror of the configured max recursion depth.
+    pub fn configured_max_depth(&self) -> usize {
+        self.max_depth
     }
 
     /// Bind a variable to a value
@@ -499,8 +525,11 @@ impl ConstEvaluator {
             });
         }
 
-        // Check recursion depth
-        if self.recursion_depth >= MAX_RECURSION_DEPTH {
+        // Check recursion depth (#303: now consults configurable
+        // `self.max_depth` instead of the hardcoded MAX_RECURSION_DEPTH
+        // constant — embedders can raise / lower the cap via
+        // `ConstEvaluator::with_max_depth`).
+        if self.recursion_depth >= self.max_depth {
             return Err(ConstEvalError::RecursionDepthExceeded {
                 name: func_name,
                 depth: self.recursion_depth,
@@ -1973,5 +2002,83 @@ mod tests {
         let result = eval.eval(&call).expect("eval should succeed");
 
         assert_eq!(result, ConstValue::Int(20));
+    }
+
+    // =========================================================================
+    // #303: configurable max_depth recursion budget pins
+    // =========================================================================
+
+    /// Build a self-recursive meta function `recur(n) ⇒ recur(n)`.
+    /// Pre-#303 this would always hit the hardcoded
+    /// MAX_RECURSION_DEPTH = 256 limit; post-#303 the limit is
+    /// configurable via `with_max_depth`.
+    fn build_recursive_eval(max_depth: usize) -> ConstEvaluator {
+        let recur_fn = meta_fn(
+            "recur",
+            &["n"],
+            call_expr("recur", vec![var_expr("n")]),
+        );
+        let mut eval = ConstEvaluator::new().with_max_depth(max_depth);
+        eval.register_meta_function(recur_fn);
+        eval
+    }
+
+    #[test]
+    fn const_eval_default_max_depth_matches_legacy_constant() {
+        // Pin (#303): the default still uses the historical
+        // `MAX_RECURSION_DEPTH = 256` constant — backward-compatible
+        // behaviour for callers that don't override.
+        let eval = ConstEvaluator::new();
+        assert_eq!(eval.configured_max_depth(), MAX_RECURSION_DEPTH);
+        assert_eq!(eval.configured_max_depth(), 256);
+    }
+
+    #[test]
+    fn const_eval_with_max_depth_overrides_default() {
+        // Pin (#303): builder propagates the configured limit.
+        let eval = ConstEvaluator::new().with_max_depth(42);
+        assert_eq!(eval.configured_max_depth(), 42);
+    }
+
+    #[test]
+    fn const_eval_max_depth_caps_recursive_meta_fn() {
+        // Pin (#303): a self-recursive meta function returns
+        // `RecursionDepthExceeded` after the configured budget,
+        // not the hardcoded 256 ceiling.  We can verify the
+        // configured value drove the result by setting a low cap
+        // (8) — pre-#303 the test would have looped 256 frames
+        // before failing; post-#303 it fails at frame 8.
+        let mut eval = build_recursive_eval(8);
+        let call = call_expr("recur", vec![int_lit(1)]);
+        let result = eval.eval(&call);
+        match result {
+            Err(ConstEvalError::RecursionDepthExceeded { name, depth }) => {
+                assert_eq!(name.as_str(), "recur");
+                assert_eq!(
+                    depth, 8,
+                    "limit must be the configured value, not the hardcoded 256"
+                );
+            }
+            Err(other) => panic!(
+                "expected RecursionDepthExceeded, got different Err: {:?}",
+                other
+            ),
+            Ok(_) => panic!("expected recursion to fail"),
+        }
+    }
+
+    #[test]
+    fn const_eval_max_depth_zero_rejects_first_call() {
+        // Pin (#303): pathological max_depth = 0 rejects every
+        // meta function call (the first frame already exceeds
+        // depth 0). Sanity check that the gate fires
+        // unconditionally — without this, a misconfigured
+        // embedder might silently bypass the guard.
+        let mut eval = build_recursive_eval(0);
+        let call = call_expr("recur", vec![int_lit(1)]);
+        assert!(matches!(
+            eval.eval(&call),
+            Err(ConstEvalError::RecursionDepthExceeded { .. })
+        ));
     }
 }
