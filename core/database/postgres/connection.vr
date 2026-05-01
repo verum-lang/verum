@@ -40,12 +40,15 @@ mount core.net.tcp.TcpStream;
 mount core.net.addr.{SocketAddr, ToSocketAddrs};
 mount core.io.IoError;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
-mount core.database.postgres.config.{PgConfig, PgTlsMode, PtmDisable, PtmVerifyFull};
+mount core.database.postgres.config.{
+    PgConfig, PgTlsMode,
+    PtmDisable, PtmAllow, PtmRequire, PtmVerifyCa, PtmVerifyFull,
+};
 mount core.database.postgres.error.dberr_from_pg;
 mount core.database.postgres.wire.frame.{PgFrame, try_parse_tagged, TaggedReadOutcome};
 mount core.database.postgres.wire.frontend.{
     StartupParams, startup, simple_query, terminate, sasl_initial_response, sasl_response,
-    cancel_request,
+    cancel_request, ssl_request,
     copy_data, copy_done, copy_fail,
 };
 mount core.database.postgres.wire.backend.{
@@ -128,24 +131,33 @@ public type PgConnection is {
 // Open / close
 // -----------------------------------------------------------------------------
 
-/// Establish a connection — TCP connect + Startup + SCRAM auth, return
-/// when the server emits ReadyForQuery.
+/// Establish a connection — TCP connect + (optional) SSLRequest +
+/// (optional) TLS handshake + Startup + SCRAM auth, return when the
+/// server emits ReadyForQuery.
+///
+/// TLS posture per `config.tls_mode` (spec §8.13.1):
+///
+///   * `PtmDisable`     — no SSLRequest sent, plaintext only.
+///   * `PtmAllow`       — SSLRequest sent; on `'S'` reply, drive TLS;
+///                        on `'N'` reply, fall back to plaintext.
+///   * `PtmRequire`     — SSLRequest sent; `'S'` mandatory.
+///                        Cert NOT validated (caller trusts the
+///                        network).
+///   * `PtmVerifyCa`    — SSLRequest sent; `'S'` mandatory; cert
+///                        chain validated; hostname not checked.
+///   * `PtmVerifyFull`  — SSLRequest sent; `'S'` mandatory; cert
+///                        chain validated; hostname must match.
+///
+/// SSLRequest negotiation is wired here. The actual TLS handshake
+/// driver (TlsClient<Handshaking> ↔ record-pump loop) is the next
+/// focused commit; until that lands, calls with
+/// `tls_mode != PtmDisable` either succeed via plaintext fallback
+/// (PtmAllow when server returns 'N') or fail cleanly with
+/// `TLS_HANDSHAKE_PENDING` so callers know exactly what's
+/// supported.
 public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
-    // Reject TLS modes we cannot honour yet.
-    match config.tls_mode {
-        PtmDisable => {}
-        PtmVerifyFull => {
-            return Err(DbError.Adapter(AdapterSpecific {
-                adapter: AdPostgres,
-                code: "TLS_PENDING".clone(),
-                message: "verify-full TLS pending core.net.tls channel-binding wiring".clone(),
-                retryable: false,
-            }));
-        }
-    }
-
     let target = format_host_port(&config.host, config.port);
-    let stream = match TcpStream.connect(target.as_str()) {
+    let mut stream = match TcpStream.connect(target.as_str()) {
         Ok(s)  => s,
         Err(_) => {
             return Err(DbError.ConnectionFailed {
@@ -154,6 +166,74 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
             });
         }
     };
+
+    // SSLRequest negotiation — spec §6.1.2. Skip entirely for
+    // PtmDisable; for every other mode, send the 8-byte magic
+    // packet and read the single-byte server verdict.
+    let mut tls_active: Bool = false;
+    match config.tls_mode {
+        PtmDisable => {
+            // Plaintext only — no SSLRequest sent.
+        }
+        _ => {
+            let req = ssl_request();
+            if write_all(&mut stream, req.as_slice()).is_err() {
+                return Err(DbError.ConnectionFailed {
+                    source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                    adapter: AdPostgres,
+                });
+            }
+            // Read the single-byte verdict — 'S' = continue TLS,
+            // 'N' = decline TLS. Anything else = protocol violation.
+            let mut one_byte: List<Byte> = List.new();
+            one_byte.push(0 as Byte);
+            let verdict = match stream.read(one_byte.as_mut_slice()) {
+                Ok(n) if n == 1 => one_byte[0],
+                _ => {
+                    return Err(DbError.ConnectionFailed {
+                        source: core.database.common.error.ConnectionErrorKind.CekServerTerminated,
+                        adapter: AdPostgres,
+                    });
+                }
+            };
+            let v = (verdict as Int) & 0xFF;
+            if v == 0x53 {
+                // 'S' — server agreed to TLS. Per spec §6.1.2 the
+                // TLS handshake follows immediately. The actual
+                // TlsClient<Handshaking> driver lands in the next
+                // commit; until then we surface an honest error
+                // describing what's missing so callers can pin to
+                // PtmDisable for now.
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "TLS_HANDSHAKE_PENDING".clone(),
+                    message: f"server accepted SSLRequest (mode {config.tls_mode.name()}) — TLS 1.3 handshake driver pending tls13.session.client integration; pin tls_mode = PtmDisable until that lands",
+                    retryable: false,
+                }));
+            } else if v == 0x4E {
+                // 'N' — server declined TLS. Per the mode:
+                if !config.tls_mode.permits_plaintext_fallback() {
+                    return Err(DbError.Adapter(AdapterSpecific {
+                        adapter: AdPostgres,
+                        code: "TLS_REJECTED_BY_SERVER".clone(),
+                        message: f"server declined TLS (mode {config.tls_mode.name()} requires encryption)",
+                        retryable: false,
+                    }));
+                }
+                // PtmAllow tolerates plaintext fallback — continue.
+            } else {
+                return Err(DbError.Adapter(AdapterSpecific {
+                    adapter: AdPostgres,
+                    code: "SSLREQUEST_PROTOCOL_VIOLATION".clone(),
+                    message: f"server replied 0x{v:x} to SSLRequest (expected 'S' or 'N')",
+                    retryable: false,
+                }));
+            }
+            // tls_active stays false until the handshake driver
+            // lands — currently we never reach here with TLS up.
+            let _ = tls_active;
+        }
+    }
 
     let mut conn = PgConnection {
         stream: stream,
