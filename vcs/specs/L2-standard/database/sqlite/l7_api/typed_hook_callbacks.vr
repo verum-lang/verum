@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, hooks, l7_api, callback_registry
+// @timeout: 15000
+// @description: Typed Verum-side hook callbacks — register a real
+//               protocol implementor and verify invoke_* dispatches
+//               to it (industrial-quality #144 closure).
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.hooks_api.{
+    HookCallbacks, hook_callbacks_new,
+    set_commit_callback, set_busy_callback, set_progress_callback,
+    invoke_commit, invoke_busy, invoke_progress,
+};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitHook, BusyHandler, ProgressHandler,
+    CommitDecision, CdAllow, CdAbort,
+    ConstantBusyHandler, constant_busy,
+};
+
+// -----------------------------------------------------------------------------
+// 1. HookCallbacks construction — all slots empty
+// -----------------------------------------------------------------------------
+
+fn callbacks_new_empty() {
+    let r = hook_callbacks_new();
+    assert(!r.has_commit());
+    assert(!r.has_rollback());
+    assert(!r.has_update());
+    assert(!r.has_pre_update());
+    assert(!r.has_authorizer());
+    assert(!r.has_busy());
+    assert(!r.has_progress());
+    assert(!r.has_trace());
+    assert(!r.any_installed());
+}
+
+// -----------------------------------------------------------------------------
+// 2. invoke_commit on empty registry returns Allow (default)
+// -----------------------------------------------------------------------------
+
+fn invoke_commit_empty() {
+    let mut r = hook_callbacks_new();
+    match invoke_commit(&mut r) {
+        CdAllow => {},
+        CdAbort(_) => panic("expected CdAllow on empty registry"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. Custom CommitHook — abort with a message
+// -----------------------------------------------------------------------------
+
+type AlwaysAbort is { reason: Text };
+
+implement CommitHook for AlwaysAbort {
+    fn on_commit(&mut self) -> CommitDecision {
+        CdAbort(self.reason.clone())
+    }
+}
+
+fn invoke_commit_aborts() {
+    let mut r = hook_callbacks_new();
+    let hook = AlwaysAbort { reason: "audit-veto".clone() };
+    set_commit_callback(&mut r, Heap.new(hook));
+    assert(r.has_commit());
+    match invoke_commit(&mut r) {
+        CdAbort(reason) => assert(reason == "audit-veto"),
+        CdAllow => panic("expected CdAbort from registered hook"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. Built-in ConstantBusyHandler — bounded retry
+// -----------------------------------------------------------------------------
+
+fn busy_handler_bounded_retry() {
+    let mut r = hook_callbacks_new();
+    let handler = constant_busy(3);
+    set_busy_callback(&mut r, Heap.new(handler));
+    // Retry counts < max should return true.
+    assert(invoke_busy(&mut r, 0));
+    assert(invoke_busy(&mut r, 1));
+    assert(invoke_busy(&mut r, 2));
+    // At max, give up.
+    assert(!invoke_busy(&mut r, 3));
+    assert(!invoke_busy(&mut r, 100));
+}
+
+// -----------------------------------------------------------------------------
+// 5. ProgressHandler — interrupt after a threshold
+// -----------------------------------------------------------------------------
+
+type InterruptAfterN is { count: Int, interrupt_at: Int };
+
+implement ProgressHandler for InterruptAfterN {
+    fn on_progress(&mut self) -> Bool {
+        self.count = self.count + 1;
+        self.count >= self.interrupt_at
+    }
+}
+
+fn progress_interrupts() {
+    let mut r = hook_callbacks_new();
+    let handler = InterruptAfterN { count: 0, interrupt_at: 3 };
+    set_progress_callback(&mut r, Heap.new(handler));
+    // First two ticks return false (continue).
+    assert(!invoke_progress(&mut r));
+    assert(!invoke_progress(&mut r));
+    // Third tick interrupts.
+    assert(invoke_progress(&mut r));
+}
+
+fn main() {
+    callbacks_new_empty();
+    invoke_commit_empty();
+    invoke_commit_aborts();
+    busy_handler_bounded_retry();
+    progress_interrupts();
+}

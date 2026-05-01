@@ -41,6 +41,11 @@ mount core.database.sqlite.native.l6_session.schema_cache.{
 };
 mount core.database.sqlite.native.l2_record.affinity.Affinity;
 mount core.database.sqlite.native.l5_sql.compile.{compile, CompileError};
+mount core.database.sqlite.native.l5_sql.parser.parse_one;
+mount core.database.sqlite.native.l5_sql.ast.{
+    SqlStatement, SCreateTable, CreateTableStmt,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.table_meta_from_create;
 
 // -----------------------------------------------------------------------------
 // SchemaRowKind — discriminator from the type column
@@ -135,7 +140,12 @@ pub fn decode_schema_row(row: &List<Register>) -> Result<SchemaRow, SchemaRowErr
 
 /// Convert a decoded SchemaRow into a TableMeta when its kind is
 /// `SrkTable` or `SrkView`.  Parses the embedded CREATE statement
-/// to recover columns + primary-key info.
+/// via the L5 parser to recover columns + primary-key info, then
+/// delegates to `schema_cache::table_meta_from_create` (the
+/// canonical converter).  Falls back to an empty-column TableMeta
+/// if the SQL fails to parse OR is not a CREATE TABLE statement
+/// (views legitimately fall here — `parse_one` handles only DML
+/// + CREATE TABLE / CREATE INDEX in v1).
 pub fn schema_row_to_table_meta(
     row: &SchemaRow,
     schema_name: &Text,
@@ -146,23 +156,65 @@ pub fn schema_row_to_table_meta(
         _ => return Err(InvalidMetadata("row is not a table/view".clone())),
     };
 
-    // Foundation: parse the CREATE statement via the L5 compile
-    // entry point.  Errors during parse are surfaced as
-    // InvalidMetadata; success but no columns recovered yields an
-    // empty-column TableMeta which the caller can detect.
-    let columns = parse_create_columns(&row.sql);
+    // For tables: parse the CREATE statement and delegate column
+    // extraction to the canonical converter.  For views: keep the
+    // empty-column shape (the L5 view-rewrite layer holds the
+    // result-column shape, not us).
+    let mut meta = match kind {
+        TkTable => parse_table_meta_from_sql(&row.sql, schema_name, &row.name, row.rootpage),
+        _       => view_meta_default(schema_name, &row.name, row.rootpage),
+    };
+    meta.created_sql = row.sql.clone();
+    meta.kind = kind;
+    Ok(meta)
+}
 
-    Ok(TableMeta {
+/// Parse the embedded CREATE TABLE statement and return a
+/// TableMeta with full column metadata.  Failures degrade to an
+/// empty-column TableMeta — callers should re-issue the CREATE
+/// via `compile_with_schema` if they need columns and the parse
+/// failed (rare; sqlite_schema typically holds well-formed SQL).
+fn parse_table_meta_from_sql(
+    sql: &Text,
+    schema_name: &Text,
+    table_name: &Text,
+    rootpage: Int,
+) -> TableMeta {
+    let stmt = match parse_one(sql) {
+        Ok(s)  => s,
+        Err(_) => return empty_table_meta(schema_name, table_name, rootpage),
+    };
+    match stmt {
+        SCreateTable(ct) => {
+            let mut meta = table_meta_from_create(&ct, rootpage, sql.clone());
+            // table_meta_from_create defaults schema to "" — we
+            // override with the caller-supplied name (typically
+            // "main" for the primary database).
+            meta.schema = schema_name.clone();
+            meta
+        }
+        _ => empty_table_meta(schema_name, table_name, rootpage),
+    }
+}
+
+fn empty_table_meta(schema_name: &Text, name: &Text, rootpage: Int) -> TableMeta {
+    TableMeta {
         schema: schema_name.clone(),
-        name: row.name.clone(),
-        kind: kind,
-        root_page: row.rootpage,
-        columns: columns,
-        primary_key_cols: List.new(),     // refined by parse_create_columns follow-up
+        name: name.clone(),
+        kind: TkTable,
+        root_page: rootpage,
+        columns: List.new(),
+        primary_key_cols: List.new(),
         strict: false,
         without_rowid: false,
-        created_sql: row.sql.clone(),
-    })
+        created_sql: "".clone(),
+    }
+}
+
+fn view_meta_default(schema_name: &Text, name: &Text, rootpage: Int) -> TableMeta {
+    let mut m = empty_table_meta(schema_name, name, rootpage);
+    m.kind = TkView;
+    m
 }
 
 /// Convert a decoded SchemaRow into an IndexMeta when its kind is
@@ -259,16 +311,6 @@ pub fn load_schema_from_rows(
     report
 }
 
-// -----------------------------------------------------------------------------
-// CREATE statement column parser
-// -----------------------------------------------------------------------------
-
-/// Foundation column parser — builds an empty column list.  The
-/// real parser walks the L5 CreateTableStmt AST returned by the
-/// L5 parser and converts each ColumnDef into a ColumnMeta.
-/// Tracked as a #143 follow-up so this module stays compileable
-/// without a transitive dependency on the L5 parse cycle which
-/// adds compile time to L6.
-fn parse_create_columns(_sql: &Text) -> List<ColumnMeta> {
-    List.new()
-}
+// CREATE-table column extraction now lives in
+// `parse_table_meta_from_sql` above — it parses via L5 then
+// delegates to schema_cache::table_meta_from_create.

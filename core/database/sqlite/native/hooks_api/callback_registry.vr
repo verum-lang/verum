@@ -1,0 +1,240 @@
+module core.database.sqlite.native.hooks_api.callback_registry;
+
+// =============================================================================
+// hooks_api/callback_registry.vr — typed Verum-side hook callbacks
+// =============================================================================
+// Layer: 7
+// Spec: SQLite C API §19.5
+//
+// Industrial-grade improvement over the opaque-handle approach
+// (`hooks_api/registration.vr`): this registry holds typed Verum
+// callbacks (`Heap<dyn CommitHook>` etc.) so in-process clients
+// (tests, drivers, audit layers) can register native Verum
+// closures and have them invoked by the dispatcher WITHOUT waiting
+// on FFI handle resolution.
+//
+// Architecture:
+//
+//   * `HookCallbacks` — single struct with one `Maybe<Heap<dyn
+//     ProtocolName>>` slot per hook kind.  None = no in-process
+//     callback registered (dispatcher then consults the FFI
+//     opaque-handle registry as fallback).
+//   * `set_*_callback(reg, h)` — install / replace.
+//   * `clear_*_callback(reg)` — uninstall.
+//   * `has_*_callback(reg) -> Bool` — fast presence check (used
+//     by fire_*_hook hot path to skip dispatch when no callback).
+//
+// The dispatcher (`hooks_api::dispatcher::fire_*_hook`) accepts a
+// `&mut HookCallbacks` parameter; when a typed callback is
+// installed it invokes it directly (zero FFI cost) and uses the
+// returned typed decision.  Falls back to the FFI opaque-handle
+// path when no Verum callback is registered.
+//
+// Concurrency: HookCallbacks is owned by Connection (single-writer
+// per connection — same model as the legacy HookRegistration
+// surface).  Safe for direct mutation through `&mut` references.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
+    AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
+    CommitDecision, CdAllow, CdAbort,
+    AuthDecision, AdAllow, AdDeny, AdIgnore,
+    AuthAction, ExtUpdateOp, UoInsert, UoUpdate, UoDelete,
+    TraceEvent, TeStmt, TeProfile, TeRow, TeClose,
+};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+
+// -----------------------------------------------------------------------------
+// HookCallbacks — single struct holding all 8 typed slots
+// -----------------------------------------------------------------------------
+
+pub type HookCallbacks is {
+    commit:     Maybe<Heap<dyn CommitHook>>,
+    rollback:   Maybe<Heap<dyn RollbackHook>>,
+    update:     Maybe<Heap<dyn UpdateHook>>,
+    pre_update: Maybe<Heap<dyn PreUpdateHook>>,
+    authorizer: Maybe<Heap<dyn AuthorizerHook>>,
+    busy:       Maybe<Heap<dyn BusyHandler>>,
+    progress:   Maybe<Heap<dyn ProgressHandler>>,
+    trace:      Maybe<Heap<dyn TraceHook>>,
+}
+
+pub fn hook_callbacks_new() -> HookCallbacks {
+    HookCallbacks {
+        commit:     None,
+        rollback:   None,
+        update:     None,
+        pre_update: None,
+        authorizer: None,
+        busy:       None,
+        progress:   None,
+        trace:      None,
+    }
+}
+
+implement HookCallbacks {
+    pub fn has_commit(&self) -> Bool      { is_some(&self.commit) }
+    pub fn has_rollback(&self) -> Bool    { is_some(&self.rollback) }
+    pub fn has_update(&self) -> Bool      { is_some(&self.update) }
+    pub fn has_pre_update(&self) -> Bool  { is_some(&self.pre_update) }
+    pub fn has_authorizer(&self) -> Bool  { is_some(&self.authorizer) }
+    pub fn has_busy(&self) -> Bool        { is_some(&self.busy) }
+    pub fn has_progress(&self) -> Bool    { is_some(&self.progress) }
+    pub fn has_trace(&self) -> Bool       { is_some(&self.trace) }
+
+    pub fn any_installed(&self) -> Bool {
+        self.has_commit() || self.has_rollback()
+            || self.has_update() || self.has_pre_update()
+            || self.has_authorizer() || self.has_busy()
+            || self.has_progress() || self.has_trace()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Setters — one per hook kind
+// -----------------------------------------------------------------------------
+
+pub fn set_commit_callback(r: &mut HookCallbacks, h: Heap<dyn CommitHook>) {
+    r.commit = Some(h);
+}
+
+pub fn set_rollback_callback(r: &mut HookCallbacks, h: Heap<dyn RollbackHook>) {
+    r.rollback = Some(h);
+}
+
+pub fn set_update_callback(r: &mut HookCallbacks, h: Heap<dyn UpdateHook>) {
+    r.update = Some(h);
+}
+
+pub fn set_pre_update_callback(r: &mut HookCallbacks, h: Heap<dyn PreUpdateHook>) {
+    r.pre_update = Some(h);
+}
+
+pub fn set_authorizer_callback(r: &mut HookCallbacks, h: Heap<dyn AuthorizerHook>) {
+    r.authorizer = Some(h);
+}
+
+pub fn set_busy_callback(r: &mut HookCallbacks, h: Heap<dyn BusyHandler>) {
+    r.busy = Some(h);
+}
+
+pub fn set_progress_callback(r: &mut HookCallbacks, h: Heap<dyn ProgressHandler>) {
+    r.progress = Some(h);
+}
+
+pub fn set_trace_callback(r: &mut HookCallbacks, h: Heap<dyn TraceHook>) {
+    r.trace = Some(h);
+}
+
+// -----------------------------------------------------------------------------
+// Clearers — uninstall per hook kind
+// -----------------------------------------------------------------------------
+
+pub fn clear_commit_callback(r: &mut HookCallbacks)     { r.commit = None; }
+pub fn clear_rollback_callback(r: &mut HookCallbacks)   { r.rollback = None; }
+pub fn clear_update_callback(r: &mut HookCallbacks)     { r.update = None; }
+pub fn clear_pre_update_callback(r: &mut HookCallbacks) { r.pre_update = None; }
+pub fn clear_authorizer_callback(r: &mut HookCallbacks) { r.authorizer = None; }
+pub fn clear_busy_callback(r: &mut HookCallbacks)       { r.busy = None; }
+pub fn clear_progress_callback(r: &mut HookCallbacks)   { r.progress = None; }
+pub fn clear_trace_callback(r: &mut HookCallbacks)      { r.trace = None; }
+
+// -----------------------------------------------------------------------------
+// Invokers — typed callback dispatch
+// -----------------------------------------------------------------------------
+
+/// Invoke the commit callback if installed.  Returns the typed
+/// decision (Allow when no callback registered).  Used by the
+/// actor's commit path to decide whether to roll back.
+pub fn invoke_commit(r: &mut HookCallbacks) -> CommitDecision {
+    match &mut r.commit {
+        Some(h) => (&mut **h).on_commit(),
+        None    => CdAllow,
+    }
+}
+
+pub fn invoke_rollback(r: &mut HookCallbacks) {
+    match &mut r.rollback {
+        Some(h) => (&mut **h).on_rollback(),
+        None    => {}
+    }
+}
+
+pub fn invoke_update(
+    r: &mut HookCallbacks,
+    op: ExtUpdateOp,
+    db: &Text,
+    table: &Text,
+    rowid: Int64,
+) {
+    match &mut r.update {
+        Some(h) => (&mut **h).on_update(op, db, table, rowid),
+        None    => {}
+    }
+}
+
+pub fn invoke_pre_update(
+    r: &mut HookCallbacks,
+    op: ExtUpdateOp,
+    db: &Text,
+    table: &Text,
+    old_row: &List<Register>,
+    new_row: &List<Register>,
+) {
+    match &mut r.pre_update {
+        Some(h) => (&mut **h).on_pre_update(op, db, table, old_row, new_row),
+        None    => {}
+    }
+}
+
+pub fn invoke_authorizer(
+    r: &mut HookCallbacks,
+    action: &AuthAction,
+) -> AuthDecision {
+    match &mut r.authorizer {
+        Some(h) => (&mut **h).authorize(action),
+        None    => AdAllow,
+    }
+}
+
+/// Invoke the busy handler.  Returns `true` when the caller
+/// should retry the operation; `false` to surface SQLITE_BUSY.
+/// When no callback is installed, returns `false` (give up).
+pub fn invoke_busy(r: &mut HookCallbacks, retry_count: Int) -> Bool {
+    match &mut r.busy {
+        Some(h) => (&mut **h).on_busy(retry_count),
+        None    => false,
+    }
+}
+
+/// Invoke the progress handler.  Returns `true` to interrupt the
+/// statement; `false` to continue.  When no callback is installed,
+/// returns `false` (continue).
+pub fn invoke_progress(r: &mut HookCallbacks) -> Bool {
+    match &mut r.progress {
+        Some(h) => (&mut **h).on_progress(),
+        None    => false,
+    }
+}
+
+pub fn invoke_trace(r: &mut HookCallbacks, event: &TraceEvent) {
+    match &mut r.trace {
+        Some(h) => (&mut **h).on_trace(event),
+        None    => {}
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Maybe presence helper — typed across all 8 callback shapes
+// -----------------------------------------------------------------------------
+
+fn is_some<T>(v: &Maybe<T>) -> Bool {
+    match v {
+        Some(_) => true,
+        None    => false,
+    }
+}

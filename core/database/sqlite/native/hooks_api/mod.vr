@@ -29,6 +29,7 @@ public module registration;
 public module op;
 public module engine;
 public module dispatcher;
+public module callback_registry;
 
 public mount .registration.{
     HookRegistration, HookKind,
@@ -53,4 +54,19 @@ public mount .dispatcher.{
     fire_commit_hook, fire_rollback_hook,
     fire_update_hook, fire_pre_update_hook,
     fire_authorizer, fire_busy_handler, fire_progress_handler, fire_trace_hook,
+};
+
+public mount .callback_registry.{
+    HookCallbacks, hook_callbacks_new,
+    set_commit_callback, set_rollback_callback,
+    set_update_callback, set_pre_update_callback,
+    set_authorizer_callback, set_busy_callback,
+    set_progress_callback, set_trace_callback,
+    clear_commit_callback, clear_rollback_callback,
+    clear_update_callback, clear_pre_update_callback,
+    clear_authorizer_callback, clear_busy_callback,
+    clear_progress_callback, clear_trace_callback,
+    invoke_commit, invoke_rollback,
+    invoke_update, invoke_pre_update,
+    invoke_authorizer, invoke_busy, invoke_progress, invoke_trace,
 };

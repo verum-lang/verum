@@ -34,6 +34,9 @@ mount core.database.sqlite.native.l4_vdbe.{
     StepResult, VdbeState, vdbe_state_new, step,
     ParamBindings, param_bindings_new,
 };
+mount core.database.sqlite.native.l4_vdbe.interpreter.{
+    Row, Done, Yield, ExecError,
+};
 mount core.database.sqlite.native.l6_session.statement.{
     PreparedStatement, StmtError,
 };
@@ -131,27 +134,39 @@ pub fn clear_bindings(stmt: &mut PreparedStatement) {
 /// state.  Returns `SoRowReady` when a row is available (caller
 /// reads via `column_*`); `SoDone` when no more rows remain;
 /// `SoErrored(msg)` on runtime error.
+///
+/// On `SoRowReady`, the row's `(reg_start, n_cols)` window is
+/// stamped into `stmt.last_row_start` / `stmt.last_row_cols` so
+/// `column_value` can read each column from the register file.
 pub fn step_one(stmt: &mut PreparedStatement) -> StepOutcome {
     // Snapshot bindings into the interpreter state so the VDBE
     // sees the latest values for `Variable(reg_dst, idx)` opcodes.
     stmt.state.install_bindings(stmt.bindings.clone());
 
     // Loop until we hit a terminal step result.  The interpreter's
-    // `step` function returns one StepResult per opcode; we walk
-    // until we see Row / Halt / Err.
-    let max_steps: Int = 1000000;   // hard cap against infinite loops
+    // `step` returns Row(start, n) on ResultRow, Done on Halt,
+    // ExecError on runtime fault, Yield to advance pc one opcode.
+    let max_steps: Int = 1000000;
     let mut steps: Int = 0;
     while steps < max_steps {
         let result = step(&mut stmt.state, &stmt.program);
         match result {
-            StepResult::Row => return SoRowReady,
-            StepResult::Halt => return SoDone,
-            StepResult::Err(msg) => return SoErrored(msg),
-            StepResult::Continue => {}
+            Row(reg_start, n_cols) => {
+                stmt.last_row_start = reg_start;
+                stmt.last_row_cols = n_cols;
+                return SoRowReady;
+            }
+            Done => return SoDone,
+            ExecError(code, msg) => return SoErrored(format_exec_error(code, &msg)),
+            Yield => {}
         }
         steps = steps + 1;
     }
     SoErrored(f"step_one: max_steps {max_steps} exceeded".as_str().to_owned())
+}
+
+fn format_exec_error(code: Int, msg: &Text) -> Text {
+    f"VDBE exec error (code {code}): {msg}".as_str().to_owned()
 }
 
 /// Reset the statement to its initial state — clears the
@@ -216,16 +231,15 @@ pub fn column_declared_type(stmt: &PreparedStatement, i: Int) -> Text {
 /// Caller must have just received `SoRowReady` from `step_one`;
 /// otherwise returns `RNull` (matches SQLite's defensive default).
 ///
-/// Foundation: values come from the interpreter's `last_result_row`
-/// register window.  Real implementation reads via
-/// `interpreter::current_row_value(state, i)` — wired once that
-/// helper lands as a follow-up to the L4 cursor opcode work.
+/// Reads the register at `last_row_start + i` from the interpreter's
+/// register file.  `step_one` populates `last_row_start` /
+/// `last_row_cols` when it observes a `Row(start, n)` step result.
 pub fn column_value(stmt: &PreparedStatement, i: Int) -> Register {
-    let _ = stmt;
-    let _ = i;
-    // Placeholder for the foundation pass — interpreter row-window
-    // accessor is the next mechanical wire.
-    RNull
+    if i < 0 || i >= stmt.last_row_cols {
+        return RNull;
+    }
+    let reg_idx = stmt.last_row_start + i;
+    register_clone(&stmt.state.regs.get(reg_idx))
 }
 
 /// Runtime kind of the column value (NULL / INTEGER / REAL / TEXT
