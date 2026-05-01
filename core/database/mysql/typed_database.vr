@@ -1,0 +1,374 @@
+// =============================================================================
+// core/database/mysql/typed_database.vr — capability-bounded MySQL surface
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §5.4 (capability types), §6.3 (MySQL adapter)
+// =============================================================================
+//
+// Mirror of `core.database.postgres.typed_database` for the MySQL
+// adapter. Same capability-bounded `implement<C: ...> Database<MysqlPool, C>`
+// pattern; same affine-Tx semantics. Differences from the postgres
+// surface (driven by the protocol):
+//
+//   * No native LISTEN/NOTIFY — MySQL has no in-server pub/sub
+//     primitive (binlog is the closest analogue, separate
+//     workstream). The CanNotify implement block is therefore
+//     absent; handlers that try to call `subscribe_channel` on
+//     `Database<MysqlPool, _>` fail at compile time with
+//     "method not in scope" rather than a runtime UNSUPPORTED
+//     error — exactly the spec §5.4 promise.
+//
+//   * Transaction begin takes optional isolation level (READ
+//     COMMITTED / REPEATABLE READ / SERIALIZABLE / READ UNCOMMITTED)
+//     and access mode (READ ONLY / READ WRITE) — surfaced as
+//     `begin_with_opts` alongside the default-isolation `begin`.
+//
+//   * Prepared-statement cache integrates via `PreparedSession`
+//     (commit #9). The typed surface exposes `query_prepared`
+//     and `execute_prepared` that route through the cache: first
+//     call against a SQL fingerprint runs COM_STMT_PREPARE and
+//     inserts into the LRU; subsequent calls hit the cache and
+//     emit only COM_STMT_EXECUTE. Server-side cache misses
+//     (ER_UNKNOWN_STMT_HANDLER) are recovered transparently.
+//
+//   * COPY equivalent — MySQL has LOAD DATA INFILE and the
+//     LOCAL_INFILE protocol option, but Spindle disables
+//     LOCAL_INFILE by default per spec §6.3.1 (security).
+//     A bulk-ingest path lands later via batched prepared
+//     INSERT under `<C: CanCopy>`; v1 omits the COPY surface so
+//     misuse fails grammatically rather than silently.
+//
+// Every method:
+//   1. Acquires a connection from the underlying MysqlPool.
+//   2. Delegates to the existing MysqlConnection method.
+//   3. Releases the connection — `release_healthy` on success,
+//      `release_discard(reason)` on error so the pool reopens a
+//      fresh slot. Drop-on-fault discipline matches spec §4.3.
+// =============================================================================
+
+module core.database.mysql.typed_database;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount base.memory.Shared;
+
+mount core.database.common.error.{DbError, AdapterSpecific};
+mount core.database.common.db_handle.Database;
+mount core.database.common.capability.{
+    Capability, CanRead, CanWrite, CanTx, CanDdl, CanCopy, CanUnsafe,
+    DbRead, DbReadWriteTx, DbAdmin, DbCopy, DbUnsafe,
+    CapabilitySet,
+};
+mount core.database.common.pool_impl.{PooledConnection, ReleaseKind, Healthy, Discard, PoolStatsSnapshot};
+
+mount core.database.mysql.pool.MysqlPool;
+mount core.database.mysql.connection.{
+    MysqlConnection, MySimpleQueryResult, MysqlPreparedResult,
+    MysqlPreparedStatement,
+};
+mount core.database.mysql.transaction.{
+    MysqlTransaction, MyTxOpts, MyTxKind, MyAccessMode,
+    MyTkRepeatableRead, MyTkReadCommitted, MyTkSerializable, MyTkReadUncommitted,
+    MyAmReadWrite, MyAmReadOnly,
+    my_tx_opts_default, begin_tx, begin_tx_with, commit_tx, rollback_tx,
+};
+mount core.database.mysql.prepared.{PreparedSession};
+mount core.database.mysql.wire.frontend.{
+    StmtParam,
+    param_null, param_int, param_text, param_blob, param_double,
+};
+
+// -----------------------------------------------------------------------------
+// Read-bound surface
+// -----------------------------------------------------------------------------
+
+implement<C: CanRead> Database<MysqlPool, C> {
+    /// Run a SELECT against the pool — acquire, run COM_QUERY,
+    /// release. Returns the typed `MySimpleQueryResult` so callers
+    /// see column metadata + text-encoded rows + affected_rows /
+    /// last_insert_id in one shape.
+    public fn query_simple(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().simple_query(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+
+    /// Cached prepared SELECT — uses `PreparedSession`'s LRU
+    /// (default cap 128) to skip COM_STMT_PREPARE on repeated
+    /// SQL. The session is owned by the caller (typically a
+    /// per-pool singleton); pass `&mut session` so the cache
+    /// can mutate.
+    ///
+    /// Acquires a single connection for the duration of the call.
+    /// Recovery: ER_UNKNOWN_STMT_HANDLER (1243) silently re-prepares
+    /// and retries once; other errors propagate verbatim.
+    public fn query_prepared(
+        &self,
+        session: &mut PreparedSession,
+        sql: &Text,
+        params: &List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = session.query_cached(handle.conn_mut(), sql, params);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write-bound surface
+// -----------------------------------------------------------------------------
+
+implement<C: CanWrite> Database<MysqlPool, C> {
+    /// Run an INSERT / UPDATE / DELETE via COM_QUERY. Returns the
+    /// raw `MySimpleQueryResult` so callers read `affected_rows`
+    /// and `last_insert_id`.
+    public fn execute_simple(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().simple_query(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+
+    /// Cached prepared INSERT/UPDATE/DELETE — same machinery as
+    /// `query_prepared`, returning the `MysqlPreparedResult` whose
+    /// `affected_rows` field carries the row count for non-SELECT
+    /// shapes. The binary protocol does not distinguish SELECT
+    /// from non-SELECT at execute time; the response shape (OK
+    /// vs result-set) is what differs and `MysqlPreparedResult`
+    /// covers both.
+    public fn execute_prepared(
+        &self,
+        session: &mut PreparedSession,
+        sql: &Text,
+        params: &List<StmtParam>,
+    ) -> Result<MysqlPreparedResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = session.execute_cached(handle.conn_mut(), sql, params);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tx-bound surface
+// -----------------------------------------------------------------------------
+
+implement<C: CanTx> Database<MysqlPool, C> {
+    /// Open a transaction with the server's default isolation
+    /// level (REPEATABLE READ on MySQL 8). Returns an affine
+    /// `MysqlTxScope<MysqlPool>` that holds the pool checkout for
+    /// the duration of the tx; consumed by `commit` / `rollback`.
+    public fn begin(&self) -> Result<MysqlTxScope<MysqlPool>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        match begin_tx(handle.conn_mut()) {
+            Ok(tx) => Ok(MysqlTxScope { tx: tx, handle: handle }),
+            Err(e) => {
+                handle.release_discard(e.message());
+                Err(e)
+            }
+        }
+    }
+
+    /// Open a transaction with explicit isolation level + access
+    /// mode. Used by handlers that need SERIALIZABLE for cross-
+    /// row invariants or READ ONLY for replica-bound analytics.
+    public fn begin_with_opts(&self, opts: &MyTxOpts) -> Result<MysqlTxScope<MysqlPool>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        match begin_tx_with(handle.conn_mut(), opts) {
+            Ok(tx) => Ok(MysqlTxScope { tx: tx, handle: handle }),
+            Err(e) => {
+                handle.release_discard(e.message());
+                Err(e)
+            }
+        }
+    }
+
+    /// Convenience — open a SERIALIZABLE transaction. Mirrors PG's
+    /// pattern; useful for cross-row invariant enforcement under
+    /// concurrent writes.
+    public fn begin_serializable(&self) -> Result<MysqlTxScope<MysqlPool>, DbError> {
+        let opts = my_tx_opts_default()
+            .with_isolation(MyTkSerializable);
+        self.begin_with_opts(&opts)
+    }
+
+    /// Convenience — open a READ ONLY transaction at REPEATABLE
+    /// READ. Replica-bound analytics handlers run under this so a
+    /// stray UPDATE compiles into a server-side error instead of
+    /// drifting writes through.
+    public fn begin_read_only(&self) -> Result<MysqlTxScope<MysqlPool>, DbError> {
+        let opts = my_tx_opts_default()
+            .with_mode(MyAmReadOnly);
+        self.begin_with_opts(&opts)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MysqlTxScope — affine wrapper bundling tx + pool checkout
+// -----------------------------------------------------------------------------
+
+/// Active-transaction handle. Holds the `MysqlTransaction` (which
+/// owns a `&mut MysqlConnection`) plus the
+/// `PooledConnection<MysqlConnection>` checkout that keeps the
+/// connection alive. Consumed by `commit` or `rollback` — affine,
+/// so a forgotten consume is a compile error per spec §5.5.
+public type affine MysqlTxScope<P> is {
+    tx: MysqlTransaction,
+    handle: PooledConnection<MysqlConnection>,
+};
+
+implement MysqlTxScope<MysqlPool> {
+    /// Borrow the underlying transaction handle for issuing
+    /// queries during the body of the transaction.
+    public fn tx_mut(&mut self) -> &mut MysqlTransaction {
+        &mut self.tx
+    }
+
+    public fn tx_ref(&self) -> &MysqlTransaction {
+        &self.tx
+    }
+
+    /// COMMIT and release the pool checkout. The underlying
+    /// connection returns to the pool's idle queue (healthy state
+    /// — commit succeeded). On commit failure the connection's
+    /// state is ambiguous; discard so the next acquire opens a
+    /// fresh one.
+    public fn commit(mut self) -> Result<(), DbError> {
+        let result = commit_tx(self.tx);
+        match &result {
+            Ok(_)  => self.handle.release_healthy(),
+            Err(e) => self.handle.release_discard(e.message()),
+        }
+        result
+    }
+
+    /// ROLLBACK and release. Symmetric to `commit`.
+    public fn rollback(mut self) -> Result<(), DbError> {
+        let result = rollback_tx(self.tx);
+        match &result {
+            Ok(_)  => self.handle.release_healthy(),
+            Err(e) => self.handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DDL-bound surface — DbAdmin / DbUnsafe only
+// -----------------------------------------------------------------------------
+
+implement<C: CanDdl> Database<MysqlPool, C> {
+    /// Run a DDL statement (CREATE / ALTER / DROP / TRUNCATE / SET
+    /// ROLE). Wraps `execute_simple` but tightens the capability
+    /// bound — `Database<MysqlPool, DbReadWriteTx>` cannot
+    /// accidentally drop a table because `CanDdl` is not in scope
+    /// on it. The bound is the load-bearing piece.
+    public fn execute_ddl(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().simple_query(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Unsafe-bound surface — DbUnsafe only. Raw SQL escape hatch per
+// spec §8.9. Call sites MUST be marked `@unsafe` AND `@audit(reason)`.
+// -----------------------------------------------------------------------------
+
+implement<C: CanUnsafe> Database<MysqlPool, C> {
+    /// Run an arbitrary SQL string. Capability bound restricts to
+    /// `Database<MysqlPool, DbUnsafe>`; combined with the
+    /// `@unsafe` + `@audit(reason)` annotations the spec §8.9
+    /// requires at the call site, every invocation is auditable.
+    public fn execute_raw_unsafe(&self, sql: &Text) -> Result<MySimpleQueryResult, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().simple_query(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Universal helpers — accessible regardless of capability
+// -----------------------------------------------------------------------------
+
+implement<C: Capability> Database<MysqlPool, C> {
+    /// Snapshot the underlying pool's metrics. Usable from any
+    /// capability — even `Database<MysqlPool, DbRead>` can emit
+    /// `db.pool.*` series.
+    public fn pool_stats(&self) -> PoolStatsSnapshot {
+        self.pool.stats()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Construction shortcuts
+// -----------------------------------------------------------------------------
+
+/// Construct a read-write-transactional database from a freshly
+/// launched MysqlPool. Application-account default (READ + WRITE +
+/// TX). Matches `core.database.postgres.database_from_pool`'s
+/// shape — handlers use the same call style across adapters.
+public fn mysql_database_from_pool(pool: MysqlPool) -> Database<MysqlPool, DbReadWriteTx> {
+    Database.from_pool(Shared.new(pool))
+}
+
+/// Admin handle — for migration runners. Surfaces `execute_ddl`
+/// in addition to the read-write-transactional bundle.
+public fn mysql_admin_database_from_pool(pool: MysqlPool) -> Database<MysqlPool, DbAdmin> {
+    Database.from_admin_pool(Shared.new(pool))
+}
+
+/// Read-only handle — analytics-replica deployments. Only
+/// `query_simple` / `query_prepared` appear on the surface; any
+/// `execute_*` / `begin*` / `execute_ddl` call is a compile
+/// error.
+public fn mysql_readonly_database_from_pool(pool: MysqlPool) -> Database<MysqlPool, DbRead> {
+    Database.from_readonly_pool(Shared.new(pool))
+}
