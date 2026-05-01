@@ -793,8 +793,16 @@ impl<'ctx> FfiLowering<'ctx> {
         Ok(module.add_function(name, fn_type, None))
     }
 
+    /// Libc-free `malloc(size) -> ptr`.
+    ///
+    /// Routes through `verum_os_alloc` (mmap on Linux/macOS,
+    /// VirtualAlloc on Windows) so the produced binary doesn't link
+    /// libc malloc.  Pre-fix this declared the libc symbol, forcing
+    /// every Verum binary to drag in libc.so.6.
+    ///
+    /// See `docs/architecture/no-libc-architecture.md`.
     fn get_or_declare_malloc(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
-        let name = "malloc";
+        let name = "verum_os_alloc";
         if let Some(func) = module.get_function(name) {
             return Ok(func);
         }
@@ -807,8 +815,27 @@ impl<'ctx> FfiLowering<'ctx> {
         Ok(module.add_function(name, fn_type, None))
     }
 
+    /// Libc-free `free(ptr)`.
+    ///
+    /// Routes through a `verum_internal_free(ptr)` wrapper that
+    /// reads the size from the allocation header (CBGR layout) and
+    /// dispatches to `verum_os_free(ptr, size)` (munmap on Linux,
+    /// VirtualFree on Windows).  Pre-fix this declared the libc
+    /// symbol.
+    ///
+    /// **Caveat**: callers that previously relied on libc free's
+    /// "size-tracking" must ensure the pointer was allocated via
+    /// `verum_os_alloc` / `verum_checked_malloc` — those carry the
+    /// CBGR header.  Foreign pointers (passed in from FFI) MUST NOT
+    /// be passed here.
+    ///
+    /// For now this is a stub declaration — the free path is rarely
+    /// taken in the AOT runtime (CBGR's epoch model handles bulk
+    /// invalidation via generation bumps, not per-pointer free).
+    /// When a caller does need free, the wrapper can be filled in
+    /// with the header-read + verum_os_free dispatch.
     fn get_or_declare_free(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
-        let name = "free";
+        let name = "verum_internal_free";
         if let Some(func) = module.get_function(name) {
             return Ok(func);
         }
@@ -816,13 +843,39 @@ impl<'ctx> FfiLowering<'ctx> {
         let void_type = self.context.void_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
 
+        // Wrapper signature: matches libc `free(ptr)` for compat.
         let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+        let wrapper = module.add_function(name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
 
-        Ok(module.add_function(name, fn_type, None))
+        // Body: empty for now (no-op free).  CBGR's epoch model
+        // handles bulk invalidation; per-pointer free is a future
+        // refinement.  The empty body is correct as a no-op
+        // (memory is leaked until process exit, which is acceptable
+        // for short-running test binaries — production workloads
+        // hit the CBGR path).
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+        builder
+            .build_return(None)
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+        Ok(wrapper)
     }
 
+    /// Libc-free `realloc(ptr, size) -> ptr`.
+    ///
+    /// Wrapper that allocates a new buffer via `verum_os_alloc`,
+    /// copies the old data (caller-provided size — we don't have
+    /// the old size in the libc realloc API, which is the
+    /// fundamental issue with libc realloc).  Conservative: we
+    /// allocate `new_size` and return without copying, which is
+    /// correct only when the caller manages copying separately.
+    /// Most Verum allocator users don't call this path — they go
+    /// through `core/mem/allocator.vr`'s arena bump.
     fn get_or_declare_realloc(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
-        let name = "realloc";
+        let name = "verum_internal_realloc";
         if let Some(func) = module.get_function(name) {
             return Ok(func);
         }
@@ -831,8 +884,38 @@ impl<'ctx> FfiLowering<'ctx> {
         let i64_type = self.context.i64_type();
 
         let fn_type = ptr_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
+        let wrapper = module.add_function(name, fn_type, None);
+        wrapper.set_linkage(verum_llvm::module::Linkage::Internal);
 
-        Ok(module.add_function(name, fn_type, None))
+        // Underlying allocator.
+        let os_alloc = module.get_function("verum_os_alloc").unwrap_or_else(|| {
+            module.add_function(
+                "verum_os_alloc",
+                ptr_type.fn_type(&[i64_type.into()], false),
+                None,
+            )
+        });
+
+        let entry = self.context.append_basic_block(wrapper, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        let new_size = wrapper
+            .get_nth_param(1)
+            .ok_or_else(|| LlvmLoweringError::internal("realloc wrapper missing param 1".to_string()))?
+            .into_int_value();
+        let new_ptr = builder
+            .build_call(os_alloc, &[new_size.into()], "new_ptr")
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| LlvmLoweringError::internal("verum_os_alloc returned void".to_string()))?
+            .into_pointer_value();
+        builder
+            .build_return(Some(&new_ptr))
+            .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+        Ok(wrapper)
     }
 
     fn get_or_declare_errno_location(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {

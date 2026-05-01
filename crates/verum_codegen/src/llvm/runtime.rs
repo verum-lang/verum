@@ -6761,9 +6761,17 @@ impl<'ctx> RuntimeLowering<'ctx> {
         wrapper
     }
 
-    /// Get or declare malloc function.
+    /// Get or declare a libc-free `verum_checked_malloc(size) -> ptr`.
+    ///
+    /// **Libc-free**: the wrapper calls `verum_os_alloc` (defined in
+    /// `platform_ir.rs::emit_verum_os_alloc`) which itself uses mmap
+    /// on Linux / macOS, VirtualAlloc on Windows — no libc `malloc`
+    /// symbol is referenced at any link stage.  See
+    /// `docs/architecture/no-libc-architecture.md`.
+    ///
+    /// On allocation failure (verum_os_alloc returns NULL) the
+    /// wrapper aborts via `verum_os_exit(1)` — also libc-free.
     fn get_or_declare_malloc(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
-        // Return the checked wrapper if it already exists
         let wrapper_name = "verum_checked_malloc";
         if let Some(func) = module.get_function(wrapper_name) {
             return Ok(func);
@@ -6772,20 +6780,32 @@ impl<'ctx> RuntimeLowering<'ctx> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();
 
-        // Declare raw malloc
         let malloc_fn_type = ptr_type.fn_type(&[i64_type.into()], false);
-        let raw_malloc = if let Some(f) = module.get_function("malloc") {
-            f
-        } else {
-            module.add_function("malloc", malloc_fn_type, None)
-        };
 
-        // Declare _exit for OOM abort
-        let exit_fn = self.get_or_declare_exit(module);
+        // Underlying allocator: `verum_os_alloc(size) -> ptr` from
+        // `platform_ir.rs::emit_verum_os_alloc`.  That helper does
+        // the per-platform dispatch (mmap / VirtualAlloc) under the
+        // libc-free architectural rule.
+        let os_alloc_fn = module.get_function("verum_os_alloc").unwrap_or_else(|| {
+            module.add_function("verum_os_alloc", malloc_fn_type, None)
+        });
 
-        // Build wrapper: ptr verum_checked_malloc(i64 size) {
-        //   ptr p = malloc(size);
-        //   if (p == null) _exit(1);
+        // OOM abort path: route through verum_os_exit (libc-free) —
+        // emit_verum_os_exit lowers to ExitProcess on Windows,
+        // _exit syscall on Linux, libSystem _exit on macOS.
+        let void_type = self.context.void_type();
+        let i32_type = self.context.i32_type();
+        let exit_fn = module.get_function("verum_os_exit").unwrap_or_else(|| {
+            module.add_function(
+                "verum_os_exit",
+                void_type.fn_type(&[i32_type.into()], false),
+                None,
+            )
+        });
+
+        // Wrapper: ptr verum_checked_malloc(i64 size) {
+        //   ptr p = verum_os_alloc(size);
+        //   if (p == null) verum_os_exit(1);
         //   return p;
         // }
         let wrapper = module.add_function(wrapper_name, malloc_fn_type, None);
@@ -6798,22 +6818,24 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         let size_param = wrapper.get_nth_param(0).unwrap().into_int_value();
         let raw_ptr = tmp_builder
-            .build_call(raw_malloc, &[size_param.into()], "raw")
+            .build_call(os_alloc_fn, &[size_param.into()], "raw")
             .or_llvm_err()?
             .try_as_basic_value()
             .basic()
-            .or_internal("malloc should return ptr")?
+            .or_internal("verum_os_alloc should return ptr")?
             .into_pointer_value();
 
         let is_null = tmp_builder.build_is_null(raw_ptr, "is_null").or_llvm_err()?;
         tmp_builder.build_conditional_branch(is_null, oom_bb, ok_bb).or_llvm_err()?;
 
-        // OOM path: abort
+        // OOM path: abort via libc-free exit.
         tmp_builder.position_at_end(oom_bb);
-        tmp_builder.build_call(exit_fn, &[i64_type.const_int(1, false).into()], "").or_llvm_err()?;
+        tmp_builder
+            .build_call(exit_fn, &[i32_type.const_int(1, false).into()], "")
+            .or_llvm_err()?;
         tmp_builder.build_unreachable().or_llvm_err()?;
 
-        // OK path: return pointer
+        // OK path: return pointer.
         tmp_builder.position_at_end(ok_bb);
         tmp_builder.build_return(Some(&raw_ptr)).or_llvm_err()?;
 

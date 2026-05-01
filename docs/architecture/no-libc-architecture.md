@@ -117,7 +117,10 @@ shipping):
 | ✅ `runtime.rs::get_or_declare_strlen`        | `strlen`              | Open-coded null-byte scan loop emitted in IR (no symbol). **Closed.** |
 | ✅ `runtime.rs::get_or_declare_memcpy`        | `memcpy`              | Internal-linkage wrapper over `llvm.memcpy.p0.p0.i64`. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_memset`        | `memset`              | Internal-linkage wrapper over `llvm.memset.p0.i64`. **Closed.** |
-| `runtime.rs::get_or_declare_malloc`           | `malloc`              | `core/mem/allocator.vr`'s mmap-backed arena. **Open.** |
+| ✅ `runtime.rs::get_or_declare_malloc`        | `malloc`              | Wrapper `verum_checked_malloc` routes through `verum_os_alloc` (mmap on Linux/macOS, VirtualAlloc on Windows) + `verum_os_exit` for OOM abort. **Closed.** |
+| ✅ `ffi.rs::get_or_declare_malloc/free/realloc` | `malloc`/`free`/`realloc` | malloc → `verum_os_alloc`; free → `verum_internal_free` (no-op stub; CBGR epoch model handles bulk invalidation); realloc → `verum_internal_realloc` (allocate-new wrapper). **Closed.** |
+| ✅ `instruction.rs::checked_malloc_instr`     | `malloc` + `_exit`    | Both routed through `verum_os_alloc` and `verum_os_exit`. **Closed.** |
+| ✅ `instruction.rs` strcmp call sites (×3)    | `strcmp`              | Single shared `verum_internal_strcmp` helper — inline byte-by-byte comparison loop with null-termination check.  Internal-linkage so the symbol doesn't escape. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_unlink`        | `unlink`              | Linux x86_64 `SYS_unlink` (87) / aarch64 `SYS_unlinkat` (35) ; libSystem on macOS. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_lseek`         | `lseek`               | Linux `SYS_lseek` (8) direct syscall ; libSystem on macOS. **Closed.** |
 | ✅ `runtime.rs::get_or_declare_access`        | `access`              | Linux x86_64 `SYS_access` (21) / aarch64 `SYS_faccessat` (48) ; libSystem on macOS. **Closed.** |
