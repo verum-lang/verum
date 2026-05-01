@@ -428,6 +428,28 @@ implement WireReader {
         }
     }
 
+    public fn read_u64_be(&mut self) -> Result<Int, WireReadError> {
+        self.need(8)?;
+        let p = self.pos as Int;
+        let v = ((self.src[p]     as Int) & 0xFF) << 56
+              | ((self.src[p + 1] as Int) & 0xFF) << 48
+              | ((self.src[p + 2] as Int) & 0xFF) << 40
+              | ((self.src[p + 3] as Int) & 0xFF) << 32
+              | ((self.src[p + 4] as Int) & 0xFF) << 24
+              | ((self.src[p + 5] as Int) & 0xFF) << 16
+              | ((self.src[p + 6] as Int) & 0xFF) << 8
+              | ((self.src[p + 7] as Int) & 0xFF);
+        self.pos = self.pos + 8;
+        Ok(v)
+    }
+
+    /// On 64-bit Verum, `Int` is two's-complement 64-bit so the
+    /// signed read is just the unsigned read reinterpreted — no
+    /// extra sign-extension needed.
+    public fn read_i64_be(&mut self) -> Result<Int, WireReadError> {
+        self.read_u64_be()
+    }
+
     public fn read_bytes(&mut self, n: Int) -> Result<List<Byte>, WireReadError> {
         self.need(n)?;
         let mut out: List<Byte> = [];
@@ -438,6 +460,20 @@ implement WireReader {
         }
         self.pos = self.pos + n;
         Ok(out)
+    }
+
+    /// Drain everything past the cursor as a fresh `List<Byte>`.
+    /// Useful for variable-trailer payloads where the leading
+    /// header is fixed-width (e.g. replication CopyData where the
+    /// XLogData payload runs to the end of the frame).
+    public fn remaining_bytes(&mut self) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let n = self.src.len() as Int;
+        while (self.pos as Int) < n {
+            out.push(self.src[self.pos as Int]);
+            self.pos = self.pos + 1;
+        }
+        out
     }
 
     /// 4-byte length-prefixed payload; `-1` decodes as `None` (SQL NULL).

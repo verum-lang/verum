@@ -154,6 +154,11 @@ public type PgConnection is {
     /// session becomes generation-stale on the next dereference.
     /// Spec database.md §4.2.
     arena: SpindleArena,
+    /// Single-slot push-back used by streaming replication
+    /// (`PgReplicationConnection.start_logical` may peel a
+    /// CopyData while waiting for CopyOutResponse). `None` on
+    /// every non-replication connection.
+    replication_stash: Maybe<BackendMessage>,
 };
 
 // -----------------------------------------------------------------------------
@@ -185,6 +190,24 @@ public type PgConnection is {
 /// `TLS_HANDSHAKE_PENDING` so callers know exactly what's
 /// supported.
 public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
+    connect_with_optional_replication(config, None)
+}
+
+/// Same wire dance as `connect`, but the StartupMessage carries
+/// `replication=<mode>` so the server enters streaming-replication
+/// sub-protocol (`"database"` for logical, `"true"` for physical).
+/// Returns a regular `PgConnection`; the replication module wraps
+/// it in an affine `PgReplicationConnection`.
+public fn connect_with_replication(config: &PgConfig, mode: &Text)
+    -> Result<PgConnection, DbError>
+{
+    connect_with_optional_replication(config, Some(mode.clone()))
+}
+
+fn connect_with_optional_replication(
+    config: &PgConfig,
+    replication: Maybe<Text>,
+) -> Result<PgConnection, DbError> {
     let target = format_host_port(&config.host, config.port);
     let mut tcp = match TcpStream.connect(target.as_str()) {
         Ok(s)  => s,
@@ -283,18 +306,20 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
         dispatcher: None,
         pipeline: None,
         arena: SpindleArena.new_connection(0),
+        replication_stash: None,
     };
 
-    // Send Startup.
+    // Send Startup. Replication mode (when set) feeds into the
+    // `replication=` startup parameter — server enters streaming
+    // replication sub-protocol on the resulting session.
     let mut params = StartupParams.new(config.user.clone())
         .with_database(config.database.clone())
         .with_application_name(config.application_name.clone());
-    let _ = params;     // silence warning; consumed below
-    let payload = startup(
-        &StartupParams.new(config.user.clone())
-            .with_database(config.database.clone())
-            .with_application_name(config.application_name.clone()),
-    );
+    match &replication {
+        Some(mode) => { params = params.with_replication(mode.clone()); }
+        None       => {}
+    }
+    let payload = startup(&params);
     write_all(&mut conn.stream, payload.as_slice())?;
 
     conn.state = PcsAuthenticating;
@@ -836,6 +861,58 @@ implement PgConnection {
     /// session.
     public fn reset_arena(&mut self) {
         self.arena.reset();
+    }
+
+    // -------------------------------------------------------------------------
+    // Streaming-replication hooks
+    // -------------------------------------------------------------------------
+    //
+    // Three minimal entry points the `replication` module needs. They
+    // intentionally bypass the simple-query / extended-query state
+    // machine because once the connection is in CopyBoth mode the
+    // server NEVER sends ReadyForQuery — the conventional read loops
+    // would block forever. State management lives in the
+    // `PgReplicationConnection` wrapper, not here.
+
+    /// Read one backend message — same as the internal
+    /// `read_message` used by `simple_query`, exposed for the
+    /// replication module's CopyBoth pump.
+    public fn read_replication_message(&mut self) -> Result<BackendMessage, DbError> {
+        read_message(self)
+    }
+
+    /// Push a message back so the next `read_replication_message`
+    /// returns it. Used when `start_logical` consumes the first
+    /// CopyData while waiting for CopyOutResponse — the data must
+    /// not be lost.
+    ///
+    /// Implementation note: re-encoding a message into the recv
+    /// buffer would re-invoke the decoder; instead we keep an
+    /// inline single-slot stash that `read_message` checks before
+    /// pulling from the wire.
+    public fn push_back_replication(&mut self, msg: BackendMessage) -> Result<(), DbError> {
+        // V0 — single-slot stash. The first call after START
+        // typically observes nothing (the server emits
+        // CopyOutResponse cleanly), so the stash is rarely used.
+        match self.replication_stash {
+            Some(_) => Err(DbError.Adapter(AdapterSpecific {
+                adapter: AdPostgres,
+                code: "REPL_STASH_FULL".clone(),
+                message: "replication push_back stash already occupied".clone(),
+                retryable: false,
+            })),
+            None => {
+                self.replication_stash = Some(msg);
+                Ok(())
+            }
+        }
+    }
+
+    /// Write a raw frame to the connection — used by the
+    /// replication module to send `'r'` Standby Status Update
+    /// CopyData.
+    public fn write_replication_frame(&mut self, buf: &[Byte]) -> Result<(), DbError> {
+        write_all(&mut self.stream, buf)
     }
 
     /// Submit a pre-built (Parse?+Bind+Execute) byte triple to the
@@ -1408,6 +1485,13 @@ fn make_client_nonce() -> Text {
 // -----------------------------------------------------------------------------
 
 fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
+    // Drain a stashed message first (set by
+    // `push_back_replication`). At most one slot — used to peel a
+    // CopyData out of order during START_REPLICATION.
+    match conn.replication_stash.take() {
+        Some(m) => { return Ok(m); }
+        None    => {}
+    }
     loop {
         // Try to parse one frame from the buffer.
         match try_parse_tagged(conn.recv.as_slice()) {

@@ -1,0 +1,659 @@
+// =============================================================================
+// core/database/postgres/replication.vr — streaming replication wire (V0)
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §6.1.7 (streaming replication).
+// =============================================================================
+//
+// PostgreSQL streaming replication is a sub-protocol of wire v3 entered
+// via the `replication` startup parameter:
+//
+//   * `replication=database` — logical replication; allows simple
+//     queries plus the replication-specific commands.
+//   * `replication=true`     — physical replication; only the
+//     replication command set is accepted.
+//
+// After START_REPLICATION the server enters CopyBoth mode and
+// streams CopyData frames carrying:
+//
+//   `'w'` (XLogData) — wal_start, wal_end, send_time, payload.
+//                      Payload bytes are output-plugin-specific
+//                      (pgoutput / wal2json / test_decoding) and
+//                      are returned opaque in V0; downstream
+//                      decoders own their own format.
+//   `'k'` (Primary keepalive) — server pinging us; if
+//                      `reply_requested == 1` we MUST reply with a
+//                      Standby Status Update or the server times us
+//                      out (default ~60 s on PG 15+).
+//
+// The client returns a `'r'` Standby Status Update CopyData frame
+// to acknowledge LSN positions and (optionally) request a server
+// keepalive.
+//
+// V0 scope:
+//   * connect_replication() with mode flag.
+//   * IDENTIFY_SYSTEM, CREATE_REPLICATION_SLOT (LOGICAL),
+//     DROP_REPLICATION_SLOT, START_REPLICATION SLOT … LOGICAL.
+//   * CopyData decode for 'w' / 'k'; everything else surfaced
+//     opaque so callers can spot future tags.
+//   * Standby status update encoder.
+//   * Affine PgReplicationConnection wrapper so a replication
+//     session can't accidentally be returned to a normal pool.
+//
+// OUT of scope V0 (each is its own follow-up):
+//   * pgoutput payload decode (Begin/Commit/Insert/Update/Delete/
+//     Truncate/Type/Origin) — separate module.
+//   * Physical replication primary path, BASE_BACKUP,
+//     TIMELINE_HISTORY.
+//   * Replication slot copy / export.
+// =============================================================================
+
+module core.database.postgres.replication;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdPostgres, AdapterSpecific,
+};
+mount core.database.common.types.{WireReader, WireBuf, WireReadError};
+mount core.database.postgres.connection.{
+    PgConnection, PgConnState, PcsReady, PcsBusy, PcsClosed, PcsFailed,
+    PgSimpleQueryResult,
+};
+mount core.database.postgres.config.PgConfig;
+mount core.database.postgres.error.dberr_from_pg;
+mount core.database.postgres.wire.frontend.{
+    StartupParams, startup, simple_query as fe_simple_query, copy_data,
+};
+mount core.database.postgres.wire.backend.{
+    BackendMessage,
+    BmReadyForQuery, BmCommandComplete, BmEmptyQueryResponse,
+    BmError, BmNotice, BmRowDescription, BmDataRow,
+    BmCopyInResponse, BmCopyOutResponse, BmCopyData, BmCopyDone,
+    BmParameterStatus, BmAuth, BmBackendKeyData, BmUnknown,
+    BmNoData, BmPortalSuspend, BmParseComplete, BmBindComplete,
+    BmCloseComplete, BmNotification,
+    Diagnostic,
+};
+
+// =============================================================================
+// Replication mode + config
+// =============================================================================
+
+/// `RmLogical` ↔ `replication=database`; `RmPhysical` ↔
+/// `replication=true`. The two paths share the connection / startup
+/// machinery; only the startup-param value and the legal command set
+/// differ. V0 ships logical wire end-to-end; physical commands
+/// (BASE_BACKUP / IDENTIFY_SYSTEM only) are reserved for V1.
+public type ReplicationMode is RmLogical | RmPhysical;
+
+public type LogicalReplicationOptions is {
+    /// Output plugin name. Common values: `"pgoutput"` (PG 10+
+    /// built-in), `"wal2json"`, `"test_decoding"`.
+    output_plugin: Text,
+    /// Plugin-specific options as `(key, value)` pairs. Encoded
+    /// into START_REPLICATION's parenthesised option list — values
+    /// are passed verbatim, callers must SQL-escape if needed.
+    plugin_options: List<(Text, Text)>,
+    /// Slot name; created on demand or expected to pre-exist.
+    slot_name: Text,
+    /// Whether to issue CREATE_REPLICATION_SLOT before
+    /// START_REPLICATION. `false` requires the slot to already
+    /// exist (production pattern: pre-create slots out-of-band so
+    /// they survive crashes).
+    create_slot: Bool,
+    /// `temporary = true` slots vanish at connection end; useful
+    /// for tests, dangerous for production (no recovery).
+    temporary: Bool,
+};
+
+implement LogicalReplicationOptions {
+    public fn pgoutput(slot: Text) -> LogicalReplicationOptions {
+        LogicalReplicationOptions {
+            output_plugin: "pgoutput".clone(),
+            plugin_options: List.new(),
+            slot_name: slot,
+            create_slot: false,
+            temporary: false,
+        }
+    }
+
+    public fn temporary_pgoutput(slot: Text) -> LogicalReplicationOptions {
+        LogicalReplicationOptions {
+            output_plugin: "pgoutput".clone(),
+            plugin_options: List.new(),
+            slot_name: slot,
+            create_slot: true,
+            temporary: true,
+        }
+    }
+
+    public fn with_option(mut self, key: Text, value: Text) -> LogicalReplicationOptions {
+        self.plugin_options.push((key, value));
+        self
+    }
+}
+
+public type PgReplicationConfig is {
+    base: PgConfig,
+    mode: ReplicationMode,
+};
+
+implement PgReplicationConfig {
+    public fn logical(base: PgConfig) -> PgReplicationConfig {
+        PgReplicationConfig { base: base, mode: RmLogical }
+    }
+
+    public fn physical(base: PgConfig) -> PgReplicationConfig {
+        PgReplicationConfig { base: base, mode: RmPhysical }
+    }
+}
+
+// =============================================================================
+// LSN — Postgres log-sequence number (64-bit)
+// =============================================================================
+
+/// PostgreSQL Log Sequence Number — 64-bit position into the WAL.
+/// On the wire it travels as Int64-BE inside CopyData payloads.
+/// Display form is `"X/Y"` where X is the upper 32 bits and Y the
+/// lower, both hex; we normalise via `format_lsn`.
+public type Lsn is { value: Int };
+
+implement Lsn {
+    public fn zero() -> Lsn { Lsn { value: 0 } }
+
+    public fn from_int(v: Int) -> Lsn { Lsn { value: v } }
+
+    public fn raw(&self) -> Int { self.value }
+
+    public fn is_zero(&self) -> Bool { self.value == 0 }
+
+    /// Postgres canonical form: `"%X/%X"` with upper / lower halves.
+    public fn format(&self) -> Text {
+        let upper = (self.value >> 32) & 0xFFFFFFFF;
+        let lower = self.value & 0xFFFFFFFF;
+        f"{format_hex(upper)}/{format_hex(lower)}"
+    }
+}
+
+fn format_hex(v: Int) -> Text {
+    let mut out = "".clone();
+    if v == 0 { return "0".clone(); }
+    let mut n = v;
+    let chars = "0123456789ABCDEF".as_bytes();
+    let mut buf: List<Byte> = List.new();
+    while n > 0 {
+        let nib = (n & 0xF) as Int;
+        buf.push(chars[nib]);
+        n = n >> 4;
+    }
+    let mut i = (buf.len() as Int) - 1;
+    while i >= 0 {
+        out.push_byte(buf[i]);
+        i = i - 1;
+    }
+    out
+}
+
+// =============================================================================
+// Replication-stream messages
+// =============================================================================
+
+public type ReplicationMessage is
+      RmXLogData(XLogData)
+    | RmKeepalive(PrimaryKeepalive)
+    /// Catch-all for tags V0 doesn't recognise. The CopyData tag
+    /// byte is preserved so callers can dispatch new variants
+    /// without modifying this module.
+    | RmOther { tag: Byte, payload: List<Byte> };
+
+public type XLogData is {
+    /// Starting LSN of the WAL chunk in `payload`.
+    wal_start: Lsn,
+    /// Server's current end-of-WAL position (advisory; not the
+    /// end of `payload`).
+    wal_end: Lsn,
+    /// Server timestamp, microseconds since 2000-01-01 00:00:00 UTC.
+    send_time: Int,
+    /// Output-plugin payload bytes — opaque at this layer.
+    payload: List<Byte>,
+};
+
+public type PrimaryKeepalive is {
+    /// Server's current end-of-WAL position.
+    wal_end: Lsn,
+    /// Server timestamp, microseconds since 2000-01-01 UTC.
+    sent_time: Int,
+    /// Server is asking us to reply with a Standby Status Update.
+    /// Failing to honour this within `wal_sender_timeout` (default
+    /// 60 s on PG 15+) will tear down the connection.
+    reply_requested: Bool,
+};
+
+// =============================================================================
+// IDENTIFY_SYSTEM result
+// =============================================================================
+
+public type IdentifySystemRow is {
+    /// Cluster system identifier (uint64 as Text from the wire).
+    systemid: Text,
+    /// Current timeline ID.
+    timeline: Int,
+    /// Server's current end-of-WAL position at IDENTIFY time.
+    xlogpos: Lsn,
+    /// Database name when connected with `replication=database`,
+    /// otherwise empty.
+    dbname: Text,
+};
+
+// =============================================================================
+// Affine replication connection
+// =============================================================================
+
+/// Affine wrapper — a replication session has terminal CopyBoth state
+/// once START_REPLICATION runs. Returning it to a regular pool would
+/// poison subsequent checkouts (the wire is no longer in regular
+/// query mode). The affine attribute makes the type-level guarantee
+/// explicit: the language enforces single-ownership.
+public type affine PgReplicationConnection is {
+    conn: PgConnection,
+    mode: ReplicationMode,
+    /// True once START_REPLICATION has been issued. Before that we
+    /// accept replication commands as simple queries; after, only
+    /// CopyData / Standby Status updates are legal.
+    streaming: Bool,
+};
+
+implement PgReplicationConnection {
+    public fn mode(&self) -> ReplicationMode { self.mode.clone() }
+    public fn is_streaming(&self) -> Bool { self.streaming }
+    public fn conn_ref(&self) -> &PgConnection { &self.conn }
+    public fn conn_mut(&mut self) -> &mut PgConnection { &mut self.conn }
+
+    /// IDENTIFY_SYSTEM — one row, four columns. Issued before
+    /// START_REPLICATION; afterwards the connection is in CopyBoth
+    /// mode and simple_query is no longer valid.
+    public fn identify_system(&mut self) -> Result<IdentifySystemRow, DbError> {
+        if self.streaming {
+            return Err(streaming_state_error("IDENTIFY_SYSTEM after START_REPLICATION"));
+        }
+        let r = self.conn.simple_query(&"IDENTIFY_SYSTEM".clone())?;
+        if r.rows.len() != 1 {
+            return Err(bad_replication("IDENTIFY_SYSTEM produced no row"));
+        }
+        let row = &r.rows[0];
+        if row.len() < 4 {
+            return Err(bad_replication("IDENTIFY_SYSTEM row has fewer than 4 columns"));
+        }
+        let systemid = wire_text(&row[0])?;
+        let timeline_text = wire_text(&row[1])?;
+        let timeline = parse_int_text(&timeline_text)
+            .ok_or(bad_replication("IDENTIFY_SYSTEM.timeline not an integer"))?;
+        let xlogpos_text = wire_text(&row[2])?;
+        let xlogpos = parse_lsn_text(&xlogpos_text)
+            .ok_or(bad_replication("IDENTIFY_SYSTEM.xlogpos not in X/Y form"))?;
+        let dbname = wire_text(&row[3]).unwrap_or("".clone());
+        Ok(IdentifySystemRow {
+            systemid: systemid,
+            timeline: timeline,
+            xlogpos: xlogpos,
+            dbname: dbname,
+        })
+    }
+
+    /// CREATE_REPLICATION_SLOT slot LOGICAL plugin [TEMPORARY]
+    /// [{ NOEXPORT_SNAPSHOT | USE_SNAPSHOT | EXPORT_SNAPSHOT }].
+    /// V0 omits the snapshot clause (server default = NOEXPORT for
+    /// temporary slots, EXPORT for permanent — matches Spindle's
+    /// "explicit only" stance).
+    public fn create_logical_slot(
+        &mut self,
+        slot: &Text,
+        plugin: &Text,
+        temporary: Bool,
+    ) -> Result<(), DbError> {
+        if self.streaming {
+            return Err(streaming_state_error("CREATE_REPLICATION_SLOT after START"));
+        }
+        let temp_clause = if temporary { " TEMPORARY".clone() } else { "".clone() };
+        let sql = f"CREATE_REPLICATION_SLOT {slot}{temp_clause} LOGICAL {plugin}";
+        let _ = self.conn.simple_query(&sql)?;
+        Ok(())
+    }
+
+    /// DROP_REPLICATION_SLOT slot [WAIT].
+    public fn drop_slot(&mut self, slot: &Text, wait: Bool) -> Result<(), DbError> {
+        if self.streaming {
+            return Err(streaming_state_error("DROP_REPLICATION_SLOT after START"));
+        }
+        let wait_clause = if wait { " WAIT".clone() } else { "".clone() };
+        let sql = f"DROP_REPLICATION_SLOT {slot}{wait_clause}";
+        let _ = self.conn.simple_query(&sql)?;
+        Ok(())
+    }
+
+    /// START_REPLICATION SLOT slot LOGICAL X/Y [( opt val , … )].
+    /// On success the connection is in CopyBoth mode; subsequent
+    /// reads must go through `next_message`, writes through
+    /// `send_standby_status`. Once entered, simple_query is no
+    /// longer legal until the stream terminates.
+    public fn start_logical(
+        &mut self,
+        opts: &LogicalReplicationOptions,
+        start_lsn: Lsn,
+    ) -> Result<(), DbError> {
+        if self.streaming {
+            return Err(streaming_state_error("START_REPLICATION already streaming"));
+        }
+        let slot = &opts.slot_name;
+        let lsn = start_lsn.format();
+        let mut sql = f"START_REPLICATION SLOT {slot} LOGICAL {lsn}";
+        if opts.plugin_options.len() > 0 {
+            sql.push_str(" (");
+            let mut i: Int = 0;
+            while i < opts.plugin_options.len() as Int {
+                let (k, v) = &opts.plugin_options[i];
+                if i > 0 { sql.push_str(", "); }
+                sql.push_str(k);
+                sql.push_str(" '");
+                sql.push_str(v);
+                sql.push_str("'");
+                i = i + 1;
+            }
+            sql.push_str(")");
+        }
+
+        // START_REPLICATION transitions to CopyBoth — the server
+        // does NOT send ReadyForQuery until the stream ends, so we
+        // can't use simple_query (which loops to RFQ). We push the
+        // Q frame raw and read until we observe the CopyOutResponse
+        // surrogate that PG emits for both CopyBoth flavours in V3.
+        match self.conn.state() {
+            PcsReady => {}
+            _ => {
+                return Err(bad_replication("START_REPLICATION requires PcsReady connection state"));
+            }
+        }
+        let payload = fe_simple_query(&sql);
+        self.conn.write_replication_frame(payload.as_slice())?;
+
+        // Read until first CopyData / CopyOutResponse arrives.
+        loop {
+            let msg = self.conn.read_replication_message()?;
+            match msg {
+                BmCopyOutResponse(_) => { break; }
+                BmCopyInResponse(_) => { break; }
+                BmCopyData { .. } => {
+                    // Some servers may send the first XLogData
+                    // before / interleaved with CopyOutResponse;
+                    // stash so the next next_message() observes it.
+                    self.conn.push_back_replication(msg)?;
+                    break;
+                }
+                BmError(d) => {
+                    return Err(dberr_from_pg(d));
+                }
+                BmNotice(_) => {}
+                BmParameterStatus(_) => {}
+                BmReadyForQuery(_) => {
+                    return Err(bad_replication("START_REPLICATION did not enter CopyBoth"));
+                }
+                _ => {}
+            }
+        }
+
+        self.streaming = true;
+        Ok(())
+    }
+
+    /// Block until the next replication frame arrives. Decodes
+    /// CopyData payloads dispatching on the leading byte.
+    public fn next_message(&mut self) -> Result<ReplicationMessage, DbError> {
+        if !self.streaming {
+            return Err(bad_replication("next_message before START_REPLICATION"));
+        }
+        loop {
+            let msg = self.conn.read_replication_message()?;
+            match msg {
+                BmCopyData { bytes } => {
+                    return decode_copy_data(bytes);
+                }
+                BmCopyDone => {
+                    // Server told us no more data (e.g. slot
+                    // dropped, max position reached). We surface
+                    // this via Other so the caller decides.
+                    return Ok(RmOther { tag: 0 as Byte, payload: List.new() });
+                }
+                BmError(d) => { return Err(dberr_from_pg(d)); }
+                BmNotice(_) => { continue; }
+                BmParameterStatus(_) => { continue; }
+                _ => { continue; }
+            }
+        }
+    }
+
+    /// Send a Standby Status Update — `'r'` CopyData. Three LSNs
+    /// (write / flush / apply) and a microsecond timestamp + a
+    /// reply_requested flag the server echoes back to ask for a
+    /// keepalive. Should be called at least once per
+    /// `wal_sender_timeout / 2` to keep the connection alive.
+    public fn send_standby_status(
+        &mut self,
+        write_pos: Lsn,
+        flush_pos: Lsn,
+        apply_pos: Lsn,
+        client_time_us: Int,
+        reply_requested: Bool,
+    ) -> Result<(), DbError> {
+        if !self.streaming {
+            return Err(bad_replication("send_standby_status before START_REPLICATION"));
+        }
+        let mut buf = WireBuf.with_capacity(34);
+        buf.put_u8(0x72);                       // 'r'
+        buf.put_i64_be(write_pos.raw());
+        buf.put_i64_be(flush_pos.raw());
+        buf.put_i64_be(apply_pos.raw());
+        buf.put_i64_be(client_time_us);
+        buf.put_u8(if reply_requested { 1 } else { 0 });
+        let frame = copy_data(buf.as_slice());
+        self.conn.write_replication_frame(frame.as_slice())?;
+        Ok(())
+    }
+
+    /// Tear down the replication session. Closes the underlying
+    /// connection — replication conns are not reusable.
+    public fn close(mut self) -> Result<(), DbError> {
+        self.conn.close()
+    }
+}
+
+// =============================================================================
+// CopyData payload decode — `'w'` (XLogData) / `'k'` (PrimaryKeepalive)
+// =============================================================================
+
+fn decode_copy_data(bytes: List<Byte>) -> Result<ReplicationMessage, DbError> {
+    if bytes.len() == 0 {
+        return Err(bad_replication("CopyData empty"));
+    }
+    let tag = bytes[0];
+    let mut r = WireReader.new(bytes);
+    let _ = match r.read_u8() {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_replication("CopyData tag read failed")); }
+    };
+
+    if (tag as Int) == 0x77 {
+        // 'w' — XLogData
+        let wal_start = match r.read_i64_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_replication("XLogData wal_start truncated")); }
+        };
+        let wal_end = match r.read_i64_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_replication("XLogData wal_end truncated")); }
+        };
+        let send_time = match r.read_i64_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_replication("XLogData send_time truncated")); }
+        };
+        let payload = r.remaining_bytes();
+        return Ok(RmXLogData(XLogData {
+            wal_start: Lsn.from_int(wal_start),
+            wal_end: Lsn.from_int(wal_end),
+            send_time: send_time,
+            payload: payload,
+        }));
+    }
+    if (tag as Int) == 0x6B {
+        // 'k' — PrimaryKeepalive
+        let wal_end = match r.read_i64_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_replication("Keepalive wal_end truncated")); }
+        };
+        let sent_time = match r.read_i64_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_replication("Keepalive sent_time truncated")); }
+        };
+        let reply = match r.read_u8() {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_replication("Keepalive reply_requested truncated")); }
+        };
+        return Ok(RmKeepalive(PrimaryKeepalive {
+            wal_end: Lsn.from_int(wal_end),
+            sent_time: sent_time,
+            reply_requested: reply == 1,
+        }));
+    }
+    // Unknown tag — return raw payload so callers can dispatch
+    // future variants without rev-locking this module.
+    let rest = r.remaining_bytes();
+    Ok(RmOther { tag: tag, payload: rest })
+}
+
+// =============================================================================
+// Connect path
+// =============================================================================
+
+/// Establish a replication connection. Sends the same Startup +
+/// SCRAM dance as `connect`, but adds the `replication` parameter
+/// matching `cfg.mode` so the server enters replication mode.
+public fn connect_replication(cfg: &PgReplicationConfig)
+    -> Result<PgReplicationConnection, DbError>
+{
+    let mode_text = match cfg.mode {
+        RmLogical  => "database".clone(),
+        RmPhysical => "true".clone(),
+    };
+    let conn = core.database.postgres.connection.connect_with_replication(
+        &cfg.base, &mode_text,
+    )?;
+    Ok(PgReplicationConnection {
+        conn: conn,
+        mode: cfg.mode.clone(),
+        streaming: false,
+    })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn streaming_state_error(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "REPL_BAD_STATE".clone(),
+        message: f"replication state violation: {what}",
+        retryable: false,
+    })
+}
+
+fn bad_replication(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdPostgres,
+        code: "REPL_PROTOCOL".clone(),
+        message: f"replication protocol error: {what}",
+        retryable: false,
+    })
+}
+
+fn wire_text(v: &core.database.common.types.WireValue) -> Result<Text, DbError> {
+    match v {
+        core.database.common.types.WvNull => Err(bad_replication("required column was NULL")),
+        core.database.common.types.WvPresent { bytes, .. } => {
+            match Text.from_utf8(bytes.as_slice()) {
+                Ok(s)  => Ok(s),
+                Err(_) => Err(bad_replication("non-UTF8 in replication metadata column")),
+            }
+        }
+    }
+}
+
+fn parse_int_text(s: &Text) -> Maybe<Int> {
+    let bytes = s.as_bytes();
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    let mut neg = false;
+    if n > 0 && (bytes[0] as Int) == ('-' as Int) { neg = true; i = 1; }
+    if i >= n { return None; }
+    let mut acc: Int = 0;
+    while i < n {
+        let b = bytes[i] as Int;
+        if b < ('0' as Int) || b > ('9' as Int) { return None; }
+        acc = acc * 10 + (b - ('0' as Int));
+        i = i + 1;
+    }
+    Some(if neg { -acc } else { acc })
+}
+
+/// Parse a `"X/Y"` textual LSN as the server emits it in
+/// IDENTIFY_SYSTEM and elsewhere; both halves are hex.
+fn parse_lsn_text(s: &Text) -> Maybe<Lsn> {
+    let bytes = s.as_bytes();
+    let mut split: Int = -1;
+    let mut i: Int = 0;
+    while i < bytes.len() as Int {
+        if (bytes[i] as Int) == ('/' as Int) { split = i; break; }
+        i = i + 1;
+    }
+    if split <= 0 || split >= (bytes.len() as Int) - 1 { return None; }
+    let upper_hex = sub_text(s, 0, split);
+    let lower_hex = sub_text(s, split + 1, bytes.len() as Int);
+    let upper = parse_hex(&upper_hex)?;
+    let lower = parse_hex(&lower_hex)?;
+    Some(Lsn { value: (upper << 32) | (lower & 0xFFFFFFFF) })
+}
+
+fn parse_hex(s: &Text) -> Maybe<Int> {
+    let bytes = s.as_bytes();
+    if bytes.len() == 0 { return None; }
+    let mut acc: Int = 0;
+    let mut i: Int = 0;
+    while i < bytes.len() as Int {
+        let b = bytes[i] as Int;
+        let nib = if b >= ('0' as Int) && b <= ('9' as Int) {
+            b - ('0' as Int)
+        } else if b >= ('a' as Int) && b <= ('f' as Int) {
+            10 + (b - ('a' as Int))
+        } else if b >= ('A' as Int) && b <= ('F' as Int) {
+            10 + (b - ('A' as Int))
+        } else {
+            return None;
+        };
+        acc = (acc << 4) | nib;
+        i = i + 1;
+    }
+    Some(acc)
+}
+
+fn sub_text(s: &Text, start: Int, end: Int) -> Text {
+    let bytes = s.as_bytes();
+    let mut out = "".clone();
+    let mut i = start;
+    while i < end {
+        out.push_byte(bytes[i]);
+        i = i + 1;
+    }
+    out
+}
+

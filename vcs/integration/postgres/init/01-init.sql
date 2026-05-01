@@ -17,6 +17,12 @@
 CREATE ROLE spindle_app    LOGIN PASSWORD 'spindle_app_pw';
 CREATE ROLE spindle_ro     LOGIN PASSWORD 'spindle_ro_pw';
 
+-- Streaming replication: Spindle's replication wire (V0) drives
+-- IDENTIFY_SYSTEM / CREATE_REPLICATION_SLOT / START_REPLICATION
+-- through the admin role. PG requires the REPLICATION attribute
+-- on the role for these commands.
+ALTER ROLE spindle_admin   WITH REPLICATION;
+
 GRANT CONNECT ON DATABASE spindle_test TO spindle_app, spindle_ro;
 GRANT USAGE   ON SCHEMA  public        TO spindle_app, spindle_ro;
 GRANT CREATE  ON SCHEMA  public        TO spindle_app;

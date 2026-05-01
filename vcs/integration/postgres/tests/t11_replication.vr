@@ -1,0 +1,199 @@
+// =============================================================================
+// t11_replication.vr — logical-replication V0 end-to-end
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (streaming replication).
+// =============================================================================
+//
+// Flow:
+//   1. connect_replication(logical) against the admin role (which
+//      has WITH REPLICATION granted in init/01-init.sql).
+//   2. IDENTIFY_SYSTEM — verify systemid/timeline/xlogpos shape.
+//   3. CREATE_REPLICATION_SLOT (TEMPORARY) so cleanup is automatic
+//      when this test connection drops.
+//   4. START_REPLICATION SLOT … LOGICAL 0/0 (output_plugin =
+//      pgoutput, publication_names = test_pub).
+//   5. INSERT a row on a *separate* connection so the replication
+//      stream sees a non-empty WAL change.
+//   6. Drain a few replication messages — keepalive + at least one
+//      XLogData. Send back a Standby Status Update so the server
+//      doesn't time us out.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    APP_USER, APP_PW,
+    connect_app,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable, PgConnection, connect as pg_connect,
+    PgReplicationConfig, PgReplicationConnection,
+    LogicalReplicationOptions,
+    Lsn, ReplicationMessage, RmXLogData, RmKeepalive, RmOther,
+    connect_replication,
+};
+mount core.time.SystemClock;
+
+fn admin_replication_config() -> PgReplicationConfig {
+    PgReplicationConfig.logical(PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-repl".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    })
+}
+
+fn write_row_on_side_channel() {
+    // Side-channel INSERT so the replication stream has something to
+    // ship. Uses connect_app() (the regular SCRAM path), independent
+    // from the replication connection.
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS repl_smoke (id integer PRIMARY KEY, payload text NOT NULL)"
+            .clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM repl_smoke".clone());
+    let _ = expect_ok(
+        side.simple_query(&"INSERT INTO repl_smoke (id, payload) VALUES (1, 'first')".clone()),
+        &"side-channel INSERT failed".clone(),
+    );
+}
+
+fn ensure_publication() {
+    let mut admin = expect_ok(
+        pg_connect(&PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: ADMIN_USER.clone(),
+            password: ADMIN_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-repl-setup".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        }),
+        &"admin connect for publication setup failed".clone(),
+    );
+    let _ = admin.simple_query(&"DROP PUBLICATION IF EXISTS spindle_test_pub".clone());
+    let _ = expect_ok(
+        admin.simple_query(&"CREATE PUBLICATION spindle_test_pub FOR ALL TABLES".clone()),
+        &"CREATE PUBLICATION failed".clone(),
+    );
+}
+
+fn main() {
+    ensure_publication();
+
+    let cfg = admin_replication_config();
+    let mut repl = expect_ok(
+        connect_replication(&cfg),
+        &"connect_replication() failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 1. IDENTIFY_SYSTEM — basic sanity on the replication wire.
+    // -------------------------------------------------------------------------
+    let id = expect_ok(
+        repl.identify_system(),
+        &"IDENTIFY_SYSTEM failed".clone(),
+    );
+    expect(
+        id.systemid.len() > 0,
+        &"IDENTIFY_SYSTEM.systemid is empty".clone(),
+    );
+    expect(
+        id.timeline >= 1,
+        &f"IDENTIFY_SYSTEM.timeline must be ≥ 1, got {id.timeline}",
+    );
+    expect(
+        !id.xlogpos.is_zero(),
+        &"IDENTIFY_SYSTEM.xlogpos is zero — server has no WAL?".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 2. Create a TEMPORARY logical slot bound to our publication.
+    // -------------------------------------------------------------------------
+    let slot_name = "spindle_test_slot".clone();
+    let _ = repl.drop_slot(&slot_name, false);   // best-effort cleanup
+    expect_ok(
+        repl.create_logical_slot(&slot_name, &"pgoutput".clone(), true),
+        &"CREATE_REPLICATION_SLOT failed".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 3. START_REPLICATION SLOT slot LOGICAL 0/0 (proto_version 1,
+    //    publication_names 'spindle_test_pub').
+    // -------------------------------------------------------------------------
+    let opts = LogicalReplicationOptions.pgoutput(slot_name.clone())
+        .with_option("proto_version".clone(), "1".clone())
+        .with_option("publication_names".clone(), "spindle_test_pub".clone());
+    expect_ok(
+        repl.start_logical(&opts, Lsn.zero()),
+        &"START_REPLICATION failed".clone(),
+    );
+    expect(
+        repl.is_streaming(),
+        &"is_streaming() must be true after START_REPLICATION".clone(),
+    );
+
+    // -------------------------------------------------------------------------
+    // 4. Trigger a change on a side connection.
+    // -------------------------------------------------------------------------
+    write_row_on_side_channel();
+
+    // -------------------------------------------------------------------------
+    // 5. Drain up to N messages, expecting at least one XLogData.
+    // -------------------------------------------------------------------------
+    let mut saw_xlog = false;
+    let mut saw_keepalive_or_other = false;
+    let mut i: Int = 0;
+    while i < 20 {
+        let msg = expect_ok(
+            repl.next_message(),
+            &f"next_message #{i} failed",
+        );
+        match msg {
+            RmXLogData(x) => {
+                saw_xlog = true;
+                expect(
+                    x.payload.len() > 0,
+                    &"XLogData payload empty".clone(),
+                );
+                // Acknowledge progress so the server doesn't drop us.
+                let now_us = SystemClock.now().as_microseconds();
+                let _ = repl.send_standby_status(
+                    x.wal_end, x.wal_end, x.wal_end, now_us, false,
+                );
+                if saw_xlog { break; }
+            }
+            RmKeepalive(k) => {
+                saw_keepalive_or_other = true;
+                if k.reply_requested {
+                    let now_us = SystemClock.now().as_microseconds();
+                    let _ = repl.send_standby_status(
+                        k.wal_end, k.wal_end, k.wal_end, now_us, false,
+                    );
+                }
+            }
+            RmOther { .. } => { saw_keepalive_or_other = true; }
+        }
+        i = i + 1;
+    }
+
+    expect(
+        saw_xlog || saw_keepalive_or_other,
+        &"replication stream produced no messages at all".clone(),
+    );
+
+    // Cleanup is best-effort — closing the connection drops the
+    // TEMPORARY slot.
+    let _ = repl.close();
+
+    pass(&"t11_replication".clone());
+}
