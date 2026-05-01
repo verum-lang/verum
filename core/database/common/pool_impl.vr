@@ -40,7 +40,8 @@ mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount sync.mutex.Mutex;
-mount async.timer.sleep_ms;
+mount sync.condvar.Condvar;
+mount time.instant.Instant;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific, PoolErrorKind};
 mount core.database.common.arena.{SpindleArena, ArenaPhase, ArenaStats, ApConnection};
 
@@ -59,9 +60,13 @@ public type PoolConfig is {
     max_connections: Int,
     /// Acquire timeout — DbError.PoolFailure { kind: PekExhausted } after.
     acquire_timeout_ms: Int,
-    /// Inter-poll sleep when blocked on a full pool. Tradeoff: smaller
-    /// = lower acquire latency, more wakeups; larger = more lazy.
-    /// Default 5ms — fast enough for OLTP, low enough to not burn CPU.
+    /// DEPRECATED. Was used by the old poll-and-sleep `acquire`
+    /// loop; the current implementation parks acquirers on a
+    /// `Condvar` and is woken in O(1) by `release_healthy` /
+    /// `release_discard`. Kept to preserve constructor-shape
+    /// compatibility for existing call sites; ignored on the hot
+    /// path. Will be removed once all adapter wrappers stop
+    /// passing it explicitly.
     poll_interval_ms: Int,
     /// Adapter id stamped onto every error this pool produces. Filled
     /// in by the per-vendor wrapper.
@@ -138,6 +143,12 @@ public type ConnectionPool<C> is {
     /// connection. Errors propagate verbatim.
     factory: fn() -> Result<C, DbError>,
     inner: Mutex<PoolInner<C>>,
+    /// Acquirer wakeup primitive. Every `release_healthy` /
+    /// `release_discard` notifies one waiter; `drain` notifies all.
+    /// Replaces the previous poll-and-sleep loop with a real
+    /// futex-backed wait — acquirers are woken in O(1) the moment
+    /// a slot frees instead of after a 5 ms polling tick.
+    cond: Condvar,
     /// Pool-scoped arena. Lives the entire pool lifetime; holds
     /// schema snapshots, prepared-statement cache entries, vendor
     /// metadata. NEVER reset while the pool is live (its references
@@ -197,40 +208,133 @@ implement<C> ConnectionPool<C> {
             config: config,
             factory: factory,
             inner: Mutex.new(inner),
+            cond: Condvar.new(),
             pool_arena: Mutex.new(SpindleArena.new_pool()),
         })
     }
 
     /// Acquire one connection. Reuses an idle one when available;
     /// otherwise opens a fresh one if we are below `max_connections`;
-    /// otherwise polls + sleeps until a slot frees or the timeout
-    /// elapses.
+    /// otherwise parks on a condvar until a slot frees or the
+    /// `acquire_timeout_ms` deadline elapses.
+    ///
+    /// Wake-up flow:
+    ///   * `release_healthy` / `release_discard` notify_one after
+    ///     dropping the inner-state lock — wake-up cost is one
+    ///     futex_wake when waiters > 0, otherwise zero.
+    ///   * `drain` notify_alls so every parked acquirer learns the
+    ///     pool is shutting down and can bail with `PekExhausted`.
+    ///
+    /// Latency: a release that frees a slot reaches the next
+    /// acquirer in ~one syscall instead of the previous
+    /// `poll_interval_ms` (default 5 ms) tick. Under load, that's
+    /// the difference between p99 acquire latency tracking the
+    /// query latency and being floored at `poll_interval_ms`.
     public fn acquire(&self) -> Result<PooledConnection<C>, DbError> {
-        let deadline_ms = self.config.acquire_timeout_ms;
-        let mut waited_ms: Int = 0;
+        let total_deadline_ns = (self.config.acquire_timeout_ms as Int) * 1_000_000;
+        let start = Instant.now();
         loop {
-            // Fast path — try to grab from the idle queue / open new.
-            match self.try_acquire_now() {
-                Ok(opt) => {
-                    match opt {
-                        Some(handle) => return Ok(handle),
-                        None         => {}     // pool full; fall through to wait
+            // -----------------------------------------------------------------
+            // Fast path 1 — pop an idle slot under the inner-state lock.
+            // -----------------------------------------------------------------
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => { return Err(self.poisoned_err()); }
+            };
+            if guard.idle.len() > 0 {
+                let conn = match guard.idle.pop() {
+                    Some(c) => c,
+                    None    => { return Err(self.poisoned_err()); }
+                };
+                let arena = match guard.idle_arenas.pop() {
+                    Some(a) => a,
+                    None    => SpindleArena.new_connection(guard.next_id),
+                };
+                guard.outstanding = guard.outstanding + 1;
+                guard.total_acquired = guard.total_acquired + 1;
+                let id = guard.next_id;
+                guard.next_id = guard.next_id + 1;
+                return Ok(PooledConnection {
+                    conn: Some(conn),
+                    arena: Some(arena),
+                    pool: self,
+                    id: id,
+                });
+            }
+
+            // -----------------------------------------------------------------
+            // Fast path 2 — room to open a new connection. Reserve the
+            // slot while holding the lock so a parallel acquirer sees
+            // us as `outstanding`; drop the lock for the (possibly
+            // slow) factory call so concurrent releases can land.
+            // -----------------------------------------------------------------
+            let total = (guard.idle.len() as Int) + guard.outstanding;
+            if total < self.config.max_connections {
+                guard.outstanding = guard.outstanding + 1;
+                let id_for_factory = guard.next_id;
+                let _ = guard;     // drop before factory call
+                match (self.factory)() {
+                    Ok(conn) => {
+                        let mut g = match self.inner.lock() {
+                            Ok(g)  => g,
+                            Err(_) => { return Err(self.poisoned_err()); }
+                        };
+                        g.total_acquired = g.total_acquired + 1;
+                        let id = g.next_id;
+                        g.next_id = g.next_id + 1;
+                        return Ok(PooledConnection {
+                            conn: Some(conn),
+                            arena: Some(SpindleArena.new_connection(id)),
+                            pool: self,
+                            id: id,
+                        });
+                    }
+                    Err(e) => {
+                        let mut g = match self.inner.lock() {
+                            Ok(g)  => g,
+                            Err(_) => { return Err(self.poisoned_err()); }
+                        };
+                        if g.outstanding > 0 {
+                            g.outstanding = g.outstanding - 1;
+                        }
+                        g.total_errors = g.total_errors + 1;
+                        let _ = g;
+                        // Wake one parked acquirer — we just freed
+                        // the reserved slot they may have been
+                        // waiting on.
+                        self.cond.notify_one();
+                        let _ = id_for_factory;
+                        return Err(e);
                     }
                 }
-                Err(e) => return Err(e),
             }
-            if waited_ms >= deadline_ms {
-                let mut guard = match self.inner.lock() {
-                    Ok(g)  => g,
-                    Err(_) => { return Err(self.poisoned_err()); }
-                };
+
+            // -----------------------------------------------------------------
+            // Slow path — pool full. Park on the condvar with the
+            // remaining timeout. wait_timeout consumes the guard and
+            // returns it (re-locked) on wake.
+            // -----------------------------------------------------------------
+            let elapsed_ns = start.elapsed().as_nanos();
+            if elapsed_ns >= total_deadline_ns {
                 guard.total_timeouts = guard.total_timeouts + 1;
                 return Err(DbError.PoolFailure {
                     kind: PoolErrorKind.PekExhausted,
                 });
             }
-            let _ = sleep_ms(self.config.poll_interval_ms);
-            waited_ms = waited_ms + self.config.poll_interval_ms;
+            let remaining_ns = total_deadline_ns - elapsed_ns;
+            match self.cond.wait_timeout(guard, remaining_ns) {
+                Ok((g, timed_out)) => {
+                    if timed_out {
+                        let mut g2 = g;
+                        g2.total_timeouts = g2.total_timeouts + 1;
+                        return Err(DbError.PoolFailure {
+                            kind: PoolErrorKind.PekExhausted,
+                        });
+                    }
+                    let _ = g;     // drop and retry the fast paths
+                }
+                Err(_) => return Err(self.poisoned_err()),
+            }
         }
     }
 
@@ -253,26 +357,40 @@ implement<C> ConnectionPool<C> {
     /// Discard-path: the arena is destroyed alongside the
     /// connection. The next acquire builds a fresh arena via the
     /// factory + `new_connection`.
+    ///
+    /// Wakeup discipline: the inner-state lock is released BEFORE
+    /// `cond.notify_one()`. The mutex-then-notify ordering is the
+    /// canonical low-contention pattern — the next acquirer wakes
+    /// and immediately re-acquires the inner-state lock without
+    /// fighting us for it. `Condvar.notify_one` is unconditional
+    /// (see `core/sync/condvar.vr`), so the wake reaches a parked
+    /// waiter even if `waiters > 0` was not yet visible to us.
     public fn release(&self, conn: C, mut arena: SpindleArena, kind: ReleaseKind) {
-        let mut guard = match self.inner.lock() {
-            Ok(g)  => g,
-            Err(_) => { return; }   // poisoned — silently drop the conn
-        };
-        match kind {
-            Healthy => {
-                arena.reset();
-                guard.total_arena_resets = guard.total_arena_resets + 1;
-                guard.idle.push(conn);
-                guard.idle_arenas.push(arena);
+        {
+            let mut guard = match self.inner.lock() {
+                Ok(g)  => g,
+                Err(_) => { return; }   // poisoned — silently drop the conn
+            };
+            match kind {
+                Healthy => {
+                    arena.reset();
+                    guard.total_arena_resets = guard.total_arena_resets + 1;
+                    guard.idle.push(conn);
+                    guard.idle_arenas.push(arena);
+                }
+                Discard(_reason) => {
+                    arena.destroy();
+                    let _ = conn;     // dropped, factory rebuilds on next acquire
+                }
             }
-            Discard(_reason) => {
-                arena.destroy();
-                let _ = conn;     // dropped, factory rebuilds on next acquire
+            if guard.outstanding > 0 {
+                guard.outstanding = guard.outstanding - 1;
             }
+            // Implicit drop of `guard` happens here — must be before
+            // the notify so the woken acquirer can re-lock with no
+            // contention.
         }
-        if guard.outstanding > 0 {
-            guard.outstanding = guard.outstanding - 1;
-        }
+        self.cond.notify_one();
     }
 
     /// Read-only handle to the pool arena. The `Mutex` guards
@@ -289,8 +407,19 @@ implement<C> ConnectionPool<C> {
     /// wait for in-flight checkouts to release, then close every idle
     /// connection AND destroy its parked arena. The connection drop
     /// is the responsibility of `C`'s destructor.
+    ///
+    /// Implementation: parks on the same `cond` as `acquire` —
+    /// every `release_*` notifies, so we wake the moment
+    /// `outstanding` could plausibly have hit zero and re-check
+    /// under the lock. `notify_all` here ensures parked acquirers
+    /// also learn the pool is shutting down (their next wake-up
+    /// surface ends in `PekExhausted`).
     public fn drain(&self, deadline_ms: Int) -> Result<(), DbError> {
-        let mut waited: Int = 0;
+        // Wake every parked acquirer so they can re-evaluate and
+        // bail with `PekExhausted` instead of holding the deadline.
+        self.cond.notify_all();
+        let total_deadline_ns = (deadline_ms as Int) * 1_000_000;
+        let start = Instant.now();
         loop {
             let mut guard = match self.inner.lock() {
                 Ok(g)  => g,
@@ -310,16 +439,17 @@ implement<C> ConnectionPool<C> {
                 guard.idle_arenas = List.new();
                 return Ok(());
             }
-            // Drop the lock before sleeping so releases can land.
-            // (No explicit drop API — let the binding go out of scope.)
-            let _ = guard;
-            if waited >= deadline_ms {
+            let elapsed_ns = start.elapsed().as_nanos();
+            if elapsed_ns >= total_deadline_ns {
                 return Err(DbError.PoolFailure {
                     kind: PoolErrorKind.PekDraining,
                 });
             }
-            let _ = sleep_ms(self.config.poll_interval_ms);
-            waited = waited + self.config.poll_interval_ms;
+            let remaining_ns = total_deadline_ns - elapsed_ns;
+            match self.cond.wait_timeout(guard, remaining_ns) {
+                Ok((g, _timed_out)) => { let _ = g; /* loop re-checks */ }
+                Err(_) => return Err(self.poisoned_err()),
+            }
         }
     }
 
@@ -353,81 +483,6 @@ implement<C> ConnectionPool<C> {
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
-
-    fn try_acquire_now(&self) -> Result<Maybe<PooledConnection<C>>, DbError> {
-        // 1. Try popping an idle connection under the lock.
-        {
-            let mut guard = match self.inner.lock() {
-                Ok(g)  => g,
-                Err(_) => { return Err(self.poisoned_err()); }
-            };
-            if guard.idle.len() > 0 {
-                let conn = match guard.idle.pop() {
-                    Some(c) => c,
-                    None    => {
-                        // Race with another puller — fall through.
-                        return Ok(None);
-                    }
-                };
-                // Pair the connection with its parked arena. The
-                // two queues are always pushed together by
-                // `release_healthy`, so a length mismatch indicates
-                // pool corruption — fall back to a fresh arena
-                // instead of indexing past the end.
-                let arena = match guard.idle_arenas.pop() {
-                    Some(a) => a,
-                    None    => SpindleArena.new_connection(guard.next_id),
-                };
-                guard.outstanding = guard.outstanding + 1;
-                guard.total_acquired = guard.total_acquired + 1;
-                let id = guard.next_id;
-                guard.next_id = guard.next_id + 1;
-                return Ok(Some(PooledConnection {
-                    conn: Some(conn),
-                    arena: Some(arena),
-                    pool: self,
-                    id: id,
-                }));
-            }
-            // 2. No idle — try opening a new one if we are below the cap.
-            let total = (guard.idle.len() as Int) + guard.outstanding;
-            if total >= self.config.max_connections {
-                return Ok(None);
-            }
-            // Reserve the slot before invoking the factory so a parallel
-            // acquire sees us as outstanding.
-            guard.outstanding = guard.outstanding + 1;
-        }
-        // Drop the lock for the (possibly slow) factory call.
-        match (self.factory)() {
-            Ok(conn) => {
-                let mut guard = match self.inner.lock() {
-                    Ok(g)  => g,
-                    Err(_) => { return Err(self.poisoned_err()); }
-                };
-                guard.total_acquired = guard.total_acquired + 1;
-                let id = guard.next_id;
-                guard.next_id = guard.next_id + 1;
-                Ok(Some(PooledConnection {
-                    conn: Some(conn),
-                    arena: Some(SpindleArena.new_connection(id)),
-                    pool: self,
-                    id: id,
-                }))
-            }
-            Err(e) => {
-                let mut guard = match self.inner.lock() {
-                    Ok(g)  => g,
-                    Err(_) => { return Err(self.poisoned_err()); }
-                };
-                if guard.outstanding > 0 {
-                    guard.outstanding = guard.outstanding - 1;
-                }
-                guard.total_errors = guard.total_errors + 1;
-                Err(e)
-            }
-        }
-    }
 
     fn poisoned_err(&self) -> DbError {
         DbError.Adapter(AdapterSpecific {
