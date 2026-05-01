@@ -229,11 +229,146 @@ Mitigation:
 ## Tracking
 
 - Architectural foundation: this document.
-- Phase 1 implementation: follow-up task #271-Phase-1.
-- Phase 2 work-stealing: follow-up task #271-Phase-2.
-- Phase 3 Send/Sync pins: follow-up task #271-Phase-3.
-- Phase 4 lock-free + cache padding: follow-up task #271-Phase-4.
+- Phase 1A foundation (LANDED, commit 0ab9cdcb): WorkerPool data
+  structure + AsyncRuntime.worker_pool field + worker_pool_size()
+  accessor. Zero-overhead default contract preserved.
+- Phase 1B thread-spawning: follow-up task #325 (split off from #277).
+- Phase 2 work-stealing: follow-up task #278.
+- Phase 3 Send/Sync pins: follow-up task #279.
+- Phase 4 lock-free + cache padding: follow-up task #280.
 - VCS spec tests: integrated with #273 (Differential Tier 0/1 tests).
 - Multi-threading observability primitives: integrated with #275
   (manifest→runtime bridge zero-overhead pin tests) — verify worker count
   reaches stdlib via LLVM constant-folding under LTO.
+
+## Phase 1B Implementation Notes (#325)
+
+The Phase 1A foundation (commit 0ab9cdcb) lands the WorkerPool data
+type + the AsyncRuntime field. Phase 1B adds the actual thread
+spawning. Below are the concurrency hazards every Phase-1B
+implementation MUST address, drawn from a careful design pass on
+2026-05-01:
+
+### Hazard 1 — Lock ordering: worker_pool vs park_mu
+
+The runtime stores `worker_pool: Mutex<Maybe<WorkerPool>>` and the
+pool itself owns `park_mu: Heap<Mutex<()>>`. Workers wake via
+`park_cv.wait(park_mu_guard)`, which releases park_mu and re-acquires
+it on wake. If a worker holds `worker_pool.lock()` while calling
+`park_cv.wait`, AND `shutdown()` holds `worker_pool.lock()` while
+calling `park_cv.notify_all`, the system deadlocks.
+
+**Required ordering:** ALWAYS acquire `park_mu` BEFORE
+`worker_pool.lock()` (or release `worker_pool.lock()` BEFORE the
+wait/notify). Document the ordering in a comment block at the top of
+both `worker_main` and `shutdown`.
+
+### Hazard 2 — Lost-wakeup race
+
+A worker that's about to park observes `process_ready_tasks()
+returned 0`, but `spawn()` pushes a new task BEFORE the worker
+acquires `park_mu`. The worker then parks on an empty queue while a
+task waits. `notify_one` from spawn was already consumed (or never
+sent because the spawning code raced).
+
+**Required pattern:** acquire `park_mu` FIRST, then re-check the
+ready queue under the lock. Only park if queue is still empty AND
+shutdown_flag is false. The standard
+"check-condition-under-mutex-then-wait" pattern. spawn/wake_task must
+notify AFTER pushing.
+
+### Hazard 3 — Shutdown extraction
+
+`shutdown()` must take the workers' join handles OUT of the
+`worker_pool` Mutex and join them. Joining while holding
+`worker_pool.lock()` deadlocks (workers re-check shutdown via the
+same lock during park). Pattern:
+
+```verum
+let pool_taken: Maybe<WorkerPool> = {
+    let mut g = self.worker_pool.lock();
+    let extracted = std.mem.replace(&mut *g, Maybe.None);
+    if let Maybe.Some(ref p) = extracted {
+        p.shutdown_flag.store(true, MemoryOrdering.Release);
+        p.park_cv.notify_all();
+    }
+    extracted
+};
+// Lock released; safe to join.
+if let Maybe.Some(pool) = pool_taken {
+    for h in pool.handles.into_iter() {
+        let _ = h.join();
+    }
+}
+```
+
+### Hazard 4 — Tier 0 (interpreter) gating
+
+Per architecture: "#271 targets Tier 1 (AOT) only. Programs running
+under `verum run --tier=interpret` continue to use the cooperative
+single-threaded loop." But `core/runtime/thread.vr::Thread.spawn`
+calls platform syscalls directly. Under interpreter mode, those
+syscalls would either crash (interpreter intercepts not configured
+for thread spawning) or silently succeed (creating real threads
+that the single-threaded VBC interpreter cannot accommodate — undefined
+behaviour).
+
+**Required gate:** `start_worker_pool` MUST detect interpreter mode
+and return early. Two viable detection mechanisms:
+
+1. Runtime-bridge intrinsic: extend the `verum_get_runtime_*` family
+   with `verum_get_runtime_execution_tier() -> Int` (0 = Tier 0
+   interpreter, 1 = Tier 1 AOT). LLVM-folds to constant under AOT.
+2. Per-platform absent under interpreter intercept: the existing
+   intrinsic for `Thread.spawn` is intercepted in the interpreter
+   to return ThreadError::Unsupported. start_worker_pool checks
+   the Result.
+
+Mechanism 2 is cleaner — it makes the "thread spawning unavailable"
+contract a runtime-observable Result that any caller can react to.
+
+### Hazard 5 — Pointer cast SAFETY contract
+
+`worker_main(addr: Int)` casts `addr as *const AsyncRuntime` to a
+borrowed reference. The pointer remains valid IFF:
+
+* Workers join in `shutdown()` before the runtime drops.
+* `Drop for AsyncRuntime` calls `shutdown()` (already true at
+  line 1166 of executor.vr).
+* `block_on()` calls `start_worker_pool()` BEFORE handing
+  ownership of `self` to anything else.
+
+Document this contract at the top of `worker_main` with a SAFETY
+block. Mark the `unsafe` block with explicit reasoning.
+
+### Hazard 6 — Drop-time deadlock
+
+`Drop for AsyncRuntime` calls `shutdown()`. If shutdown joins
+workers and a worker is currently calling
+`runtime.worker_pool.lock()`, Drop's lock-acquire blocks waiting for
+the worker to release. But the worker is waiting for shutdown_flag
+to be set. Circular wait.
+
+**Required pattern:** Hazard 3's "extract pool then join outside the
+lock" eliminates this — Drop holds the lock only briefly to extract,
+then joins lock-free.
+
+### Test plan
+
+Per the dual-mode requirement (Tier 0 + Tier 1):
+
+* Tier 0: assert `start_worker_pool` returns early without spawning;
+  `worker_pool_size()` returns 0; manifest `async_worker_threads = 4`
+  is silently ignored. No crashes, no panics.
+* Tier 1: assert observable parallelism — 1000 CPU-bound tasks
+  complete in < 2× single-thread baseline. `worker_pool_size()`
+  returns 4 (or N_CONFIGURED).
+* Cross-tier: differential test runner from #273 exercises both
+  modes for the same `.vr` test source. Both must pass + agree on
+  outcome (not on timing — only on result correctness).
+
+### Estimated cost
+
+Realistic budget: **3-5 days** of focused concurrent-code work +
+testing, NOT the original "~250 LOC" estimate that ignored the
+hazard-mitigation work.
