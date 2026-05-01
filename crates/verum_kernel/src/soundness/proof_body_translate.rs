@@ -49,7 +49,8 @@ use verum_ast::ty::PathSegment;
 use verum_common::Maybe;
 
 use super::expr_translate::{
-    AgdaExprRenderer, CoqExprRenderer, ExprRenderer, LeanExprRenderer, TranslatedExpr,
+    AgdaExprRenderer, CoqExprRenderer, ExprRenderer, IsabelleExprRenderer,
+    LeanExprRenderer, TranslatedExpr,
 };
 
 // =============================================================================
@@ -470,6 +471,114 @@ fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
     TranslatedProofBody::Fallback {
         reason: "Agda: no tactic system; only Term and single-apply translate in V0".to_string(),
     }
+}
+
+// =============================================================================
+// IsabelleProofBodyRenderer (#156 — fourth backend)
+// =============================================================================
+
+/// Isabelle/HOL backend.  Isabelle's proof model is closer to Coq's
+/// than Lean's — the `apply` keyword exists, classical-tactic
+/// names like `auto`, `simp`, `blast` are first-class, and proofs
+/// are typically structured as `proof - ... qed` blocks.
+///
+/// **Coverage** (V0):
+///   * `ProofBody::Term(expr)` → `by (rule <expr>)` — Isabelle's
+///     reference-by-rule shape closest to Coq's `exact`.
+///   * Single-apply (Tactic + Structured) → `by (rule <name>)`.
+///   * Primitive tactics: Auto / Trivial / Reflexivity / Assumption /
+///     Ring / Field / Omega → Isabelle's stock tactic library.
+pub struct IsabelleProofBodyRenderer;
+
+impl IsabelleProofBodyRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for IsabelleProofBodyRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProofBodyRenderer for IsabelleProofBodyRenderer {
+    fn id(&self) -> &'static str {
+        "isabelle"
+    }
+
+    fn render(&self, body: &ProofBody) -> TranslatedProofBody {
+        match body.kind() {
+            ProofBodyKind::Term => render_term_isabelle(body),
+            ProofBodyKind::Tactic | ProofBodyKind::Structured => {
+                render_single_apply_isabelle(body)
+            }
+            other => TranslatedProofBody::Fallback {
+                reason: format!(
+                    "Isabelle translator: proof-body kind {:?} not yet covered (V0 covers Term + single-apply + primitive tactics)",
+                    other,
+                ),
+            },
+        }
+    }
+}
+
+fn render_term_isabelle(body: &ProofBody) -> TranslatedProofBody {
+    let expr = match body {
+        ProofBody::Term(e) => e.as_ref(),
+        _ => unreachable!("called from kind() == Term arm"),
+    };
+    match IsabelleExprRenderer::new().render(expr) {
+        TranslatedExpr::Translated { text } => TranslatedProofBody::Translated {
+            text: format!("by (rule {})", text),
+        },
+        TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
+            reason: format!(
+                "Isabelle term-mode: expr renderer fallback — {}",
+                reason
+            ),
+        },
+    }
+}
+
+fn render_single_apply_isabelle(body: &ProofBody) -> TranslatedProofBody {
+    if let Some((name, _args)) = classify_single_apply(body) {
+        return TranslatedProofBody::Translated {
+            text: format!("by (rule {})", name),
+        };
+    }
+    if let Some(tactic) = primitive_tactic(body) {
+        if let Some(text) = primitive_tactic_to_isabelle(tactic) {
+            return TranslatedProofBody::Translated { text };
+        }
+    }
+    TranslatedProofBody::Fallback {
+        reason: "Isabelle: V0 covers single-apply + primitive tactics".to_string(),
+    }
+}
+
+/// Translate a primitive tactic to its Isabelle/HOL equivalent.
+/// Isabelle's tactic vocabulary is close to Coq's but with subtle
+/// differences:
+///   * `reflexivity` → `by simp` (Isabelle uses simp for refl-
+///     equality goals; `(rule refl)` also works for bare `x = x`).
+///   * `omega` → `by linarith` (Isabelle uses linarith for linear
+///     arithmetic; `arith` is the older name).
+///   * `field` → `by algebra` (Mathlib's `field_simp` analogue).
+fn primitive_tactic_to_isabelle(tactic: &TacticExpr) -> Option<String> {
+    Some(match tactic {
+        TacticExpr::Trivial => "by simp".to_string(),
+        TacticExpr::Assumption => "by assumption".to_string(),
+        TacticExpr::Reflexivity => "by (rule refl)".to_string(),
+        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => {
+            "by auto".to_string()
+        }
+        TacticExpr::Ring => "by algebra".to_string(),
+        TacticExpr::Field => "by algebra".to_string(),
+        TacticExpr::Omega => "by linarith".to_string(),
+        _ => return None,
+    })
 }
 
 // =============================================================================
@@ -1100,6 +1209,58 @@ mod tests {
         let body = structured_apply_step("backbone_full", vec![]);
         let r = AgdaProofBodyRenderer::new().render(&body);
         assert_eq!(r.text(), Some("backbone_full"));
+    }
+
+    // -------------------------------------------------------------
+    // Isabelle/HOL translator (#156 — fourth backend)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn isabelle_renders_apply_as_by_rule() {
+        let body = apply_body("backbone_full", vec![]);
+        let r = IsabelleProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("by (rule backbone_full)"));
+    }
+
+    #[test]
+    fn isabelle_renders_term_body_as_by_rule() {
+        let body = term_body("h_x");
+        let r = IsabelleProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("by (rule h_x)"));
+    }
+
+    #[test]
+    fn isabelle_renders_primitive_tactics() {
+        let body = primitive_body(TacticExpr::Trivial);
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by simp"),
+        );
+        let body = primitive_body(TacticExpr::Auto {
+            with_hints: List::new(),
+        });
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by auto"),
+        );
+        let body = primitive_body(TacticExpr::Omega);
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by linarith"),
+            "Isabelle uses linarith for omega-style decisions",
+        );
+        let body = primitive_body(TacticExpr::Reflexivity);
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by (rule refl)"),
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_call_shape_apply() {
+        let body = apply_body_via_call("lemma_x", vec![name_path_expr("p")]);
+        let r = IsabelleProofBodyRenderer::new().render(&body);
+        assert_eq!(r.text(), Some("by (rule lemma_x)"));
     }
 
     #[test]

@@ -1247,6 +1247,305 @@ fn generic_arg_to_agda_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
     }
 }
 
+// -----------------------------------------------------------------------------
+// IsabelleExprRenderer (#156 — fourth backend)
+// -----------------------------------------------------------------------------
+
+/// Isabelle/HOL backend.  Isabelle/HOL is a classical higher-order
+/// logic system — distinct from Coq's CIC and Lean 4's CIC-derived
+/// hierarchy.  Adding it brings classical HOL into the foundation
+/// matrix alongside CIC (Coq + Lean) and MLTT (Agda).
+///
+/// Surface conventions:
+///
+///   * Equality: `=` (not `≡`).
+///   * Logic: `∧` / `∨` / `⟶` / `⟷` (Isabelle uses Unicode HOL
+///     symbols by default in modern Isabelle releases).
+///   * Negation: `¬`.
+///   * Function application: `f x y` (juxtaposition, like Lean).
+///   * Universal: `∀x. P x` / Existential: `∃x. P x`.
+pub struct IsabelleExprRenderer;
+
+impl IsabelleExprRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for IsabelleExprRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExprRenderer for IsabelleExprRenderer {
+    fn id(&self) -> &'static str {
+        "isabelle"
+    }
+
+    fn render(&self, expr: &Expr) -> TranslatedExpr {
+        match render_expr_isabelle(expr) {
+            Some(text) => TranslatedExpr::Translated { text },
+            None => TranslatedExpr::Fallback {
+                reason: classify_unrenderable(expr).to_string(),
+                original: verum_ast::pretty::format_expr(expr).to_string(),
+            },
+        }
+    }
+}
+
+fn render_expr_isabelle(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Literal(lit) => render_literal_isabelle(&lit.kind),
+        ExprKind::Path(path) => path.as_ident().map(|i| i.as_str().to_string()),
+        ExprKind::Paren(inner) => render_expr_isabelle(inner).map(|t| format!("({})", t)),
+        ExprKind::Unary { op, expr: inner } => {
+            let inner_text = render_expr_isabelle(inner)?;
+            match op {
+                UnOp::Not => Some(format!("¬ {}", parens_if_complex(&inner_text))),
+                UnOp::Neg => Some(format!("- {}", parens_if_complex(&inner_text))),
+                _ => None,
+            }
+        }
+        ExprKind::Binary { op, left, right } => {
+            let l = render_expr_isabelle(left)?;
+            let r = render_expr_isabelle(right)?;
+            let isa_op = match op {
+                BinOp::Eq => Some("="),
+                BinOp::Ne => Some("≠"),
+                BinOp::Lt => Some("<"),
+                BinOp::Le => Some("≤"),
+                BinOp::Gt => Some(">"),
+                BinOp::Ge => Some("≥"),
+                BinOp::And => Some("∧"),
+                BinOp::Or => Some("∨"),
+                BinOp::Imply => Some("⟶"),
+                BinOp::Iff => Some("⟷"),
+                BinOp::Add => Some("+"),
+                BinOp::Sub => Some("-"),
+                BinOp::Mul => Some("*"),
+                BinOp::Div => Some("div"),
+                BinOp::Rem => Some("mod"),
+                _ => None,
+            }?;
+            Some(format!(
+                "({} {} {})",
+                parens_if_complex(&l),
+                isa_op,
+                parens_if_complex(&r)
+            ))
+        }
+        ExprKind::Call { func, args, .. } => {
+            // Isabelle uses curried-juxtaposition application —
+            // same shape as Lean / Agda.
+            let head = render_expr_isabelle(func)?;
+            let mut out = head;
+            for a in args.iter() {
+                let arg_text = render_expr_isabelle(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(out)
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            // Isabelle has no method-call dot-notation; fall back to
+            // function-application form.
+            let receiver_text = render_expr_isabelle(receiver)?;
+            let mut out = format!(
+                "{} {}",
+                method.as_str(),
+                parens_if_complex(&receiver_text),
+            );
+            for a in args.iter() {
+                let arg_text = render_expr_isabelle(a)?;
+                out.push(' ');
+                out.push_str(&parens_if_complex(&arg_text));
+            }
+            Some(out)
+        }
+        ExprKind::Field { expr: inner, field } => {
+            // Isabelle record selector: `field obj`.
+            let receiver_text = render_expr_isabelle(inner)?;
+            Some(format!(
+                "{} {}",
+                field.as_str(),
+                parens_if_complex(&receiver_text),
+            ))
+        }
+        ExprKind::Forall { bindings, body } => {
+            // `∀x. body` — Isabelle/HOL universal.
+            let body_text = render_expr_isabelle(body)?;
+            let names: Vec<String> = bindings
+                .iter()
+                .filter_map(quantifier_binding_name)
+                .collect();
+            if names.is_empty() {
+                return None;
+            }
+            Some(format!("(∀{}. {})", names.join(" "), body_text))
+        }
+        ExprKind::Exists { bindings, body } => {
+            let body_text = render_expr_isabelle(body)?;
+            let names: Vec<String> = bindings
+                .iter()
+                .filter_map(quantifier_binding_name)
+                .collect();
+            if names.is_empty() {
+                return None;
+            }
+            Some(format!("(∃{}. {})", names.join(" "), body_text))
+        }
+        _ => None,
+    }
+}
+
+fn render_literal_isabelle(kind: &LiteralKind) -> Option<String> {
+    match kind {
+        LiteralKind::Int(int_lit) => Some(int_lit.value.to_string()),
+        LiteralKind::Bool(true) => Some("True".to_string()),
+        LiteralKind::Bool(false) => Some("False".to_string()),
+        LiteralKind::Text(s) => match s {
+            StringLit::Regular(t) | StringLit::MultiLine(t) => {
+                // Isabelle string literals use backslash-escaped quotes
+                // inside `''...''` syntax; for portability we emit
+                // the standard `"..."` form Isabelle's parser accepts
+                // for HOL-string content.
+                Some(format!("''{}''", t.as_str().replace('"', "\\\"")))
+            }
+        },
+        LiteralKind::Float(f) => Some(f.value.to_string()),
+        _ => None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// IsabelleTypeRenderer
+// -----------------------------------------------------------------------------
+
+/// Isabelle/HOL type backend.  Maps Verum stdlib types to their HOL
+/// counterparts: `Int → int`, `Nat → nat`, `Bool → bool`, `Text →
+/// string`, `List<T> → 'T list`, `Maybe<T> → 'T option`.
+pub struct IsabelleTypeRenderer;
+
+impl IsabelleTypeRenderer {
+    /// Construct a fresh renderer.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for IsabelleTypeRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeRenderer for IsabelleTypeRenderer {
+    fn id(&self) -> &'static str {
+        "isabelle"
+    }
+
+    fn render(&self, ty: &Type) -> TranslatedType {
+        match render_type_isabelle(ty) {
+            Some(text) => TranslatedType::Translated { text },
+            None => TranslatedType::Fallback {
+                reason: classify_unrenderable_type(ty).to_string(),
+                original: format!("{:?}", ty.kind),
+            },
+        }
+    }
+}
+
+fn render_type_isabelle(ty: &Type) -> Option<String> {
+    match &ty.kind {
+        TypeKind::Unit => Some("unit".to_string()),
+        TypeKind::Bool => Some("bool".to_string()),
+        TypeKind::Int => Some("int".to_string()),
+        TypeKind::Float => Some("real".to_string()),
+        TypeKind::Char => Some("char".to_string()),
+        TypeKind::Text => Some("string".to_string()),
+        TypeKind::Path(path) => path.as_ident().map(|i| match i.as_str() {
+            "Int" => "int".to_string(),
+            "Bool" => "bool".to_string(),
+            "Float" => "real".to_string(),
+            "Text" => "string".to_string(),
+            "Char" => "char".to_string(),
+            "Unit" => "unit".to_string(),
+            "Nat" => "nat".to_string(),
+            other => other.to_string(),
+        }),
+        TypeKind::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .iter()
+                .map(render_type_isabelle)
+                .collect::<Option<Vec<_>>>()?;
+            if parts.is_empty() {
+                Some("unit".to_string())
+            } else if parts.len() == 1 {
+                Some(parts.into_iter().next().unwrap())
+            } else {
+                // Isabelle tuple syntax: `T1 × T2 × ...`.
+                Some(format!("({})", parts.join(" × ")))
+            }
+        }
+        TypeKind::Slice(inner) | TypeKind::Array { element: inner, .. } => {
+            // Isabelle uses postfix `T list`.
+            let t = render_type_isabelle(inner)?;
+            Some(format!("({} list)", t))
+        }
+        TypeKind::Generic { base, args, .. } => {
+            // Isabelle uses postfix syntax for type constructors:
+            // `'a list`, `'a option`.  For multi-arg: `(T1, T2) Map`.
+            let base_text = render_type_isabelle(base)?;
+            let mapped_base = match base_text.as_str() {
+                "List" => "list",
+                "Maybe" | "Option" => "option",
+                "Result" => "sum",
+                other => other,
+            }
+            .to_string();
+            let arg_parts: Vec<String> = args
+                .iter()
+                .filter_map(generic_arg_to_isabelle_text)
+                .collect();
+            match arg_parts.len() {
+                0 => Some(mapped_base),
+                1 => Some(format!("({} {})", arg_parts[0], mapped_base)),
+                _ => Some(format!("(({}) {})", arg_parts.join(", "), mapped_base)),
+            }
+        }
+        TypeKind::Reference { inner, .. }
+        | TypeKind::CheckedReference { inner, .. }
+        | TypeKind::UnsafeReference { inner, .. } => render_type_isabelle(inner),
+        TypeKind::Refined { base, predicate } => {
+            // Isabelle refinement types use set-comprehension syntax:
+            // `{ x. P x }`.  The base type is implicit from context.
+            let base_text = render_type_isabelle(base)?;
+            let pred_text = render_expr_isabelle(&predicate.expr)?;
+            let binder = match &predicate.binding {
+                verum_common::Maybe::Some(i) => i.as_str().to_string(),
+                verum_common::Maybe::None => "it".to_string(),
+            };
+            Some(format!("{{{} :: {}. {}}}", binder, base_text, pred_text))
+        }
+        _ => None,
+    }
+}
+
+fn generic_arg_to_isabelle_text(arg: &verum_ast::ty::GenericArg) -> Option<String> {
+    use verum_ast::ty::GenericArg;
+    match arg {
+        GenericArg::Type(t) => render_type_isabelle(t),
+        _ => Some("_".to_string()),
+    }
+}
+
 /// Diagnostic classifier for unrenderable type shapes.
 fn classify_unrenderable_type(ty: &Type) -> &'static str {
     match &ty.kind {
