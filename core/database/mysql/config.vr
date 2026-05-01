@@ -10,21 +10,63 @@ mount core.*;
 mount base.{Text, Maybe, None, Some};
 mount collections.List;
 
+/// MySQL TLS posture per libmysqlclient's `--ssl-mode` taxonomy
+/// (and spec §8.13.1 — production posture is `MtmVerifyIdentity`).
+///
+/// The five variants:
+///   * `MtmDisable`        — plaintext only. CLIENT_SSL never set.
+///   * `MtmPreferred`      — set CLIENT_SSL if server offers it; if
+///                           server lacks SSL support, fall back to
+///                           plaintext silently. Legacy.
+///   * `MtmRequired`       — CLIENT_SSL mandatory. Server cert NOT
+///                           validated (caller trusts the network).
+///   * `MtmVerifyCa`       — CLIENT_SSL mandatory + CA chain
+///                           validated. Hostname not checked.
+///   * `MtmVerifyIdentity` — Production default. CLIENT_SSL +
+///                           CA + hostname match. Spec §8.13.1.
 public type MysqlTlsMode is
       MtmDisable
-    | MtmRequired;
+    | MtmPreferred
+    | MtmRequired
+    | MtmVerifyCa
+    | MtmVerifyIdentity;
 
 implement MysqlTlsMode {
     public fn name(&self) -> Text {
         match self {
-            MtmDisable  => "disable".clone(),
-            MtmRequired => "required".clone(),
+            MtmDisable        => "disable".clone(),
+            MtmPreferred      => "preferred".clone(),
+            MtmRequired       => "required".clone(),
+            MtmVerifyCa       => "verify-ca".clone(),
+            MtmVerifyIdentity => "verify-identity".clone(),
         }
     }
     public fn is_encrypted(&self) -> Bool {
         match self {
-            MtmDisable  => false,
-            MtmRequired => true,
+            MtmDisable => false,
+            _          => true,
+        }
+    }
+    /// Whether the server's certificate must be CA-validated.
+    public fn requires_ca_check(&self) -> Bool {
+        match self {
+            MtmVerifyCa | MtmVerifyIdentity => true,
+            _                                => false,
+        }
+    }
+    /// Whether the cert hostname must match the connect-string host.
+    public fn requires_hostname_match(&self) -> Bool {
+        match self {
+            MtmVerifyIdentity => true,
+            _                  => false,
+        }
+    }
+    /// Whether a server lacking CLIENT_SSL is acceptable. Disable /
+    /// Preferred → yes; Required / Verify* → no.
+    public fn permits_plaintext_fallback(&self) -> Bool {
+        match self {
+            MtmDisable | MtmPreferred => true,
+            _                          => false,
         }
     }
 }

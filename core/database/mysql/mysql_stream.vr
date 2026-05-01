@@ -1,0 +1,145 @@
+// =============================================================================
+// core/database/mysql/mysql_stream.vr — TCP / TLS unified stream for MySQL wire
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3 (TLS), §8.13.1 (TLS posture).
+// =============================================================================
+//
+// Mirror of `core.database.postgres.pg_stream` for MySQL. Sum-type
+// wrapper around `core.net.tcp.TcpStream` and
+// `core.net.tls.TlsStream` so MysqlConnection can read/write
+// through either transport without per-call dispatch logic at
+// every wire site.
+//
+// Two variants:
+//
+//   * `MsPlain(TcpStream)` — pre-TLS or `tls_mode = MtmDisable`.
+//   * `MsTls(TlsStream)`   — TLS established after the
+//     CLIENT_SSL handshake mid-flight.
+//
+// Async TLS read/write is bridged through `core.async.executor.block_on`
+// to keep MysqlConnection's synchronous wire surface — same pattern as
+// PgStream.
+// =============================================================================
+
+module core.database.mysql.mysql_stream;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount core.net.tcp.TcpStream;
+mount core.net.tls.{TlsStream, TlsConfig, LegacyTlsError};
+mount core.net.addr.SocketAddr;
+mount core.io.IoError;
+mount core.async.executor.block_on;
+
+// =============================================================================
+// MysqlStream
+// =============================================================================
+
+public type MysqlStream is
+      MsPlain(TcpStream)
+    | MsTls(TlsStream);
+
+implement MysqlStream {
+    /// Borrow the inner TCP stream — for socket-level operations
+    /// (local_addr, set_*_timeout) that don't care about
+    /// encryption.
+    public fn tcp(&self) -> &TcpStream {
+        match self {
+            MsPlain(t)  => t,
+            MsTls(tls)  => &tls.inner,
+        }
+    }
+
+    public fn tcp_mut(&mut self) -> &mut TcpStream {
+        match self {
+            MsPlain(t)  => t,
+            MsTls(tls)  => &mut tls.inner,
+        }
+    }
+
+    public fn local_addr(&self) -> Result<SocketAddr, IoError> {
+        self.tcp().local_addr()
+    }
+
+    public fn is_tls(&self) -> Bool {
+        match self {
+            MsPlain(_) => false,
+            MsTls(_)   => true,
+        }
+    }
+
+    /// SHA-256 of the peer's leaf certificate. Used by
+    /// caching_sha2_password's RSA-OAEP path when the channel is
+    /// encrypted (the server sends pubkey but the client can also
+    /// verify pin via cert hash). For now exposed for symmetry
+    /// with PG; concrete consumers land later.
+    public fn peer_cert_hash_sha256(&self) -> Maybe<[Byte; 32]> {
+        match self {
+            MsPlain(_)  => None,
+            MsTls(tls)  => tls.peer_cert_hash_sha256(),
+        }
+    }
+
+    /// Read into `buf`. Bridges async `TlsStream.read` through
+    /// `block_on` so MysqlConnection's synchronous wire surface
+    /// keeps working.
+    public fn read(&mut self, buf: &mut [Byte]) -> Result<Int, IoError> {
+        match self {
+            MsPlain(t) => t.read(buf),
+            MsTls(tls) => {
+                let mut tmp: List<Byte> = List.with_capacity(buf.len() as Int);
+                let mut i: Int = 0;
+                while i < buf.len() as Int { tmp.push(0_u8); i = i + 1; }
+                let result = block_on(tls.read(&mut tmp));
+                match result {
+                    Ok(n) => {
+                        let mut k: Int = 0;
+                        while k < n {
+                            buf[k] = tmp[k];
+                            k = k + 1;
+                        }
+                        Ok(n)
+                    }
+                    Err(e) => Err(IoError.Other(f"TLS read: {e}")),
+                }
+            }
+        }
+    }
+
+    /// Write `data`. On TLS the bytes are encrypted before
+    /// transmission.
+    public fn write(&mut self, data: &[Byte]) -> Result<Int, IoError> {
+        match self {
+            MsPlain(t) => t.write(data),
+            MsTls(tls) => {
+                let result = block_on(tls.write(data));
+                match result {
+                    Ok(n)  => Ok(n),
+                    Err(e) => Err(IoError.Other(f"TLS write: {e}")),
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// upgrade — drive a TLS client handshake over an existing TCP stream
+// =============================================================================
+
+/// Drive a TLS client handshake over an existing TCP stream. On
+/// success, returns a `MysqlStream::MsTls(...)` ready for encrypted
+/// reads/writes. Bridged through `block_on` because
+/// `TlsStream.connect` is async and MysqlConnection is currently
+/// synchronous.
+public fn upgrade_to_tls(
+    tcp: TcpStream,
+    server_name: &Text,
+    config: &TlsConfig,
+) -> Result<MysqlStream, LegacyTlsError> {
+    match block_on(TlsStream.connect(tcp, server_name, config)) {
+        Ok(tls)  => Ok(MsTls(tls)),
+        Err(e)   => Err(e),
+    }
+}
