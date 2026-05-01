@@ -4553,6 +4553,153 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     Ok(())
 }
 
+/// `verum audit --dependent-theorems <axiom-name>` — list every
+/// theorem in the workspace whose transitive proof depends on the
+/// given axiom (#188).
+///
+/// Mathematician-facing utility: when an axiom rejects or is
+/// admitted under audit, "which of my theorems lose their
+/// discharge?" is answered without manual dependency tracing.
+/// Walks the apply-graph backwards from the named axiom.  Output:
+/// `target/audit-reports/dependent-theorems-<axiom>.json` + plain
+/// or JSON CLI rendering.
+pub fn audit_dependent_theorems_with_format(
+    axiom_name: &str,
+    format: AuditFormat,
+) -> Result<()> {
+    use verum_kernel::soundness::apply_graph::{
+        ApplyGraph, SymbolEntry, dependent_theorems, extract_apply_targets,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step(&format!(
+            "Walking apply-graph for theorems dependent on `{}`",
+            axiom_name,
+        ));
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let mut vr_files = discover_vr_files(&manifest_dir);
+    vr_files.extend(discover_stdlib_vr_files());
+
+    let mut graph = ApplyGraph::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+    for abs_path in &vr_files {
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+        for item in &module.items {
+            match &item.kind {
+                verum_ast::decl::ItemKind::Theorem(d)
+                | verum_ast::decl::ItemKind::Lemma(d)
+                | verum_ast::decl::ItemKind::Corollary(d) => {
+                    let name = d.name.name.as_str().to_string();
+                    if let verum_common::Maybe::Some(body) = &d.proof {
+                        let apply_targets = extract_apply_targets(body);
+                        graph.insert(name, SymbolEntry::Theorem { apply_targets });
+                    } else {
+                        graph.insert(
+                            name,
+                            classify_axiom_entry(
+                                &d.name.name,
+                                &d.attributes,
+                                &item.attributes,
+                            ),
+                        );
+                    }
+                }
+                verum_ast::decl::ItemKind::Axiom(a) => {
+                    let name = a.name.name.as_str().to_string();
+                    graph.insert(
+                        name,
+                        classify_axiom_entry(
+                            &a.name.name,
+                            &a.attributes,
+                            &item.attributes,
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let dependents = dependent_theorems(&graph, axiom_name);
+
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join(format!(
+        "dependent-theorems-{}.json",
+        axiom_name.replace('/', "-").replace('.', "_"),
+    ));
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "axiom": axiom_name,
+        "parsed_files": parsed_files,
+        "skipped_files": skipped_files,
+        "dependent_count": dependents.len(),
+        "dependents": dependents
+            .iter()
+            .map(|d| serde_json::json!({
+                "theorem": d.theorem,
+                "chain": d.chain,
+            }))
+            .collect::<Vec<_>>(),
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Dependent-theorems audit");
+            println!("─────────────────────────────────────────");
+            println!("Axiom:          {}", axiom_name);
+            println!("Files parsed:   {}", parsed_files);
+            println!("Files skipped:  {}", skipped_files);
+            println!("Dependents:     {}", dependents.len());
+            if dependents.is_empty() {
+                println!();
+                println!(
+                    "{} No theorem in the workspace depends on `{}`.",
+                    "✓".green(),
+                    axiom_name,
+                );
+            } else {
+                println!();
+                println!(
+                    "Theorems whose proof transitively depends on `{}`:",
+                    axiom_name,
+                );
+                for d in &dependents {
+                    println!("  • {}", d.theorem);
+                    if d.chain.len() > 2 {
+                        println!("       chain: {}", d.chain.join(" → "));
+                    }
+                }
+            }
+            println!();
+            println!("Report: {}", report_path.display());
+        }
+        AuditFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string(&payload).unwrap_or_default(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
 pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::soundness::apply_graph::{
         ApplyGraph, LeafKind, SymbolEntry, extract_apply_targets, walk_transitive,
