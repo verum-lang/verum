@@ -16,6 +16,7 @@ public module der;
 public module cbor;
 public module json_pointer;
 public module msgpack;
+public module bson;
 public module pem;
 public module jcs;
 public module json_patch;
@@ -42,6 +43,13 @@ public mount .base58.Base58Error;
 
 // Re-exports — CBOR (RFC 8949)
 public mount .cbor.{CborValue, CborError, MAX_CBOR_NESTING};
+
+// Re-exports — BSON (Binary JSON, MongoDB v1.1)
+public mount .bson.{
+    BsonValue, BsonDocument, BsonDocumentBuilder, BsonObjectId,
+    BsonBinary, BsonRegex, BsonTimestamp, BsonError,
+    MAX_BSON_DOCUMENT_BYTES, MAX_BSON_NESTING, MAX_BSON_FIELDS,
+};
 
 // Re-exports — Hex
 public mount .hex.HexError;

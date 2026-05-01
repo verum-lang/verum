@@ -1,0 +1,1163 @@
+// =============================================================================
+// encoding/bson.vr — Binary JSON (BSON v1.1)
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections
+// Spec: https://bsonspec.org/spec.html
+// =============================================================================
+//
+// BSON — the binary serialisation format originating with MongoDB,
+// re-used as the on-disk and wire format of MongoDB drivers, and
+// occasionally as a first-class transport for typed data outside
+// the document-store world. Tighter than JSON (numbers are typed
+// rather than stringified, dates and ObjectIds are atomic 8/12-byte
+// values, binary blobs ride inline) and self-describing (no
+// out-of-band schema needed).
+//
+// # Why this lives in core/encoding/
+//
+//   * Schema-less (matches the rest of the encoding/ family — JSON,
+//     CBOR, MessagePack); schema-required formats (protobuf,
+//     flatbuffers, avro) belong elsewhere.
+//   * Useful well beyond MongoDB: GridFS-style binary blob storage,
+//     change-data-capture log formats, key-value store payload
+//     types, and any tool that prefers strict typing without the
+//     overhead of CBOR's tag system.
+//   * Pure Verum, no FFI — fits the CLAUDE.md "no libc" rule.
+//
+// # Supported types (all canonical types per BSON v1.1)
+//
+//   0x01  double            — 8-byte little-endian IEEE-754 binary64
+//   0x02  string            — i32 LE length + UTF-8 bytes + 0x00 terminator
+//                             (length includes the terminator)
+//   0x03  document          — embedded BSON document (recursive)
+//   0x04  array             — BSON document with numeric string keys
+//                             ("0", "1", "2", ...) preserving order
+//   0x05  binary            — i32 LE length + 1-byte subtype + bytes
+//   0x07  ObjectId          — 12 raw bytes
+//   0x08  boolean           — 0x00 or 0x01
+//   0x09  UTC datetime      — i64 LE milliseconds since Unix epoch
+//   0x0A  null              — no payload
+//   0x0B  regex             — cstring pattern + cstring options
+//   0x0D  JavaScript code   — i32 LE length + UTF-8 + 0x00
+//   0x10  int32             — i32 LE
+//   0x11  timestamp         — u64 LE (first 4 bytes = increment,
+//                             second 4 = seconds since epoch)
+//   0x12  int64             — i64 LE
+//   0x13  decimal128        — 16 raw bytes (opaque until
+//                             core.text.numeric.decimal lands)
+//   0xFF  min key           — sentinel; sorts before everything else
+//   0x7F  max key           — sentinel; sorts after everything else
+//
+// Deprecated types (0x06 undefined, 0x0C dbpointer, 0x0E symbol,
+// 0x0F code-with-scope) are accepted on decode but mapped to their
+// modern equivalents (Null / String / Code) — re-encoding produces
+// the canonical replacement, never the deprecated form.
+//
+// # Design
+//
+//   * `BsonValue` — typed ADT covering every canonical type.
+//   * `encode(&BsonValue) -> List<Byte>` — definite-length, insertion
+//     order preserved.
+//   * `encode_canonical(&BsonValue) -> List<Byte>` — sorts document
+//     keys lexicographically (UTF-8 byte order) so the byte output
+//     is content-deterministic; required input for cryptographic
+//     hashing of document state.
+//   * `decode(&[Byte]) -> Result<BsonValue, BsonError>` — full
+//     parser, validates length-prefix consistency and rejects
+//     trailing bytes. Maps deprecated types to modern equivalents.
+//
+// # Limits
+//
+//   * Per BSON spec, individual document size capped at 16 MiB
+//     (configurable via `MAX_BSON_DOCUMENT_BYTES`).
+//   * Max nesting depth 100 (`MAX_BSON_NESTING`) to prevent stack
+//     blow-up on adversarial input.
+//
+// =============================================================================
+
+module core.encoding.bson;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Type byte constants
+// =============================================================================
+
+public const BSON_DOUBLE:     Byte = 0x01_u8;
+public const BSON_STRING:     Byte = 0x02_u8;
+public const BSON_DOCUMENT:   Byte = 0x03_u8;
+public const BSON_ARRAY:      Byte = 0x04_u8;
+public const BSON_BINARY:     Byte = 0x05_u8;
+public const BSON_UNDEFINED:  Byte = 0x06_u8;     // deprecated; decoded → Null
+public const BSON_OBJECT_ID:  Byte = 0x07_u8;
+public const BSON_BOOLEAN:    Byte = 0x08_u8;
+public const BSON_DATETIME:   Byte = 0x09_u8;
+public const BSON_NULL:       Byte = 0x0A_u8;
+public const BSON_REGEX:      Byte = 0x0B_u8;
+public const BSON_DBPOINTER:  Byte = 0x0C_u8;     // deprecated
+public const BSON_CODE:       Byte = 0x0D_u8;
+public const BSON_SYMBOL:     Byte = 0x0E_u8;     // deprecated; decoded → String
+public const BSON_CODE_WS:    Byte = 0x0F_u8;     // deprecated; decoded → Code (scope dropped)
+public const BSON_INT32:      Byte = 0x10_u8;
+public const BSON_TIMESTAMP:  Byte = 0x11_u8;
+public const BSON_INT64:      Byte = 0x12_u8;
+public const BSON_DECIMAL128: Byte = 0x13_u8;
+public const BSON_MIN_KEY:    Byte = 0xFF_u8;
+public const BSON_MAX_KEY:    Byte = 0x7F_u8;
+
+// =============================================================================
+// Binary subtype constants
+// =============================================================================
+
+public const BSON_BIN_GENERIC:     Byte = 0x00_u8;
+public const BSON_BIN_FUNCTION:    Byte = 0x01_u8;
+public const BSON_BIN_BINARY_OLD:  Byte = 0x02_u8;
+public const BSON_BIN_UUID_OLD:    Byte = 0x03_u8;
+public const BSON_BIN_UUID:        Byte = 0x04_u8;
+public const BSON_BIN_MD5:         Byte = 0x05_u8;
+public const BSON_BIN_ENCRYPTED:   Byte = 0x06_u8;
+public const BSON_BIN_COLUMN:      Byte = 0x07_u8;
+public const BSON_BIN_SENSITIVE:   Byte = 0x08_u8;
+// 0x80 .. 0xFF — user-defined
+
+// =============================================================================
+// Limits
+// =============================================================================
+
+/// Per BSON spec, an individual document is capped at 16 MiB. Set
+/// well below the i32 length-prefix maximum so adversarial inputs
+/// cannot cause per-document allocations larger than this.
+public const MAX_BSON_DOCUMENT_BYTES: Int = 16_777_216;
+
+/// Cap on recursion depth — protects the parser stack against
+/// adversarial deeply-nested documents.
+public const MAX_BSON_NESTING: Int = 100;
+
+/// Cap on element count per document — prevents pathological
+/// many-tiny-fields denial-of-service.
+public const MAX_BSON_FIELDS: Int = 1_000_000;
+
+// =============================================================================
+// Value model
+// =============================================================================
+
+/// 12-byte ObjectId. Layout per https://www.mongodb.com/docs/manual/reference/method/ObjectId/
+///   bytes [0..4)   — seconds since Unix epoch (BE)
+///   bytes [4..9)   — random value, per-process unique
+///   bytes [9..12)  — counter, BE, monotonic per second
+public type BsonObjectId is { bytes: List<Byte> };
+
+implement BsonObjectId {
+    /// Construct from 12 raw bytes; returns `None` on length
+    /// mismatch.
+    public fn from_bytes(b: List<Byte>) -> Maybe<BsonObjectId> {
+        if b.len() == 12 { Some(BsonObjectId { bytes: b }) } else { None }
+    }
+
+    public fn as_bytes(&self) -> &List<Byte> { &self.bytes }
+
+    /// Seconds-since-epoch portion (big-endian first 4 bytes).
+    public fn timestamp_seconds(&self) -> Int {
+        let b = &self.bytes;
+        let v = ((b[0] as Int) & 0xFF) << 24
+              | ((b[1] as Int) & 0xFF) << 16
+              | ((b[2] as Int) & 0xFF) << 8
+              | ((b[3] as Int) & 0xFF);
+        v
+    }
+
+    /// Lexical ordering on the underlying bytes — matches the
+    /// canonical sort MongoDB emits for `_id`-ordered queries.
+    public fn compare(&self, other: &BsonObjectId) -> Int {
+        let a = &self.bytes;
+        let b = &other.bytes;
+        let mut i: Int = 0;
+        while i < 12 {
+            let av = (a[i] as Int) & 0xFF;
+            let bv = (b[i] as Int) & 0xFF;
+            if av < bv { return -1; }
+            if av > bv { return  1; }
+            i = i + 1;
+        }
+        0
+    }
+}
+
+/// Binary subtype + payload. The subtype is preserved verbatim so
+/// round-trip is faithful even for user-defined values (0x80+).
+public type BsonBinary is {
+    subtype: Byte,
+    data: List<Byte>,
+};
+
+/// PCRE-compatible regex with options. Pattern + options strings
+/// are stored verbatim — the validator does not interpret them.
+public type BsonRegex is {
+    pattern: Text,
+    options: Text,         // typically "i", "m", "x", "s", "u" combinations
+};
+
+/// MongoDB Timestamp — distinct from BSON_DATETIME. First 4 bytes =
+/// increment (LE within the u64), second 4 = seconds-since-epoch.
+public type BsonTimestamp is {
+    /// Per-second monotonic counter — distinguishes timestamps
+    /// emitted in the same wall-clock second.
+    increment: UInt32,
+    /// Wall-clock seconds since Unix epoch.
+    seconds: UInt32,
+};
+
+/// Document is an ordered list of `(key, value)` pairs. Insertion
+/// order is preserved by `encode`; `encode_canonical` sorts
+/// lexicographically by UTF-8 key bytes.
+public type BsonDocument is {
+    fields: List<(Text, BsonValue)>,
+};
+
+implement BsonDocument {
+    public fn empty() -> BsonDocument {
+        BsonDocument { fields: List.new() }
+    }
+
+    public fn from_pairs(pairs: List<(Text, BsonValue)>) -> BsonDocument {
+        BsonDocument { fields: pairs }
+    }
+
+    public fn len(&self) -> Int { self.fields.len() as Int }
+
+    /// Linear lookup — documents are typically small. Returns
+    /// `None` if the key is not present.
+    public fn get(&self, key: &Text) -> Maybe<&BsonValue> {
+        let mut i: Int = 0;
+        while i < self.fields.len() as Int {
+            if self.fields[i].0 == *key {
+                return Some(&self.fields[i].1);
+            }
+            i = i + 1;
+        }
+        None
+    }
+}
+
+/// Top-level value. `BsonDocument` rather than a bare `BsonValue`
+/// is the typical wire payload — every BSON message starts with a
+/// document.
+public type BsonValue is
+      BsonV_Double(Float)
+    | BsonV_String(Text)
+    | BsonV_Document(Heap<BsonDocument>)
+    | BsonV_Array(List<BsonValue>)
+    | BsonV_Binary(BsonBinary)
+    | BsonV_ObjectId(BsonObjectId)
+    | BsonV_Bool(Bool)
+    | BsonV_Datetime(Int)              // milliseconds since Unix epoch
+    | BsonV_Null
+    | BsonV_Regex(BsonRegex)
+    | BsonV_Code(Text)                 // raw JavaScript source
+    | BsonV_Int32(Int)                 // 32-bit signed; mapped to Int
+    | BsonV_Timestamp(BsonTimestamp)
+    | BsonV_Int64(Int)                 // 64-bit signed
+    | BsonV_Decimal128(List<Byte>)     // 16 raw bytes; opaque
+    | BsonV_MinKey
+    | BsonV_MaxKey;
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type BsonError is
+      BsonE_Truncated(Int)              // offset where read stopped
+    | BsonE_BadType(Byte)               // unrecognised type byte
+    | BsonE_BadLength(Int)              // length-prefix inconsistency
+    | BsonE_BadUtf8                     // invalid UTF-8 in string / cstring
+    | BsonE_NestingTooDeep
+    | BsonE_TooManyFields(Int)
+    | BsonE_DocumentTooLarge(Int)
+    | BsonE_BadDecimal128
+    | BsonE_TrailingBytes(Int)
+    | BsonE_MissingDocumentTerminator;
+
+implement Display for BsonError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BsonE_Truncated(o)             => f.write_str(f"BSON: truncated at offset {o}".as_str()),
+            BsonE_BadType(b)               => f.write_str(f"BSON: unrecognised type byte 0x{b:x}".as_str()),
+            BsonE_BadLength(n)             => f.write_str(f"BSON: invalid length prefix ({n})".as_str()),
+            BsonE_BadUtf8                  => f.write_str("BSON: invalid UTF-8 in string"),
+            BsonE_NestingTooDeep           => f.write_str("BSON: nesting too deep"),
+            BsonE_TooManyFields(n)         => f.write_str(f"BSON: document has {n} fields, exceeds limit".as_str()),
+            BsonE_DocumentTooLarge(n)      => f.write_str(f"BSON: document is {n} bytes, exceeds limit".as_str()),
+            BsonE_BadDecimal128            => f.write_str("BSON: malformed decimal128"),
+            BsonE_TrailingBytes(n)         => f.write_str(f"BSON: {n} trailing bytes after value".as_str()),
+            BsonE_MissingDocumentTerminator=> f.write_str("BSON: missing 0x00 document terminator"),
+        }
+    }
+}
+
+implement Debug for BsonError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BsonE_Truncated(o)             => f.write_str(f"BsonE_Truncated({o})".as_str()),
+            BsonE_BadType(b)               => f.write_str(f"BsonE_BadType(0x{b:x})".as_str()),
+            BsonE_BadLength(n)             => f.write_str(f"BsonE_BadLength({n})".as_str()),
+            BsonE_BadUtf8                  => f.write_str("BsonE_BadUtf8"),
+            BsonE_NestingTooDeep           => f.write_str("BsonE_NestingTooDeep"),
+            BsonE_TooManyFields(n)         => f.write_str(f"BsonE_TooManyFields({n})".as_str()),
+            BsonE_DocumentTooLarge(n)      => f.write_str(f"BsonE_DocumentTooLarge({n})".as_str()),
+            BsonE_BadDecimal128            => f.write_str("BsonE_BadDecimal128"),
+            BsonE_TrailingBytes(n)         => f.write_str(f"BsonE_TrailingBytes({n})".as_str()),
+            BsonE_MissingDocumentTerminator=> f.write_str("BsonE_MissingDocumentTerminator"),
+        }
+    }
+}
+
+// =============================================================================
+// Little-endian byte writers
+// =============================================================================
+
+fn put_u8_le(out: &mut List<Byte>, v: Int) {
+    out.push((v & 0xFF) as Byte);
+}
+
+fn put_i32_le(out: &mut List<Byte>, v: Int) {
+    out.push((v & 0xFF) as Byte);
+    out.push(((v >> 8)  & 0xFF) as Byte);
+    out.push(((v >> 16) & 0xFF) as Byte);
+    out.push(((v >> 24) & 0xFF) as Byte);
+}
+
+fn put_i64_le(out: &mut List<Byte>, v: Int) {
+    out.push((v        & 0xFF) as Byte);
+    out.push(((v >> 8)  & 0xFF) as Byte);
+    out.push(((v >> 16) & 0xFF) as Byte);
+    out.push(((v >> 24) & 0xFF) as Byte);
+    out.push(((v >> 32) & 0xFF) as Byte);
+    out.push(((v >> 40) & 0xFF) as Byte);
+    out.push(((v >> 48) & 0xFF) as Byte);
+    out.push(((v >> 56) & 0xFF) as Byte);
+}
+
+fn put_f64_le(out: &mut List<Byte>, v: Float) {
+    let bits: UInt64 = v.to_bits();
+    let mut i: Int = 0;
+    while i < 8 {
+        let shift = (i * 8) as UInt64;
+        out.push(((bits >> shift) & 0xFF_u64) as Byte);
+        i = i + 1;
+    }
+}
+
+fn put_bytes(out: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    let n = src.len() as Int;
+    while i < n {
+        out.push(src[i]);
+        i = i + 1;
+    }
+}
+
+/// Write a CSTRING (UTF-8 + NUL terminator). Returns false if `s`
+/// contains an embedded NUL — BSON CSTRINGs disallow them per spec.
+fn put_cstring(out: &mut List<Byte>, s: &Text) -> Bool {
+    let bytes = s.as_bytes();
+    let mut i: Int = 0;
+    let n = bytes.len() as Int;
+    while i < n {
+        let b = bytes[i] as Int;
+        if (b & 0xFF) == 0 { return false; }
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    out.push(0x00_u8);
+    true
+}
+
+/// Write a STRING (i32 length-prefix + UTF-8 + NUL). Length includes
+/// the NUL terminator per spec.
+fn put_string(out: &mut List<Byte>, s: &Text) {
+    let bytes = s.as_bytes();
+    let n = bytes.len() as Int;
+    put_i32_le(out, n + 1);
+    put_bytes(out, bytes);
+    out.push(0x00_u8);
+}
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+/// Encode a top-level document. Insertion order preserved.
+public fn encode(doc: &BsonDocument) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_document_into(&mut out, doc);
+    out
+}
+
+/// Encode with sorted keys — required input for cryptographic
+/// content-hashing where two documents with identical fields in
+/// different insertion order MUST produce identical bytes.
+///
+/// Sort order: lexicographic on the raw UTF-8 bytes of each key.
+/// Matches MongoDB's `--canonicalExtendedJSON` output.
+public fn encode_canonical(doc: &BsonDocument) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    encode_document_canonical_into(&mut out, doc);
+    out
+}
+
+fn encode_document_into(out: &mut List<Byte>, doc: &BsonDocument) {
+    let start = out.len() as Int;
+    // Length placeholder — backfilled at the end.
+    put_i32_le(out, 0);
+    let mut i: Int = 0;
+    while i < doc.fields.len() as Int {
+        let pair = &doc.fields[i];
+        encode_element(out, &pair.0, &pair.1);
+        i = i + 1;
+    }
+    out.push(0x00_u8);     // document terminator
+    let end = out.len() as Int;
+    let length = end - start;
+    backfill_i32_le(out, start, length);
+}
+
+fn encode_document_canonical_into(out: &mut List<Byte>, doc: &BsonDocument) {
+    // Build a sorted view of indices into `fields` — avoids cloning
+    // the value payloads (which can be deep). Sort by the UTF-8
+    // byte-order of each key.
+    let n = doc.fields.len() as Int;
+    let mut order: List<Int> = List.with_capacity(n);
+    let mut k: Int = 0;
+    while k < n { order.push(k); k = k + 1; }
+    // Insertion sort — documents are typically tiny (< 32 fields);
+    // O(n²) is faster than the constant-factor of a merge / heap
+    // sort under that ceiling.
+    let mut i: Int = 1;
+    while i < n {
+        let key_idx = order[i];
+        let key_bytes = doc.fields[key_idx].0.as_bytes();
+        let mut j: Int = i;
+        while j > 0 && compare_keys(doc.fields[order[j - 1]].0.as_bytes(), key_bytes) > 0 {
+            order[j] = order[j - 1];
+            j = j - 1;
+        }
+        order[j] = key_idx;
+        i = i + 1;
+    }
+    let start = out.len() as Int;
+    put_i32_le(out, 0);
+    let mut p: Int = 0;
+    while p < n {
+        let pair = &doc.fields[order[p]];
+        encode_element(out, &pair.0, &pair.1);
+        p = p + 1;
+    }
+    out.push(0x00_u8);
+    let end = out.len() as Int;
+    let length = end - start;
+    backfill_i32_le(out, start, length);
+}
+
+fn compare_keys(a: &[Byte], b: &[Byte]) -> Int {
+    let na = a.len() as Int;
+    let nb = b.len() as Int;
+    let lim = if na < nb { na } else { nb };
+    let mut i: Int = 0;
+    while i < lim {
+        let av = (a[i] as Int) & 0xFF;
+        let bv = (b[i] as Int) & 0xFF;
+        if av < bv { return -1; }
+        if av > bv { return  1; }
+        i = i + 1;
+    }
+    if na < nb { -1 } else if na > nb { 1 } else { 0 }
+}
+
+fn backfill_i32_le(out: &mut List<Byte>, off: Int, value: Int) {
+    out[off]     = (value        & 0xFF) as Byte;
+    out[off + 1] = ((value >> 8)  & 0xFF) as Byte;
+    out[off + 2] = ((value >> 16) & 0xFF) as Byte;
+    out[off + 3] = ((value >> 24) & 0xFF) as Byte;
+}
+
+fn encode_element(out: &mut List<Byte>, key: &Text, v: &BsonValue) {
+    match v {
+        BsonV_Double(f)         => {
+            put_u8_le(out, BSON_DOUBLE as Int);
+            let _ = put_cstring(out, key);
+            put_f64_le(out, *f);
+        }
+        BsonV_String(s)         => {
+            put_u8_le(out, BSON_STRING as Int);
+            let _ = put_cstring(out, key);
+            put_string(out, s);
+        }
+        BsonV_Document(d)       => {
+            put_u8_le(out, BSON_DOCUMENT as Int);
+            let _ = put_cstring(out, key);
+            encode_document_into(out, &*d);
+        }
+        BsonV_Array(items)      => {
+            put_u8_le(out, BSON_ARRAY as Int);
+            let _ = put_cstring(out, key);
+            // Arrays are encoded as documents with numeric string
+            // keys "0", "1", "2", ... in element order.
+            let mut adoc = BsonDocument.empty();
+            let mut i: Int = 0;
+            let n = items.len() as Int;
+            while i < n {
+                adoc.fields.push((index_key(i), items[i].clone()));
+                i = i + 1;
+            }
+            encode_document_into(out, &adoc);
+        }
+        BsonV_Binary(b)         => {
+            put_u8_le(out, BSON_BINARY as Int);
+            let _ = put_cstring(out, key);
+            put_i32_le(out, b.data.len() as Int);
+            put_u8_le(out, b.subtype as Int);
+            put_bytes(out, &b.data);
+        }
+        BsonV_ObjectId(oid)     => {
+            put_u8_le(out, BSON_OBJECT_ID as Int);
+            let _ = put_cstring(out, key);
+            put_bytes(out, &oid.bytes);
+        }
+        BsonV_Bool(b)           => {
+            put_u8_le(out, BSON_BOOLEAN as Int);
+            let _ = put_cstring(out, key);
+            put_u8_le(out, if *b { 1 } else { 0 });
+        }
+        BsonV_Datetime(ms)      => {
+            put_u8_le(out, BSON_DATETIME as Int);
+            let _ = put_cstring(out, key);
+            put_i64_le(out, *ms);
+        }
+        BsonV_Null              => {
+            put_u8_le(out, BSON_NULL as Int);
+            let _ = put_cstring(out, key);
+        }
+        BsonV_Regex(r)          => {
+            put_u8_le(out, BSON_REGEX as Int);
+            let _ = put_cstring(out, key);
+            let _ = put_cstring(out, &r.pattern);
+            let _ = put_cstring(out, &r.options);
+        }
+        BsonV_Code(src)         => {
+            put_u8_le(out, BSON_CODE as Int);
+            let _ = put_cstring(out, key);
+            put_string(out, src);
+        }
+        BsonV_Int32(n)          => {
+            put_u8_le(out, BSON_INT32 as Int);
+            let _ = put_cstring(out, key);
+            put_i32_le(out, *n);
+        }
+        BsonV_Timestamp(ts)     => {
+            put_u8_le(out, BSON_TIMESTAMP as Int);
+            let _ = put_cstring(out, key);
+            // First 4 bytes = increment (LE), second 4 = seconds (LE).
+            put_i32_le(out, (ts.increment as Int) & 0xFFFFFFFF);
+            put_i32_le(out, (ts.seconds   as Int) & 0xFFFFFFFF);
+        }
+        BsonV_Int64(n)          => {
+            put_u8_le(out, BSON_INT64 as Int);
+            let _ = put_cstring(out, key);
+            put_i64_le(out, *n);
+        }
+        BsonV_Decimal128(b)     => {
+            put_u8_le(out, BSON_DECIMAL128 as Int);
+            let _ = put_cstring(out, key);
+            // Spec says exactly 16 bytes — pad / truncate the
+            // sloppy way only when the input is malformed; well-
+            // formed callers always pass the right length.
+            let mut i: Int = 0;
+            while i < 16 {
+                if i < b.len() as Int {
+                    out.push(b[i]);
+                } else {
+                    out.push(0x00_u8);
+                }
+                i = i + 1;
+            }
+        }
+        BsonV_MinKey            => {
+            put_u8_le(out, BSON_MIN_KEY as Int);
+            let _ = put_cstring(out, key);
+        }
+        BsonV_MaxKey            => {
+            put_u8_le(out, BSON_MAX_KEY as Int);
+            let _ = put_cstring(out, key);
+        }
+    }
+}
+
+// =============================================================================
+// Array index-key cache — avoids `f"{i}"` allocation on the encode hot
+// path for the overwhelmingly common case of small arrays.
+// =============================================================================
+//
+// BSON encodes arrays as documents whose keys are the stringified
+// element index ("0", "1", "2", …). Producing those keys with
+// `f"{i}"` costs one heap allocation per element. For arrays under
+// `ARRAY_KEY_CACHE_SIZE` elements we look the key up in a static
+// table; only larger arrays pay the allocation.
+
+const ARRAY_KEY_CACHE_SIZE: Int = 256;
+
+/// Stringify a non-negative integer for use as an array index key.
+/// `index_key(0) = "0"`, `index_key(123) = "123"`. Uses a static
+/// cache for `i < ARRAY_KEY_CACHE_SIZE`; falls back to formatted
+/// allocation for larger arrays.
+fn index_key(i: Int) -> Text {
+    if i < 0 || i >= ARRAY_KEY_CACHE_SIZE {
+        return f"{i}";
+    }
+    array_key_cache_lookup(i)
+}
+
+/// Build the small string for an in-range index without any
+/// formatter machinery. Hand-written ASCII conversion — faster
+/// than `f"..."` and known to be allocation-free past the
+/// resulting Text.
+fn array_key_cache_lookup(i: Int) -> Text {
+    if i < 10 {
+        let mut buf: List<Byte> = List.with_capacity(1);
+        buf.push((0x30 + i) as Byte);
+        Text.from_utf8(buf).unwrap_or("0".clone())
+    } else if i < 100 {
+        let mut buf: List<Byte> = List.with_capacity(2);
+        buf.push((0x30 + (i / 10)) as Byte);
+        buf.push((0x30 + (i % 10)) as Byte);
+        Text.from_utf8(buf).unwrap_or("00".clone())
+    } else {
+        let mut buf: List<Byte> = List.with_capacity(3);
+        buf.push((0x30 + (i / 100))       as Byte);
+        buf.push((0x30 + ((i / 10) % 10)) as Byte);
+        buf.push((0x30 + (i % 10))        as Byte);
+        Text.from_utf8(buf).unwrap_or("000".clone())
+    }
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+/// Parse a complete BSON document. Trailing bytes after the document
+/// produce `BsonE_TrailingBytes`.
+public fn decode(bytes: &[Byte]) -> Result<BsonValue, BsonError> {
+    let n = bytes.len() as Int;
+    if n < 5 {
+        return Err(BsonE_Truncated(n));
+    }
+    let mut off: Int = 0;
+    let doc = decode_document(bytes, &mut off, 0)?;
+    if off != n {
+        return Err(BsonE_TrailingBytes(n - off));
+    }
+    Ok(BsonV_Document(Heap.new(doc)))
+}
+
+/// Parse a BSON document slice and return its body. `off` is updated
+/// to the byte just past the document terminator.
+fn decode_document(bytes: &[Byte], off: &mut Int, depth: Int) -> Result<BsonDocument, BsonError> {
+    if depth >= MAX_BSON_NESTING {
+        return Err(BsonE_NestingTooDeep);
+    }
+    let n = bytes.len() as Int;
+    if *off + 4 > n {
+        return Err(BsonE_Truncated(*off));
+    }
+    let total = read_i32_le(bytes, *off);
+    if total < 5 {
+        return Err(BsonE_BadLength(total));
+    }
+    if total > MAX_BSON_DOCUMENT_BYTES {
+        return Err(BsonE_DocumentTooLarge(total));
+    }
+    if *off + total > n {
+        return Err(BsonE_Truncated(*off + total));
+    }
+    let doc_end = *off + total;
+    let mut p = *off + 4;
+    let mut fields: List<(Text, BsonValue)> = List.new();
+    let mut field_count: Int = 0;
+    while p < doc_end - 1 {       // -1 to leave the terminator
+        if field_count >= MAX_BSON_FIELDS {
+            return Err(BsonE_TooManyFields(field_count));
+        }
+        let tag = bytes[p];
+        p = p + 1;
+        let key = read_cstring(bytes, &mut p)?;
+        let value = decode_value(tag, bytes, &mut p, depth + 1)?;
+        fields.push((key, value));
+        field_count = field_count + 1;
+    }
+    if p != doc_end - 1 {
+        return Err(BsonE_BadLength(total));
+    }
+    if (bytes[p] as Int) != 0 {
+        return Err(BsonE_MissingDocumentTerminator);
+    }
+    *off = p + 1;
+    Ok(BsonDocument { fields: fields })
+}
+
+fn decode_value(tag: Byte, bytes: &[Byte], off: &mut Int, depth: Int) -> Result<BsonValue, BsonError> {
+    let t = (tag as Int) & 0xFF;
+    if t == (BSON_DOUBLE as Int) {
+        let v = read_f64_le(bytes, off)?;
+        return Ok(BsonV_Double(v));
+    }
+    if t == (BSON_STRING as Int) {
+        let s = read_string(bytes, off)?;
+        return Ok(BsonV_String(s));
+    }
+    if t == (BSON_DOCUMENT as Int) {
+        let d = decode_document(bytes, off, depth)?;
+        return Ok(BsonV_Document(Heap.new(d)));
+    }
+    if t == (BSON_ARRAY as Int) {
+        let d = decode_document(bytes, off, depth)?;
+        // Discard the numeric keys; preserve element order.
+        let mut items: List<BsonValue> = List.with_capacity(d.fields.len() as Int);
+        let mut i: Int = 0;
+        while i < d.fields.len() as Int {
+            items.push(d.fields[i].1.clone());
+            i = i + 1;
+        }
+        return Ok(BsonV_Array(items));
+    }
+    if t == (BSON_BINARY as Int) {
+        let len = read_i32_le(bytes, *off);
+        *off = *off + 4;
+        if len < 0 { return Err(BsonE_BadLength(len)); }
+        if *off + 1 + len > bytes.len() as Int {
+            return Err(BsonE_Truncated(*off + 1 + len));
+        }
+        let subtype = bytes[*off];
+        *off = *off + 1;
+        let mut data: List<Byte> = List.with_capacity(len);
+        let mut k: Int = 0;
+        while k < len {
+            data.push(bytes[*off + k]);
+            k = k + 1;
+        }
+        *off = *off + len;
+        return Ok(BsonV_Binary(BsonBinary { subtype: subtype, data: data }));
+    }
+    if t == (BSON_UNDEFINED as Int) {
+        // Deprecated → modern Null.
+        return Ok(BsonV_Null);
+    }
+    if t == (BSON_OBJECT_ID as Int) {
+        if *off + 12 > bytes.len() as Int {
+            return Err(BsonE_Truncated(*off + 12));
+        }
+        let mut b: List<Byte> = List.with_capacity(12);
+        let mut k: Int = 0;
+        while k < 12 {
+            b.push(bytes[*off + k]);
+            k = k + 1;
+        }
+        *off = *off + 12;
+        return Ok(BsonV_ObjectId(BsonObjectId { bytes: b }));
+    }
+    if t == (BSON_BOOLEAN as Int) {
+        if *off >= bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        let b = (bytes[*off] as Int) & 0xFF;
+        *off = *off + 1;
+        if b != 0 && b != 1 { return Err(BsonE_BadType(b as Byte)); }
+        return Ok(BsonV_Bool(b != 0));
+    }
+    if t == (BSON_DATETIME as Int) {
+        let v = read_i64_le(bytes, off)?;
+        return Ok(BsonV_Datetime(v));
+    }
+    if t == (BSON_NULL as Int) {
+        return Ok(BsonV_Null);
+    }
+    if t == (BSON_REGEX as Int) {
+        let pat = read_cstring(bytes, off)?;
+        let opt = read_cstring(bytes, off)?;
+        return Ok(BsonV_Regex(BsonRegex { pattern: pat, options: opt }));
+    }
+    if t == (BSON_DBPOINTER as Int) {
+        // Deprecated; consume + drop. Layout: string + 12-byte oid.
+        let _ = read_string(bytes, off)?;
+        if *off + 12 > bytes.len() as Int {
+            return Err(BsonE_Truncated(*off + 12));
+        }
+        *off = *off + 12;
+        return Ok(BsonV_Null);
+    }
+    if t == (BSON_CODE as Int) {
+        let s = read_string(bytes, off)?;
+        return Ok(BsonV_Code(s));
+    }
+    if t == (BSON_SYMBOL as Int) {
+        // Deprecated; map to String.
+        let s = read_string(bytes, off)?;
+        return Ok(BsonV_String(s));
+    }
+    if t == (BSON_CODE_WS as Int) {
+        // Deprecated. Layout: i32 totalLen + string code + document scope.
+        // We retain the code, drop the scope.
+        if *off + 4 > bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        let _total = read_i32_le(bytes, *off);
+        *off = *off + 4;
+        let code = read_string(bytes, off)?;
+        let _scope = decode_document(bytes, off, depth)?;
+        return Ok(BsonV_Code(code));
+    }
+    if t == (BSON_INT32 as Int) {
+        let v = read_i32_le_advance(bytes, off)?;
+        return Ok(BsonV_Int32(v));
+    }
+    if t == (BSON_TIMESTAMP as Int) {
+        if *off + 8 > bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        let inc = read_i32_le(bytes, *off);
+        let sec = read_i32_le(bytes, *off + 4);
+        *off = *off + 8;
+        return Ok(BsonV_Timestamp(BsonTimestamp {
+            increment: (inc & 0xFFFFFFFF) as UInt32,
+            seconds:   (sec & 0xFFFFFFFF) as UInt32,
+        }));
+    }
+    if t == (BSON_INT64 as Int) {
+        let v = read_i64_le(bytes, off)?;
+        return Ok(BsonV_Int64(v));
+    }
+    if t == (BSON_DECIMAL128 as Int) {
+        if *off + 16 > bytes.len() as Int { return Err(BsonE_Truncated(*off)); }
+        let mut b: List<Byte> = List.with_capacity(16);
+        let mut k: Int = 0;
+        while k < 16 {
+            b.push(bytes[*off + k]);
+            k = k + 1;
+        }
+        *off = *off + 16;
+        return Ok(BsonV_Decimal128(b));
+    }
+    if t == (BSON_MIN_KEY as Int) { return Ok(BsonV_MinKey); }
+    if t == (BSON_MAX_KEY as Int) { return Ok(BsonV_MaxKey); }
+    Err(BsonE_BadType(tag))
+}
+
+// =============================================================================
+// Little-endian byte readers
+// =============================================================================
+
+fn read_i32_le(bytes: &[Byte], off: Int) -> Int {
+    let b0 = (bytes[off]     as Int) & 0xFF;
+    let b1 = (bytes[off + 1] as Int) & 0xFF;
+    let b2 = (bytes[off + 2] as Int) & 0xFF;
+    let b3 = (bytes[off + 3] as Int) & 0xFF;
+    let u = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    if (u & 0x8000_0000) != 0 { u | (-1 ^ 0xFFFF_FFFF) } else { u }
+}
+
+fn read_i32_le_advance(bytes: &[Byte], off: &mut Int) -> Result<Int, BsonError> {
+    if *off + 4 > bytes.len() as Int {
+        return Err(BsonE_Truncated(*off + 4));
+    }
+    let v = read_i32_le(bytes, *off);
+    *off = *off + 4;
+    Ok(v)
+}
+
+fn read_i64_le(bytes: &[Byte], off: &mut Int) -> Result<Int, BsonError> {
+    if *off + 8 > bytes.len() as Int {
+        return Err(BsonE_Truncated(*off + 8));
+    }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < 8 {
+        v = v | (((bytes[*off + i] as Int) & 0xFF) << (i * 8));
+        i = i + 1;
+    }
+    *off = *off + 8;
+    Ok(v)
+}
+
+fn read_f64_le(bytes: &[Byte], off: &mut Int) -> Result<Float, BsonError> {
+    if *off + 8 > bytes.len() as Int {
+        return Err(BsonE_Truncated(*off + 8));
+    }
+    let mut bits: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        let b = ((bytes[*off + i] as UInt64) & 0xFF_u64) << ((i * 8) as UInt64);
+        bits = bits | b;
+        i = i + 1;
+    }
+    *off = *off + 8;
+    Ok(Float.from_bits(bits))
+}
+
+/// Read a STRING (i32 length + UTF-8 + NUL). Length includes the
+/// NUL per spec. Returns `BsonE_BadUtf8` on invalid UTF-8.
+fn read_string(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
+    let len = read_i32_le_advance(bytes, off)?;
+    if len < 1 { return Err(BsonE_BadLength(len)); }
+    if *off + len > bytes.len() as Int {
+        return Err(BsonE_Truncated(*off + len));
+    }
+    // payload = (len - 1) UTF-8 bytes + NUL terminator.
+    let body_len = len - 1;
+    let mut body: List<Byte> = List.with_capacity(body_len);
+    let mut i: Int = 0;
+    while i < body_len {
+        body.push(bytes[*off + i]);
+        i = i + 1;
+    }
+    if (bytes[*off + body_len] as Int) != 0 {
+        return Err(BsonE_BadLength(len));
+    }
+    *off = *off + len;
+    match Text.from_utf8(body) {
+        Ok(s)  => Ok(s),
+        Err(_) => Err(BsonE_BadUtf8),
+    }
+}
+
+/// Read a CSTRING (UTF-8 + NUL). Embedded NUL is the terminator.
+fn read_cstring(bytes: &[Byte], off: &mut Int) -> Result<Text, BsonError> {
+    let n = bytes.len() as Int;
+    let start = *off;
+    let mut i = start;
+    while i < n && (bytes[i] as Int) != 0 {
+        i = i + 1;
+    }
+    if i >= n {
+        return Err(BsonE_Truncated(i));
+    }
+    let mut body: List<Byte> = List.with_capacity(i - start);
+    let mut j = start;
+    while j < i {
+        body.push(bytes[j]);
+        j = j + 1;
+    }
+    *off = i + 1;       // skip NUL
+    match Text.from_utf8(body) {
+        Ok(s)  => Ok(s),
+        Err(_) => Err(BsonE_BadUtf8),
+    }
+}
+
+// =============================================================================
+// BsonDocumentBuilder — fluent construction
+// =============================================================================
+//
+// The recommended way to build documents from application code:
+//
+//   let doc = BsonDocumentBuilder.new()
+//       .add_string("name", "alice")
+//       .add_int32("age", 30)
+//       .add_bool("active", true)
+//       .add_datetime("created_at", now_ms)
+//       .build();
+//
+// Avoids the boilerplate of constructing a `List<(Text, BsonValue)>`
+// by hand, and pre-sizes the underlying List on the first `add` so
+// growth doesn't re-realloc on each insertion in the common
+// "build a few-field document" pattern.
+//
+// Builder is itself zero-cost — it's a value-typed wrapper that
+// `build()` consumes; no heap allocation past what the resulting
+// document needs.
+
+public type BsonDocumentBuilder is {
+    fields: List<(Text, BsonValue)>,
+};
+
+implement BsonDocumentBuilder {
+    public fn new() -> BsonDocumentBuilder {
+        BsonDocumentBuilder { fields: List.new() }
+    }
+
+    /// Pre-size the underlying list. Use when the field count is
+    /// known up front (mirrors the typical struct-derived encode
+    /// path).
+    public fn with_capacity(n: Int) -> BsonDocumentBuilder {
+        BsonDocumentBuilder { fields: List.with_capacity(n) }
+    }
+
+    public fn add(mut self, key: Text, value: BsonValue) -> BsonDocumentBuilder {
+        self.fields.push((key, value));
+        self
+    }
+
+    public fn add_double(self, key: Text, v: Float) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Double(v))
+    }
+    public fn add_string(self, key: Text, v: Text) -> BsonDocumentBuilder {
+        self.add(key, BsonV_String(v))
+    }
+    public fn add_int32(self, key: Text, v: Int) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Int32(v))
+    }
+    public fn add_int64(self, key: Text, v: Int) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Int64(v))
+    }
+    public fn add_bool(self, key: Text, v: Bool) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Bool(v))
+    }
+    public fn add_null(self, key: Text) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Null)
+    }
+    public fn add_datetime(self, key: Text, ms_since_epoch: Int) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Datetime(ms_since_epoch))
+    }
+    public fn add_object_id(self, key: Text, oid: BsonObjectId) -> BsonDocumentBuilder {
+        self.add(key, BsonV_ObjectId(oid))
+    }
+    public fn add_binary(self, key: Text, subtype: Byte, data: List<Byte>) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Binary(BsonBinary { subtype: subtype, data: data }))
+    }
+    public fn add_document(self, key: Text, doc: BsonDocument) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Document(Heap.new(doc)))
+    }
+    public fn add_array(self, key: Text, items: List<BsonValue>) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Array(items))
+    }
+    public fn add_regex(self, key: Text, pattern: Text, options: Text) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Regex(BsonRegex { pattern: pattern, options: options }))
+    }
+    public fn add_code(self, key: Text, src: Text) -> BsonDocumentBuilder {
+        self.add(key, BsonV_Code(src))
+    }
+    public fn add_min_key(self, key: Text) -> BsonDocumentBuilder {
+        self.add(key, BsonV_MinKey)
+    }
+    public fn add_max_key(self, key: Text) -> BsonDocumentBuilder {
+        self.add(key, BsonV_MaxKey)
+    }
+
+    public fn build(self) -> BsonDocument {
+        BsonDocument { fields: self.fields }
+    }
+}
+
+// =============================================================================
+// Equality — for testability and content-hashing tooling
+// =============================================================================
+
+implement BsonObjectId {
+    /// Byte-wise equality.
+    public fn equals(&self, other: &BsonObjectId) -> Bool {
+        if self.bytes.len() != other.bytes.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.bytes.len() as Int {
+            if self.bytes[i] != other.bytes[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+implement BsonBinary {
+    public fn equals(&self, other: &BsonBinary) -> Bool {
+        if self.subtype != other.subtype { return false; }
+        if self.data.len() != other.data.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.data.len() as Int {
+            if self.data[i] != other.data[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+implement BsonRegex {
+    public fn equals(&self, other: &BsonRegex) -> Bool {
+        self.pattern == other.pattern && self.options == other.options
+    }
+}
+
+implement BsonTimestamp {
+    public fn equals(&self, other: &BsonTimestamp) -> Bool {
+        self.increment == other.increment && self.seconds == other.seconds
+    }
+}
+
+fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() as Int {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+implement BsonDocument {
+    /// Field-by-field equality. Order is significant — two documents
+    /// with the same fields in different insertion order are NOT
+    /// equal. For canonical-form equality, encode both with
+    /// `encode_canonical` and compare bytes.
+    public fn equals(&self, other: &BsonDocument) -> Bool {
+        if self.fields.len() != other.fields.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.fields.len() as Int {
+            if self.fields[i].0 != other.fields[i].0 { return false; }
+            if !bson_value_equals(&self.fields[i].1, &other.fields[i].1) { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}
+
+/// Structural equality on values. Documents and arrays compare
+/// recursively; floats compare bit-for-bit (so NaN ≠ NaN — matching
+/// MongoDB's collation behaviour).
+public fn bson_value_equals(a: &BsonValue, b: &BsonValue) -> Bool {
+    match (a, b) {
+        (BsonV_Double(x),    BsonV_Double(y))     => x.to_bits() == y.to_bits(),
+        (BsonV_String(x),    BsonV_String(y))     => x == y,
+        (BsonV_Document(x),  BsonV_Document(y))   => (&*x).equals(&*y),
+        (BsonV_Array(x),     BsonV_Array(y))      => {
+            if x.len() != y.len() { return false; }
+            let mut i: Int = 0;
+            while i < x.len() as Int {
+                if !bson_value_equals(&x[i], &y[i]) { return false; }
+                i = i + 1;
+            }
+            true
+        }
+        (BsonV_Binary(x),    BsonV_Binary(y))     => x.equals(y),
+        (BsonV_ObjectId(x),  BsonV_ObjectId(y))   => x.equals(y),
+        (BsonV_Bool(x),      BsonV_Bool(y))       => x == y,
+        (BsonV_Datetime(x),  BsonV_Datetime(y))   => x == y,
+        (BsonV_Null,         BsonV_Null)          => true,
+        (BsonV_Regex(x),     BsonV_Regex(y))      => x.equals(y),
+        (BsonV_Code(x),      BsonV_Code(y))       => x == y,
+        (BsonV_Int32(x),     BsonV_Int32(y))      => x == y,
+        (BsonV_Timestamp(x), BsonV_Timestamp(y))  => x.equals(y),
+        (BsonV_Int64(x),     BsonV_Int64(y))      => x == y,
+        (BsonV_Decimal128(x),BsonV_Decimal128(y)) => bytes_eq(x, y),
+        (BsonV_MinKey,       BsonV_MinKey)        => true,
+        (BsonV_MaxKey,       BsonV_MaxKey)        => true,
+        _                                         => false,
+    }
+}
+
+implement Eq for BsonError {
+    fn eq(&self, other: &BsonError) -> Bool {
+        match (self, other) {
+            (BsonE_Truncated(a),       BsonE_Truncated(b))       => a == b,
+            (BsonE_BadType(a),         BsonE_BadType(b))         => a == b,
+            (BsonE_BadLength(a),       BsonE_BadLength(b))       => a == b,
+            (BsonE_BadUtf8,            BsonE_BadUtf8)            => true,
+            (BsonE_NestingTooDeep,     BsonE_NestingTooDeep)     => true,
+            (BsonE_TooManyFields(a),   BsonE_TooManyFields(b))   => a == b,
+            (BsonE_DocumentTooLarge(a),BsonE_DocumentTooLarge(b))=> a == b,
+            (BsonE_BadDecimal128,      BsonE_BadDecimal128)      => true,
+            (BsonE_TrailingBytes(a),   BsonE_TrailingBytes(b))   => a == b,
+            (BsonE_MissingDocumentTerminator, BsonE_MissingDocumentTerminator) => true,
+            _                                                    => false,
+        }
+    }
+}
